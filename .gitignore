@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+
+# Django
+*.log
+db.sqlite3
+staticfiles/
+mediafiles/
+
+# ML Models
+backend/ml_models/*.joblib
+backend/ml_models/*.pkl
+
+# Environment
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node
+node_modules/
+.next/
+out/
+
+# Temp
+.tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Credentials
+credentials.json
+token.json
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
