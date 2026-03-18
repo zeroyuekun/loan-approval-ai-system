@@ -42,6 +42,20 @@ function getDuration(step: AgentStep): string | null {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
+const STEP_LABELS: Record<string, string> = {
+  ml_prediction: 'ML Prediction',
+  email_generation: 'Email Generation',
+  bias_check: 'Bias Check',
+  ai_email_review: 'AI Email Review',
+  human_escalation: 'Human Escalation',
+  human_escalation_severe_bias: 'Human Escalation (Severe Bias)',
+  human_escalation_after_retries: 'Human Escalation (After Retries)',
+  next_best_offers: 'Next Best Offers',
+  marketing_message_generation: 'Marketing Message',
+  human_review_approved: 'Human Review Approved',
+  human_review_decision: 'Human Review Decision',
+}
+
 export function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
   return (
     <div className="space-y-0">
@@ -55,13 +69,17 @@ export function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
           </div>
           <div className="pb-6 flex-1">
             <div className="flex items-center gap-2">
-              <p className="text-sm font-medium">{step.step_name}</p>
+              <p className="text-sm font-medium">{STEP_LABELS[step.step_name] || step.step_name}</p>
               {getDuration(step) && (
                 <span className="text-xs text-muted-foreground">({getDuration(step)})</span>
               )}
             </div>
             {step.result_summary && (
-              <p className="text-sm text-muted-foreground mt-0.5">{step.result_summary}</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {typeof step.result_summary === 'string'
+                  ? step.result_summary
+                  : Object.entries(step.result_summary).map(([k, v]) => `${k}: ${v}`).join(', ')}
+              </p>
             )}
             {step.error && (
               <p className="text-sm text-destructive mt-0.5">{step.error}</p>

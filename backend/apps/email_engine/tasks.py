@@ -4,7 +4,7 @@ from apps.email_engine.models import GeneratedEmail, GuardrailLog
 from apps.loans.models import LoanApplication
 
 
-@shared_task(bind=True, name='apps.email_engine.tasks.generate_email_task')
+@shared_task(bind=True, name='apps.email_engine.tasks.generate_email_task', time_limit=120, autoretry_for=(ConnectionError, TimeoutError, OSError), retry_backoff=True, max_retries=3)
 def generate_email_task(self, application_id, decision):
     """Generate a decision email for a loan application."""
     from apps.email_engine.services.email_generator import EmailGenerator
@@ -28,12 +28,24 @@ def generate_email_task(self, application_id, decision):
     )
 
     # Save guardrail logs
-    for check in result['guardrail_results']:
-        GuardrailLog.objects.create(
+    GuardrailLog.objects.bulk_create([
+        GuardrailLog(
             email=email,
             check_name=check['check_name'],
             passed=check['passed'],
             details=check['details'],
+        )
+        for check in result['guardrail_results']
+    ])
+
+    # Send email to customer if guardrails passed
+    email_sent = False
+    if result['passed_guardrails'] and application.applicant.email:
+        from apps.email_engine.services.sender import send_decision_email
+        email_sent = send_decision_email(
+            recipient_email=application.applicant.email,
+            subject=result['subject'],
+            body=result['body'],
         )
 
     return {
@@ -41,4 +53,5 @@ def generate_email_task(self, application_id, decision):
         'subject': result['subject'],
         'passed_guardrails': result['passed_guardrails'],
         'attempt_number': result['attempt_number'],
+        'email_sent': email_sent,
     }

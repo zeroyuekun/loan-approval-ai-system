@@ -33,16 +33,21 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 
 
-# Feature definitions
+# Feature definitions (must match DataGenerator output columns)
 NUMERIC_FEATURES = [
-    "income",
+    "annual_income",
     "credit_score",
     "loan_amount",
+    "loan_term_months",
     "debt_to_income",
     "employment_length",
-    "annual_income",
+    "property_value",
+    "deposit_amount",
+    "monthly_expenses",
+    "existing_credit_card_limit",
+    "number_of_dependants",
 ]
-CATEGORICAL_FEATURES = ["purpose", "home_ownership"]
+CATEGORICAL_FEATURES = ["purpose", "home_ownership", "employment_type", "applicant_type"]
 BINARY_FEATURES = ["has_cosigner"]
 TARGET = "approved"
 
@@ -223,6 +228,7 @@ def train_xgboost(X_train, y_train, preprocessor) -> Pipeline:
             scale_pos_weight=scale_pos_weight,
             eval_metric="logloss",
             use_label_encoder=False,
+            n_jobs=1,  # Prevent thread oversubscription inside GridSearchCV n_jobs=-1
         )),
     ])
 

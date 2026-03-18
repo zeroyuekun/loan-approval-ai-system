@@ -39,15 +39,15 @@ export function EmailPreview({ email }: EmailPreviewProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="rounded-md border p-4 space-y-3">
-          <div>
-            <span className="text-xs font-medium text-muted-foreground">Subject</span>
-            <p className="font-medium">{email.subject}</p>
+        <div className="rounded-lg border bg-white p-6 shadow-soft">
+          <div className="mb-4">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Subject</span>
+            <p className="mt-1 text-base font-semibold">{email.subject}</p>
           </div>
-          <hr />
+          <hr className="mb-5" />
           <div>
-            <span className="text-xs font-medium text-muted-foreground">Body</span>
-            <div className="mt-1 whitespace-pre-wrap text-sm">{email.body}</div>
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Body</span>
+            <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{email.body}</div>
           </div>
         </div>
 

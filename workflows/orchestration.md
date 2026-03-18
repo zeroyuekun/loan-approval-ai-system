@@ -18,11 +18,12 @@ Chain all three levels of the AI loan approval system into a single agentic pipe
 | ML predictor | `backend/apps/ml_engine/services/predictor.py` | Runs model inference |
 | Email generator | `backend/apps/email_engine/services/email_generator.py` | Generates decision emails |
 | Bias detector | `backend/apps/agents/services/bias_detector.py` | Scores emails for bias |
-| NBO generator | `backend/apps/agents/services/nbo_generator.py` | Generates next-best-offer for denials |
+| NBO generator | `backend/apps/agents/services/next_best_offer.py` | Generates next-best-offer for denials |
+| Marketing agent | `backend/apps/agents/services/marketing_agent.py` | Generates follow-up marketing email with alternative offers for denied applicants |
 
 ## Steps
 
-1. **Receive loan_id** — Validate that the loan application exists and is in `pending` status. If not found or already processed, abort with appropriate error.
+1. **Receive loan_id** - Validate that the loan application exists and is in `pending` status. If not found or already processed, abort with appropriate error.
 
 2. **Run ML prediction** (Level 1)
    - Load the active model version from `ModelVersion.objects.filter(is_active=True)`
@@ -49,10 +50,21 @@ Chain all three levels of the AI loan approval system into a single agentic pipe
 6. **Generate NBO** (if denied)
    - If the loan was denied, generate a next-best-offer suggestion
    - Consider: lower loan amount, different term, secured vs. unsecured, co-signer suggestion
-   - Append NBO section to the denial email
    - Record step: `{"step": "nbo_generation", "result": {"offer_type": str}, "duration_ms": int}`
 
-7. **Finalize AgentRun**
+7. **Generate Marketing Message** (if NBO succeeded)
+   - Generate a customer-facing marketing message summarising the NBO offers
+   - Update the NBO record with the marketing message
+
+8. **Marketing Agent Email** (if NBO succeeded)
+   - The Marketing Agent generates a full follow-up email presenting the alternative offers
+   - The email is forward-looking (no decline references) and includes a clear call to action
+   - Runs marketing-specific guardrails: prohibited language, tone, no decline language, call to action
+   - Retries up to 3 times if guardrails fail
+   - Saves a `MarketingEmail` record linked to the `AgentRun`
+   - Record step: `{"step": "marketing_email_generation", "result": {"subject": str, "passed_guardrails": bool}, "duration_ms": int}`
+
+9. **Finalize AgentRun**
    - Update loan application status to `approved` or `denied`
    - Save the complete `AgentRun` record with all steps
    - Store the final email in `GeneratedEmail` model
@@ -86,6 +98,7 @@ AgentRun(
 - `AgentRun` record with full step history and timing
 - `GeneratedEmail` record with final email content
 - NBO record (if applicable)
+- `MarketingEmail` record with follow-up marketing email (if denied and NBO generated)
 
 ## Edge Cases
 

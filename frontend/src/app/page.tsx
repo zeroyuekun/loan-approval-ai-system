@@ -11,9 +11,9 @@ export default function Home() {
   useEffect(() => {
     if (!isLoading) {
       if (user) {
-        router.push('/dashboard')
+        router.replace(user.role === 'customer' ? '/apply' : '/dashboard')
       } else {
-        router.push('/login')
+        router.replace('/login')
       }
     }
   }, [user, isLoading, router])

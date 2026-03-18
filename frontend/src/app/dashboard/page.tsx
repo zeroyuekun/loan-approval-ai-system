@@ -9,17 +9,20 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 export default function DashboardPage() {
   const { data: applicationsData, isLoading: appsLoading } = useApplications({ page_size: 5 })
+  // Fetch total counts by status using page_size=1 (we only need the count field)
+  const { data: approvedData } = useApplications({ page_size: 1, status: 'approved' })
+  const { data: deniedData } = useApplications({ page_size: 1, status: 'denied' })
   const { data: metrics } = useModelMetrics()
 
   const applications = applicationsData?.results || []
   const totalCount = applicationsData?.count || 0
 
-  const approved = applications.filter((a) => a.status === 'approved').length
-  const denied = applications.filter((a) => a.status === 'denied').length
+  const approved = approvedData?.count || 0
+  const denied = deniedData?.count || 0
   const approvalRate = totalCount > 0 ? (approved / Math.max(approved + denied, 1)) * 100 : 0
 
   const activeModelName = metrics
-    ? `${metrics.algorithm === 'rf' ? 'Random Forest' : 'XGBoost'} v${metrics.version}`
+    ? (metrics.algorithm === 'rf' ? 'Random Forest' : 'XGBoost')
     : 'N/A'
 
   if (appsLoading) {

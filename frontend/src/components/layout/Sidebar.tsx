@@ -2,14 +2,16 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart3, Mail, Bot } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart3, Mail, Bot, UserCircle, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
-import { Badge } from '@/components/ui/badge'
+import { LogoIcon } from '@/components/ui/logo'
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/dashboard/applications', label: 'Applications', icon: FileText },
+  { href: '/dashboard/customers', label: 'Customers', icon: Users, staffOnly: true },
+  { href: '/dashboard/profile', label: 'My Profile', icon: UserCircle },
   { href: '/dashboard/model-metrics', label: 'Model Metrics', icon: BarChart3 },
   { href: '/dashboard/emails', label: 'Emails', icon: Mail },
   { href: '/dashboard/agents', label: 'Agent Workflows', icon: Bot },
@@ -27,20 +29,26 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   return (
     <>
       {isOpen && (
-        <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={onClose} />
+        <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={onClose} />
       )}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r bg-card transition-transform lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col gradient-sidebar text-white transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 border-r border-white/[0.06]",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex h-16 items-center border-b px-6">
-          <h1 className="text-lg font-bold">LoanAI</h1>
+        {/* Brand */}
+        <div className="flex h-16 items-center gap-2.5 px-6">
+          <LogoIcon />
+          <span className="text-lg font-bold tracking-tight">AussieLoanAI</span>
         </div>
 
-        <nav className="flex-1 space-y-1 p-4">
-          {navItems.map((item) => {
+        {/* Navigation */}
+        <nav className="flex-1 space-y-1 px-3 py-4">
+          <p className="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            Menu
+          </p>
+          {navItems.filter((item) => !('staffOnly' in item && item.staffOnly) || (user?.role === 'admin' || user?.role === 'officer')).map((item) => {
             const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
             return (
               <Link
@@ -48,32 +56,34 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 href={item.href}
                 onClick={onClose}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                   isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    ? "bg-gradient-to-r from-blue-500/20 to-indigo-500/15 text-white shadow-sm shadow-blue-500/10 border border-white/10"
+                    : "text-slate-400 hover:bg-gradient-to-r hover:from-white/10 hover:to-white/5 hover:text-white"
                 )}
               >
-                <item.icon className="h-4 w-4" />
+                <item.icon className={cn("h-[18px] w-[18px]", isActive && "text-blue-400")} />
                 {item.label}
+                {isActive && (
+                  <div className="ml-auto h-1.5 w-1.5 rounded-full bg-blue-400" />
+                )}
               </Link>
             )
           })}
         </nav>
 
+        {/* User card */}
         {user && (
-          <div className="border-t p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-medium">
+          <div className="border-t border-white/10 p-4">
+            <div className="flex items-center gap-3 rounded-lg bg-white/5 p-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 via-indigo-500 to-violet-500 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 border border-white/20">
                 {user.first_name?.[0] || user.username[0].toUpperCase()}
               </div>
               <div className="flex-1 overflow-hidden">
-                <p className="truncate text-sm font-medium">
+                <p className="truncate text-sm font-medium text-white">
                   {user.first_name ? `${user.first_name} ${user.last_name}` : user.username}
                 </p>
-                <Badge variant="secondary" className="text-xs">
-                  {user.role}
-                </Badge>
+                <p className="text-xs text-slate-400 capitalize">{user.role}</p>
               </div>
             </div>
           </div>

@@ -10,6 +10,8 @@ interface ROCCurveProps {
 }
 
 export function ROCCurve({ fpr, tpr, auc }: ROCCurveProps) {
+  if (!fpr?.length || !tpr?.length) return null
+
   const data = fpr.map((x, i) => ({
     fpr: parseFloat(x.toFixed(3)),
     tpr: parseFloat(tpr[i].toFixed(3)),
@@ -19,7 +21,7 @@ export function ROCCurve({ fpr, tpr, auc }: ROCCurveProps) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base">ROC Curve</CardTitle>
-        <CardDescription>AUC: {auc.toFixed(4)}</CardDescription>
+        <CardDescription>AUC: {auc != null ? auc.toFixed(4) : '—'}</CardDescription>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={300}>

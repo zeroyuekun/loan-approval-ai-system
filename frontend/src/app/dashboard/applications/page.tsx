@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useApplications } from '@/hooks/useApplications'
 import { ApplicationTable } from '@/components/applications/ApplicationTable'
@@ -12,12 +12,22 @@ import { Plus, Search } from 'lucide-react'
 export default function ApplicationsPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [purposeFilter, setPurposeFilter] = useState('')
 
+  // Debounce search input by 300ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
   const { data, isLoading } = useApplications({
     page,
-    search: search || undefined,
+    search: debouncedSearch || undefined,
     status: statusFilter || undefined,
     purpose: purposeFilter || undefined,
   })
@@ -31,7 +41,7 @@ export default function ApplicationsPage() {
             <Input
               placeholder="Search applications..."
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+              onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
             />
           </div>

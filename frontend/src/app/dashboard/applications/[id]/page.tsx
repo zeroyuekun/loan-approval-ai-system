@@ -1,10 +1,11 @@
 'use client'
 
-import { useParams } from 'next/navigation'
+import { useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import { useApplication } from '@/hooks/useApplications'
-import { useAgentRun } from '@/hooks/useAgentStatus'
+import { useAuth } from '@/lib/auth'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { emailApi } from '@/lib/api'
+import { emailApi, loansApi } from '@/lib/api'
 import { ApplicationDetail } from '@/components/applications/ApplicationDetail'
 import { Skeleton } from '@/components/ui/skeleton'
 import { GeneratedEmail } from '@/types'
@@ -12,7 +13,12 @@ import { GeneratedEmail } from '@/types'
 export default function ApplicationDetailPage() {
   const params = useParams()
   const id = params.id as string
+  const router = useRouter()
+  const { user } = useAuth()
   const queryClient = useQueryClient()
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const isAdmin = user?.role === 'admin'
 
   const { data: application, isLoading: appLoading } = useApplication(id)
 
@@ -26,12 +32,23 @@ export default function ApplicationDetailPage() {
     retry: false,
   })
 
-  const { data: agentRun } = useAgentRun(id)
-
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['application', id] })
     queryClient.invalidateQueries({ queryKey: ['email', id] })
     queryClient.invalidateQueries({ queryKey: ['agentRun', id] })
+  }
+
+  const handleDelete = async () => {
+    setIsDeleting(true)
+    try {
+      await loansApi.delete(id)
+      queryClient.invalidateQueries({ queryKey: ['applications'] })
+      router.push('/dashboard/applications')
+    } catch (error) {
+      console.error('Failed to delete application:', error)
+      setIsDeleting(false)
+      setShowDeleteConfirm(false)
+    }
   }
 
   if (appLoading) {
@@ -55,8 +72,11 @@ export default function ApplicationDetailPage() {
     <ApplicationDetail
       application={application}
       email={email || null}
-      agentRun={agentRun || null}
       onRefresh={handleRefresh}
+      onDelete={isAdmin ? handleDelete : undefined}
+      isDeleting={isDeleting}
+      showDeleteConfirm={showDeleteConfirm}
+      onDeleteConfirmToggle={setShowDeleteConfirm}
     />
   )
 }

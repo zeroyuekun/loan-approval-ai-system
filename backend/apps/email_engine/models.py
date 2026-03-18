@@ -15,7 +15,7 @@ class GeneratedEmail(models.Model):
     generation_time_ms = models.IntegerField(null=True)
     attempt_number = models.IntegerField(default=1)
     passed_guardrails = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         ordering = ['-created_at']

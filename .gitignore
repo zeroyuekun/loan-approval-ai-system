@@ -55,3 +55,12 @@ token.json
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Celery beat schedule
+celerybeat-schedule*
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Windows artifacts
+nul

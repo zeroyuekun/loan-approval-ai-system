@@ -4,6 +4,7 @@ from .models import LoanApplication
 
 
 class LoanApplicationFilter(django_filters.FilterSet):
+    applicant = django_filters.NumberFilter(field_name='applicant_id')
     status = django_filters.ChoiceFilter(choices=LoanApplication.Status.choices)
     purpose = django_filters.ChoiceFilter(choices=LoanApplication.Purpose.choices)
     credit_score_min = django_filters.NumberFilter(field_name='credit_score', lookup_expr='gte')

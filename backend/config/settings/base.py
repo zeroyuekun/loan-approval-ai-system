@@ -8,8 +8,15 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-dev-key-change-in-production')
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
+
+_secret_key = os.environ.get('DJANGO_SECRET_KEY', '')
+if not _secret_key and not DEBUG:
+    raise ValueError(
+        'DJANGO_SECRET_KEY environment variable must be set in production (DEBUG=False). '
+        'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
+    )
+SECRET_KEY = _secret_key or 'django-insecure-dev-key-change-in-production'
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 INSTALLED_APPS = [
@@ -21,6 +28,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Third party
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_filters',
     'django_celery_results',
@@ -71,6 +79,8 @@ DATABASES = {
         'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'postgres'),
         'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+        'CONN_MAX_AGE': 600,
+        'CONN_HEALTH_CHECKS': True,
     }
 }
 
@@ -83,7 +93,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 AUTH_USER_MODEL = 'accounts.CustomUser'
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'en-au'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
@@ -108,6 +118,14 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ),
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '20/min',
+        'user': '60/min',
+    },
 }
 
 # Simple JWT
@@ -115,7 +133,7 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': False,
+    'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
@@ -141,3 +159,42 @@ CELERY_TASK_ROUTES = {
 
 # ML Models
 ML_MODELS_DIR = BASE_DIR / 'ml_models'
+
+# Security headers (applied in all environments)
+X_FRAME_OPTIONS = 'DENY'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+# Password hashing — prefer Argon2, fall back to PBKDF2
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+]
+
+# Field-level encryption key for PII (Fernet)
+FIELD_ENCRYPTION_KEY = os.environ.get('FIELD_ENCRYPTION_KEY', '')
+
+# Email (Gmail SMTP)
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'aussieloanai@gmail.com')
+
+# AI Temperature Settings
+AI_TEMPERATURE_ANALYSIS = 0.0       # Bias detection, reviews, structured analysis
+AI_TEMPERATURE_DECISION_EMAIL = 0.0  # Approval/denial emails (regulatory documents)
+AI_TEMPERATURE_MARKETING = 0.2       # Marketing/retention content (slight variance for anti-spam)
+
+# Bias detection thresholds (used by orchestrator pipeline)
+BIAS_THRESHOLD_PASS = 60       # 0-60: compliant, email can be sent
+BIAS_THRESHOLD_REVIEW = 80     # 61-80: high bias, AI review then human escalation
+# 81+: severe bias, direct human escalation
+
+# Marketing-specific bias thresholds (tighter — declined customers are vulnerable)
+MARKETING_BIAS_THRESHOLD_PASS = 50    # 0-50: compliant marketing email
+MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior review (Opus)
+# 71+: blocked, marketing email not sent

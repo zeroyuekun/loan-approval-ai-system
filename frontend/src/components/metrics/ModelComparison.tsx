@@ -49,7 +49,7 @@ export function ModelComparison({ models }: ModelComparisonProps) {
                 {metrics.map((metric) => (
                   <div key={metric} className="flex justify-between text-sm">
                     <span className="text-muted-foreground">{metricLabels[metric]}</span>
-                    <span className="font-medium">{formatPercent(model[metric])}</span>
+                    <span className="font-medium">{model[metric] != null ? formatPercent(model[metric]) : '—'}</span>
                   </div>
                 ))}
               </CardContent>

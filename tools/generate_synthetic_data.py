@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate synthetic loan application data for model training.
 
-Creates realistic loan records with configurable count and distributions,
-using a weighted scoring formula to determine approval decisions.
+Creates realistic loan records using Australian lending standards (APRA 2026,
+Big 4 bank criteria, HEM benchmarks, LVR thresholds, income shading).
 
 Usage:
     python tools/generate_synthetic_data.py
@@ -14,12 +14,18 @@ import argparse
 import os
 import sys
 
+# Add backend to path so we can import the Django service
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
+
 import numpy as np
 import pandas as pd
 
 
 def generate_synthetic_data(num_records: int = 10000, seed: int = 42) -> pd.DataFrame:
-    """Generate synthetic loan application records.
+    """Generate synthetic loan application records using Australian lending standards.
+
+    Uses the same DataGenerator service as the Django backend to ensure
+    consistency between standalone generation and API-based generation.
 
     Args:
         num_records: Number of records to generate.
@@ -28,143 +34,150 @@ def generate_synthetic_data(num_records: int = 10000, seed: int = 42) -> pd.Data
     Returns:
         DataFrame with loan application features and approval target.
     """
-    np.random.seed(seed)
     print(f"Generating {num_records} records with random seed {seed}...")
 
-    # --- Feature generation ---
+    try:
+        from apps.ml_engine.services.data_generator import DataGenerator
+        generator = DataGenerator()
+        return generator.generate(num_records=num_records, random_seed=seed)
+    except ImportError:
+        print("Could not import Django DataGenerator, using standalone implementation...")
+        return _generate_standalone(num_records, seed)
 
-    # Income: log-normal, median ~55k, range 30k-200k
-    income = np.random.lognormal(mean=10.9, sigma=0.5, size=num_records)
-    income = np.clip(income, 30000, 200000).round(2)
 
-    # Credit score: normal, mean 680, std 80, range 300-850
-    credit_score = np.random.normal(loc=680, scale=80, size=num_records)
-    credit_score = np.clip(credit_score, 300, 850).astype(int)
+def _generate_standalone(num_records: int, seed: int) -> pd.DataFrame:
+    """Standalone generation matching the Django DataGenerator logic."""
+    np.random.seed(seed)
+    n = num_records
 
-    # Loan amount: log-normal, median ~25k, range 1k-500k
-    loan_amount = np.random.lognormal(mean=10.1, sigma=0.8, size=num_records)
-    loan_amount = np.clip(loan_amount, 1000, 500000).round(2)
+    # Australian income distribution (ABS median ~$65k)
+    annual_income = np.random.lognormal(mean=np.log(70000), sigma=0.55, size=n).round(2)
+    annual_income = np.clip(annual_income, 25000, 500000)
 
-    # Debt-to-income: beta distribution, skewed toward 0.2-0.4
-    debt_to_income = np.random.beta(a=2, b=5, size=num_records)
-    debt_to_income = np.clip(debt_to_income, 0.0, 1.0).round(4)
+    # Equifax Australia credit score (0-1200, national average ~846)
+    credit_score = np.clip(np.random.normal(loc=846, scale=150, size=n).astype(int), 0, 1200)
 
-    # Employment length: exponential, most < 10 years, range 0-40
-    employment_length = np.random.exponential(scale=5, size=num_records)
-    employment_length = np.clip(employment_length, 0, 40).astype(int)
+    # Loan amounts
+    loan_amount = np.random.lognormal(mean=np.log(350000), sigma=0.7, size=n).round(2)
+    loan_amount = np.clip(loan_amount, 5000, 3000000)
 
-    # Purpose: weighted categorical
-    purpose_choices = ["home", "auto", "education", "personal", "business"]
-    purpose_weights = [0.30, 0.25, 0.15, 0.20, 0.10]
-    purpose = np.random.choice(purpose_choices, size=num_records, p=purpose_weights)
-
-    # Home ownership: weighted categorical
-    ownership_choices = ["own", "rent", "mortgage"]
-    ownership_weights = [0.20, 0.35, 0.45]
-    home_ownership = np.random.choice(
-        ownership_choices, size=num_records, p=ownership_weights
+    loan_term_months = np.random.choice(
+        [60, 120, 180, 240, 300, 360], size=n,
+        p=[0.05, 0.10, 0.15, 0.20, 0.25, 0.25]
     )
 
-    # Has cosigner: 15% True
-    has_cosigner = np.random.random(size=num_records) < 0.15
+    debt_to_income = np.clip(np.random.beta(a=2.5, b=4, size=n) * 10, 0.1, 12.0).round(2)
+    employment_length = np.clip(np.random.exponential(scale=6, size=n).astype(int), 0, 40)
 
-    # Annual income is an alias for income
-    annual_income = income.copy()
+    purposes = ['home', 'auto', 'education', 'personal', 'business']
+    purpose = np.random.choice(purposes, size=n, p=[0.35, 0.20, 0.15, 0.20, 0.10])
 
-    # --- Approval scoring ---
+    ownerships = ['own', 'rent', 'mortgage']
+    home_ownership = np.random.choice(ownerships, size=n, p=[0.20, 0.35, 0.45])
 
-    # Normalize credit score to 0-1
-    credit_score_norm = (credit_score - 300) / 550.0
+    has_cosigner = np.random.choice([0, 1], size=n, p=[0.92, 0.08])
 
-    # Income-to-loan ratio, capped at 1.0
-    income_to_loan = np.minimum(income / loan_amount, 1.0)
+    emp_types = ['payg_permanent', 'payg_casual', 'self_employed', 'contract']
+    employment_type = np.random.choice(emp_types, size=n, p=[0.55, 0.15, 0.20, 0.10])
 
-    # Employment factor: min(years / 10, 1.0)
-    employment_factor = np.minimum(employment_length / 10.0, 1.0)
+    app_types = ['single', 'couple']
+    applicant_type = np.random.choice(app_types, size=n, p=[0.45, 0.55])
 
-    # Cosigner bonus
-    cosigner_bonus = has_cosigner.astype(float)
+    number_of_dependants = np.random.choice([0, 1, 2, 3, 4], size=n, p=[0.35, 0.25, 0.25, 0.10, 0.05])
 
-    # Purpose factor
-    purpose_factor_map = {
-        "home": 0.8,
-        "auto": 0.7,
-        "education": 0.6,
-        "business": 0.5,
-        "personal": 0.4,
-    }
-    purpose_factor = np.array([purpose_factor_map[p] for p in purpose])
+    is_home = purpose == 'home'
+    property_value = np.zeros(n)
+    lvr_targets = np.clip(np.random.normal(0.82, 0.08, size=n), 0.60, 0.98)
+    property_value[is_home] = (loan_amount[is_home] / lvr_targets[is_home]).round(2)
+    property_value = np.clip(property_value, 0, 5000000)
 
-    # Weighted score
-    score = (
-        0.35 * credit_score_norm
-        + 0.25 * (1 - debt_to_income)
-        + 0.20 * income_to_loan
-        + 0.10 * employment_factor
-        + 0.05 * cosigner_bonus
-        + 0.05 * purpose_factor
+    deposit_amount = np.zeros(n)
+    deposit_amount[is_home] = (property_value[is_home] - loan_amount[is_home]).round(2)
+    deposit_amount = np.clip(deposit_amount, 0, 2000000)
+
+    monthly_expenses = np.clip(
+        np.random.lognormal(mean=np.log(2500), sigma=0.4, size=n).round(2), 800, 10000
     )
 
-    # Decision with noise
-    threshold = 0.5
-    noise = np.random.uniform(-0.05, 0.05, size=num_records)
-    approved = (score > (threshold + noise)).astype(int)
-
-    # --- Build DataFrame ---
-
-    df = pd.DataFrame(
-        {
-            "income": income,
-            "credit_score": credit_score,
-            "loan_amount": loan_amount,
-            "debt_to_income": debt_to_income,
-            "employment_length": employment_length,
-            "purpose": purpose,
-            "home_ownership": home_ownership,
-            "annual_income": annual_income,
-            "has_cosigner": has_cosigner.astype(int),
-            "approved": approved,
-        }
+    existing_credit_card_limit = np.where(
+        np.random.random(n) < 0.70,
+        np.clip(np.random.lognormal(mean=np.log(8000), sigma=0.6, size=n), 0, 50000).round(2),
+        0
     )
 
+    df = pd.DataFrame({
+        'annual_income': annual_income,
+        'credit_score': credit_score,
+        'loan_amount': loan_amount,
+        'loan_term_months': loan_term_months,
+        'debt_to_income': debt_to_income,
+        'employment_length': employment_length,
+        'purpose': purpose,
+        'home_ownership': home_ownership,
+        'has_cosigner': has_cosigner,
+        'property_value': property_value,
+        'deposit_amount': deposit_amount,
+        'monthly_expenses': monthly_expenses,
+        'existing_credit_card_limit': existing_credit_card_limit,
+        'number_of_dependants': number_of_dependants,
+        'employment_type': employment_type,
+        'applicant_type': applicant_type,
+    })
+
+    # Simplified approval logic (see DataGenerator._compute_approval for full version)
+    approved = np.ones(n, dtype=int)
+
+    # Hard cutoffs
+    approved[debt_to_income >= 6.0] = 0
+    approved[credit_score < 500] = 0
+
+    # Serviceability (simplified)
+    monthly_rate = 0.095 / 12  # 9.5% assessment rate
+    monthly_repayment = (
+        loan_amount * monthly_rate * (1 + monthly_rate) ** loan_term_months
+        / ((1 + monthly_rate) ** loan_term_months - 1)
+    )
+    monthly_income = annual_income / 12
+    surplus = monthly_income * 0.75 - monthly_expenses - monthly_repayment
+    approved[surplus < 0] = 0
+
+    # DSR check
+    dsr = monthly_repayment / monthly_income
+    approved[dsr > 0.35] = 0
+
+    # Composite scoring
+    credit_norm = np.clip((credit_score - 500) / 700, 0, 1)
+    dti_score = np.clip(1 - (debt_to_income / 6.0), 0, 1)
+    composite = 0.30 * credit_norm + 0.30 * dti_score + 0.20 * np.clip(surplus / 3000, 0, 1) + 0.20 * np.clip(annual_income / 150000, 0, 1)
+    noise = np.random.normal(0, 0.04, size=n)
+    approved[composite + noise < 0.35] = 0
+
+    df['approved'] = approved
     return df
 
 
 def validate_data(df: pd.DataFrame) -> None:
-    """Validate the generated DataFrame for correctness.
-
-    Args:
-        df: Generated loan data DataFrame.
-
-    Raises:
-        ValueError: If validation checks fail.
-    """
-    # Check for nulls
+    """Validate the generated DataFrame for correctness."""
     null_count = df.isnull().sum().sum()
     if null_count > 0:
         raise ValueError(f"Found {null_count} null values in generated data.")
 
-    # Check value ranges
-    assert df["income"].between(30000, 200000).all(), "Income out of range"
-    assert df["credit_score"].between(300, 850).all(), "Credit score out of range"
-    assert df["loan_amount"].between(1000, 500000).all(), "Loan amount out of range"
-    assert df["debt_to_income"].between(0, 1).all(), "DTI out of range"
+    assert df["annual_income"].between(25000, 500000).all(), "Income out of range"
+    assert df["credit_score"].between(0, 1200).all(), "Credit score out of range"
+    assert df["loan_amount"].between(5000, 3000000).all(), "Loan amount out of range"
+    assert df["debt_to_income"].between(0, 12.1).all(), "DTI out of range"
     assert df["employment_length"].between(0, 40).all(), "Employment length out of range"
     assert set(df["purpose"].unique()).issubset(
         {"home", "auto", "education", "personal", "business"}
     ), "Invalid purpose values"
-    assert set(df["home_ownership"].unique()).issubset(
-        {"own", "rent", "mortgage"}
-    ), "Invalid home_ownership values"
     assert set(df["approved"].unique()).issubset({0, 1}), "Invalid approved values"
 
-    # Check approval rate
     approval_rate = df["approved"].mean()
     print(f"Approval rate: {approval_rate:.1%}")
-    if not 0.40 <= approval_rate <= 0.80:
+    if not 0.25 <= approval_rate <= 0.45:
         print(
-            f"WARNING: Approval rate {approval_rate:.1%} is outside expected range (55-65%). "
-            "Consider adjusting the scoring threshold."
+            f"WARNING: Approval rate {approval_rate:.1%} is outside expected range (25-45%). "
+            "Consider adjusting parameters."
         )
 
 
@@ -174,46 +187,33 @@ def main():
         description="Generate synthetic loan application data for model training."
     )
     parser.add_argument(
-        "--num-records",
-        type=int,
-        default=10000,
+        "--num-records", type=int, default=10000,
         help="Number of records to generate (default: 10000)",
     )
     parser.add_argument(
-        "--output-path",
-        type=str,
-        default=".tmp/synthetic_loans.csv",
+        "--output-path", type=str, default=".tmp/synthetic_loans.csv",
         help="Output CSV file path (default: .tmp/synthetic_loans.csv)",
     )
     parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
+        "--seed", type=int, default=42,
         help="Random seed for reproducibility (default: 42)",
     )
     args = parser.parse_args()
 
     if args.num_records > 1000000:
-        print(
-            f"WARNING: Generating {args.num_records:,} records. "
-            "This may use significant disk space."
-        )
+        print(f"WARNING: Generating {args.num_records:,} records. This may use significant disk space.")
 
-    # Generate data
     df = generate_synthetic_data(num_records=args.num_records, seed=args.seed)
-
-    # Validate
     validate_data(df)
 
-    # Ensure output directory exists
     output_dir = os.path.dirname(args.output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    # Save
     df.to_csv(args.output_path, index=False)
     print(f"Saved {len(df)} records to {args.output_path}")
     print(f"File size: {os.path.getsize(args.output_path) / 1024:.1f} KB")
+    print(f"Columns: {list(df.columns)}")
     print(f"\nColumn summary:\n{df.describe().round(2)}")
 
 

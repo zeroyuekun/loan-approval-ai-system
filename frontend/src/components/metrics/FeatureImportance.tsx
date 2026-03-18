@@ -4,17 +4,18 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface FeatureImportanceProps {
-  features: Record<string, number>
+  features: Record<string, number> | Array<{ feature: string; importance: number }>
   title?: string
 }
 
 export function FeatureImportance({ features, title = 'Feature Importance' }: FeatureImportanceProps) {
-  const data = Object.entries(features)
-    .map(([name, importance]) => ({
-      name: name.replace(/_/g, ' '),
-      importance: parseFloat(importance.toFixed(4)),
-    }))
-    .sort((a, b) => b.importance - a.importance)
+  const data = (Array.isArray(features)
+    ? features.map((f) => ({ name: f.feature.replace(/_/g, ' '), importance: f.importance }))
+    : Object.entries(features).map(([name, importance]) => ({
+        name: name.replace(/_/g, ' '),
+        importance: Number(importance),
+      }))
+  ).sort((a, b) => b.importance - a.importance)
 
   return (
     <Card>

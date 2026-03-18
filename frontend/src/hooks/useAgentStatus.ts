@@ -4,7 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { agentsApi, tasksApi } from '@/lib/api'
 import { AgentRun, TaskStatus } from '@/types'
 
-export function useAgentRun(loanId: string) {
+export function useAgentRun(loanId: string, options?: { pipelineQueued?: boolean }) {
+  const pipelineQueued = options?.pipelineQueued ?? false
+
   return useQuery<AgentRun>({
     queryKey: ['agentRun', loanId],
     queryFn: async () => {
@@ -12,6 +14,16 @@ export function useAgentRun(loanId: string) {
       return data
     },
     enabled: !!loanId,
+    retry: false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      // Keep polling while the run is active
+      if (status === 'pending' || status === 'running') return 2000
+      // Also keep polling if the frontend knows a new run is expected
+      // (the current data is the OLD completed run; Celery hasn't created the new one yet)
+      if (pipelineQueued) return 2000
+      return false
+    },
   })
 }
 
@@ -26,6 +38,7 @@ export function useOrchestrate() {
     onSuccess: (_data, loanId) => {
       queryClient.invalidateQueries({ queryKey: ['agentRun', loanId] })
       queryClient.invalidateQueries({ queryKey: ['application', loanId] })
+      queryClient.invalidateQueries({ queryKey: ['email', loanId] })
     },
   })
 }
@@ -41,7 +54,7 @@ export function useTaskStatus(taskId: string, options?: { enabled?: boolean }) {
     refetchInterval: (query) => {
       const status = query.state.data?.status
       if (status === 'SUCCESS' || status === 'FAILURE') return false
-      return 2000
+      return 3000
     },
   })
 }

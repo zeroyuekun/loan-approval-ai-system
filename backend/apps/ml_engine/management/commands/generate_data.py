@@ -1,10 +1,167 @@
 import random
+from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand
 
-from apps.accounts.models import CustomUser
+from apps.accounts.models import CustomerProfile, CustomUser
 from apps.loans.models import LoanApplication
 from apps.ml_engine.services.data_generator import DataGenerator
+
+# Realistic Australian demo customers
+DEMO_CUSTOMERS = [
+    {'username': 'demo_customer', 'first_name': 'James', 'last_name': 'Mitchell', 'email': 'james.mitchell@example.com'},
+    {'username': 'sarah_chen', 'first_name': 'Sarah', 'last_name': 'Chen', 'email': 'sarah.chen@example.com'},
+    {'username': 'liam_oconnor', 'first_name': 'Liam', 'last_name': "O'Connor", 'email': 'liam.oconnor@example.com'},
+    {'username': 'priya_sharma', 'first_name': 'Priya', 'last_name': 'Sharma', 'email': 'priya.sharma@example.com'},
+    {'username': 'olivia_taylor', 'first_name': 'Olivia', 'last_name': 'Taylor', 'email': 'olivia.taylor@example.com'},
+    {'username': 'mohammed_ali', 'first_name': 'Mohammed', 'last_name': 'Ali', 'email': 'mohammed.ali@example.com'},
+    {'username': 'emma_williams', 'first_name': 'Emma', 'last_name': 'Williams', 'email': 'emma.williams@example.com'},
+    {'username': 'david_nguyen', 'first_name': 'David', 'last_name': 'Nguyen', 'email': 'david.nguyen@example.com'},
+    {'username': 'jessica_brown', 'first_name': 'Jessica', 'last_name': 'Brown', 'email': 'jessica.brown@example.com'},
+    {'username': 'marco_rossi', 'first_name': 'Marco', 'last_name': 'Rossi', 'email': 'marco.rossi@example.com'},
+    {'username': 'chloe_martin', 'first_name': 'Chloe', 'last_name': 'Martin', 'email': 'chloe.martin@example.com'},
+    {'username': 'raj_patel', 'first_name': 'Raj', 'last_name': 'Patel', 'email': 'raj.patel@example.com'},
+    {'username': 'sophie_jones', 'first_name': 'Sophie', 'last_name': 'Jones', 'email': 'sophie.jones@example.com'},
+    {'username': 'tom_anderson', 'first_name': 'Tom', 'last_name': 'Anderson', 'email': 'tom.anderson@example.com'},
+    {'username': 'mei_lin_wong', 'first_name': 'Mei Lin', 'last_name': 'Wong', 'email': 'meilin.wong@example.com'},
+    {'username': 'jack_harris', 'first_name': 'Jack', 'last_name': 'Harris', 'email': 'jack.harris@example.com'},
+    {'username': 'amara_okafor', 'first_name': 'Amara', 'last_name': 'Okafor', 'email': 'amara.okafor@example.com'},
+    {'username': 'ben_thompson', 'first_name': 'Ben', 'last_name': 'Thompson', 'email': 'ben.thompson@example.com'},
+    {'username': 'yuki_tanaka', 'first_name': 'Yuki', 'last_name': 'Tanaka', 'email': 'yuki.tanaka@example.com'},
+    {'username': 'grace_kelly', 'first_name': 'Grace', 'last_name': 'Kelly', 'email': 'grace.kelly@example.com'},
+    {'username': 'chris_dimitriou', 'first_name': 'Chris', 'last_name': 'Dimitriou', 'email': 'chris.dimitriou@example.com'},
+    {'username': 'natalie_white', 'first_name': 'Natalie', 'last_name': 'White', 'email': 'natalie.white@example.com'},
+    {'username': 'sam_robinson', 'first_name': 'Sam', 'last_name': 'Robinson', 'email': 'sam.robinson@example.com'},
+    {'username': 'fatima_hassan', 'first_name': 'Fatima', 'last_name': 'Hassan', 'email': 'fatima.hassan@example.com'},
+    {'username': 'daniel_lee', 'first_name': 'Daniel', 'last_name': 'Lee', 'email': 'daniel.lee@example.com'},
+]
+
+# Australian addresses by suburb
+AU_ADDRESSES = [
+    {'line_1': '42 Oxford Street', 'suburb': 'Surry Hills', 'state': 'NSW', 'postcode': '2010'},
+    {'line_1': '15 Brunswick Street', 'suburb': 'Fitzroy', 'state': 'VIC', 'postcode': '3065'},
+    {'line_1': '8 James Street', 'suburb': 'Fortitude Valley', 'state': 'QLD', 'postcode': '4006'},
+    {'line_1': '23 High Street', 'suburb': 'Fremantle', 'state': 'WA', 'postcode': '6160'},
+    {'line_1': '91 Jetty Road', 'suburb': 'Glenelg', 'state': 'SA', 'postcode': '5045'},
+    {'line_1': '5 Sandy Bay Road', 'suburb': 'Sandy Bay', 'state': 'TAS', 'postcode': '7005'},
+    {'line_1': '17 Lonsdale Street', 'suburb': 'Braddon', 'state': 'ACT', 'postcode': '2612'},
+    {'line_1': '33 Mitchell Street', 'suburb': 'Darwin City', 'state': 'NT', 'postcode': '0800'},
+    {'line_1': '112 George Street', 'suburb': 'The Rocks', 'state': 'NSW', 'postcode': '2000'},
+    {'line_1': '7 Chapel Street', 'suburb': 'South Yarra', 'state': 'VIC', 'postcode': '3141'},
+    {'line_1': '29 Boundary Street', 'suburb': 'West End', 'state': 'QLD', 'postcode': '4101'},
+    {'line_1': '64 Beaufort Street', 'suburb': 'Perth', 'state': 'WA', 'postcode': '6000'},
+    {'line_1': '3 King William Road', 'suburb': 'Unley', 'state': 'SA', 'postcode': '5061'},
+    {'line_1': '51 Liverpool Street', 'suburb': 'Hobart', 'state': 'TAS', 'postcode': '7000'},
+    {'line_1': '20 Mort Street', 'suburb': 'Canberra City', 'state': 'ACT', 'postcode': '2601'},
+    {'line_1': '78 Military Road', 'suburb': 'Neutral Bay', 'state': 'NSW', 'postcode': '2089'},
+    {'line_1': '14 Acland Street', 'suburb': 'St Kilda', 'state': 'VIC', 'postcode': '3182'},
+    {'line_1': '56 Caxton Street', 'suburb': 'Paddington', 'state': 'QLD', 'postcode': '4064'},
+    {'line_1': '9 Stirling Highway', 'suburb': 'Claremont', 'state': 'WA', 'postcode': '6010'},
+    {'line_1': '38 Rundle Street', 'suburb': 'Adelaide', 'state': 'SA', 'postcode': '5000'},
+    {'line_1': '145 Parramatta Road', 'suburb': 'Annandale', 'state': 'NSW', 'postcode': '2038'},
+    {'line_1': '22 Glenferrie Road', 'suburb': 'Hawthorn', 'state': 'VIC', 'postcode': '3122'},
+    {'line_1': '11 Logan Road', 'suburb': 'Woolloongabba', 'state': 'QLD', 'postcode': '4102'},
+    {'line_1': '67 Hay Street', 'suburb': 'Subiaco', 'state': 'WA', 'postcode': '6008'},
+    {'line_1': '4 The Parade', 'suburb': 'Norwood', 'state': 'SA', 'postcode': '5067'},
+]
+
+UNIT_PREFIXES = ['Unit', 'Apt', 'Level']
+
+
+def _random_dob(min_age=22, max_age=65):
+    today = date.today()
+    age = random.randint(min_age, max_age)
+    dob = today.replace(year=today.year - age) - timedelta(days=random.randint(0, 364))
+    return dob
+
+
+def _random_phone():
+    return f'04{random.randint(10, 99)} {random.randint(100, 999)} {random.randint(100, 999)}'
+
+
+def _build_profile_data(index):
+    """Generate realistic, correlated profile data for a customer."""
+    addr = AU_ADDRESSES[index % len(AU_ADDRESSES)]
+    tenure = random.choices(
+        [random.randint(0, 2), random.randint(3, 7), random.randint(8, 12), random.randint(13, 20)],
+        weights=[15, 40, 30, 15],
+    )[0]
+
+    # Correlated: longer tenure → higher tier, more products
+    if tenure >= 10:
+        tier = random.choices(['gold', 'platinum'], weights=[40, 60])[0]
+        num_products = random.randint(3, 6)
+    elif tenure >= 5:
+        tier = random.choices(['silver', 'gold'], weights=[50, 50])[0]
+        num_products = random.randint(2, 5)
+    elif tenure >= 2:
+        tier = random.choices(['standard', 'silver'], weights=[60, 40])[0]
+        num_products = random.randint(1, 3)
+    else:
+        tier = 'standard'
+        num_products = random.randint(1, 2)
+
+    has_mortgage = random.random() < (0.5 if tenure >= 5 else 0.2)
+    has_credit_card = random.random() < (0.8 if tenure >= 3 else 0.5)
+    has_auto_loan = random.random() < (0.3 if tenure >= 2 else 0.1)
+
+    # Savings correlated with tenure and tier
+    savings_base = {'standard': 5000, 'silver': 15000, 'gold': 35000, 'platinum': 60000}
+    savings = round(random.uniform(savings_base[tier] * 0.5, savings_base[tier] * 2.5), 2)
+    checking = round(random.uniform(1000, 20000), 2)
+
+    on_time_pct = round(random.uniform(
+        95.0 if tier in ('gold', 'platinum') else 88.0,
+        100.0,
+    ), 1)
+    prev_repaid = random.randint(
+        1 if tenure >= 3 else 0,
+        min(tenure // 2 + 1, 6),
+    )
+
+    residency = random.choices(
+        ['citizen', 'permanent_resident', 'temporary_visa', 'nz_citizen'],
+        weights=[70, 18, 7, 5],
+    )[0]
+
+    marital = random.choices(
+        ['single', 'married', 'de_facto', 'divorced', 'widowed'],
+        weights=[30, 35, 20, 12, 3],
+    )[0]
+
+    primary_id = random.choice(['drivers_licence', 'passport'])
+    secondary_id = 'medicare' if primary_id == 'drivers_licence' else random.choice(['drivers_licence', 'medicare'])
+
+    has_unit = random.random() < 0.35
+    address_line_2 = f'{random.choice(UNIT_PREFIXES)} {random.randint(1, 20)}' if has_unit else ''
+
+    return {
+        'date_of_birth': _random_dob(),
+        'phone': _random_phone(),
+        'address_line_1': addr['line_1'],
+        'address_line_2': address_line_2,
+        'suburb': addr['suburb'],
+        'state': addr['state'],
+        'postcode': addr['postcode'],
+        'marital_status': marital,
+        'residency_status': residency,
+        'primary_id_type': primary_id,
+        'primary_id_number': f'{random.randint(10000000, 99999999)}',
+        'secondary_id_type': secondary_id,
+        'secondary_id_number': f'{random.randint(2000, 9999)} {random.randint(10000, 99999)} {random.randint(1, 9)}',
+        'tax_file_number_provided': random.random() < 0.85,
+        'is_politically_exposed': random.random() < 0.02,
+        'account_tenure_years': tenure,
+        'loyalty_tier': tier,
+        'num_products': num_products,
+        'savings_balance': savings,
+        'checking_balance': checking,
+        'has_credit_card': has_credit_card,
+        'has_mortgage': has_mortgage,
+        'has_auto_loan': has_auto_loan,
+        'on_time_payment_pct': on_time_pct,
+        'previous_loans_repaid': prev_repaid,
+    }
 
 
 class Command(BaseCommand):
@@ -41,35 +198,58 @@ class Command(BaseCommand):
         if db_count > 0:
             self.stdout.write(f'Creating {db_count} LoanApplication records in DB...')
 
-            # Ensure at least one customer user exists
-            customer, created = CustomUser.objects.get_or_create(
-                username='demo_customer',
-                defaults={
-                    'email': 'demo@example.com',
-                    'role': 'customer',
-                    'first_name': 'Demo',
-                    'last_name': 'Customer',
-                },
-            )
-            if created:
-                customer.set_password('demo1234')
-                customer.save()
+            # Create demo customers with fully populated profiles
+            customers = []
+            for i, cust_data in enumerate(DEMO_CUSTOMERS):
+                user, created = CustomUser.objects.get_or_create(
+                    username=cust_data['username'],
+                    defaults={
+                        'email': cust_data['email'],
+                        'role': 'customer',
+                        'first_name': cust_data['first_name'],
+                        'last_name': cust_data['last_name'],
+                    },
+                )
+                if created:
+                    user.set_password('demo1234')
+                    user.save()
 
+                # Populate profile with realistic Australian data
+                profile_data = _build_profile_data(i)
+                CustomerProfile.objects.update_or_create(
+                    user=user,
+                    defaults=profile_data,
+                )
+                customers.append(user)
+
+            self.stdout.write(self.style.SUCCESS(
+                f'Created/updated {len(customers)} demo customers with full profiles'
+            ))
+
+            # Distribute loan applications across customers (round-robin)
             subset = df.sample(n=min(db_count, len(df)), random_state=42)
             created_count = 0
-            for _, row in subset.iterrows():
+            for idx, (_, row) in enumerate(subset.iterrows()):
+                applicant = customers[idx % len(customers)]
                 LoanApplication.objects.create(
-                    applicant=customer,
+                    applicant=applicant,
                     annual_income=row['annual_income'],
                     credit_score=int(row['credit_score']),
                     loan_amount=row['loan_amount'],
                     loan_term_months=int(row['loan_term_months']),
-                    debt_to_income=round(row['debt_to_income'], 4),
+                    debt_to_income=round(row['debt_to_income'], 2),
                     employment_length=int(row['employment_length']),
                     purpose=row['purpose'],
                     home_ownership=row['home_ownership'],
                     has_cosigner=bool(row['has_cosigner']),
+                    property_value=row['property_value'] if row['property_value'] > 0 else None,
+                    deposit_amount=row['deposit_amount'] if row['deposit_amount'] > 0 else None,
+                    monthly_expenses=row['monthly_expenses'],
+                    existing_credit_card_limit=row['existing_credit_card_limit'],
+                    number_of_dependants=int(row['number_of_dependants']),
+                    employment_type=row['employment_type'],
+                    applicant_type=row['applicant_type'],
                 )
                 created_count += 1
 
-            self.stdout.write(self.style.SUCCESS(f'Created {created_count} LoanApplication records'))
+            self.stdout.write(self.style.SUCCESS(f'Created {created_count} LoanApplication records across {len(customers)} customers'))

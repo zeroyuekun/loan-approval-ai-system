@@ -67,7 +67,7 @@ export function ApplicationTable({
               <TableCell>{app.credit_score}</TableCell>
               <TableCell>
                 <Badge className={getStatusColor(app.status)} variant="outline">
-                  {app.status}
+                  {app.status.toUpperCase()}
                 </Badge>
               </TableCell>
               <TableCell className="text-muted-foreground">{formatDate(app.created_at)}</TableCell>
@@ -83,10 +83,12 @@ export function ApplicationTable({
         </TableBody>
       </Table>
 
-      {totalPages > 1 && (
+      {(totalPages > 1 || page > 1) && (
         <div className="flex items-center justify-between mt-4">
           <p className="text-sm text-muted-foreground">
-            Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalCount)} of {totalCount}
+            {totalCount > 0
+              ? `Showing ${((page - 1) * pageSize) + 1} to ${Math.min(page * pageSize, totalCount)} of ${totalCount}`
+              : '\u00A0'}
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -98,7 +100,7 @@ export function ApplicationTable({
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <span className="text-sm">
-              Page {page} of {totalPages}
+              Page {page} of {totalPages || page}
             </span>
             <Button
               variant="outline"

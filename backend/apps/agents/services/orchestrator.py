@@ -1,41 +1,84 @@
+import logging
 import time
 from datetime import datetime, timezone
 
-from apps.agents.models import AgentRun, BiasReport, NextBestOffer
+from django.conf import settings
+from django.db import transaction
+
+from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.email_engine.models import GeneratedEmail, GuardrailLog
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.predictor import ModelPredictor
 
-from .bias_detector import BiasDetector
+from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector, MarketingEmailReviewer
+from .marketing_agent import MarketingAgent
 from .next_best_offer import NextBestOfferGenerator
+
+logger = logging.getLogger('agents.orchestrator')
 
 
 class PipelineOrchestrator:
-    """
-    Central coordination point for the full loan processing pipeline.
-    Orchestrates ML prediction, email generation, bias checking, and next best offers.
-    """
+    """Runs the full loan processing pipeline end to end."""
 
-    MAX_BIAS_RETRIES = 2
+    def _build_profile_context(self, application):
+        """Build a dict of customer profile data for downstream services.
+
+        Returns None if the profile is not available so callers can degrade
+        gracefully.
+        """
+        try:
+            profile = application.applicant.profile
+        except Exception:
+            logger.info('Application %s: no customer profile available', application.pk)
+            return None
+
+        return {
+            'savings_balance': profile.savings_balance,
+            'checking_balance': profile.checking_balance,
+            'account_tenure_years': profile.account_tenure_years,
+            'loyalty_tier': profile.get_loyalty_tier_display(),
+            'num_products': profile.num_products,
+            'on_time_payment_pct': profile.on_time_payment_pct,
+            'previous_loans_repaid': profile.previous_loans_repaid,
+            'has_credit_card': profile.has_credit_card,
+            'has_mortgage': profile.has_mortgage,
+            'has_auto_loan': profile.has_auto_loan,
+            'gross_annual_income': getattr(profile, 'gross_annual_income', None),
+            'superannuation_balance': getattr(profile, 'superannuation_balance', None),
+            'total_assets': profile.total_assets if hasattr(profile, 'total_assets') else None,
+            'total_monthly_liabilities': profile.total_monthly_liabilities if hasattr(profile, 'total_monthly_liabilities') else None,
+            'employment_status': getattr(profile, 'employment_status', ''),
+            'occupation': getattr(profile, 'occupation', ''),
+            'industry': getattr(profile, 'industry', ''),
+        }
 
     def orchestrate(self, application_id):
-        """
-        Run the full pipeline for a loan application.
-
-        Steps:
-            1. Run ML prediction
-            2. Generate decision email
-            3. Run bias check on email
-            4. If bias detected, regenerate email (up to MAX_BIAS_RETRIES)
-            5. If denied, generate next best offers
-        """
+        """Run prediction -> email -> bias check -> NBO for a loan application."""
         start_time = time.time()
+        logger.info('Starting pipeline for application %s', application_id)
 
-        application = LoanApplication.objects.select_related('applicant').get(pk=application_id)
-        application.status = 'processing'
-        application.save(update_fields=['status'])
+        with transaction.atomic():
+            application = (
+                LoanApplication.objects
+                .select_for_update()
+                .select_related('applicant')
+                .get(pk=application_id)
+            )
+            if application.status == 'processing':
+                raise ValueError('Pipeline already running for this application')
+            application.status = 'processing'
+            application.save(update_fields=['status'])
+
+        # Refetch with profile (nullable) outside the lock — select_for_update
+        # cannot be combined with outer joins on nullable relations in PostgreSQL.
+        application = (
+            LoanApplication.objects
+            .select_related('applicant__profile')
+            .get(pk=application_id)
+        )
+        profile_context = self._build_profile_context(application)
 
         agent_run = AgentRun.objects.create(
             application=application,
@@ -54,7 +97,6 @@ class PipelineOrchestrator:
             predictor = ModelPredictor()
             prediction_result = predictor.predict(application)
 
-            # Save prediction log
             PredictionLog.objects.create(
                 model_version_id=prediction_result['model_version'],
                 application=application,
@@ -64,7 +106,6 @@ class PipelineOrchestrator:
                 processing_time_ms=prediction_result['processing_time_ms'],
             )
 
-            # Save loan decision
             LoanDecision.objects.update_or_create(
                 application=application,
                 defaults={
@@ -79,11 +120,14 @@ class PipelineOrchestrator:
                 'prediction': prediction_result['prediction'],
                 'probability': prediction_result['probability'],
             })
+            logger.info('Application %s: prediction=%s prob=%.3f',
+                        application_id, prediction_result['prediction'], prediction_result['probability'])
         except Exception as e:
+            logger.error('Application %s: ML prediction failed: %s', application_id, e)
             step = self._fail_step(step, str(e))
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
-            application.status = 'review'
-            application.save(update_fields=['status'])
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(status='review')
             return agent_run
 
         steps.append(step)
@@ -93,7 +137,11 @@ class PipelineOrchestrator:
         step = self._start_step('email_generation')
         try:
             generator = EmailGenerator()
-            email_result = generator.generate(application, decision)
+            email_result = generator.generate(
+                application, decision,
+                confidence=prediction_result['probability'],
+                profile_context=profile_context,
+            )
 
             generated_email = GeneratedEmail.objects.create(
                 application=application,
@@ -107,24 +155,27 @@ class PipelineOrchestrator:
                 passed_guardrails=email_result['passed_guardrails'],
             )
 
-            for check in email_result['guardrail_results']:
-                GuardrailLog.objects.create(
+            GuardrailLog.objects.bulk_create([
+                GuardrailLog(
                     email=generated_email,
                     check_name=check['check_name'],
                     passed=check['passed'],
                     details=check['details'],
                 )
+                for check in email_result['guardrail_results']
+            ])
 
             step = self._complete_step(step, result_summary={
                 'subject': email_result['subject'],
                 'passed_guardrails': email_result['passed_guardrails'],
             })
         except Exception as e:
+            logger.error('Application %s: email generation failed: %s', application_id, e)
             step = self._fail_step(step, str(e))
             steps.append(step)
             self._finalize_run(agent_run, steps, start_time, error=str(e))
-            application.status = decision
-            application.save(update_fields=['status'])
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(status=decision)
             return agent_run
 
         steps.append(step)
@@ -144,6 +195,9 @@ class PipelineOrchestrator:
                 agent_run=agent_run,
                 email=generated_email,
                 bias_score=bias_result['score'],
+                deterministic_score=bias_result.get('deterministic_score'),
+                llm_raw_score=bias_result.get('llm_raw_score'),
+                score_source=bias_result.get('score_source', 'composite'),
                 categories=bias_result['categories'],
                 analysis=bias_result['analysis'],
                 flagged=bias_result['flagged'],
@@ -155,86 +209,509 @@ class PipelineOrchestrator:
                 'flagged': bias_result['flagged'],
             })
         except Exception as e:
+            logger.error('Application %s: bias check failed: %s', application_id, e)
             step = self._fail_step(step, str(e))
-            steps.append(step)
-            # Continue even if bias check fails
-            bias_result = {'score': 0, 'flagged': False}
+            bias_result = {'score': 100, 'flagged': True, 'requires_human_review': True}
 
         steps.append(step)
 
-        # Step 4: Regenerate if bias detected
-        if bias_result.get('flagged', False) and bias_result.get('score', 0) > 30:
-            for retry in range(self.MAX_BIAS_RETRIES):
-                step = self._start_step(f'email_regeneration_attempt_{retry + 1}')
-                try:
-                    email_result = generator.generate(application, decision, attempt=retry + 2)
+        # Step 4: Handle bias results
+        bias_score = bias_result.get('score', 0)
+        bias_threshold_pass = getattr(settings, 'BIAS_THRESHOLD_PASS', 60)
+        bias_threshold_review = getattr(settings, 'BIAS_THRESHOLD_REVIEW', 80)
 
-                    generated_email = GeneratedEmail.objects.create(
-                        application=application,
-                        decision=decision,
-                        subject=email_result['subject'],
-                        body=email_result['body'],
-                        prompt_used=email_result['prompt_used'],
-                        model_used='claude-sonnet-4-20250514',
-                        generation_time_ms=email_result['generation_time_ms'],
-                        attempt_number=email_result['attempt_number'],
-                        passed_guardrails=email_result['passed_guardrails'],
-                    )
+        # Score above review threshold: Severe bias — escalate directly to human
+        if bias_score > bias_threshold_review:
+            step = self._start_step('human_escalation_severe_bias')
+            step = self._complete_step(step, result_summary={
+                'bias_score': bias_score,
+                'reason': f'Severe bias detected (score > {bias_threshold_review}), escalated directly to human reviewer',
+            })
+            steps.append(step)
+            logger.warning('Application %s: severe bias (score=%s), escalating', application_id, bias_score)
 
-                    # Re-check bias
-                    bias_result = bias_detector.analyze(email_result['body'], context)
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(status='review')
+            agent_run.status = 'escalated'
+            self._finalize_run(agent_run, steps, start_time)
+            return agent_run
 
-                    BiasReport.objects.create(
-                        agent_run=agent_run,
-                        email=generated_email,
-                        bias_score=bias_result['score'],
-                        categories=bias_result['categories'],
-                        analysis=bias_result['analysis'],
-                        flagged=bias_result['flagged'],
-                        requires_human_review=bias_result['requires_human_review'],
-                    )
-
-                    step = self._complete_step(step, result_summary={
-                        'bias_score': bias_result['score'],
-                        'flagged': bias_result['flagged'],
-                    })
-                    steps.append(step)
-
-                    if not bias_result.get('flagged', False):
-                        break
-                except Exception as e:
-                    step = self._fail_step(step, str(e))
-                    steps.append(step)
-                    break
-
-        # Step 5: Next Best Offers (if denied)
-        if decision == 'denied':
-            step = self._start_step('next_best_offers')
+        # Moderate bias — AI Email Reviewer gets second opinion
+        if bias_threshold_pass < bias_score <= bias_threshold_review:
+            step = self._start_step('ai_email_review')
+            review_result = {'approved': False}
             try:
-                nbo_generator = NextBestOfferGenerator()
-                nbo_result = nbo_generator.generate(application)
+                reviewer = AIEmailReviewer()
+                review_result = reviewer.review(email_result['body'], bias_result, context)
 
-                NextBestOffer.objects.create(
-                    agent_run=agent_run,
-                    application=application,
-                    offers=nbo_result['offers'],
-                    analysis=nbo_result['analysis'],
-                )
+                latest_bias_report = agent_run.bias_reports.order_by('-created_at').first()
+                if latest_bias_report:
+                    latest_bias_report.ai_review_approved = review_result['approved']
+                    latest_bias_report.ai_review_reasoning = review_result['reasoning']
+                    latest_bias_report.save(update_fields=['ai_review_approved', 'ai_review_reasoning'])
 
                 step = self._complete_step(step, result_summary={
-                    'num_offers': len(nbo_result['offers']),
+                    'approved': review_result['approved'],
+                    'confidence': review_result['confidence'],
                 })
             except Exception as e:
+                logger.error('Application %s: AI email review failed: %s', application_id, e)
+                step = self._fail_step(step, str(e))
+                review_result = {'approved': False}
+
+            steps.append(step)
+
+            ai_approved = review_result.get('approved', False)
+            ai_confidence = review_result.get('confidence', 0.0)
+
+            if not ai_approved:
+                # AI reviewer confirmed bias — escalate to human
+                step = self._start_step('human_escalation')
+                step = self._complete_step(step, result_summary={
+                    'bias_score': bias_score,
+                    'reason': 'AI reviewer confirmed potential bias, escalated to human reviewer',
+                })
+                steps.append(step)
+                logger.warning('Application %s: AI reviewer confirmed bias, escalating', application_id)
+
+                with transaction.atomic():
+                    LoanApplication.objects.filter(pk=application.pk).update(status='review')
+                agent_run.status = 'escalated'
+                self._finalize_run(agent_run, steps, start_time)
+                return agent_run
+
+            if ai_approved and ai_confidence < 0.7:
+                # Low confidence approval — escalate for safety
+                step = self._start_step('human_escalation_low_confidence')
+                step = self._complete_step(step, result_summary={
+                    'bias_score': bias_score,
+                    'ai_confidence': ai_confidence,
+                    'reason': f'AI reviewer approved but with low confidence ({ai_confidence:.2f} < 0.70), escalated for safety',
+                })
+                steps.append(step)
+                logger.warning('Application %s: low-confidence AI approval (%.2f), escalating',
+                               application_id, ai_confidence)
+
+                with transaction.atomic():
+                    LoanApplication.objects.filter(pk=application.pk).update(status='review')
+                agent_run.status = 'escalated'
+                self._finalize_run(agent_run, steps, start_time)
+                return agent_run
+
+            # AI reviewer approved with high confidence — continue pipeline
+
+        # Send decision email to customer
+        step = self._start_step('email_delivery')
+        try:
+            from apps.email_engine.services.sender import send_decision_email
+            recipient = application.applicant.email
+            if recipient and generated_email and email_result['passed_guardrails']:
+                send_result = send_decision_email(recipient, email_result['subject'], email_result['body'])
+                if send_result['sent']:
+                    step = self._complete_step(step, result_summary={
+                        'sent': True,
+                        'recipient': recipient,
+                    })
+                else:
+                    step = self._fail_step(step, send_result.get('error', 'Send failed'))
+            else:
+                step = self._complete_step(step, result_summary={
+                    'sent': False,
+                    'reason': 'No recipient email or guardrails not passed',
+                })
+        except Exception as e:
+            logger.error('Application %s: email delivery failed: %s', application_id, e)
+            step = self._fail_step(step, str(e))
+        steps.append(step)
+
+        # Step 5: NBO + Marketing pipeline (if denied)
+        if decision == 'denied':
+            denial_reasons = ''
+            if prediction_result and prediction_result.get('feature_importances'):
+                top_factors = sorted(
+                    prediction_result['feature_importances'].items(),
+                    key=lambda x: x[1], reverse=True
+                )[:3]
+                denial_reasons = ', '.join(f'{k}: {v:.3f}' for k, v in top_factors)
+
+            steps = self._run_nbo_and_marketing_pipeline(
+                application, agent_run, steps, denial_reasons, profile_context,
+            )
+
+        # Finalize
+        with transaction.atomic():
+            LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+        self._finalize_run(agent_run, steps, start_time)
+        logger.info('Application %s: pipeline completed with decision=%s', application_id, decision)
+
+        return agent_run
+
+    def resume_after_review(self, agent_run_id, reviewer='', note=''):
+        """Pick up an escalated pipeline after a human approves or denies it."""
+        start_time = time.time()
+        logger.info('Resuming agent run %s after human review', agent_run_id)
+
+        with transaction.atomic():
+            agent_run = AgentRun.objects.select_for_update().select_related(
+                'application__applicant', 'application__decision',
+            ).get(pk=agent_run_id)
+
+            if agent_run.status != 'escalated':
+                raise ValueError(
+                    f'Cannot resume agent run with status {agent_run.status!r} (expected "escalated")'
+                )
+
+            application = agent_run.application
+
+            # Lock application to prevent two simultaneous reviews from resuming
+            LoanApplication.objects.select_for_update().get(pk=application.pk)
+            if application.status != 'review':
+                raise ValueError(
+                    f'Cannot resume: application status is {application.status!r} (expected "review")'
+                )
+
+            try:
+                _ = application.decision
+            except LoanDecision.DoesNotExist:
+                raise ValueError(f'No decision found for application {application.id}')
+
+            decision = application.decision.decision
+
+        # Refetch with profile outside the lock (nullable relation can't be in select_for_update)
+        application = (
+            LoanApplication.objects
+            .select_related('applicant__profile', 'decision')
+            .get(pk=application.pk)
+        )
+        profile_context = self._build_profile_context(application)
+        steps = agent_run.steps or []
+
+        # Record the human approval
+        step = self._start_step('human_review_approved')
+        step = self._complete_step(step, result_summary={
+            'reviewer': reviewer,
+            'note': note,
+            'action': 'approve',
+        })
+        steps.append(step)
+
+        if decision == 'approved':
+            # Human approved an escalated application — re-generate and send approval email
+            step = self._start_step('email_generation')
+            try:
+                generator = EmailGenerator()
+                email_result = generator.generate(
+                    application, 'approved',
+                    confidence=application.decision.confidence,
+                    profile_context=profile_context,
+                )
+
+                generated_email = GeneratedEmail.objects.create(
+                    application=application,
+                    decision='approved',
+                    subject=email_result['subject'],
+                    body=email_result['body'],
+                    prompt_used=email_result['prompt_used'],
+                    model_used='claude-sonnet-4-20250514',
+                    generation_time_ms=email_result['generation_time_ms'],
+                    attempt_number=email_result['attempt_number'],
+                    passed_guardrails=email_result['passed_guardrails'],
+                )
+
+                GuardrailLog.objects.bulk_create([
+                    GuardrailLog(
+                        email=generated_email,
+                        check_name=check['check_name'],
+                        passed=check['passed'],
+                        details=check['details'],
+                    )
+                    for check in email_result['guardrail_results']
+                ])
+
+                step = self._complete_step(step, result_summary={
+                    'subject': email_result['subject'],
+                    'passed_guardrails': email_result['passed_guardrails'],
+                })
+            except Exception as e:
+                logger.error('Agent run %s: approval email generation failed: %s', agent_run_id, e)
+                step = self._fail_step(step, str(e))
+                email_result = None
+            steps.append(step)
+
+            # Send the approval email
+            if email_result and email_result.get('passed_guardrails'):
+                step = self._start_step('email_delivery')
+                try:
+                    from apps.email_engine.services.sender import send_decision_email
+                    recipient = application.applicant.email
+                    if recipient:
+                        send_result = send_decision_email(recipient, email_result['subject'], email_result['body'])
+                        if send_result['sent']:
+                            step = self._complete_step(step, result_summary={
+                                'sent': True,
+                                'recipient': recipient,
+                            })
+                        else:
+                            step = self._fail_step(step, send_result.get('error', 'Send failed'))
+                    else:
+                        step = self._complete_step(step, result_summary={
+                            'sent': False,
+                            'reason': 'No recipient email',
+                        })
+                except Exception as e:
+                    logger.error('Agent run %s: approval email delivery failed: %s', agent_run_id, e)
+                    step = self._fail_step(step, str(e))
+                steps.append(step)
+
+        elif decision == 'denied':
+            # Extract denial reasons from stored feature importances
+            denial_reasons = ''
+            if hasattr(application, 'decision') and application.decision.feature_importances:
+                top_factors = sorted(
+                    application.decision.feature_importances.items(),
+                    key=lambda x: x[1], reverse=True
+                )[:3]
+                denial_reasons = ', '.join(f'{k}: {v:.3f}' for k, v in top_factors)
+
+            steps = self._run_nbo_and_marketing_pipeline(
+                application, agent_run, steps, denial_reasons, profile_context,
+            )
+
+        # Finalize
+        with transaction.atomic():
+            LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+        agent_run.status = 'completed'
+        self._finalize_run(agent_run, steps, start_time)
+        logger.info('Agent run %s: resumed and completed with decision=%s', agent_run_id, decision)
+
+        return agent_run
+
+    def _run_nbo_and_marketing_pipeline(self, application, agent_run, steps, denial_reasons, profile_context):
+        """Run NBO generation -> marketing message -> marketing email -> bias check -> send.
+
+        Shared by both orchestrate() and resume_after_review() for denied applications.
+        """
+        nbo_result = None
+        nbo_generator = NextBestOfferGenerator()
+
+        # NBO generation
+        step = self._start_step('next_best_offers')
+        try:
+            nbo_result = nbo_generator.generate(application, denial_reasons=denial_reasons)
+
+            NextBestOffer.objects.create(
+                agent_run=agent_run,
+                application=application,
+                offers=nbo_result['offers'],
+                analysis=nbo_result['analysis'],
+                customer_retention_score=nbo_result.get('customer_retention_score', 0),
+                loyalty_factors=nbo_result.get('loyalty_factors', []),
+                personalized_message=nbo_result.get('personalized_message', ''),
+            )
+
+            step = self._complete_step(step, result_summary={
+                'num_offers': len(nbo_result['offers']),
+                'customer_retention_score': nbo_result.get('customer_retention_score', 0),
+            })
+        except Exception as e:
+            logger.error('Application %s: NBO generation failed: %s', application.pk, e)
+            step = self._fail_step(step, str(e))
+
+        steps.append(step)
+
+        if not nbo_result or not nbo_result.get('offers'):
+            logger.warning('Application %s: no NBO offers generated — skipping marketing email pipeline', application.pk)
+
+        # Marketing Message Generation (if NBO succeeded)
+        if nbo_result and nbo_result.get('offers'):
+            step = self._start_step('marketing_message_generation')
+            try:
+                marketing_result = nbo_generator.generate_marketing_message(
+                    application, nbo_result['offers'], denial_reasons=denial_reasons,
+                )
+                nbo_record = agent_run.next_best_offers.order_by('-created_at').first()
+                if nbo_record:
+                    nbo_record.marketing_message = marketing_result['marketing_message']
+                    nbo_record.save(update_fields=['marketing_message'])
+
+                step = self._complete_step(step, result_summary={
+                    'message_length': len(marketing_result['marketing_message']),
+                    'generation_time_ms': marketing_result['generation_time_ms'],
+                })
+            except Exception as e:
+                logger.error('Application %s: marketing message failed: %s', application.pk, e)
                 step = self._fail_step(step, str(e))
 
             steps.append(step)
 
-        # Finalize
-        application.status = decision
-        application.save(update_fields=['status'])
-        self._finalize_run(agent_run, steps, start_time)
+        # Marketing Agent Email (if NBO succeeded)
+        if nbo_result and nbo_result.get('offers'):
+            step = self._start_step('marketing_email_generation')
+            email_result_marketing = None
+            try:
+                marketing_agent = MarketingAgent()
+                email_result_marketing = marketing_agent.generate(
+                    application, nbo_result, denial_reasons=denial_reasons,
+                )
 
-        return agent_run
+                step = self._complete_step(step, result_summary={
+                    'subject': email_result_marketing['subject'],
+                    'passed_guardrails': email_result_marketing['passed_guardrails'],
+                    'attempt_number': email_result_marketing['attempt_number'],
+                    'generation_time_ms': email_result_marketing['generation_time_ms'],
+                })
+            except Exception as e:
+                logger.error('Application %s: marketing email generation failed: %s', application.pk, e)
+                step = self._fail_step(step, str(e))
+
+            steps.append(step)
+
+            # Marketing bias check → save → send
+            # Always save the marketing email to DB regardless of bias outcome
+            if email_result_marketing:
+                send_approved = False
+                if email_result_marketing.get('passed_guardrails'):
+                    try:
+                        steps, send_approved = self._run_marketing_bias_check(
+                            email_result_marketing, application, agent_run, steps,
+                        )
+                    except Exception as e:
+                        logger.error('Application %s: marketing bias check failed: %s', application.pk, e)
+                        send_approved = False
+
+                logger.info('Application %s: marketing send_approved=%s', application.pk, send_approved)
+
+                # Single save point for MarketingEmail
+                MarketingEmail.objects.create(
+                    agent_run=agent_run,
+                    application=application,
+                    subject=email_result_marketing['subject'],
+                    body=email_result_marketing['body'],
+                    prompt_used=email_result_marketing['prompt_used'],
+                    generation_time_ms=email_result_marketing['generation_time_ms'],
+                    attempt_number=email_result_marketing['attempt_number'],
+                    passed_guardrails=email_result_marketing['passed_guardrails'],
+                    guardrail_results=email_result_marketing['guardrail_results'],
+                )
+
+                # Send if approved
+                if send_approved:
+                    step = self._start_step('marketing_email_delivery')
+                    try:
+                        from apps.email_engine.services.sender import send_decision_email
+                        recipient = application.applicant.email
+                        if recipient:
+                            send_result = send_decision_email(
+                                recipient,
+                                email_result_marketing['subject'],
+                                email_result_marketing['body'],
+                            )
+                            if send_result['sent']:
+                                step = self._complete_step(step, result_summary={
+                                    'sent': True,
+                                    'recipient': recipient,
+                                })
+                            else:
+                                step = self._fail_step(step, send_result.get('error', 'Send failed'))
+                        else:
+                            step = self._complete_step(step, result_summary={
+                                'sent': False,
+                                'reason': 'No recipient email',
+                            })
+                    except Exception as e:
+                        logger.error('Application %s: marketing email delivery failed: %s', application.pk, e)
+                        step = self._fail_step(step, str(e))
+
+                    steps.append(step)
+
+        return steps
+
+    def _run_marketing_bias_check(self, email_result_marketing, application, agent_run, steps):
+        """Run bias analysis on a marketing email. Returns (steps, send_approved)."""
+        marketing_context = {
+            'loan_amount': float(application.loan_amount),
+            'purpose': application.get_purpose_display(),
+            'decision': 'denied',
+        }
+
+        bias_threshold_pass = getattr(settings, 'MARKETING_BIAS_THRESHOLD_PASS', 50)
+        bias_threshold_review = getattr(settings, 'MARKETING_BIAS_THRESHOLD_REVIEW', 70)
+
+        step = self._start_step('marketing_bias_check')
+        marketing_bias_result = {'score': 100, 'flagged': True, 'requires_human_review': True}
+        try:
+            detector = MarketingBiasDetector()
+            marketing_bias_result = detector.analyze(
+                email_result_marketing['body'], marketing_context,
+            )
+
+            # Create a BiasReport record for the marketing email bias check
+            BiasReport.objects.create(
+                agent_run=agent_run,
+                report_type='marketing',
+                bias_score=marketing_bias_result['score'],
+                deterministic_score=marketing_bias_result.get('deterministic_score'),
+                llm_raw_score=marketing_bias_result.get('llm_raw_score'),
+                score_source=marketing_bias_result.get('score_source', 'composite'),
+                categories=marketing_bias_result['categories'],
+                analysis=marketing_bias_result['analysis'],
+                flagged=marketing_bias_result['flagged'],
+                requires_human_review=marketing_bias_result['requires_human_review'],
+            )
+
+            step = self._complete_step(step, result_summary={
+                'bias_score': marketing_bias_result['score'],
+                'flagged': marketing_bias_result['flagged'],
+            })
+        except Exception as e:
+            logger.error('Application %s: marketing bias check failed: %s', application.pk, e)
+            step = self._fail_step(step, str(e))
+            marketing_bias_result = {'score': 100, 'flagged': True, 'requires_human_review': True}
+        steps.append(step)
+
+        marketing_bias_score = marketing_bias_result.get('score', 100)
+
+        if marketing_bias_score > bias_threshold_review:
+            logger.warning('Application %s: marketing email blocked — bias score %s > review threshold %s',
+                           application.pk, marketing_bias_score, bias_threshold_review)
+            step = self._start_step('marketing_email_blocked')
+            step = self._complete_step(step, result_summary={
+                'bias_score': marketing_bias_score,
+                'reason': f'Marketing email blocked: bias score {marketing_bias_score} exceeds threshold {bias_threshold_review}',
+            })
+            steps.append(step)
+            return steps, False
+
+        if bias_threshold_pass < marketing_bias_score <= bias_threshold_review:
+            step = self._start_step('marketing_ai_review')
+            review_result = {'approved': False}
+            try:
+                reviewer = MarketingEmailReviewer()
+                review_result = reviewer.review(
+                    email_result_marketing['body'], marketing_bias_result, marketing_context,
+                )
+                step = self._complete_step(step, result_summary={
+                    'approved': review_result['approved'],
+                    'confidence': review_result['confidence'],
+                })
+            except Exception as e:
+                logger.error('Application %s: marketing AI review failed: %s', application.pk, e)
+                step = self._fail_step(step, str(e))
+                review_result = {'approved': False}
+            steps.append(step)
+
+            if not review_result.get('approved', False):
+                logger.warning('Application %s: marketing email blocked by senior reviewer', application.pk)
+                step = self._start_step('marketing_email_blocked')
+                step = self._complete_step(step, result_summary={
+                    'bias_score': marketing_bias_score,
+                    'reason': 'Senior reviewer blocked marketing email after bias flag',
+                })
+                steps.append(step)
+                return steps, False
+
+        logger.info('Application %s: marketing email approved for sending', application.pk)
+        return steps, True
 
     def _start_step(self, step_name):
         return {
@@ -262,6 +739,7 @@ class PipelineOrchestrator:
         total_time = int((time.time() - start_time) * 1000)
         agent_run.steps = steps
         agent_run.total_time_ms = total_time
-        agent_run.status = 'failed' if error else 'completed'
+        if agent_run.status != 'escalated':
+            agent_run.status = 'failed' if error else 'completed'
         agent_run.error = error or ''
         agent_run.save()

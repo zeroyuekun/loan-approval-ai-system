@@ -5,8 +5,8 @@ from .models import LoanApplication, LoanDecision
 
 @admin.register(LoanApplication)
 class LoanApplicationAdmin(admin.ModelAdmin):
-    list_display = ('id', 'applicant', 'loan_amount', 'purpose', 'status', 'credit_score', 'created_at')
-    list_filter = ('status', 'purpose', 'home_ownership', 'has_cosigner')
+    list_display = ('id', 'applicant', 'loan_amount', 'purpose', 'status', 'credit_score', 'employment_type', 'created_at')
+    list_filter = ('status', 'purpose', 'home_ownership', 'employment_type', 'applicant_type', 'has_cosigner')
     search_fields = ('applicant__username', 'applicant__email', 'notes')
     readonly_fields = ('id', 'created_at', 'updated_at')
 

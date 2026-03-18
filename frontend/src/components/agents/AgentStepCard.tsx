@@ -34,7 +34,16 @@ export function AgentStepCard({ step }: AgentStepCardProps) {
     <Card>
       <CardHeader
         className="cursor-pointer pb-3"
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e: React.KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setExpanded(!expanded)
+          }
+        }}
+        aria-expanded={expanded}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

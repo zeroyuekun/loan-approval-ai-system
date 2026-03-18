@@ -19,30 +19,30 @@ Generate fair lending compliant approval and denial emails for loan applicants u
 
 ## Steps
 
-1. **Build prompt** — Construct a system prompt and user message with the loan context:
+1. **Build prompt** - Construct a system prompt and user message with the loan context:
    - System prompt defines the role (professional loan officer), tone (respectful, clear), and constraints (fair lending compliance)
    - User message includes: applicant first name, loan amount, loan purpose, decision, and decision-specific details
    - For approvals: include approved amount, interest rate, term, next steps
    - For denials: include specific, actionable denial reasons (e.g., "debt-to-income ratio exceeds our threshold"), alternative options
 
-2. **Call Claude API** — Send prompt to Claude (model: `claude-sonnet-4-20250514`) with:
+2. **Call Claude API** - Send prompt to Claude (model: `claude-sonnet-4-20250514`) with:
    - `max_tokens`: 1024
    - `temperature`: 0.3 (low creativity for consistency)
    - Timeout: 30 seconds
 
-3. **Run guardrails** — Check the generated email against all rules:
+3. **Run guardrails** - Check the generated email against all rules:
    - **Prohibited language**: Reject if email contains references to race, ethnicity, religion, gender, marital status, national origin, disability, age, sexual orientation, or any other protected class
    - **No hallucinated numbers**: Cross-check any dollar amounts or percentages against the input data. If the email mentions a number not in the input, flag it.
    - **Professional tone**: No slang, no overly casual language, no exclamation marks in denial emails
    - **Required elements**: Subject line present, greeting with applicant name, clear decision statement, closing with contact information
    - **Denial-specific**: Must include at least one specific reason, must mention right to request reconsideration, must not be discouraging about future applications
 
-4. **Retry on failure** — If guardrails fail:
+4. **Retry on failure** - If guardrails fail:
    - Append the failure reasons to the prompt as additional constraints
    - Retry up to 3 times total
    - If all 3 attempts fail, escalate to manual review and log the failure
 
-5. **Save** — Store the generated email in the database with:
+5. **Save** - Store the generated email in the database with:
    - The final email text
    - Guardrail pass/fail status
    - Number of attempts

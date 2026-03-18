@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
+import { ErrorBoundary } from '@/components/ui/error-boundary'
 
 export default function DashboardRootLayout({
   children,
@@ -15,7 +16,10 @@ export default function DashboardRootLayout({
 
   useEffect(() => {
     if (!isLoading && !user) {
-      router.push('/login')
+      router.replace('/login')
+    }
+    if (!isLoading && user?.role === 'customer') {
+      router.replace('/apply')
     }
   }, [user, isLoading, router])
 
@@ -28,6 +32,11 @@ export default function DashboardRootLayout({
   }
 
   if (!user) return null
+  if (user.role === 'customer') return null
 
-  return <DashboardLayout>{children}</DashboardLayout>
+  return (
+    <ErrorBoundary>
+      <DashboardLayout>{children}</DashboardLayout>
+    </ErrorBoundary>
+  )
 }

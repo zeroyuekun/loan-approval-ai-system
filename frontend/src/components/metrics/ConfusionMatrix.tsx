@@ -3,10 +3,19 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface ConfusionMatrixProps {
-  matrix: { tp: number; fp: number; tn: number; fn: number }
+  matrix: {
+    tp?: number; fp?: number; tn?: number; fn?: number;
+    true_positives?: number; false_positives?: number; true_negatives?: number; false_negatives?: number;
+  }
 }
 
-export function ConfusionMatrix({ matrix }: ConfusionMatrixProps) {
+export function ConfusionMatrix({ matrix: raw }: ConfusionMatrixProps) {
+  const matrix = {
+    tp: raw.tp ?? raw.true_positives ?? 0,
+    fp: raw.fp ?? raw.false_positives ?? 0,
+    tn: raw.tn ?? raw.true_negatives ?? 0,
+    fn: raw.fn ?? raw.false_negatives ?? 0,
+  }
   const total = matrix.tp + matrix.fp + matrix.tn + matrix.fn
   const maxVal = Math.max(matrix.tp, matrix.fp, matrix.tn, matrix.fn)
 

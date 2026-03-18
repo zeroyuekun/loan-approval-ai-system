@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Evaluate a trained loan approval model against test data.
 
-Loads a saved joblib model and test dataset, then generates a comprehensive
-evaluation report including accuracy, precision, recall, F1, AUC-ROC,
-confusion matrix data, ROC curve data, and feature importances.
+Loads a saved joblib model and test dataset, then generates an
+evaluation report with accuracy, precision, recall, F1, AUC-ROC,
+confusion matrix, ROC curve, and feature importances.
 
 Usage:
     python tools/evaluate_model.py --model-path backend/ml_models/rf_model.joblib --test-data-path .tmp/synthetic_loans.csv
@@ -32,14 +32,19 @@ from sklearn.metrics import (
 
 # Feature definitions (must match training)
 NUMERIC_FEATURES = [
-    "income",
+    "annual_income",
     "credit_score",
     "loan_amount",
+    "loan_term_months",
     "debt_to_income",
     "employment_length",
-    "annual_income",
+    "property_value",
+    "deposit_amount",
+    "monthly_expenses",
+    "existing_credit_card_limit",
+    "number_of_dependants",
 ]
-CATEGORICAL_FEATURES = ["purpose", "home_ownership"]
+CATEGORICAL_FEATURES = ["purpose", "home_ownership", "employment_type", "applicant_type"]
 BINARY_FEATURES = ["has_cosigner"]
 TARGET = "approved"
 
@@ -139,15 +144,7 @@ def extract_feature_importances(model) -> dict:
 
 
 def evaluate(model, df: pd.DataFrame) -> dict:
-    """Run full evaluation of a model against a dataset.
-
-    Args:
-        model: Trained sklearn Pipeline.
-        df: DataFrame with features and target.
-
-    Returns:
-        Comprehensive evaluation report as a dict.
-    """
+    """Run full evaluation of a model against a dataset."""
     feature_cols = NUMERIC_FEATURES + CATEGORICAL_FEATURES + BINARY_FEATURES
     X = df[feature_cols]
     y = df[TARGET]

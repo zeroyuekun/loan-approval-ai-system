@@ -31,14 +31,14 @@ export function RecentApplications({ applications }: RecentApplicationsProps) {
             {applications.slice(0, 5).map((app) => (
               <TableRow key={app.id}>
                 <TableCell>
-                  <Link href={`/dashboard/applications/${app.id}`} className="font-medium hover:underline">
+                  <Link href={`/dashboard/customers/${app.applicant.id}`} className="font-medium text-blue-600 hover:underline">
                     {app.applicant.first_name} {app.applicant.last_name}
                   </Link>
                 </TableCell>
                 <TableCell>{formatCurrency(app.loan_amount)}</TableCell>
                 <TableCell>
                   <Badge className={getStatusColor(app.status)} variant="outline">
-                    {app.status}
+                    {app.status.toUpperCase()}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground">{formatDate(app.created_at)}</TableCell>

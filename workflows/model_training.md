@@ -18,18 +18,18 @@ Train and retrain Random Forest (RF) and XGBoost classification models on loan a
 
 ## Steps
 
-1. **Load data** — Read CSV from `--data-path` (default: `.tmp/synthetic_loans.csv`)
+1. **Load data** - Read CSV from `--data-path` (default: `.tmp/synthetic_loans.csv`)
 2. **Preprocess**
    - Encode categorical features (`purpose`, `home_ownership`) with `LabelEncoder` or `OneHotEncoder`
    - Scale numeric features (`income`, `credit_score`, `loan_amount`, `debt_to_income`, `employment_length`, `annual_income`) with `StandardScaler`
    - Handle missing values: drop rows with >50% missing, impute remainder with median (numeric) or mode (categorical)
-3. **Split** — 80% train / 10% validation / 10% test using `train_test_split` with `random_state=42` and `stratify=y`
+3. **Split** - 80% train / 10% validation / 10% test using `train_test_split` with `random_state=42` and `stratify=y`
 4. **Train with GridSearchCV**
    - RF params: `n_estimators` [100, 200, 300], `max_depth` [10, 20, None], `min_samples_split` [2, 5]
    - XGBoost params: `n_estimators` [100, 200], `max_depth` [3, 6, 9], `learning_rate` [0.01, 0.1, 0.3]
    - Use 5-fold cross-validation, scoring on `f1_weighted`
-5. **Evaluate** — Run best model against validation set first, then test set. Print classification report, confusion matrix, AUC-ROC.
-6. **Save** — Serialize best model with `joblib.dump()` to `backend/ml_models/` (or `--output-dir`). Include scaler and encoders in the same pipeline or as separate artifacts.
+5. **Evaluate** - Run best model against validation set first, then test set. Print classification report, confusion matrix, AUC-ROC.
+6. **Save** - Serialize best model with `joblib.dump()` to `backend/ml_models/` (or `--output-dir`). Include scaler and encoders in the same pipeline or as separate artifacts.
 
 ## Expected Outputs
 
@@ -48,7 +48,7 @@ If the approval rate is heavily skewed (>80% or <20%), apply one or more of:
 ### Overfitting
 - Compare validation accuracy vs. test accuracy. If val is significantly higher (>5% gap), the model is likely overfit.
 - Remedies: reduce `max_depth`, increase `min_samples_split`, add regularization (XGBoost `reg_alpha`, `reg_lambda`)
-- Check feature importances — if one feature dominates (>50% importance), investigate whether it's a data leak.
+- Check feature importances - if one feature dominates (>50% importance), investigate whether it's a data leak.
 
 ### Data Issues
 - If CSV has fewer than 500 rows, warn that results may be unreliable.
