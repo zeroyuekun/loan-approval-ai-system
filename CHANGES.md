@@ -4,6 +4,116 @@ All notable changes to this project are documented here, in reverse chronologica
 
 ---
 
+## 2026-03-20 — Customer Profile Flow, Edit Profile, and UI/UX Improvements
+
+**Goal:** Fix the customer-facing loan application flow so customers see empty profile fields (not pre-filled fake data), can complete their own profile including identity documents, and get properly redirected to the loan application. Add a restricted "Edit Profile" page with fraud-prevention field locking, a customer account dropdown menu, Docker live reload, and various UI fixes.
+
+### Why these changes were needed
+
+The `seed_profiles` management command was populating ALL customer profile fields — personal details, identity documents, employment, income, assets — with random data. This meant customers logging in saw someone else's fake data pre-filled in their profile. Worse, the identity fields (DOB, residency, IDs) were marked read-only in the serializer, so customers could never submit their own identity documents through the API. The profile could never be completed by a customer.
+
+The customer experience also had several broken paths: the "Complete Profile" button pointed to a non-existent dashboard route, numeric fields showing `0` appeared as empty due to JavaScript falsy-value bugs, and a stale React Query cache caused the profile to appear incomplete even after saving.
+
+### Backend changes
+
+**Serializer: identity fields made writable for customers**
+- Removed `date_of_birth`, `residency_status`, `primary_id_type`, `primary_id_number`, `secondary_id_type`, `secondary_id_number`, `tax_file_number_provided`, and `is_politically_exposed` from `read_only_fields` in `CustomerProfileSerializer`
+- These fields are required for the 100-point ID check under AML/CTF Act 2006 — customers must be able to submit them during initial profile completion
+- Banking relationship fields (tenure, balances, products) remain read-only
+
+**Seed command: reduced to bank-known data only**
+- `seed_profiles` now only populates fields the bank would already have: `account_tenure_years`, `num_products`, `has_credit_card`, `has_mortgage`, `has_auto_loan`, `on_time_payment_pct`, `previous_loans_repaid`, `loyalty_tier`, `savings_balance`, `checking_balance`
+- All customer-entered fields (personal, identity, employment, income, assets, liabilities, living situation) are left blank
+- Existing seeded profiles were reset in the database
+
+**Profile completeness check: fixed falsy-value bug**
+- `is_profile_complete` and `missing_profile_fields` used Python truthiness checks (`all(getattr(self, f) for f in ...)`)
+- `number_of_dependants = 0` was treated as "missing" because `0` is falsy
+- Fixed to use explicit `val is None or val == ''` checks so `0` is correctly treated as a valid answer
+
+### Frontend changes
+
+**Customer dropdown menu**
+- Replaced the bare logout icon in the customer header with a proper dropdown menu
+- Shows avatar initial, full name, and email
+- Contains "Edit Profile" link and "Sign Out" button
+- Follows the same dropdown pattern used in the admin TopNav
+
+**Edit Profile page (`/apply/profile/edit`)**
+- New restricted profile editing page accessible from the customer dropdown
+- **Locked fields (display only):** Name, email, date of birth, residency status, primary/secondary ID documents — with a notice explaining customers must visit a branch to change these (AML/CTF Act 2006 fraud prevention, consistent with CBA/ANZ/Westpac online banking)
+- **Editable fields:** Phone, address, marital status, contact preference, employment, income, assets, liabilities, living situation — life-circumstance fields that Australian banks allow customers to update online
+- ID document numbers are masked (show type + "****") in the locked section
+- Redirects to `/apply` after saving
+
+**Profile redirect fix**
+- Changed the "Go to My Profile" link in `ApplicationForm` from `/dashboard/profile` (didn't exist) to `/apply/profile`
+
+**Falsy-value fixes on profile page**
+- Changed `form.number_of_dependants || ''` to `form.number_of_dependants ?? ''` across all numeric fields
+- Applied to both the `useEffect` form initialisation and the input `value` props
+- `0` now displays correctly instead of showing as empty
+
+**Stale cache fix**
+- Profile page now `await`s `queryClient.invalidateQueries` before redirecting to `/apply/new`
+- `ApplicationForm` profile query uses `staleTime: 0` to always refetch on mount
+- Prevents the race condition where `/apply/new` loaded stale cached profile data showing `is_profile_complete: false`
+
+**Application status page**
+- Removed "Back" button
+- Added "Finished" button (bottom-right, blue) linking to `/apply`
+- Added spacing between the last card and the button
+
+**Incomplete profile warning**
+- Removed "Go Back" button from the incomplete profile card in `ApplicationForm`
+- Added "Finished" button (bottom-right) linking to `/apply`
+
+**Apply page spacing**
+- Added proper spacing between the "Apply Now" button row and application cards
+- Removed the `+` icon from the "Apply Now" button
+
+**Customers table**
+- Added border between "All Customers" heading and the table
+
+**Model metrics**
+- Changed "Active" badge to green (`success` variant)
+- Matched badge sizes between version and active badges
+
+### Hydration error fixes
+
+**Badge component (`badge.tsx`)**
+- Changed from `<div>` to `<span>` to fix "div cannot be a descendant of p" hydration error
+
+**CardDescription component (`card.tsx`)**
+- Changed from `<p>` to `<div>` to fix "p cannot contain a nested div" hydration error
+- `CardDescription` was being used with block-level children (badges, flex containers) in `ThresholdChart`
+
+### Infrastructure
+
+**Docker live reload for frontend**
+- Added `command: npm run dev` override in `docker-compose.yml` for the frontend service
+- Added `WATCHPACK_POLLING: "true"` for Windows Docker file system compatibility
+- Mounted `./frontend/public:/app/public` volume
+- Changes to `frontend/src/` now hot-reload without requiring container rebuilds
+
+### Files changed
+- `backend/apps/accounts/serializers.py` — identity fields writable
+- `backend/apps/accounts/models.py` — fixed profile completeness check
+- `backend/apps/accounts/management/commands/seed_profiles.py` — bank-known data only
+- `frontend/src/app/apply/layout.tsx` — customer dropdown menu
+- `frontend/src/app/apply/profile/edit/page.tsx` — new edit profile page
+- `frontend/src/app/apply/profile/page.tsx` — falsy-value fixes, cache fix
+- `frontend/src/app/apply/page.tsx` — spacing, button cleanup
+- `frontend/src/app/apply/status/[id]/page.tsx` — finished button, removed back
+- `frontend/src/components/applications/ApplicationForm.tsx` — redirect fix, cache fix, button changes
+- `frontend/src/app/dashboard/customers/page.tsx` — table header border
+- `frontend/src/app/dashboard/model-metrics/page.tsx` — green active badge, badge sizing
+- `frontend/src/components/ui/badge.tsx` — div to span (hydration fix)
+- `frontend/src/components/ui/card.tsx` — p to div (hydration fix)
+- `docker-compose.yml` — frontend dev mode, live reload
+
+---
+
 ## 2026-03-19 — Pipeline Integrity Fixes, Risk Analytics, Feature Interactions, and Self-Healing Validation
 
 **Goal:** Fix 4 critical pipeline contradictions found during a team code review, add Basel III risk analytics (EL = PD x LGD x EAD, stress testing, conformal prediction), feature interaction engineering, credit-score-sensitive LGD, and implement self-healing validation with realistic Australian demo scenarios.

@@ -82,6 +82,35 @@ tools/              # standalone training + evaluation scripts
 workflows/          # markdown SOPs for each pipeline stage
 ```
 
+## Customer experience
+
+The system has two separate interfaces: an admin/officer dashboard and a customer-facing application portal.
+
+### Customer application flow
+
+1. Customer registers and logs in → lands on `/apply`
+2. System checks profile completeness against NCCP Act and AML/CTF requirements
+3. If incomplete, customer is directed to `/apply/profile` to fill in personal details, identity documents, employment, income, assets, liabilities, and living situation
+4. Banking relationship data (tenure, balances, products, payment history) is pre-populated by the bank — customers cannot edit these
+5. Once complete, customer submits a 5-step loan application (personal → employment & income → expenses & debts → loan details → review)
+6. Application enters the agent pipeline (ML prediction → email generation → bias check → delivery)
+7. Customer sees real-time status updates on `/apply/status/{id}`
+8. Decision email is sent to the customer's email address via Gmail SMTP
+
+### Profile security model
+
+The edit profile page (`/apply/profile/edit`) restricts which fields customers can change online, following the same pattern as CBA, ANZ, and Westpac online banking:
+
+**Locked (require branch visit or admin):** Name, email, date of birth, residency status, primary/secondary identity documents. These are frozen after initial submission under AML/CTF Act 2006 to prevent identity fraud. ID numbers are masked in the UI.
+
+**Editable online:** Phone, address, marital status, contact preference, employment details, income, assets, liabilities, living situation. These are life-circumstance fields that change naturally and Australian banks allow customers to update through self-service.
+
+**Bank-managed (read-only):** Account tenure, loyalty tier, product holdings, balances, payment history. These are derived from the banking relationship and cannot be self-reported.
+
+### Seeded data design
+
+The `seed_profiles` command only populates bank-known data (balances, banking relationship metrics). All customer-entered fields are left blank, so demo customers see empty forms — not pre-filled fake data. This accurately represents a new customer who has a banking relationship but hasn't completed their loan application profile.
+
 ## ML model — making synthetic data behave like real data
 
 This is where most people building portfolio projects get it wrong. They generate clean synthetic data, train a model on it, get 99% accuracy, and call it a day. A recruiter who's worked at a bank will look at those numbers and know the data was trivial.
