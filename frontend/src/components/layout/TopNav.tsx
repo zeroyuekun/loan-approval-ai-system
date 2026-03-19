@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { Menu, LogOut, User, ChevronDown } from 'lucide-react'
+import { Menu, LogOut, UserCircle, ChevronDown } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
+import Link from 'next/link'
 
 interface TopNavProps {
   title: string
@@ -46,6 +47,14 @@ export function TopNav({ title, onMenuClick }: TopNavProps) {
                 <p className="text-xs text-muted-foreground">{user?.email}</p>
               </div>
               <hr className="my-1" />
+              <Link
+                href="/dashboard/profile"
+                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-foreground hover:bg-slate-100 transition-colors"
+                onClick={() => setShowDropdown(false)}
+              >
+                <UserCircle className="h-4 w-4" />
+                Edit Profile
+              </Link>
               <button
                 className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
                 onClick={() => {
@@ -54,7 +63,7 @@ export function TopNav({ title, onMenuClick }: TopNavProps) {
                 }}
               >
                 <LogOut className="h-4 w-4" />
-                Sign out
+                Sign Out
               </button>
             </div>
           </>
