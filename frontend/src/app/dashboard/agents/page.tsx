@@ -41,6 +41,7 @@ function groupByCustomer(runs: AgentRun[]): CustomerGroup[] {
 }
 
 export default function AgentsPage() {
+  const [search, setSearch] = useState('')
   const { data, isLoading } = useQuery<PaginatedResponse<AgentRun>>({
     queryKey: ['agentRuns'],
     queryFn: async () => {
@@ -76,7 +77,6 @@ export default function AgentsPage() {
     )
   }
 
-  const [search, setSearch] = useState('')
   const customerGroups = groupByCustomer(runs)
   const filtered = search.trim()
     ? customerGroups.filter((g) => g.applicant_name.toLowerCase().includes(search.toLowerCase()))

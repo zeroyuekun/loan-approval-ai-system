@@ -4,6 +4,7 @@ import re
 import time
 
 import anthropic
+import httpx
 
 from apps.email_engine.services.guardrails import GuardrailChecker
 
@@ -30,12 +31,12 @@ def _sanitize_prompt_input(value, max_length=500):
     return value[:max_length].strip()
 
 
-MARKETING_EMAIL_PROMPT = """You are drafting a polished retention email for AussieLoanAI, an Australian bank. This email is a forward-looking follow-up sent 1-2 hours AFTER the decline notification. It NEVER references the decline. It presents alternative products the customer qualifies for, using their real financial data.
+MARKETING_EMAIL_PROMPT = """You are drafting a follow-up email for AussieLoanAI, an Australian bank. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline. Instead, it acknowledges that the customer recently applied and pivots directly to alternative products the customer qualifies for.
 
-The email uses a modern, structured marketing format with divider lines, product highlight cards, and a professional footer with legal disclaimers. It should look like a premium retention email from a Big 4 Australian bank's digital marketing team.
+The tone matches our other correspondence: professional, warm, customer-service-friendly. Clean formatting with no box-drawing dividers or UPPERCASE headers. Plain-text section labels. The customer should feel valued and that we genuinely want to help them find a path forward.
 
 === COMPLIANCE RULES ===
-1. NEVER reference the decline, rejection, or unsuccessful application. This is forward-looking only.
+1. Do NOT repeat the decline decision. The customer already received that letter. Instead, acknowledge they recently applied and pivot to alternatives.
 2. Under Banking Code 2025 (para 89-91), marketing must not be aggressive, misleading, or create undue pressure.
 3. Under NCCP Act 2009 (s133), products offered must be "not unsuitable" for the customer.
 4. Under ASIC RG 234, claims must not be misleading. Never imply guaranteed approval for credit products.
@@ -65,115 +66,110 @@ The email uses a modern, structured marketing format with divider lines, product
 - Loyalty Factors: {loyalty_factors}
 - Retention Strategy: {nbo_analysis}
 
+=== SPACING RULES ===
+- Leave a BLANK LINE between every section and paragraph.
+- Section labels appear on their own line, followed by a blank line, then the section content.
+- Leave a blank line before and after bulleted lists.
+- The sign-off block, separator, and footer are each separated by a blank line.
+
 === EMAIL FORMAT (follow this structure exactly) ===
 
 1. Subject line (prefix with "Subject: "):
-   Personalised and benefit-led. Use the customer's first name and a specific number.
-   Examples: "{applicant_first_name}, your savings could be earning you $X,XXX this year"
-   or "{applicant_first_name}, we've found two options worth a look"
-   NEVER reference the decline. No exclamation marks.
+   Format: "Next steps for your AussieLoanAI loan application"
+   or "{applicant_first_name}, some options worth considering"
+   NEVER use "denied", "rejected", "declined", or "unsuccessful" in the subject.
 
-2. Greeting: "Hi {applicant_first_name},"
+2. "Dear {applicant_first_name}," followed by a blank line.
 
-3. Opening paragraph (2-3 sentences):
-   Reference their banking relationship (tenure, payment history, savings) to show you looked at their file. Frame the email as "we've identified options tailored to your situation." Warm, confident, forward-looking. Do NOT mention the decline.
+3. OPENING (2\u20133 sentences):
+   Acknowledge their recent application briefly ("Following your recent loan application with us..."). Do NOT restate the decline. Pivot immediately to: "We value you as a customer and want to help you explore some options that may work for your situation." Follow with a blank line.
 
-4. For each offer, create a PRODUCT CARD using this format:
+4. For each alternative offer, use a clean section with a label on its own line:
 
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
-\u2726  OUR TOP PICK FOR YOU (or ALSO WORTH CONSIDERING for 2nd/3rd offers)
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+   "Why consider this option:" or "Option [N]:" as a plain-text section label, then a blank line, then:
+   \u2022  Key benefit 1 (e.g., "Higher approval odds: Often approved for borrowers building their credit history.")
+   \u2022  Key benefit 2 (e.g., "Lower interest rates: Because the risk is lower with collateral in place.")
 
-Product Name
-Rate  |  Key benefit  |  Key feature
+   After the bullets, leave a blank line, then include 1\u20132 sentences explaining how this specific product fits THIS customer, using their actual numbers where available.
 
-2-3 sentences explaining how this product fits THIS customer specifically, using their actual numbers (savings balance, income, payment history). Calculate approximate returns or repayments where possible.
+   Leave a blank line between each offer section.
 
-\u2192  Call to action: [Action text]
-
-   Use the FIRST offer as "OUR TOP PICK FOR YOU" and subsequent offers as "ALSO WORTH CONSIDERING".
    For term deposits, you may say "Guaranteed returns" and "Government protected*" (with footnote).
    For credit products (loans, credit cards), NEVER say "guaranteed" anything.
 
-5. After the last product card, add a closing divider and a bridge paragraph:
-   "Which one suits you best?" then introduce Sarah Mitchell as their dedicated lending officer.
-   Include phone emoji (\U0001f4de) and email emoji (\U0001f4e7) for contact details:
-   \U0001f4de  Call Sarah directly: 1300 000 000 (Mon\u2013Fri, 8:30am\u20135:30pm AEST)
-   \U0001f4e7  Or simply reply to this email
+5. CLOSING (split across two paragraphs):
+   - First paragraph: Express genuine interest in helping. Use first person: "If any of these options interest you, I'd welcome the chance to talk them through with you." Provide direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to this email.
+   - Second paragraph (after a blank line): Close with this exact line (substituting the customer's first name): "Thanks for coming to us, [First Name]. We'd love to help you find the right option when you're ready." Do NOT rephrase or reword this line.
 
-6. Closing line: "We're here to help your money go further." or similar warm, genuine line.
+6. Sign-off (after a blank line):
 
-7. Sign-off:
-Warm regards,
-The AussieLoanAI Team
+Sincerely,
 
-8. Footer (after a divider line) with legal disclaimers:
+Sarah Mitchell
+Senior Lending Officer
+AussieLoanAI Pty Ltd
+ABN 12 345 678 901 | Australian Credit Licence No. 012345
+Ph: 1300 000 000
+Email: aussieloanai@gmail.com
+
+7. Footer (after a separator line) with legal disclaimers:
+   \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
    - Financial Claims Scheme footnote (* for term deposits if applicable)
    - Rate conditions footnote (** for bonus rates if applicable)
    - General advice warning and TMD/PDS reference
    - Unsubscribe line and physical address
-   - ABN and Australian Credit Licence placeholders
+   - ABN and Australian Credit Licence
 
 === TONE ===
-- Warm, confident, modern. Like a fintech retention email, not a stuffy bank letter.
-- The customer should feel valued and that someone actually looked at their profile.
+- Professional, warm, and customer-service-friendly. Matches the tone of our approval and decline letters.
+- The customer should feel valued and that someone looked at their profile.
 - Present offers as genuinely useful options, not consolation prizes.
 - Use contractions naturally: "you're", "we've", "we'd", "it's", "that's".
-- No patronising language, no false urgency, no decline references.
-- You may use "tailored" and "comprehensive" when describing specific product features.
+- No patronising language, no false urgency.
+- Do NOT repeat the decline. They already know. This email is about what comes next.
+- Every sentence delivers value, information, or reassurance.
 
 === TONE CALIBRATION EXAMPLE ===
-Do NOT copy verbatim. Study the structure: personalised subject with a number, relationship-anchored opening, product cards with dividers and specific numbers, emoji contact details, legal footer.
+Do NOT copy verbatim. Study the clean structure, the brief acknowledgement without repeating the decline, the benefit-led product presentation, and the warm personal closing.
 
-Subject: {applicant_first_name}, your savings could be earning you $1,625 this year
+Subject: Next steps for your AussieLoanAI loan application
 
-Hi {applicant_first_name},
+Dear Neville,
 
-Six years of banking with us hasn't gone unnoticed. You're one of our most valued customers, and we'd like to make sure your money is working just as hard as you are.
+Following your recent Personal Loan application with us, we wanted to reach out because we value you as a customer and want to help you get the funding you need. We've reviewed your profile and identified some options that may be a good fit for your situation.
 
-We've taken a look at your account profile and identified two options tailored to your situation, both designed to help you grow your savings with confidence.
+We can offer you a Secured Personal Loan, which uses a savings account, term deposit, or vehicle as collateral. This is often a strong path forward for customers in your position.
 
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
-\u2726  OUR TOP PICK FOR YOU
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+Why consider this option:
 
-AussieLoanAI 12-Month Term Deposit
-5.00% p.a.  |  Guaranteed returns  |  Government protected*
+  \u2022  Higher approval odds: Secured loans are often approved for borrowers who may not qualify for an unsecured product of the same size.
+  \u2022  Lower interest rates: Because the risk is lower for both parties when collateral is in place.
+  \u2022  Flexible terms: Loan terms from 12 to 60 months, with repayments structured to suit your income.
 
-Based on your current balance of $32,500, you could earn approximately $1,625 in interest over 12 months, guaranteed, with no market risk to your capital.
+Based on your current savings balance and income, a secured loan of up to $[XX,XXX] may be available to you at a competitive rate.
 
-That's your money earning for you while you focus on what matters.
+We'd also like to highlight our Goal Saver Account:
 
-\u2192  Lock in your rate today
+  \u2022  Earn up to 5.20% p.a.** on your savings with no lock-in period.
+  \u2022  Building a consistent savings pattern strengthens future loan applications.
 
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
-\u2726  ALSO WORTH CONSIDERING
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+If any of these options interest you, I'd welcome the chance to talk them through with you. There may be a path forward that works well for your goals.
 
-AussieLoanAI Goal Saver
-5.20% p.a. bonus rate**  |  No lock-in  |  Full flexibility
+You can contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
 
-Deposit just $100 per month and you'll earn the bonus rate on your entire balance. It's a simple, flexible way to build consistent savings habits, and it looks great on future credit applications too.
+Thanks for coming to us, Neville. We'd love to help you find the right option when you're ready.
 
-\u2192  Start saving smarter
+Sincerely,
 
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+Sarah Mitchell
+Senior Lending Officer
+AussieLoanAI Pty Ltd
+ABN 12 345 678 901 | Australian Credit Licence No. 012345
+Ph: 1300 000 000
+Email: aussieloanai@gmail.com
 
-Which one suits you best? Your dedicated lending officer, Sarah Mitchell, is across your profile and happy to walk you through either option, no obligation, no pressure.
-
-\U0001f4de  Call Sarah directly: 1300 000 000 (Mon\u2013Fri, 8:30am\u20135:30pm AEST)
-\U0001f4e7  Or simply reply to this email
-
-We're here to help your money go further.
-
-Warm regards,
-The AussieLoanAI Team
-
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
-
-*Deposits up to $250,000 per account holder are protected under the Australian Government's Financial Claims Scheme. Terms and conditions apply. AussieLoanAI Pty Ltd ABN [XX XXX XXX XXX]. Australian Credit Licence No. [XXXXXX].
-
-**The 5.20% p.a. bonus rate applies when you deposit a minimum of $100 per month and make no withdrawals. If conditions are not met in a given month, the base rate of [X.XX]% p.a. will apply for that month. Rate is variable and subject to change.
+\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+**The 5.20% p.a. bonus rate applies when you deposit a minimum of $100 per month and make no withdrawals. If conditions are not met in a given month, the base rate of [X.XX]% p.a. will apply. Rate is variable and subject to change.
 
 Interest rates are current as at [DD/MM/YYYY] and are subject to change without notice. This email contains general information only and does not take into account your personal financial situation, objectives, or needs. Before making a decision, please consider whether the product is appropriate for you. Full terms and conditions, including the Target Market Determination and Product Disclosure Statement, are available at www.aussieloanai.com.au.
 
@@ -192,7 +188,10 @@ class MarketingAgent:
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
         self.guardrail_checker = GuardrailChecker()
 
     def generate(self, application, nbo_result, denial_reasons=''):
@@ -313,14 +312,20 @@ class MarketingAgent:
         return results
 
     def _check_no_decline_language(self, text):
-        """Marketing emails must not reference the decline — this is a forward-looking message."""
-        import re
+        """Marketing emails must not restate the decline decision.
+
+        The email may acknowledge the customer's recent application, but must NOT
+        repeat words like 'declined', 'denied', 'rejected', 'unsuccessful', or
+        restate the decision itself ('unable to approve'). The customer already
+        received the decline letter.
+        """
         text_lower = text.lower()
         decline_phrases = [
             r'\b(declined|denied|rejected|unsuccessful|turned down)\b',
             r'\b(did not meet|does not meet|failed to meet)\b',
             r'\b(unable to approve|cannot approve|could not approve)\b',
             r'\bapplication was not\b',
+            r'\bwe regret\b',
         ]
         found = []
         for pattern in decline_phrases:
@@ -431,9 +436,13 @@ class MarketingAgent:
             'details': details,
         }
 
-    # Marketing-specific AI-giveaway terms — excludes "comprehensive" and "tailored"
-    # which are legitimate in product descriptions (e.g. "comprehensive insurance package",
-    # "tailored repayment schedule").
+    # Marketing-specific AI-giveaway terms — excludes phrases legitimate in the
+    # new customer-service-friendly marketing format:
+    # - "comprehensive"/"tailored" OK in product descriptions
+    # - "don't hesitate" OK in contact sections
+    # - "we value you/your" OK in customer acknowledgement
+    # - "we appreciate your" OK in closing
+    # - "wanted to reach out" OK in marketing follow-up context
     MARKETING_AI_GIVEAWAY_TERMS = [
         r'\bpleased to (?:confirm|inform|advise)\b',
         r'\bdelighted\b',
@@ -441,22 +450,16 @@ class MarketingAgent:
         r'\bgreat news\b',
         r'\bexciting\b',
         r'\bwe are happy to\b',
-        r'\bI wanted to reach out\b',
         r'\bnavigate\b',
         r'\bjourney\b',
         r'\bleverage\b',
         r'\bempower\b',
         r'\brest assured\b',
-        r'\bdon[\u2019\']t hesitate\b',
-        r'\bwe are here to help\b',
-        # r'\bwalk you through\b',  # Removed: legitimate in marketing retention context
         r'\bevery step of the way\b',
         r'\bwe understand how important\b',
         r'\bwe understand this (?:may be|is) disappointing\b',
-        r'\bwe appreciate the trust\b',
         r'\bregardless of (?:this|the) outcome\b',
         r'\bshould you have any questions at all\b',
-        r'\bplease do not hesitate to contact\b',
         # Transitional adverbs (strongest AI-tell)
         r'\badditionally\b',
         r'\bfurthermore\b',
@@ -470,11 +473,9 @@ class MarketingAgent:
         r'\bcould potentially\b',
         r'\bit is possible that\b',
         r'\bmight be able to\b',
-        # Performative empathy
+        # Performative empathy (excessive forms only)
         r'\bwe understand that\b',
         r'\bwe recognise that\b',
-        r'\bwe appreciate that\b',
-        r'\bwe value your\b',
         # Over-formal constructions
         r'\bwe would like to\b',
         r'\bwe would like you to\b',
@@ -482,10 +483,8 @@ class MarketingAgent:
         r'\bshould you require\b',
         r'\bshould you have any\b',
         r'\bwe wish you\b',
-        # NOTE: "we look forward to" is natural in retention context — intentionally excluded
         # AI closing/filler patterns
         r'\bplease feel free to\b',
-        # r'\bdo not hesitate\b',  # Removed: legitimate in formal marketing correspondence
         r'\bwe are committed to\b',
         r'\bwe remain committed to\b',
         r'\bwe are available\b',
@@ -527,8 +526,8 @@ class MarketingAgent:
         }
 
     def _check_marketing_format(self, text):
-        """Check marketing email format — allows Unicode dividers, emoji, and arrows
-        but still blocks markdown, HTML, and em dashes."""
+        """Check marketing email format — plain text with bullets and en dashes allowed.
+        Blocks markdown, HTML, and em dashes."""
         formatting_issues = []
 
         if re.search(r'\*\*[^*]+\*\*', text):
@@ -539,8 +538,8 @@ class MarketingAgent:
             formatting_issues.append('HTML tags')
         if re.search(r'\u2014', text):
             formatting_issues.append('em dashes')
-        # Note: Unicode box-drawing (\u2500, \u2501), arrows (\u2192), stars (\u2726),
-        # bullets (\u2022), en dashes (\u2013), and emoji are all ALLOWED in marketing format.
+        # Allowed: Unicode box-drawing (\u2500, \u2501), arrows (\u2192), stars (\u2726),
+        # bullets (\u2022), en dashes (\u2013), and emoji.
 
         passed = len(formatting_issues) == 0
         details = (
@@ -566,6 +565,7 @@ class MarketingAgent:
             '1300 000 000', 'lending specialist', 'alternatives@',
             'sarah mitchell', 'lending officer', 'senior lending officer',
             'lending team', 'direct line', 'directly on',
+            'contact me directly', 'contact me', 'aussieloanai@gmail.com',
         ]
         has_cta = any(phrase in text_lower for phrase in cta_phrases)
         return {
@@ -592,7 +592,7 @@ class MarketingAgent:
         body = '\n'.join(lines[body_start:]).strip()
 
         if not subject:
-            subject = "Your lending options with AussieLoanAI"
+            subject = "Next steps for your AussieLoanAI loan application"
 
         return subject, body
 

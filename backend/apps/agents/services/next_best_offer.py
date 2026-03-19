@@ -2,6 +2,7 @@ import json
 import os
 
 import anthropic
+import httpx
 
 from .recommendation_engine import RecommendationEngine
 
@@ -35,7 +36,10 @@ class NextBestOfferGenerator:
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
         self.engine = RecommendationEngine()
 
     def generate(self, application, denial_reasons=''):

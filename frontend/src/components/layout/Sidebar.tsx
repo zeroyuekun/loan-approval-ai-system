@@ -56,10 +56,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 href={item.href}
                 onClick={onClose}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 outline-none focus-visible:outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 active:bg-transparent",
                   isActive
-                    ? "bg-gradient-to-r from-blue-500/20 to-indigo-500/15 text-white shadow-sm shadow-blue-500/10 border border-white/10"
-                    : "text-slate-400 hover:bg-gradient-to-r hover:from-white/10 hover:to-white/5 hover:text-white"
+                    ? "bg-gradient-to-r from-blue-500/20 to-indigo-500/15 text-white shadow-sm shadow-blue-500/10"
+                    : "text-slate-400 hover:text-white"
                 )}
               >
                 <item.icon className={cn("h-[18px] w-[18px]", isActive && "text-blue-400")} />

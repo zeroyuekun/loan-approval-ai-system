@@ -114,6 +114,7 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
       return data
     },
     enabled: isCustomer,
+    staleTime: 0,
   })
 
   // Block customers with incomplete profiles
@@ -157,18 +158,22 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
               </ul>
             </div>
             <div className="flex gap-3 pt-2">
-              <Link href="/dashboard/profile">
+              <Link href="/apply/profile">
                 <Button>
                   <UserCircle className="mr-2 h-4 w-4" />
                   Go to My Profile
                 </Button>
               </Link>
-              <Button variant="outline" onClick={() => router.back()}>
-                Go Back
-              </Button>
             </div>
           </CardContent>
         </Card>
+        <div className="flex justify-end mt-4">
+          <Link href="/apply">
+            <Button variant="outline">
+              Finished
+            </Button>
+          </Link>
+        </div>
       </div>
     )
   }

@@ -38,7 +38,7 @@ export default function CustomersPage() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="border-b">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">All Customers</CardTitle>
             <div className="relative w-64">

@@ -152,8 +152,11 @@ services:
         condition: service_healthy
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      WATCHPACK_POLLING: "true"
     volumes:
       - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    command: npm run dev
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
       interval: 30s

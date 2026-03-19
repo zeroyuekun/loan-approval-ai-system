@@ -1,4 +1,4 @@
-APPROVAL_EMAIL_PROMPT = """You are drafting a formal loan approval email from AussieLoanAI, an Australian lender. This email should look like professional correspondence from a licensed Australian credit provider, not a casual note.
+APPROVAL_EMAIL_PROMPT = """You are drafting a formal loan approval email from AussieLoanAI, an Australian lender. This email should read like professional correspondence from a licensed Australian credit provider that is also genuinely warm and customer-service-friendly.
 
 Application details:
 - Applicant Name: {applicant_name}
@@ -15,193 +15,203 @@ Application details:
 
 === EMAIL FORMAT AND STRUCTURE ===
 
-This is a FORMAL loan approval letter from a licensed Australian credit provider. It uses structured sections with divider lines, a loan summary table, numbered next steps, and a professional sign-off with licence details. The tone is warm and congratulatory but professional, like a senior lending officer at a Big 4 bank.
+This is a FORMAL but WARM loan approval letter from a licensed Australian credit provider. The structure is clean and simple: no box-drawing dividers, no UPPERCASE section headers. Instead, use plain-text section labels followed by a colon or just clear paragraph breaks. The tone is that of a senior lending officer who genuinely cares about the customer.
 
 FORMAT RULES:
-1. Use box-drawing line dividers between sections: a line of 40+ Unicode box-drawing horizontal characters (U+2500: \u2500).
-2. Section headers appear AFTER a divider line, in UPPERCASE. Example: YOUR APPROVED LOAN SUMMARY, WHAT HAPPENS NEXT, IMPORTANT INFORMATION, NEED HELP?
-3. Within the loan summary table, use indented key-value pairs aligned with spaces. Values the system does not know (interest rate, fees, comparison rate, repayment amount, repayment start date) MUST use placeholder format like [X.XX]% p.a. or $[X,XXX.XX] or [DD/MM/YYYY]. NEVER invent these numbers.
-4. Use the bullet character (U+2022: \u2022) for bullet lists in the IMPORTANT INFORMATION section, not hyphens or asterisks.
-5. Use indented numbered lists (with spaces before the number) in the WHAT HAPPENS NEXT section.
-6. No markdown, no HTML, no bold/italic. Plain text with Unicode box-drawing dividers and bullet characters only.
-7. No em dashes (U+2014). Use en dashes (U+2013) for ranges or commas/semicolons for clauses.
+1. NO UPPERCASE section headers. Use simple, clean formatting with plain-text section labels.
+2. Section labels are plain text (e.g., "Loan Details:", "Next Steps:", "Before You Sign:", "We're Here For You:"). They appear on their own line.
+3. Within the loan details section, use indented key-value pairs aligned with spaces. If a LOAN PRICING section is provided at the end of this prompt, use those EXACT figures. Otherwise, use placeholder format like [X.XX]% p.a. or $[X,XXX.XX] or [DD Month YYYY]. NEVER invent numbers that are not provided.
+4. Use indented numbered lists in the Next Steps section.
+5. No markdown, no HTML, no bold/italic. Plain text only.
+6. Use en dashes (\u2013) for ranges. No em dashes (U+2014).
+7. A single line of box-drawing dashes (\u2500\u2500\u2500) may appear ONLY as a separator before the comparison rate footnote at the very end of the email. No box-drawing characters anywhere else.
 
 COMPLIANCE RULES:
 8. Never reference protected characteristics (Sex Discrimination Act 1984, Racial Discrimination Act 1975, Disability Discrimination Act 1992, Age Discrimination Act 2004).
 9. Australian English spelling: finalised, recognised, organisation, colour, favour, centre, honour, licence.
 10. Australian financial terms: solicitor/conveyancer, settlement, stamp duty, fortnight, p.a.
-11. Do NOT invent interest rates, fees, repayment amounts, or any figures not provided. Use placeholders.
-12. Include cooling-off period mention, hardship team mention, and NCCP Act reference.
+11. Do NOT invent interest rates, fees, repayment amounts, or any figures not provided. If a LOAN PRICING section is appended to this prompt, use those exact figures.
+12. Include cooling-off period mention and hardship team mention with direct phone and email.
 13. Include a confidentiality notice at the bottom.
-14. Include an attachments list at the bottom referencing the loan contract, credit guide, and key facts sheet.
+14. Include an attachments list at the bottom referencing the loan contract, key facts sheet, and credit guide.
+15. Include AFCA dispute resolution reference at the very end.
+16. Include approval validity period (30 days) and material change clause.
 
 TONE:
-- Warm, congratulatory, and confident. This is good news. The customer should feel welcomed.
-- Professional but human. "Congratulations" and "pleased to confirm" are appropriate here.
-- Every sentence delivers information. No empty filler.
-- The officer is thorough and helpful, guiding the customer through next steps clearly.
+- Warm, congratulatory, and genuinely caring. This is good news. The customer should feel welcomed and valued.
+- Professional but personal. Use first person where appropriate ("please don't hesitate to contact me directly"). The officer is a real person, not a department.
+- "Congratulations" is appropriate. "Pleased to inform" is appropriate. The customer just got great news.
+- Every sentence delivers information or reassurance. No empty filler.
+- The officer is thorough, helpful, and proactive about guiding the customer through next steps.
+- The "Before You Sign" section should feel genuinely protective of the customer, not a disclaimer dump.
+- The hardship section should feel like a genuine safety net, not a compliance afterthought.
 
 === EMAIL STRUCTURE (follow this order exactly) ===
 
 1. Subject line (prefix with "Subject: "):
-   Format: "Your [Purpose] Loan Has Been Approved | Reference #[APP-XXXXXX]"
-   Use the first 6 characters of the application ID as the reference number.
+   Format: "Congratulations! Your [Loan Type] Loan is Approved"
+   Where [Loan Type] is derived from purpose (e.g., "Personal", "Home", "Business", "Vehicle", "Education").
 
 2. "Dear [First Name],"
 
-3. CONGRATULATIONS PARAGRAPH (2-3 sentences): Confirm the approval warmly. Thank them for choosing AussieLoanAI. Mention that you have completed a thorough assessment and are confident in moving forward.
+3. OPENING PARAGRAPH (2 sentences): State the approval warmly. Use "We are pleased to inform you that your application for a [Loan Type] loan with AussieLoanAI has been approved." Follow with "Congratulations!"
 
-4. DIVIDER LINE + "YOUR APPROVED LOAN SUMMARY" header + DIVIDER LINE
-   Then an indented table of key-value pairs:
-   - Loan Type: based on purpose (e.g., "Personal Loan (Unsecured)", "Home Loan (Secured)", "Business Loan", "Vehicle Loan (Secured)", "Education Loan")
-   - Approved Amount: ${loan_amount:,.2f}
-   - Annual Interest Rate: [X.XX]% p.a. (fixed/variable)
+4. "Loan Details:" section label, then an indented table of key-value pairs:
+   - Loan Amount: ${loan_amount:,.2f}
+   - Interest Rate: [X.XX]% p.a. ([Fixed/Variable])
    - Comparison Rate: [X.XX]% p.a.*
-   - Loan Term: use the actual loan_term_months if available, otherwise [XX] months
-   - Estimated Monthly Repayment: $[X,XXX.XX]
+   - Loan Term: use the actual loan_term_months if available, otherwise [XX] months ([X] years)
+   - Estimated Monthly Payment: $[X,XXX.XX]
    - Establishment Fee: $[XXX.XX]
-   - Monthly Account Fee: $[XX.XX]
-   - Total Amount Payable: $[XXX,XXX.XX]
-   - Repayment Start Date: [DD/MM/YYYY]
-   Then a comparison rate warning footnote (standard ASIC-required text).
+   - First Repayment Date: [DD Month YYYY]
 
-5. DIVIDER LINE + "WHAT HAPPENS NEXT" header + DIVIDER LINE
-   Brief intro sentence, then 4 numbered steps:
-   1. Review your Loan Contract (attached as PDF)
-   2. Sign and return documents (electronic via secure portal or in person)
-   3. Confirm nominated account (BSB and account number)
-   4. Settlement and disbursement (funds within 1-2 business days)
-   Then a note that approval is valid for 30 days.
+5. "Next Steps:" section label, then a brief intro sentence ("Please review the attached formal loan agreement, which outlines all terms and conditions. To proceed with the disbursement of funds:"), then 3 numbered steps:
+   1. Sign and return your documents by [DD Month YYYY] \u2013 you can sign electronically via our secure portal at [portal link], or return them by email or in person.
+   2. Confirm your nominated bank account (BSB and account number) for the funds to be deposited into.
+   3. Once received, funds are typically in your account within 1\u20132 business days.
+
+6. "Required Documentation:" section label on its own line, then a brief intro sentence ("To finalise your loan, please provide the following documents:"), then list the documents as numbered items with two-space indentation. Leave a blank line before and after this section.
 
 {documentation_checklist}
 
-6. DIVIDER LINE + "IMPORTANT INFORMATION" header + DIVIDER LINE
-   Use bullet character (\u2022) for 3 items:
-   - Take time to read and understand the full terms
-   - Consider whether the loan meets their needs; contact us if circumstances changed
-   - Seek independent financial or legal advice if needed
-   Then mention cooling-off period and hardship team.
+7. "Before You Sign:" section label on its own line, then leave a blank line and write 2-3 paragraphs:
+   - Encourage the customer to read the full terms carefully, including fees and what happens if a repayment is missed.
+   - If circumstances have changed since they applied, ask them to let you know.
+   - Mention they are welcome to seek independent financial or legal advice before proceeding.
+   - Mention the cooling-off period after signing, with reference to the loan agreement for details.
 
-7. DIVIDER LINE + "NEED HELP?" header + DIVIDER LINE
-   Offer to answer questions. Provide direct contact: 1300 000 000, Monday to Friday, 8:30am - 5:30pm AEST. Mention they can reply to the email. Close with a brief congratulations and appreciation.
+   Leave a blank line between each paragraph in this section.
 
-8. Sign-off:
+8. "We're Here For You:" section label on its own line, then leave a blank line and write:
+   - Mention that if they experience financial difficulty at any point during their loan, they should contact early.
+   - Provide the Financial Hardship team contact: 1300 000 001 or aussieloanai@gmail.com.
 
-Kind regards,
+9. CLOSING PARAGRAPH (separate from the above sections, after a blank line):
+   - First sentence: Offer to answer questions about the loan or next steps. Provide direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to this email. State you are here to make sure everything runs smoothly.
+   - Second sentence (after a blank line): Close with congratulations again using the customer's first name and appreciation for trusting AussieLoanAI.
+
+10. Sign-off (after a blank line):
+
+Warm regards,
 
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
-Australian Credit Licence No. [XXXXXX]
-
+ABN 12 345 678 901 | Australian Credit Licence No. 012345
 Ph: 1300 000 000
-Email: sarah.mitchell@aussieloanai.com.au
-Web: www.aussieloanai.com.au
+Email: aussieloanai@gmail.com
 
-9. Confidentiality notice (1 sentence, italic-style but plain text):
-   "This communication is confidential and intended solely for the named recipient. If you have received this email in error, please notify the sender immediately and delete the message."
+11. Attachments list (after a blank line):
+   Attachments:
+     1. Loan Contract \u2013 [Applicant Full Name].pdf
+     2. Key Facts Sheet \u2013 [Loan Type] Loan.pdf
+     3. Credit Guide \u2013 AussieLoanAI Pty Ltd.pdf
 
-10. Attachments list:
-   \u2022  AussieLoanAI [Purpose] Loan Contract, [Applicant Name].pdf
-   \u2022  Credit Guide and Privacy Disclosure.pdf
-   \u2022  Key Facts Sheet, [Loan Type].pdf
+12. Separator line, then comparison rate footnote and regulatory notices:
+   \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   *Comparison rate of [X.XX]% p.a. is calculated on a $30,000 unsecured [loan type] loan over a 5-year term. WARNING: This comparison rate applies only to the example given. Different amounts and terms will result in different comparison rates. Costs such as redraw fees and early repayment costs, and cost savings such as fee waivers, are not included in the comparison rate but may influence the cost of the loan.
+
+   This approval is valid for 30 days and is subject to no material change in your financial circumstances. If you are dissatisfied with any aspect of our service, please contact us first. If unresolved, you may contact the Australian Financial Complaints Authority (AFCA) on 1800 931 678 or at www.afca.org.au.
+
+   This communication is confidential and intended solely for the named recipient.
+
+=== SPACING RULES ===
+- Leave a BLANK LINE between every section (after the section label line, after the last line of a section, before the next section label).
+- Leave a BLANK LINE between paragraphs within a section.
+- Section labels appear on their own line, followed by a blank line, then the section content.
+- The sign-off block, attachments list, and footer are each separated by a blank line.
+
+=== COMMON MISTAKES TO AVOID ===
+These are the most frequent reasons emails fail quality checks. Avoid them:
+
+1. HALLUCINATED NUMBERS: Do NOT invent rates, fees, or amounts. If a LOAN PRICING section is provided, use ONLY those exact figures. If no pricing is provided, use placeholder format [X.XX]%. Never round or estimate.
+2. AI LANGUAGE: Never write "Additionally", "Furthermore", "Moreover", "rest assured", "every step of the way", "navigate", "leverage", "empower". These are immediate AI tells.
+3. DOUBLE SIGN-OFF: Write only ONE closing (e.g., "Warm regards,"). Do not add "Best," or "Sincerely," elsewhere.
+4. MARKDOWN: No **bold**, no # headers, no - bullet lists. Use plain text, numbered lists, and the Unicode bullet character only where specified.
+5. EM DASHES: Use en dashes (\u2013) only. Never use em dashes (\u2014).
+6. MISSING ELEMENTS: Approval emails MUST include: next steps, cooling-off period, hardship team contact, AFCA reference. Omitting any will fail compliance.
+7. WORD COUNT: Keep the body under 650 words. Approvals with pricing tables tend to run long \u2013 be concise in paragraphs.
+8. SENTENCE RHYTHM: Mix short sentences (5-8 words) with longer ones (12-18 words). Do not write every sentence at ~15 words.
 
 === TONE CALIBRATION EXAMPLE ===
-Do NOT copy this verbatim. Study the structure: congratulatory opening, structured loan summary table with dividers, numbered next steps, bullet-pointed important information, contact section, formal sign-off with ACL number, confidentiality notice, and attachments.
+Do NOT copy this verbatim. Study the warm-but-professional tone, the clean simple structure without box dividers, the proper spacing between every section, the documentation section between Next Steps and Before You Sign, the genuine care in the "Before You Sign" and "We're Here For You" sections, the direct and personal closing, and the regulatory notices placed at the very end.
 
-Subject: Your Personal Loan Has Been Approved | Reference #APP-7f3a2b
+Subject: Congratulations! Your Personal Loan is Approved
 
 Dear Neville,
 
-Congratulations, we are pleased to confirm that your application for a personal loan with AussieLoanAI has been approved.
+We are pleased to inform you that your application for a Personal Loan with AussieLoanAI has been approved. Congratulations!
 
-Thank you for choosing us to support your financial goals. We have completed a thorough assessment of your application, and we are confident in moving forward with the following terms:
+Loan Details:
 
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-YOUR APPROVED LOAN SUMMARY
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  Loan Amount:             $50,000.00
+  Interest Rate:           [X.XX]% p.a. (Fixed)
+  Comparison Rate:         [X.XX]% p.a.*
+  Loan Term:               60 months (5 years)
+  Monthly Repayment:       $[X,XXX.XX]
+  Establishment Fee:       $[XXX.XX]
+  First Repayment Date:    [DD Month YYYY]
 
-  Loan Type:                   Personal Loan (Unsecured)
-  Approved Amount:             $500,000.00
-  Annual Interest Rate:        [X.XX]% p.a. (fixed/variable)
-  Comparison Rate:             [X.XX]% p.a.*
-  Loan Term:                   60 months
-  Estimated Monthly Repayment: $[X,XXX.XX]
-  Establishment Fee:           $[XXX.XX]
-  Monthly Account Fee:         $[XX.XX]
-  Total Amount Payable:        $[XXX,XXX.XX]
-  Repayment Start Date:        [DD/MM/YYYY]
+Next Steps:
 
-  * Comparison rate calculated on a $150,000 unsecured loan
-    over a 5-year term. WARNING: This comparison rate applies
-    only to the example given. Different amounts and terms
-    will result in different comparison rates. Costs such as
-    redraw fees and early repayment costs, and cost savings
-    such as fee waivers, are not included in the comparison
-    rate but may influence the cost of the loan.
+Please review the attached loan agreement, which outlines all terms and conditions. To proceed with the disbursement of funds:
 
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-WHAT HAPPENS NEXT
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  1. Sign and return your documents by [DD Month YYYY] \u2013 you can sign electronically via our secure portal at [portal link], or return them by email or in person.
+  2. Confirm your nominated bank account (BSB and account number) for the funds to be deposited into.
+  3. Once received, funds are typically in your account within 1\u20132 business days.
 
-To finalise your loan and arrange disbursement of funds, please complete the following steps:
+Required Documentation:
 
-  1. Review your Loan Contract: Your loan agreement and associated disclosure documents are attached to this email as a PDF. Please read them carefully, including the terms and conditions, fees, and your rights and obligations under the contract.
+To finalise your loan, please provide the following documents:
 
-  2. Sign and return your documents: You can sign your loan contract electronically via our secure portal, or return the signed documents to us by email or in person at your nearest AussieLoanAI branch.
+  1. Current photo identification (Australian driver licence or passport)
+  2. Proof of current residential address (utility bill, council rates notice, or bank statement dated within the last 3 months)
+  3. Two most recent payslips (no older than 45 days)
+  4. Most recent PAYG payment summary or ATO Notice of Assessment
+  5. Bank statements for all transaction and savings accounts (last 3 months)
+  6. Recent statements for any existing loans, credit cards, or buy-now-pay-later accounts
 
-  3. Confirm your nominated account: Please ensure we have the correct BSB and account number for the account into which you would like the funds deposited.
+Before You Sign:
 
-  4. Settlement and disbursement: Once we have received your signed documents and verified your nominated account, funds will typically be disbursed within 1\u20132 business days.
+We want to make sure this loan is right for you. Please take the time to read the full terms carefully, including fees and what happens if a repayment is missed.
 
-Please note that this approval is valid for 30 days from the date of this correspondence. If your loan contract is not executed within this period, a reassessment may be required.
+If your circumstances have changed since you applied, please let us know. You are also welcome to seek independent financial or legal advice before proceeding.
 
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-IMPORTANT INFORMATION
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+You will have access to a cooling-off period after signing, allowing you to withdraw without penalty. Details are in your loan agreement.
 
-Before signing your loan contract, we encourage you to:
+We're Here For You:
 
-  \u2022  Take the time you need to read and understand the full terms of your loan, including any fees, charges, and what happens if repayments are missed.
-  \u2022  Consider whether this loan continues to meet your financial needs and objectives. If your circumstances have changed since your application, please let us know before proceeding.
-  \u2022  Seek independent financial or legal advice if you have any questions about your obligations under the contract.
+If at any point during your loan you experience financial difficulty, please contact us early. Our Financial Hardship team is here to help and can be reached on 1300 000 001 or at aussieloanai@gmail.com.
 
-You have the right to a cooling-off period after signing your loan contract, during which you may withdraw without penalty. Details of this period are outlined in your loan agreement.
+If you have any questions about your loan or need help with the next steps, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email. I'm here to make sure everything runs smoothly for you.
 
-If at any time during the life of your loan you experience financial difficulty, we encourage you to contact us as early as possible. We have a dedicated hardship team who can work with you to find a suitable arrangement.
+Congratulations again on your approval, Neville. We appreciate your trust in AussieLoanAI.
 
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-NEED HELP?
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-If you have any questions about your loan, the next steps, or anything in the attached documents, please do not hesitate to reach out. I am here to guide you through the process and ensure everything runs smoothly.
-
-You can contact me directly on 1300 000 000, Monday to Friday, 8:30am \u2013 5:30pm AEST, or reply to this email at any time.
-
-Once again, congratulations on your approval. We look forward to supporting you and appreciate your trust in AussieLoanAI.
-
-Kind regards,
+Warm regards,
 
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
-Australian Credit Licence No. [XXXXXX]
-
+ABN 12 345 678 901 | Australian Credit Licence No. 012345
 Ph: 1300 000 000
-Email: sarah.mitchell@aussieloanai.com.au
-Web: www.aussieloanai.com.au
-
-This communication is confidential and intended solely for the named recipient. If you have received this email in error, please notify the sender immediately and delete the message.
+Email: aussieloanai@gmail.com
 
 Attachments:
-  \u2022  AussieLoanAI Personal Loan Contract, Neville.pdf
-  \u2022  Credit Guide and Privacy Disclosure.pdf
-  \u2022  Key Facts Sheet, Personal Loan.pdf
+  1. Loan Contract \u2013 Neville Thompson.pdf
+  2. Key Facts Sheet \u2013 Personal Loan.pdf
+  3. Credit Guide \u2013 AussieLoanAI Pty Ltd.pdf
 
-(End of calibration example. Write your own email for this applicant using the same structure, adapting the loan type, amount, purpose, and applicant name from the application details above.)
+\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+*Comparison rate of [X.XX]% p.a. is calculated on a $30,000 unsecured personal loan over a 5-year term. WARNING: This comparison rate applies only to the example given. Different amounts and terms will result in different comparison rates. Costs such as redraw fees and early repayment costs, and cost savings such as fee waivers, are not included in the comparison rate but may influence the cost of the loan.
+
+This approval is valid for 30 days and is subject to no material change in your financial circumstances. If you are dissatisfied with any aspect of our service, please contact us first. If unresolved, you may contact the Australian Financial Complaints Authority (AFCA) on 1800 931 678 or at www.afca.org.au.
+
+This communication is confidential and intended solely for the named recipient.
+
+(End of calibration example. Write your own email for this applicant using the same tone, structure, and spacing, adapting the loan type, amount, purpose, and applicant name from the application details above.)
 """
 
-DENIAL_EMAIL_PROMPT = """You are drafting a formal decline letter from AussieLoanAI, an Australian lender. Under the 2025 Banking Code of Practice (paragraph 81), you must tell the customer the general reason their loan was not approved.
+DENIAL_EMAIL_PROMPT = """You are drafting a formal decline letter from AussieLoanAI, an Australian lender. Under the 2025 Banking Code of Practice (paragraph 81), you must tell the customer the general reason their loan was not approved. The email should be professional but genuinely empathetic and customer-service-friendly.
 
 Application details:
 - Applicant Name: {applicant_name}
@@ -212,148 +222,174 @@ Application details:
 === BANKING RELATIONSHIP ===
 {banking_context}
 
-=== FINANCIAL INSTITUTION EMAIL ETIQUETTE ===
+=== EMAIL FORMAT AND STRUCTURE ===
 
-DENIAL/ADVERSE ACTION EMAILS:
-1. Open by thanking the applicant for choosing AussieLoanAI and for taking the time to apply. Acknowledge their interest warmly but without excess.
-2. State the decline clearly in a single, direct sentence in the second paragraph. Use "we regret to advise that we are unable to approve your request at this time."
-3. Present the specific denial factors as structured list items. Each factor should have a short label (e.g. "Employment type and tenure:") followed by a plain-language explanation of how it fell outside lending parameters. Indent each item with two spaces.
-4. Include a paragraph explaining responsible lending obligations. These obligations exist to protect the customer from financial difficulty. State this genuinely, not as a disclaimer.
-5. Provide actionable improvement steps as structured list items. Frame them as steps that "may strengthen a future application." Connect each step directly to the denial factors.
-6. Inform the customer of their right to a free credit report from Equifax (equifax.com.au), Illion (illion.com.au), or Experian (experian.com.au). The word "free" must appear (Banking Code para 81). Include the website URLs.
-7. Offer to discuss alternative products or revised application amounts. Use first person ("I would welcome the opportunity to discuss your options with you").
-8. Provide your direct contact number with business hours (Monday to Friday, 8:30am to 5:30pm AEST).
-9. Reference the internal complaints process first, then AFCA as escalation. Present AFCA details (1800 931 678, www.afca.org.au) with phone and website on separate indented lines.
-10. Close by thanking them again for considering AussieLoanAI and expressing hope to be of service in the future.
-11. Use neutral subject lines. Never use "denied", "rejected", "declined", or "unsuccessful" in the subject line.
-12. Do not repeat the decline decision more than once in the email.
+This is a FORMAL but WARM decline letter from a licensed Australian credit provider. The structure is clean and simple: no box-drawing dividers, no UPPERCASE section headers. Use plain-text section labels (e.g., "What You Can Do:", "We'd Still Like to Help:"). The tone is that of a senior lending officer who genuinely respects the customer and wants to be transparent and helpful.
 
-GENERAL COMPLIANCE:
-13. Never reference protected characteristics: race, gender, religion, disability, marital status, age, pregnancy, national origin (Sex Discrimination Act 1984 s22, Racial Discrimination Act 1975 s15, Disability Discrimination Act 1992 s24, Age Discrimination Act 2004 s26).
-14. Only cite financial criteria for decisions (income, credit score, DTI ratio, employment tenure, LVR). These are legitimate under NCCP Act 2009.
-15. Do not invent dollar amounts, interest rates, fees, or repayment figures not provided in the application data.
-16. Australian English spelling: finalised, recognised, organisation, colour, favour, centre, honour, licence (noun).
-17. Australian financial terms: solicitor/conveyancer, settlement, stamp duty, fortnight.
-18. No markdown formatting (no bold, headers, asterisks). No HTML. Use indented text for structured list items only.
-19. No em dashes. Use commas, full stops, or semicolons.
-20. Use "please" no more than twice in the entire email.
+FORMAT RULES:
+1. NO UPPERCASE section headers. Use simple, clean formatting with plain-text section labels.
+2. Section labels are plain text on their own line (e.g., "What You Can Do:", "We'd Still Like to Help:").
+3. Use the bullet character (U+2022: \u2022) for list items (denial factors, improvement steps, credit reporting bodies). Indent with two spaces before the bullet.
+4. No markdown, no HTML, no bold/italic. Plain text only.
+5. Use en dashes (\u2013) for ranges. No em dashes (U+2014).
+6. A single line of box-drawing dashes (\u2500\u2500\u2500) may appear ONLY as a separator before the AFCA/complaints footer at the very end. No box-drawing characters anywhere else.
 
-VOICE AND REGISTER:
-This is a formal but genuinely warm decline letter. Not cold, not clinical, not motivational. Think of a senior lending officer who respects the applicant enough to give them a thorough, clear explanation and genuine options.
+COMPLIANCE RULES:
+7. Never reference protected characteristics (Sex Discrimination Act 1984 s22, Racial Discrimination Act 1975 s15, Disability Discrimination Act 1992 s24, Age Discrimination Act 2004 s26).
+8. Only cite financial criteria for decisions (income, credit score, DTI ratio, employment tenure, LVR). These are legitimate under NCCP Act 2009.
+9. Do NOT invent dollar amounts, interest rates, fees, or repayment figures not provided in the application data.
+10. Australian English spelling: finalised, recognised, organisation, colour, favour, centre, honour, licence (noun).
+11. Australian financial terms: solicitor/conveyancer, settlement, stamp duty, fortnight, p.a.
+12. The word "free" must appear when referencing credit reports (Banking Code para 81).
+13. Never use "denied", "rejected", "declined", or "unsuccessful" in the subject line.
+14. Do not repeat the decline decision more than once in the email.
 
-The tone is:
-- Respectful and empathetic without being patronising or saccharine.
-- Professional and thorough. Every paragraph serves a purpose.
-- First person where appropriate ("I would welcome the opportunity"). The officer is a real person, not a department.
-- Reasons are explained in context, not listed as bare thresholds. "Your current employment arrangements fell outside the parameters we require for a loan of this size" not just "Employment tenure: 8 months (minimum: 12 months)."
-- The email assumes the applicant is an intelligent adult who deserves a complete explanation.
-- Total body is 300-370 words. This is a substantive letter, not a brief notification.
-
-STRUCTURE (each section separated by a blank line):
-
-1. Subject line (prefix with "Subject: "). Professional and neutral. Examples: "Your loan application with AussieLoanAI" or "Regarding your personal loan application". Never use "denied", "rejected", "declined", or "unsuccessful".
-
-2. "Dear [First Name],"
-
-3. OPENING (2 sentences): Thank them for choosing AussieLoanAI and for taking the time to apply. Acknowledge their interest and state that you want to ensure they have a clear understanding of the outcome.
-
-4. DECISION (1 sentence): After a thorough assessment of their application for the specific amount and purpose, state that you are unable to approve their request at this time.
-
-5. ASSESSMENT FACTORS: Introduce with "Our assessment identified the following factors:" then list each denial reason as an indented item with a label and contextual explanation. Each factor should explain how the applicant's circumstances fell outside lending parameters, not just state a threshold.
-
-6. RESPONSIBLE LENDING (2-3 sentences): Explain that the assessment was conducted in accordance with responsible lending obligations, designed to ensure that credit provided is suitable and manageable. State that these obligations exist to protect the customer from financial difficulty, and that you take them seriously.
-
-7. FUTURE APPLICATION STEPS: State that this outcome is based on current circumstances and does not prevent future applications. Introduce with "In particular, the following steps may strengthen a future application:" then list specific improvement steps as indented items, each connected to the denial factors.
-
-8. CREDIT REPORT (2 sentences): Encourage them to review their credit report to confirm accuracy of the information held about them. State they are entitled to a free copy from Equifax (equifax.com.au), Illion (illion.com.au), or Experian (experian.com.au).
-
-9. DISCUSSION OFFER (1-2 sentences): Offer to explore whether an alternative loan product or revised application amount may be suitable. Use first person.
-
-10. CONTACT (1 sentence): Direct number with business hours (Monday to Friday, 8:30am to 5:30pm AEST).
-
-11. COMPLAINTS AND AFCA (2-3 sentences): State commitment to resolving concerns through the internal complaints process. If the customer remains dissatisfied following that process, they may refer their complaint to AFCA. Present AFCA phone (1800 931 678) and website (www.afca.org.au) on separate indented lines.
-
-12. CLOSING (1-2 sentences): Thank them again for considering AussieLoanAI. Express hope to be of service in the future.
-
-13. Sign-off:
-
-Kind regards,
-
-Sarah Mitchell
-Senior Lending Officer
-AussieLoanAI Pty Ltd
-Australian Credit Licence No. [XXXXXX]
-
-Ph: 1300 000 000
-Email: sarah.mitchell@aussieloanai.com.au
-Web: www.aussieloanai.com.au
-
-This communication is confidential and intended solely for the named recipient. If you have received this email in error, please notify the sender immediately and delete the message.
-
-AUSTRALIAN ENGLISH (non-negotiable):
-- Spelling: finalised, recognised, organisation, colour, favour, centre, honour, licence (noun)
-- Terms: solicitor/conveyancer (not attorney), settlement (not closing), stamp duty (not transfer tax), fortnight (not two weeks)
+TONE:
+- Empathetic and transparent. "We understand this is not the outcome you were hoping for" is appropriate.
+- Professional but personal. Use first person where appropriate ("I would welcome the chance to discuss your options").
+- Respectful: the customer is an intelligent adult who deserves a thorough, clear explanation.
+- Reasons are explained in context, not listed as bare thresholds.
+- The "We'd Still Like to Help" section should feel genuinely hopeful, not a sales pitch.
+- The closing should use the customer's first name and express genuine appreciation.
+- Every sentence delivers information, empathy, or actionable guidance. No empty filler.
+- Total body is 300\u2013400 words. This is a substantive letter, not a brief notification.
 
 DO NOT:
 - Use harsh language: "you failed", "your credit is poor", "you were rejected"
-- Invent dollar amounts, percentages, or terms not provided
-- Use markdown formatting (bold, headers, asterisks). Use indented text for structured lists only.
-- Use American English
-- Use em dashes. Use commas, full stops, or semicolons instead.
-- Use these AI-giveaway phrases: "we understand this may be disappointing", "I wanted to reach out", "navigate", "journey", "leverage", "empower", "tailored", "rest assured", "every step of the way", "regardless of this outcome", "pleased to inform", "delighted", "thrilled", "great news", "exciting"
-- Repeat the decline decision more than once
 - Use exclamation marks
-- Reference protected characteristics
+- Use these AI-giveaway phrases: "navigate", "leverage", "empower", "rest assured", "every step of the way", "regardless of this outcome", "delighted", "thrilled", "great news", "exciting"
 - Use transitional adverbs: "Additionally", "Furthermore", "Moreover", "In addition", "Consequently", "As such"
 - Hedge: no "may potentially", "could possibly", "it is possible that". State facts or omit.
 
-=== TONE CALIBRATION EXAMPLE ===
-The following is a complete sample decline letter showing the tone, structure, and density we expect. Do NOT copy this verbatim. Study the warmth of the opening, how reasons are explained in context (not bare thresholds), how improvement steps connect to denial factors, and how AFCA is presented after the internal complaints reference. Aim for 300-370 words in the body.
+=== SPACING RULES ===
+- Leave a BLANK LINE between every section and paragraph.
+- Section labels appear on their own line, followed by a blank line, then the section content.
+- Leave a blank line before and after bulleted lists.
+- The sign-off block, separator, and footer are each separated by a blank line.
 
-Subject: Your loan application with AussieLoanAI
+=== EMAIL STRUCTURE (follow this order exactly) ===
 
-Dear Neville,
+1. Subject line (prefix with "Subject: "):
+   Format: "Update on Your [Loan Type] Application | Ref #[TYPE CODE]-[YYYYMMDD]-[XXXX]"
+   Where [TYPE CODE] is PL (personal), HL (home), BL (business), VL (vehicle), EL (education).
+   Never use "denied", "rejected", "declined", or "unsuccessful" in the subject line.
 
-Thank you for choosing AussieLoanAI and for taking the time to apply for a personal loan with us. We value your interest in our services and want to ensure you have a clear understanding of the outcome of your application.
+2. "Dear [First Name]," followed by a blank line.
 
-After a thorough assessment of your application for a $500,000 personal loan, we regret to advise that we are unable to approve your request at this time.
+3. OPENING (1\u20132 sentences): Thank them for giving AussieLoanAI the opportunity to review their application. Reference the specific loan amount and type. Follow with a blank line.
 
-Our assessment identified the following factors:
+4. DECISION + EMPATHY (2 sentences): State the decline clearly ("we regret to inform you that we are unable to approve your request at this time"). Follow immediately with empathy: "We understand this is not the outcome you were hoping for, and we want to be transparent about the reasons so you have a clear picture of what happened." Follow with a blank line.
 
-  Employment type and tenure: Your current employment arrangements fell outside the parameters we require for a loan of this size.
-  Loan-to-income ratio: The requested loan amount relative to your verified income exceeded our serviceability thresholds.
+5. ASSESSMENT FACTORS: Introduce with "This decision was based on a thorough review of your financial profile, specifically:" then leave a blank line, then list each denial reason as a bulleted item (\u2022) with a short label (e.g., "Employment type and tenure:") followed by a contextual explanation. Follow with a blank line.
 
-This assessment was conducted in accordance with our responsible lending obligations, which are designed to ensure that any credit we provide is suitable and manageable for our customers. These obligations exist to protect you from financial difficulty, and we take them seriously.
+6. RESPONSIBLE LENDING (1 sentence, its own paragraph): State that the assessment was conducted in line with responsible lending obligations, which exist to ensure any credit provided is suitable and manageable. Follow with a blank line.
 
-This outcome is based on your circumstances at the time of your application and does not prevent you from applying with us in the future. In particular, the following steps may strengthen a future application:
+7. "What You Can Do:" section label on its own line, then a blank line, then:
+   - State this decision is based on current circumstances and does not prevent future applications.
+   - "The following steps may strengthen a future application:" then leave a blank line, then list specific improvement steps as bulleted items (\u2022), each connected to the denial factors.
+   Follow with a blank line.
 
-  Establishing a longer tenure in your current role, or transitioning to a permanent employment arrangement.
-  Considering a reduced loan amount that sits within a sustainable repayment range relative to your income.
+8. CREDIT REPORT (its own paragraph): State they are entitled to a free copy of their credit report to verify the information used. Leave a blank line, then list the three bodies as bulleted items:
+   \u2022  Equifax \u2013 equifax.com.au
+   \u2022  Illion \u2013 illion.com.au
+   \u2022  Experian \u2013 experian.com.au
+   Follow with a blank line.
 
-We would also encourage you to review your credit report to confirm the accuracy of the information held about you. You are entitled to obtain a free copy of your report from any of Australia's credit reporting bodies, Equifax (equifax.com.au), Illion (illion.com.au), or Experian (experian.com.au).
+9. "We'd Still Like to Help:" section label on its own line, then a blank line, then 1\u20132 sentences offering to explore alternative products or a revised amount. Use first person ("I would welcome the chance to discuss your options"). Add a hopeful note: "There may be a path forward that isn't obvious from the initial application alone." Follow with a blank line.
 
-If you would like to explore whether an alternative loan product or a revised application amount may be suitable for your needs, I would welcome the opportunity to discuss your options with you.
+10. CLOSING (2\u20133 sentences, split across two paragraphs):
+   - First paragraph: Offer direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to the email. Do NOT apologise or mention disappointment.
+   - Second paragraph (after a blank line): Close with this exact line (substituting the customer's first name): "Thanks for coming to us, [First Name]. We'd love to help you find the right option when you're ready." Do NOT rephrase or reword this line.
 
-You can reach me directly on 1300 000 000, Monday to Friday, 8:30am to 5:30pm AEST.
-
-We are committed to resolving any concerns through our internal complaints process. If you remain dissatisfied following that process, you may refer your complaint to the Australian Financial Complaints Authority (AFCA):
-  Phone: 1800 931 678
-  Website: www.afca.org.au
-
-Thank you again for considering AussieLoanAI. We appreciate the opportunity to assist you and hope to be of service in the future.
+11. Sign-off (after a blank line):
 
 Kind regards,
 
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
-Australian Credit Licence No. [XXXXXX]
-
+ABN 12 345 678 901 | Australian Credit Licence No. 012345
 Ph: 1300 000 000
-Email: sarah.mitchell@aussieloanai.com.au
-Web: www.aussieloanai.com.au
+Email: aussieloanai@gmail.com
 
-This communication is confidential and intended solely for the named recipient. If you have received this email in error, please notify the sender immediately and delete the message.
+12. Separator line (after a blank line), then AFCA/complaints footer and confidentiality notice:
+   \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   If you are dissatisfied with this decision, we encourage you to contact us first so we can address your concerns through our internal complaints process. If you remain dissatisfied, you may lodge a complaint with the Australian Financial Complaints Authority (AFCA):
+   Phone: 1800 931 678
+   Website: www.afca.org.au
+   Email: info@afca.org.au
 
-(End of calibration example. Write your own email for this applicant using the same tone, structure, and density.)
+   This communication is confidential and intended solely for the named recipient.
+
+=== COMMON MISTAKES TO AVOID ===
+These are the most frequent reasons denial emails fail quality checks:
+
+1. HARSH LANGUAGE: Never write "you failed", "your credit is poor", "rejected". Use "we are unable to approve at this time".
+2. AI LANGUAGE: Never write "Additionally", "Furthermore", "navigate", "leverage", "we understand that", "should you wish to". These are immediate AI tells.
+3. REPEATING THE DECLINE: State the decline decision ONCE. Do not rephrase it in multiple paragraphs.
+4. HALLUCINATED NUMBERS: Do NOT invent dollar amounts, rates, or thresholds not in the application data.
+5. MISSING "FREE" CREDIT REPORT: Banking Code para 81 requires the word "free" when mentioning credit reports.
+6. MISSING AFCA: Every denial email MUST include AFCA contact details in the footer.
+7. EXCLAMATION MARKS: Do not use any exclamation marks in a denial letter.
+8. WORD COUNT: Keep the body under 500 words. Be concise but thorough.
+9. SENTENCE RHYTHM: Mix short sentences (5-8 words) with longer ones (12-18 words).
+10. MARKDOWN/EM DASHES: Plain text only. En dashes (\u2013) not em dashes (\u2014). Bullet character \u2022 not - or *.
+
+=== TONE CALIBRATION EXAMPLE ===
+Do NOT copy this verbatim. Study the empathetic-but-professional tone, the clean structure without box dividers, how reasons are explained in context, how improvement steps connect to denial factors, the genuine helpfulness of the "We'd Still Like to Help" section, and the AFCA footer placed after the sign-off.
+
+Subject: Update on Your Personal Loan Application | Ref #PL-20260319-0047
+
+Dear Neville,
+
+Thank you for giving us the opportunity to review your application for a $500,000 Personal Loan with AussieLoanAI.
+
+After careful consideration, we regret to inform you that we are unable to approve your request at this time. We understand this is not the outcome you were hoping for, and we want to be transparent about the reasons so you have a clear picture of what happened.
+
+This decision was based on a thorough review of your financial profile, specifically:
+
+  \u2022  Employment type and tenure: Your current employment arrangements fell outside the parameters we require for a loan of this size.
+  \u2022  Loan-to-income ratio: The requested loan amount relative to your verified income exceeded our serviceability thresholds.
+
+This assessment was conducted in line with our responsible lending obligations, which exist to ensure any credit we provide is suitable and manageable for our customers.
+
+What You Can Do:
+
+This decision is based on your circumstances at the time of your application \u2013 it does not prevent you from applying with us in the future. The following steps may strengthen a future application:
+
+  \u2022  Establishing a longer tenure in your current role, or transitioning to a permanent employment arrangement.
+  \u2022  Considering a reduced loan amount that sits within a sustainable repayment range relative to your income.
+
+You are also entitled to a free copy of your credit report to verify the information used in our assessment. You can request one from any of Australia's credit reporting bodies:
+
+  \u2022  Equifax \u2013 equifax.com.au
+  \u2022  Illion \u2013 illion.com.au
+  \u2022  Experian \u2013 experian.com.au
+
+We'd Still Like to Help:
+
+If you'd like to explore whether a different loan product or a revised amount may be suitable for your needs, I would welcome the chance to discuss your options with you. There may be a path forward that isn't obvious from the initial application alone.
+
+If you have any questions about this decision, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
+
+Thanks for coming to us, Neville. We'd love to help you find the right option when you're ready.
+
+Kind regards,
+
+Sarah Mitchell
+Senior Lending Officer
+AussieLoanAI Pty Ltd
+ABN 12 345 678 901 | Australian Credit Licence No. 012345
+Ph: 1300 000 000
+Email: aussieloanai@gmail.com
+
+\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+If you are dissatisfied with this decision, we encourage you to contact us first so we can address your concerns through our internal complaints process. If you remain dissatisfied, you may lodge a complaint with the Australian Financial Complaints Authority (AFCA):
+Phone: 1800 931 678
+Website: www.afca.org.au
+Email: info@afca.org.au
+
+This communication is confidential and intended solely for the named recipient.
+
+(End of calibration example. Write your own email for this applicant using the same tone, structure, and density, adapting the loan type, amount, purpose, reasons, and applicant name from the application details above.)
 """

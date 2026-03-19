@@ -56,6 +56,16 @@ class LoanApplication(models.Model):
         SINGLE = 'single', 'Single'
         COUPLE = 'couple', 'Couple'
 
+    class AustralianState(models.TextChoices):
+        NSW = 'NSW', 'New South Wales'
+        VIC = 'VIC', 'Victoria'
+        QLD = 'QLD', 'Queensland'
+        WA = 'WA', 'Western Australia'
+        SA = 'SA', 'South Australia'
+        TAS = 'TAS', 'Tasmania'
+        ACT = 'ACT', 'Australian Capital Territory'
+        NT = 'NT', 'Northern Territory'
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     applicant = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='loan_applications'
@@ -103,6 +113,13 @@ class LoanApplication(models.Model):
         choices=[('own', 'Own'), ('rent', 'Rent'), ('mortgage', 'Mortgage')],
     )
     has_cosigner = models.BooleanField(default=False)
+
+    # Location
+    state = models.CharField(
+        max_length=3, choices=AustralianState.choices,
+        default=AustralianState.NSW,
+        help_text="Australian state/territory of the applicant",
+    )
 
     # Compliance
     has_hecs = models.BooleanField(default=False, help_text="Has HECS/HELP debt (ATO compulsory repayment)")

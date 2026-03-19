@@ -35,6 +35,7 @@ class _CalibratedModel:
     def predict_proba(self, X):
         raw_probs = self.estimator.predict_proba(X)[:, 1]
         calibrated = self._calibrator.predict(raw_probs)
+        calibrated = np.clip(calibrated, 0.0, 1.0)
         return np.column_stack([1 - calibrated, calibrated])
 
     @property
@@ -45,7 +46,7 @@ class _CalibratedModel:
 class ModelTrainer:
     """Handles model training with GridSearchCV."""
 
-    CATEGORICAL_COLS = ['purpose', 'home_ownership', 'employment_type', 'applicant_type']
+    CATEGORICAL_COLS = ['purpose', 'home_ownership', 'employment_type', 'applicant_type', 'state']
     NUMERIC_COLS = [
         'annual_income', 'credit_score', 'loan_amount', 'loan_term_months',
         'debt_to_income', 'employment_length', 'has_cosigner',
@@ -53,17 +54,41 @@ class ModelTrainer:
         'existing_credit_card_limit', 'number_of_dependants',
         'has_hecs', 'has_bankruptcy',
         'lvr', 'loan_to_income', 'credit_card_burden', 'expense_to_income',
+        # Feature interactions (standard in Big 4 bank scorecards)
+        'lvr_x_dti', 'income_credit_interaction',
+        'serviceability_ratio', 'employment_stability',
     ]
 
     def __init__(self):
         self.scaler = StandardScaler()
         self.ohe_columns = None  # column names after one-hot encoding
         self.metrics_service = MetricsService()
+        self._reference_distribution = None  # saved for PSI drift detection
+        self._imputation_values = {}  # stored in model bundle for predictor alignment
 
-    @staticmethod
-    def add_derived_features(df):
-        """Add engineered features: LVR, loan-to-income, credit card burden, expense-to-income."""
+    def add_derived_features(self, df):
+        """Add engineered features: LVR, loan-to-income, credit card burden, expense-to-income.
+
+        Handles missing values (NaN) in optional fields by imputing with
+        sensible defaults before computing derived features.
+        Stores imputation values so the predictor can use the same ones.
+        """
         df = df.copy()
+
+        # Impute missing values and store the values used so the predictor
+        # can apply identical imputation (prevents train/serve skew).
+        expenses_median = float(df['monthly_expenses'].median()) if df['monthly_expenses'].notna().any() else 2500.0
+        self._imputation_values = {
+            'monthly_expenses': expenses_median,
+            'existing_credit_card_limit': 0.0,
+            'property_value': 0.0,
+            'deposit_amount': 0.0,
+        }
+        df['monthly_expenses'] = df['monthly_expenses'].fillna(expenses_median)
+        df['existing_credit_card_limit'] = df['existing_credit_card_limit'].fillna(0)
+        df['property_value'] = df['property_value'].fillna(0)
+        df['deposit_amount'] = df['deposit_amount'].fillna(0)
+
         df['lvr'] = np.where(
             df['property_value'] > 0,
             df['loan_amount'] / df['property_value'],
@@ -81,6 +106,63 @@ class ModelTrainer:
             df['monthly_expenses'] * 12 / df['annual_income'],
             0.0,
         )
+
+        # ---------------------------------------------------------------
+        # FEATURE INTERACTIONS
+        #
+        # Real bank scorecards capture cross-feature signals that single
+        # features miss. These interactions model the combinatorial risk
+        # that underwriters assess intuitively:
+        #
+        # - A high LVR alone is manageable; high LVR + high DTI together
+        #   is much riskier than the sum of parts (compounding leverage)
+        # - High income partially compensates for high DTI (more buffer)
+        # - Long employment for a casual worker is very different from
+        #   long employment for a permanent worker
+        # - Credit score + income together predict serviceability better
+        #   than either alone (creditworthiness x capacity)
+        #
+        # These are standard features in Big 4 bank scorecards. APRA CPG
+        # 235 specifically mentions interaction effects in model risk
+        # management requirements.
+        # ---------------------------------------------------------------
+
+        # Leverage interaction: LVR x DTI — compounding risk.
+        # High LVR (little equity) + high DTI (stretched income) is the
+        # profile most likely to default under stress (RBA FSR 2022).
+        df['lvr_x_dti'] = df['lvr'] * df['debt_to_income']
+
+        # Capacity interaction: income normalised credit score.
+        # High credit + high income = strong applicant. Low credit + low
+        # income = weak. This captures the joint effect better than either
+        # feature alone.
+        df['income_credit_interaction'] = (
+            np.log1p(df['annual_income']) * df['credit_score'] / 1200
+        )
+
+        # Serviceability buffer: how much monthly income remains after
+        # all commitments as a ratio. Directly models the bank's
+        # serviceability assessment.
+        monthly_commitments = (
+            df['existing_credit_card_limit'] * 0.03
+            + df['monthly_expenses']
+        )
+        df['serviceability_ratio'] = np.where(
+            monthly_income > 0,
+            np.clip(1.0 - monthly_commitments / monthly_income, -1.0, 1.0),
+            0.0,
+        )
+
+        # Employment stability score: employment type quality x tenure.
+        # Permanent with 10 years = very stable; casual with 1 year = risky.
+        emp_type_weight = df.get('employment_type', pd.Series(dtype=str)).map({
+            'payg_permanent': 1.0,
+            'contract': 0.7,
+            'self_employed': 0.6,
+            'payg_casual': 0.4,
+        }).fillna(0.5)
+        df['employment_stability'] = emp_type_weight * np.log1p(df['employment_length'])
+
         # Ensure new columns exist with defaults if missing from older datasets
         if 'has_hecs' not in df.columns:
             df['has_hecs'] = 0
@@ -164,8 +246,41 @@ class ModelTrainer:
             df_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
         )
 
+        # Capture reference distribution for PSI drift detection (APRA CPG 235).
+        # Computed on training data ONLY (not full dataset) to avoid data leakage.
+        # Stores both percentile summaries and histogram bin counts/edges for PSI.
+        ref_dist = {}
+        for col in self.NUMERIC_COLS:
+            if col in df_train.columns:
+                vals = df_train[col].dropna().values
+                if len(vals) > 0:
+                    percentiles = np.percentile(vals, np.arange(0, 101, 10)).tolist()
+                    # Histogram bins for proper PSI computation
+                    bin_edges = np.percentile(vals, np.linspace(0, 100, 11))
+                    bin_edges = np.unique(bin_edges)
+                    if len(bin_edges) >= 3:
+                        hist_counts = np.histogram(vals, bins=bin_edges)[0]
+                    else:
+                        hist_counts = np.array([])
+                        bin_edges = np.array([])
+                    ref_dist[col] = {
+                        'percentiles': percentiles,
+                        'mean': float(np.mean(vals)),
+                        'std': float(np.std(vals)),
+                        'n': len(vals),
+                        'histogram_counts': hist_counts.tolist(),
+                        'histogram_edges': bin_edges.tolist(),
+                    }
+        self._reference_distribution = ref_dist
+
         # Save original test indices before transform() resets them
         test_original_indices = df_test.index.copy()
+
+        # Save raw copies BEFORE preprocessing for WOE scorecard (C4 fix).
+        # WOE bins must be in interpretable units (credit_score 650-750),
+        # not z-score units from StandardScaler.
+        df_train_raw = self.add_derived_features(df_train.copy())
+        df_test_raw = self.add_derived_features(df_test.copy())
 
         # Fit preprocessing on training data only
         df_train, feature_cols = self.fit_preprocess(df_train)
@@ -186,6 +301,13 @@ class ModelTrainer:
         # Probability calibration on validation set only (avoids data leakage
         # since GridSearchCV already used cross-validation on the training set)
         model = _CalibratedModel(raw_model, X_val, y_val)
+
+        # Conformal prediction: compute nonconformity scores on validation set.
+        # These are stored in the model bundle and used at inference time to
+        # produce prediction intervals with guaranteed coverage.
+        # Nonconformity score = |predicted_prob - actual_outcome|
+        y_val_prob = model.predict_proba(X_val)[:, 1]
+        self._conformal_scores = np.sort(np.abs(y_val_prob - y_val.values))
 
         # Evaluate on test set only (val was used implicitly via GridSearchCV)
         y_pred = model.predict(X_test)
@@ -235,7 +357,7 @@ class ModelTrainer:
 
         # Fairness metrics with full TPR/FPR/disparate impact
         fairness_metrics = {}
-        for col in ['employment_type', 'applicant_type']:
+        for col in ['employment_type', 'applicant_type', 'state']:
             if col in df.columns:
                 test_indices = test_original_indices
                 original_vals = df.loc[test_indices, col] if col in df.columns else pd.Series()
@@ -245,6 +367,52 @@ class ModelTrainer:
                     )
                     fairness_metrics[col] = fairness_result
         metrics['fairness'] = fairness_metrics
+
+        # WOE/IV analysis on RAW (unscaled) data so bin edges are in
+        # interpretable units (credit_score 650-750, not z-scores).
+        try:
+            woe_iv = self.metrics_service.compute_all_woe_iv(
+                df_test_raw[self.NUMERIC_COLS], y_test, self.NUMERIC_COLS, n_bins=10
+            )
+            metrics['woe_iv'] = {
+                col: {'iv': v['iv'], 'interpretation': v['iv_interpretation']}
+                for col, v in woe_iv.items()
+                if v['iv'] >= 0.02
+            }
+        except Exception:
+            logger.warning("WOE/IV computation failed", exc_info=True)
+            metrics['woe_iv'] = {}
+
+        # WOE logistic regression scorecard on RAW data with out-of-sample AUC.
+        try:
+            _, _, scorecard = self.metrics_service.build_woe_scorecard(
+                df_train_raw[self.NUMERIC_COLS], y_train, self.NUMERIC_COLS, n_bins=10,
+                X_test=df_test_raw[self.NUMERIC_COLS], y_test=y_test,
+            )
+            if scorecard:
+                metrics['woe_scorecard'] = scorecard
+        except Exception:
+            logger.warning("WOE scorecard build failed", exc_info=True)
+
+        # Adversarial validation: can a classifier distinguish train from test?
+        try:
+            adv = self.metrics_service.adversarial_validation(
+                X_train.values, X_test.values
+            )
+            metrics['adversarial_validation'] = adv
+        except Exception:
+            logger.warning("Adversarial validation failed", exc_info=True)
+
+        # Concentration risk (APRA APS 221)
+        try:
+            metrics['concentration_risk'] = {}
+            for col in ['purpose', 'employment_type', 'state']:
+                if col in df.columns:
+                    metrics['concentration_risk'][col] = (
+                        self.metrics_service.compute_concentration_risk(df, col)
+                    )
+        except Exception:
+            logger.warning("Concentration risk computation failed", exc_info=True)
 
         return model, metrics
 
@@ -260,14 +428,63 @@ class ModelTrainer:
         grid.fit(X_train, y_train)
         return grid.best_estimator_, grid.best_params_
 
+    def _build_monotonic_constraints(self, feature_cols):
+        """Build monotonic constraint vector for XGBoost.
+
+        In credit risk modelling, certain relationships MUST be monotonic:
+        - Higher credit score → higher approval probability (positive)
+        - Higher income → higher approval probability (positive)
+        - Higher debt-to-income → lower approval probability (negative)
+        - Higher employment length → higher approval probability (positive)
+        - Bankruptcy → lower approval probability (negative)
+
+        XGBoost enforces these during tree construction, preventing the
+        model from learning spurious non-monotonic patterns from noise.
+        This is a regulatory expectation: APRA and ASIC expect that a
+        model won't approve someone with a lower credit score over
+        someone identical but with a higher score.
+
+        Returns a tuple of (1, -1, 0) for each feature:
+          1 = monotonically increasing (more → more likely approved)
+         -1 = monotonically decreasing (more → less likely approved)
+          0 = unconstrained
+        """
+        constraints = {
+            'annual_income': 1,         # more income → more likely approved
+            'credit_score': 1,          # better credit → more likely approved
+            'debt_to_income': -1,       # higher DTI → less likely approved
+            'employment_length': 1,     # longer tenure → more likely approved
+            'has_cosigner': 1,          # cosigner helps
+            'has_bankruptcy': -1,       # bankruptcy hurts
+            # has_hecs: unconstrained (0) — effect is income-mediated, not unconditional.
+            # High-income HECS holders are barely affected; forcing monotonicity
+            # would unfairly penalise them.
+            'loan_to_income': -1,       # higher loan relative to income → riskier
+            'expense_to_income': -1,    # higher expenses relative to income → riskier
+            # lvr: unconstrained (0) — non-home loans have LVR=0.0, which is
+            # semantically "no property", not "best possible LVR". A -1
+            # constraint would force the model to approve LVR=0 (personal loans)
+            # more than any home loan with a deposit.
+            'credit_card_burden': -1,   # higher CC burden → riskier
+            # Interaction features
+            'lvr_x_dti': -1,            # compounding leverage → riskier
+            'income_credit_interaction': 1,  # higher income x credit → safer
+            'serviceability_ratio': 1,   # more buffer after commitments → safer
+            'employment_stability': 1,   # more stable employment → safer
+        }
+        return tuple(constraints.get(col, 0) for col in feature_cols)
+
     def _train_xgb(self, X_train, y_train, X_val, y_val):
-        """Train XGBoost with RandomizedSearchCV, class imbalance handling, and early stopping."""
+        """Train XGBoost with RandomizedSearchCV, monotonic constraints, and early stopping."""
         from xgboost import XGBClassifier
 
         # Handle class imbalance
         neg_count = int((y_train == 0).sum())
         pos_count = int((y_train == 1).sum())
         scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1.0
+
+        # Build monotonic constraints from feature names
+        monotonic = self._build_monotonic_constraints(list(X_train.columns))
 
         param_grid = {
             'n_estimators': [100, 200, 300],
@@ -287,6 +504,7 @@ class ModelTrainer:
             random_state=42,
             eval_metric='logloss',
             scale_pos_weight=scale_pos_weight,
+            monotone_constraints=monotonic,
             n_jobs=1,
         )
         search = RandomizedSearchCV(
@@ -303,6 +521,7 @@ class ModelTrainer:
             random_state=42,
             eval_metric='logloss',
             scale_pos_weight=scale_pos_weight,
+            monotone_constraints=monotonic,
             early_stopping_rounds=20,
             n_jobs=-1,
         )
@@ -315,7 +534,7 @@ class ModelTrainer:
         return final_model, best_params
 
     def save_model(self, model, path):
-        """Save model bundle (model, scaler, column names) to disk."""
+        """Save model bundle (model, scaler, column names, reference distribution) to disk."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
         bundle = {
             'model': model,
@@ -323,6 +542,54 @@ class ModelTrainer:
             'feature_cols': self.ohe_columns,
             'categorical_cols': self.CATEGORICAL_COLS,
             'numeric_cols': self.NUMERIC_COLS,
+            # Reference distribution for PSI drift detection (APRA CPG 235).
+            # Stores raw numeric feature values from training data so that
+            # incoming applications can be compared against what the model
+            # was trained on.
+            'reference_distribution': self._reference_distribution,
+            # Imputation values used during training so the predictor can
+            # apply identical imputation (prevents train/serve skew).
+            'imputation_values': self._imputation_values,
+            # Conformal prediction nonconformity scores (split conformal method).
+            # Used at inference to compute prediction intervals with guaranteed
+            # coverage. Stored as sorted array for fast quantile lookup.
+            'conformal_scores': getattr(self, '_conformal_scores', np.array([])),
         }
+        # Self-healing: validate pipeline consistency before saving
+        self._validate_pipeline_consistency(bundle)
         joblib.dump(bundle, path)
         return path
+
+    def _validate_pipeline_consistency(self, bundle):
+        """Post-training validation to catch pipeline inconsistencies.
+
+        Runs automatically before every model save. If any check fails,
+        training raises a clear error rather than saving a broken model.
+        """
+        errors = []
+
+        # 1. Categorical cols match between trainer and predictor
+        from apps.ml_engine.services.predictor import ModelPredictor
+        if set(self.CATEGORICAL_COLS) != set(ModelPredictor.CATEGORICAL_COLS):
+            errors.append(
+                f"CATEGORICAL_COLS mismatch: trainer={self.CATEGORICAL_COLS}, "
+                f"predictor={ModelPredictor.CATEGORICAL_COLS}"
+            )
+
+        # 2. Feature cols present in bundle
+        if not bundle.get('feature_cols'):
+            errors.append("Model bundle missing 'feature_cols'")
+
+        # 3. Imputation values present
+        if not bundle.get('imputation_values'):
+            errors.append("Model bundle missing 'imputation_values'")
+
+        # 4. Reference distribution present
+        if not bundle.get('reference_distribution'):
+            errors.append("Model bundle missing 'reference_distribution'")
+
+        if errors:
+            raise ValueError(
+                "Pipeline consistency check FAILED:\n" + "\n".join(f"  - {e}" for e in errors)
+            )
+        logger.info("Pipeline consistency check passed: %d validations OK", 4)

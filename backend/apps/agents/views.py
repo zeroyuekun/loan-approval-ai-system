@@ -12,7 +12,7 @@ from apps.loans.models import AuditLog, LoanApplication
 
 
 class OrchestrationThrottle(UserRateThrottle):
-    rate = '5/hour'
+    rate = '60/hour'
 
 
 def _check_loan_access(user, loan_id):

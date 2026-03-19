@@ -116,8 +116,8 @@ export default function ModelMetricsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold">{algorithmLabel}</h3>
-          <Badge variant="secondary">v{metrics.version}</Badge>
-          {metrics.is_active && <Badge>Active</Badge>}
+          <Badge variant="secondary" className="text-sm px-3 py-0.5">v{metrics.version}</Badge>
+          {metrics.is_active && <Badge variant="success" className="text-sm px-3 py-0.5">Active</Badge>}
         </div>
         {user?.role === 'admin' && (
           <div className="flex items-center gap-2">

@@ -244,18 +244,38 @@ class DataConsistencyChecker:
         return findings
 
     def _check_bankruptcy_vs_credit(self, f):
-        """Bankruptcy with a high credit score is contradictory."""
+        """Bankruptcy with a high credit score is contradictory.
+
+        In Australia, a discharged bankrupt (5-7 years post-discharge) can
+        rebuild their score to 550-650. Scores above 700 with a bankruptcy
+        flag are almost certainly data errors. Scores 600-700 are suspicious
+        but possible for late-stage discharged bankrupts, so we warn rather
+        than block.
+        """
         has_bankruptcy = f.get('has_bankruptcy')
         credit = _safe_float(f.get('credit_score'))
-        if has_bankruptcy and credit > 600:
+        if not has_bankruptcy:
+            return []
+        if credit > 700:
             return [{
                 'fields': ['has_bankruptcy', 'credit_score'],
                 'severity': 'error',
                 'message': (
                     f'Applicant declares bankruptcy but has a credit score '
                     f'of {int(credit)}. An undischarged bankrupt or someone '
-                    f'within 7 years of discharge would typically have a '
-                    f'score well below 500. Verify the bankruptcy declaration.'
+                    f'within 7 years of discharge would not have a score '
+                    f'above 700. Verify the bankruptcy declaration.'
+                ),
+            }]
+        if credit > 600:
+            return [{
+                'fields': ['has_bankruptcy', 'credit_score'],
+                'severity': 'warning',
+                'message': (
+                    f'Applicant declares bankruptcy with a credit score of '
+                    f'{int(credit)}. This is possible for a late-stage '
+                    f'discharged bankrupt (6-7 years) but unusual. '
+                    f'Verify the bankruptcy status and discharge date.'
                 ),
             }]
         return []

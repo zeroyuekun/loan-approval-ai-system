@@ -85,7 +85,7 @@
     @apply backdrop-blur-lg border border-white/40 shadow-lg shadow-black/[0.04];
   }
   .gradient-primary {
-    background: linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%);
+    background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 50%, #2563eb 100%);
   }
   .gradient-sidebar {
     background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 40%, #1e293b 100%);
@@ -115,13 +115,6 @@
       inset 0 1px 0 0 rgb(255 255 255 / 0.8),
       inset 0 -1px 0 0 rgb(99 102 241 / 0.04);
   }
-  .sheen-card:hover {
-    box-shadow:
-      0 12px 32px -8px rgb(99 102 241 / 0.12),
-      0 4px 8px -2px rgb(0 0 0 / 0.04),
-      inset 0 1px 0 0 rgb(255 255 255 / 0.9),
-      inset 0 -1px 0 0 rgb(99 102 241 / 0.06);
-  }
   .gradient-border {
     position: relative;
   }
@@ -141,18 +134,5 @@
   .btn-sheen {
     position: relative;
     overflow: hidden;
-  }
-  .btn-sheen::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
-    transition: left 0.5s ease;
-  }
-  .btn-sheen:hover::after {
-    left: 100%;
   }
 }

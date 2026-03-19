@@ -103,7 +103,7 @@ def clear_model_cache():
 class ModelPredictor:
     """Loads the active model and runs predictions."""
 
-    CATEGORICAL_COLS = ['purpose', 'home_ownership', 'employment_type', 'applicant_type']
+    CATEGORICAL_COLS = ['purpose', 'home_ownership', 'employment_type', 'applicant_type', 'state']
 
     def __init__(self):
         self.model_version = ModelVersion.objects.filter(is_active=True).first()
@@ -118,6 +118,14 @@ class ModelPredictor:
         self.label_encoders = bundle.get('label_encoders')
         self.categorical_cols = bundle.get('categorical_cols', self.CATEGORICAL_COLS)
         self.numeric_cols = bundle.get('numeric_cols', [])
+        self.reference_distribution = bundle.get('reference_distribution', {})
+        self.imputation_values = bundle.get('imputation_values', {
+            'monthly_expenses': 2500.0,
+            'existing_credit_card_limit': 0.0,
+            'property_value': 0.0,
+            'deposit_amount': 0.0,
+        })
+        self.conformal_scores = bundle.get('conformal_scores', np.array([]))
         self.consistency_checker = DataConsistencyChecker()
 
     @staticmethod
@@ -141,7 +149,41 @@ class ModelPredictor:
             df['monthly_expenses'] * 12 / df['annual_income'],
             0.0,
         )
+
+        # Feature interactions (must match trainer.add_derived_features exactly)
+        df['lvr_x_dti'] = df['lvr'] * df['debt_to_income']
+        df['income_credit_interaction'] = (
+            np.log1p(df['annual_income']) * df['credit_score'] / 1200
+        )
+        monthly_commitments = (
+            df['existing_credit_card_limit'] * 0.03
+            + df['monthly_expenses']
+        )
+        df['serviceability_ratio'] = np.where(
+            monthly_income > 0,
+            np.clip(1.0 - monthly_commitments / monthly_income, -1.0, 1.0),
+            0.0,
+        )
+        emp_type_weight = df.get('employment_type', pd.Series(dtype=str)).map({
+            'payg_permanent': 1.0,
+            'contract': 0.7,
+            'self_employed': 0.6,
+            'payg_casual': 0.4,
+        }).fillna(0.5)
+        df['employment_stability'] = emp_type_weight * np.log1p(df['employment_length'])
+
         return df
+
+    @staticmethod
+    def _safe_get_state(application):
+        """Safely get state from application, handling unmigrated databases."""
+        try:
+            state = getattr(application, 'state', None)
+            if state:
+                return state
+        except Exception:
+            pass
+        return 'NSW'
 
     def _validate_input(self, features: dict):
         """Validate feature values are within reasonable bounds.
@@ -224,15 +266,16 @@ class ModelPredictor:
             'has_cosigner': int(application.has_cosigner),
             'purpose': application.purpose,
             'home_ownership': application.home_ownership,
-            'property_value': float(application.property_value or 0),
-            'deposit_amount': float(application.deposit_amount or 0),
-            'monthly_expenses': float(application.monthly_expenses or 0),
-            'existing_credit_card_limit': float(application.existing_credit_card_limit or 0),
+            'property_value': float(application.property_value) if application.property_value is not None else self.imputation_values.get('property_value', 0),
+            'deposit_amount': float(application.deposit_amount) if application.deposit_amount is not None else self.imputation_values.get('deposit_amount', 0),
+            'monthly_expenses': float(application.monthly_expenses) if application.monthly_expenses is not None else self.imputation_values.get('monthly_expenses', 2500),
+            'existing_credit_card_limit': float(application.existing_credit_card_limit) if application.existing_credit_card_limit is not None else self.imputation_values.get('existing_credit_card_limit', 0),
             'number_of_dependants': application.number_of_dependants,
             'employment_type': application.employment_type,
             'applicant_type': application.applicant_type,
             'has_hecs': int(getattr(application, 'has_hecs', 0)),
             'has_bankruptcy': int(getattr(application, 'has_bankruptcy', 0)),
+            'state': self._safe_get_state(application),
         }
 
         # Validate inputs
@@ -288,6 +331,10 @@ class ModelPredictor:
 
         processing_time = int((time.time() - start_time) * 1000)
 
+        # Per-application drift flags: check if key features are far outside
+        # the training distribution (APRA CPG 235 ongoing monitoring)
+        drift_warnings = self._check_feature_drift(features)
+
         # Use optimal threshold from model version if available
         threshold = self.model_version.optimal_threshold or 0.5
         probability = round(float(probabilities[1]), 4)
@@ -295,6 +342,29 @@ class ModelPredictor:
 
         # Flag borderline cases for human review
         requires_human_review = abs(probability - threshold) <= 0.10
+
+        # Also flag for review if significant feature drift detected
+        if any(w.get('severity') == 'drift' for w in drift_warnings):
+            requires_human_review = True
+
+        # Expected Loss (EL = PD x LGD x EAD) — Basel III / APRA APS 113
+        from .metrics import MetricsService
+        _ms = MetricsService()
+        lvr = (float(features.get('loan_amount', 0)) / float(features.get('property_value', 1))
+               if features.get('property_value', 0) > 0 else 0.0)
+        expected_loss = _ms.compute_expected_loss(
+            pd_value=1.0 - probability,  # PD = probability of denial/default
+            loan_amount=features.get('loan_amount', 0),
+            purpose=features.get('purpose', 'personal'),
+            lvr=lvr,
+            credit_score=features.get('credit_score', 864),
+        )
+
+        # Stress testing — 4 adverse scenarios
+        stress_results = self._stress_test(features, threshold)
+
+        # Conformal prediction interval (95% coverage)
+        confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
         return {
             'prediction': prediction_label,
@@ -307,4 +377,190 @@ class ModelPredictor:
             'processing_time_ms': processing_time,
             'model_version': str(self.model_version.id),
             'consistency_warnings': consistency['warnings'],
+            'drift_warnings': drift_warnings,
+            'expected_loss': expected_loss,
+            'stress_test': stress_results,
+            'confidence_interval': confidence_interval,
+        }
+
+    def _check_feature_drift(self, features):
+        """Check if individual feature values fall far outside training distribution.
+
+        This is a per-application check, not a batch PSI. It flags when a single
+        applicant's values are extreme outliers relative to what the model was
+        trained on, which may indicate the model is being applied outside its
+        valid range.
+
+        For batch PSI monitoring, use MetricsService.compute_feature_psi().
+        """
+        warnings = []
+        if not self.reference_distribution:
+            return warnings
+
+        for col, ref in self.reference_distribution.items():
+            val = features.get(col)
+            if val is None:
+                continue
+            try:
+                val = float(val)
+            except (TypeError, ValueError):
+                continue
+
+            mean = ref.get('mean', 0)
+            std = ref.get('std', 1)
+            percentiles = ref.get('percentiles', [])
+
+            if std <= 0:
+                continue
+
+            # Flag values beyond 3 standard deviations from training mean
+            z_score = abs(val - mean) / std
+            if z_score > 4.0:
+                warnings.append({
+                    'feature': col,
+                    'value': val,
+                    'z_score': round(z_score, 2),
+                    'training_mean': round(mean, 2),
+                    'training_std': round(std, 2),
+                    'severity': 'drift',
+                    'message': (
+                        f'{col} value ({val:,.2f}) is {z_score:.1f} standard deviations '
+                        f'from the training mean ({mean:,.2f}). The model may not '
+                        f'be reliable for this input range.'
+                    ),
+                })
+            elif z_score > 3.0:
+                warnings.append({
+                    'feature': col,
+                    'value': val,
+                    'z_score': round(z_score, 2),
+                    'training_mean': round(mean, 2),
+                    'training_std': round(std, 2),
+                    'severity': 'warning',
+                    'message': (
+                        f'{col} value ({val:,.2f}) is {z_score:.1f} standard deviations '
+                        f'from the training mean ({mean:,.2f}). This is unusual but '
+                        f'within tolerance.'
+                    ),
+                })
+
+        return warnings
+
+    def _stress_test(self, features, threshold):
+        """Run 4 adverse scenarios to show model behavior under stress.
+
+        Required under APRA APS 110 for stress testing. Shows that worse
+        inputs produce lower approval probabilities (model degrades sensibly).
+        """
+        scenarios = {}
+        base_prob = None
+
+        try:
+            df_base = pd.DataFrame([features])
+            df_base = self._transform(df_base)
+            base_prob = float(self.model.predict_proba(df_base[self.feature_cols])[0][1])
+
+            # Scenario 1: Income -15%
+            stressed = features.copy()
+            stressed['annual_income'] = float(stressed['annual_income']) * 0.85
+            stressed['debt_to_income'] = float(stressed.get('loan_amount', 0)) / stressed['annual_income']
+            df_s = pd.DataFrame([stressed])
+            df_s = self._transform(df_s)
+            prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
+            scenarios['income_minus_15pct'] = {
+                'probability': round(prob, 4),
+                'decision': 'approved' if prob >= threshold else 'denied',
+                'change': round(prob - base_prob, 4),
+            }
+
+            # Scenario 2: Property value -20%
+            stressed = features.copy()
+            if float(stressed.get('property_value', 0)) > 0:
+                stressed['property_value'] = float(stressed['property_value']) * 0.80
+            df_s = pd.DataFrame([stressed])
+            df_s = self._transform(df_s)
+            prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
+            scenarios['property_minus_20pct'] = {
+                'probability': round(prob, 4),
+                'decision': 'approved' if prob >= threshold else 'denied',
+                'change': round(prob - base_prob, 4),
+            }
+
+            # Scenario 3: Credit score -50
+            stressed = features.copy()
+            stressed['credit_score'] = max(300, int(stressed['credit_score']) - 50)
+            df_s = pd.DataFrame([stressed])
+            df_s = self._transform(df_s)
+            prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
+            scenarios['credit_minus_50'] = {
+                'probability': round(prob, 4),
+                'decision': 'approved' if prob >= threshold else 'denied',
+                'change': round(prob - base_prob, 4),
+            }
+
+            # Scenario 4: Combined stress (all three)
+            stressed = features.copy()
+            stressed['annual_income'] = float(stressed['annual_income']) * 0.85
+            stressed['debt_to_income'] = float(stressed.get('loan_amount', 0)) / stressed['annual_income']
+            if float(stressed.get('property_value', 0)) > 0:
+                stressed['property_value'] = float(stressed['property_value']) * 0.80
+            stressed['credit_score'] = max(300, int(stressed['credit_score']) - 50)
+            df_s = pd.DataFrame([stressed])
+            df_s = self._transform(df_s)
+            prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
+            scenarios['combined_stress'] = {
+                'probability': round(prob, 4),
+                'decision': 'approved' if prob >= threshold else 'denied',
+                'change': round(prob - base_prob, 4),
+            }
+        except Exception:
+            logger.warning("Stress test computation failed", exc_info=True)
+
+        return {
+            'base_probability': round(base_prob, 4) if base_prob is not None else None,
+            'scenarios': scenarios,
+        }
+
+    def _conformal_interval(self, probability, alpha=0.05):
+        """Compute conformal prediction interval with guaranteed coverage.
+
+        Uses split conformal prediction: nonconformity scores computed on
+        the validation set during training define how much the prediction
+        can vary. At confidence level (1-alpha), the true probability is
+        within [prob - q, prob + q] where q is the (1-alpha) quantile of
+        the nonconformity scores.
+
+        This gives honest uncertainty estimates — unlike a raw probability
+        which has no coverage guarantee.
+
+        Args:
+            probability: model predicted probability of approval
+            alpha: significance level (0.05 = 95% confidence)
+
+        Returns:
+            dict with lower, upper bounds and confidence level.
+        """
+        if len(self.conformal_scores) == 0:
+            return {
+                'lower': round(probability, 4),
+                'upper': round(probability, 4),
+                'confidence_level': 1 - alpha,
+                'available': False,
+            }
+
+        # Quantile of nonconformity scores at (1 - alpha) level
+        n = len(self.conformal_scores)
+        q_idx = int(np.ceil((1 - alpha) * (n + 1))) - 1
+        q_idx = min(q_idx, n - 1)
+        q = float(self.conformal_scores[q_idx])
+
+        lower = max(0.0, probability - q)
+        upper = min(1.0, probability + q)
+
+        return {
+            'lower': round(lower, 4),
+            'upper': round(upper, 4),
+            'width': round(upper - lower, 4),
+            'confidence_level': 1 - alpha,
+            'available': True,
         }

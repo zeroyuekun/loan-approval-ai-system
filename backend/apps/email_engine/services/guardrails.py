@@ -30,7 +30,8 @@ class GuardrailChecker:
 
     # AI-giveaway phrases that real bank officers never use
     AI_GIVEAWAY_TERMS = [
-        r'\bpleased to (?:inform|advise)\b',  # "pleased to confirm" is legitimate in formal approvals
+        # "pleased to inform" and "pleased to confirm" are legitimate in formal approval letters
+        # r'\bpleased to (?:inform|advise)\b',
         r'\bdelighted\b',
         r'\bthrilled\b',
         r'\bgreat news\b',
@@ -38,22 +39,21 @@ class GuardrailChecker:
         r'\bwe are happy to\b',
         r'\bI wanted to reach out\b',
         r'\bnavigate\b',
-        r'\bjourney\b',
+        # r'\bjourney\b',  # Removed: legitimate in Australian lending ("home ownership journey")
         r'\bleverage\b',
         r'\bempower\b',
-        r'\bcomprehensive\b',
+        # r'\bcomprehensive\b',  # Removed: legitimate in formal letters ("comprehensive loan agreement")
         r'\btailored\b',
         r'\brest assured\b',
-        r'\bdon[\u2019\']t hesitate\b',
-        r'\bwe are here to help\b',
+        # r'\bdon[\u2019\']t hesitate\b',  # Removed: legitimate in formal approval/customer-service correspondence
+        # r'\bwe are here to help\b',  # Removed: legitimate in hardship/customer-service sections
         r'\bwalk you through\b',
         r'\bevery step of the way\b',
         r'\bwe understand how important\b',
         r'\bwe understand this (?:may be|is) disappointing\b',
-        r'\bwe appreciate the trust\b',
+        # r'\bwe appreciate the trust\b',  # Removed: legitimate closing in approval letters
         r'\bregardless of (?:this|the) outcome\b',
         r'\bshould you have any questions at all\b',
-        # r'\bplease do not hesitate to contact\b',  # Removed: legitimate in formal approval letters
         # Transitional adverbs (strongest AI-tell)
         r'\badditionally\b',
         r'\bfurthermore\b',
@@ -78,10 +78,9 @@ class GuardrailChecker:
         r'\bshould you require\b',
         r'\bshould you have any\b',
         r'\bwe wish you\b',
-        r'\bwe look forward to\b',
+        # r'\bwe look forward to\b',  # Removed: legitimate closing in approval letters
         # AI closing/filler patterns
         r'\bplease feel free to\b',
-        # r'\bdo not hesitate\b',  # Removed: legitimate in formal approval correspondence
         r'\bwe are available\b',
         r'\bthank you for trusting\b',
         r'\bin order to\b',
@@ -172,9 +171,9 @@ class GuardrailChecker:
         issues = []
 
         # Strip ASIC comparison rate footnotes before checking
-        # (standard regulatory text contains fixed amounts like $150,000)
+        # (standard regulatory text contains fixed amounts like $30,000)
         text_to_check = re.sub(
-            r'\*\s*[Cc]omparison rate calculated.*?(?:cost of the loan\.|$)',
+            r'\*\s*[Cc]omparison rate (?:of|calculated).*?(?:cost of the loan\.|$)',
             '', text, flags=re.DOTALL,
         )
 
@@ -188,6 +187,15 @@ class GuardrailChecker:
         valid_amounts.add(f"${amount:,.2f}")
         valid_amounts.add(f"${amount:,.0f}")
         valid_amounts.add(f"${int(amount):,}")
+
+        # Add pricing engine amounts as valid (monthly payment, establishment fee)
+        pricing = context.get('pricing', {})
+        if pricing.get('monthly_payment_number'):
+            mp = pricing['monthly_payment_number']
+            valid_amounts.add(f"${mp:,.2f}")
+        if pricing.get('establishment_fee_number'):
+            ef = pricing['establishment_fee_number']
+            valid_amounts.add(f"${ef:,.2f}")
 
         for found in found_amounts:
             cleaned = found.replace(',', '').replace('$', '')
@@ -204,8 +212,47 @@ class GuardrailChecker:
             except ValueError:
                 continue
 
+        # Validate percentages (interest rate, comparison rate) against pricing engine
+        if pricing:
+            valid_rates = set()
+            if pricing.get('interest_rate_number') is not None:
+                valid_rates.add(float(pricing['interest_rate_number']))
+            if pricing.get('comparison_rate_number') is not None:
+                valid_rates.add(float(pricing['comparison_rate_number']))
+
+            if valid_rates:
+                # Extract percentages from email, excluding common disclaimers
+                # (e.g. "80% LVR", "100% offset", percentage ranges in legal text)
+                pct_pattern = r'(\d+\.?\d*)\s*%'
+                # Exclude lines containing common disclaimer terms
+                disclaimer_pattern = re.compile(
+                    r'\b(?:LVR|offset|of\s+the\s+loan|'
+                    r'Financial Claims Scheme|government|'
+                    r'deposit|minimum|withdrawal|base rate)\b',
+                    re.IGNORECASE,
+                )
+                for line in text_to_check.split('\n'):
+                    if disclaimer_pattern.search(line):
+                        continue
+                    pct_matches = re.findall(pct_pattern, line)
+                    for pct_str in pct_matches:
+                        try:
+                            pct_val = float(pct_str)
+                        except ValueError:
+                            continue
+                        # Skip common non-rate percentages
+                        if pct_val in (0, 100) or pct_val > 30:
+                            continue
+                        # Check if this percentage matches a known valid rate
+                        is_valid_rate = any(
+                            abs(pct_val - vr) < 0.05
+                            for vr in valid_rates
+                        )
+                        if not is_valid_rate:
+                            issues.append(f"Unrecognized interest rate: {pct_str}%")
+
         passed = len(issues) == 0
-        details = "; ".join(issues) if issues else "All amounts verified"
+        details = "; ".join(issues) if issues else "All amounts and rates verified"
 
         return {
             'check_name': 'hallucinated_numbers',
@@ -317,11 +364,23 @@ class GuardrailChecker:
         missing = []
 
         if decision == 'approved':
-            has_next = any(phrase in text_lower for phrase in ['next step', 'next steps', 'what happens next', 'from here', 'to proceed', 'moving forward'])
+            has_next = any(phrase in text_lower for phrase in ['next step', 'next steps', 'what happens next', 'from here', 'to proceed'])
             if not has_next:
                 missing.append('next steps')
             if 'approved' not in text_lower and 'approval' not in text_lower:
                 missing.append('approval confirmation')
+            has_before_sign = any(phrase in text_lower for phrase in ['before you sign', 'before signing', 'take the time to read'])
+            if not has_before_sign:
+                missing.append('before-you-sign consumer protection notice')
+            has_hardship = any(phrase in text_lower for phrase in ['financial difficulty', 'hardship', 'financial hardship'])
+            if not has_hardship:
+                missing.append('financial hardship team reference')
+            has_cooling = any(phrase in text_lower for phrase in ['cooling-off', 'cooling off'])
+            if not has_cooling:
+                missing.append('cooling-off period notice')
+            has_afca = any(phrase in text_lower for phrase in ['afca', 'australian financial complaints authority', '1800 931 678'])
+            if not has_afca:
+                missing.append('AFCA dispute resolution reference')
         elif decision == 'denied':
             has_reasons = any(phrase in text_lower for phrase in ['reason', 'because', 'based on', 'due to', 'unfortunately', 'factor', 'criteria', 'unable to approve', 'not approved', 'unable to offer', 'not in a position'])
             if not has_reasons:
@@ -363,7 +422,7 @@ class GuardrailChecker:
 
         # Strip sign-off block (from "Regards" / "Kind regards" / "Sincerely" / "Warm regards" onward)
         end = len(lines)
-        sign_off_patterns = ('regards', 'kind regards', 'sincerely', 'warm regards', 'yours faithfully', 'best regards')
+        sign_off_patterns = ('regards', 'kind regards', 'sincerely', 'warm regards', 'yours faithfully', 'best regards', 'warmest regards')
         for i in range(len(lines) - 1, max(start - 1, -1), -1):
             stripped = lines[i].strip().lower().rstrip(',')
             if stripped in sign_off_patterns:
@@ -377,7 +436,7 @@ class GuardrailChecker:
         if decision == 'approved':
             limit = 650  # Formal structured approval letters with loan summary tables are longer
         else:
-            limit = 450
+            limit = 500  # Denial letters with empathetic tone, improvement steps, and credit report info
 
         passed = count <= limit
         details = (
@@ -458,32 +517,71 @@ class GuardrailChecker:
         }
 
     def run_all_checks(self, email_text, context):
-        """Run all guardrail checks and return results.
+        """Run all guardrail checks and return results with a quality score.
 
         Checks enforced (based on 20+ financial institution email etiquette rules):
-         1. Prohibited discriminatory language (ECOA, Sex/Racial/Disability/Age Discrimination Acts)
-         2. Hallucinated numbers (amounts must match application data)
+         1. Prohibited discriminatory language (Sex/Racial/Disability/Age Discrimination Acts)
+         2. Hallucinated numbers (amounts must match application data or pricing engine)
          3. Aggressive/threatening tone
-         4. Required elements per decision type (AFCA, credit report rights, next steps)
+         4. Required elements per decision type (next steps, hardship, cooling-off, AFCA, credit report)
          5. AI-giveaway language (phrases real bank officers never write)
          6. Professional financial language (no misleading claims, no guaranteed approvals)
          7. Plain text format (no markdown, HTML, or em dashes)
-         8. Word count limits (approval: 300, denial: 220)
+         8. Word count limits (approval: 650, denial: 500)
          9. Single sign-off structure (no double closings)
+        10. Sentence rhythm (warning only — flags suspiciously uniform AI-generated sentence lengths)
+
+        Returns list of check results. Each result includes a 'weight' field
+        indicating the severity impact on the quality score.
         """
         decision = context.get('decision', 'approved')
 
-        results = [
-            self.check_prohibited_language(email_text),
-            self.check_hallucinated_numbers(email_text, context),
-            self.check_tone(email_text),
-            self.check_required_elements(email_text, decision),
-            self.check_ai_giveaway_language(email_text),
-            self.check_professional_financial_language(email_text),
-            self.check_plain_text_format(email_text),
-            self.check_word_count(email_text, decision),
-            self.check_sign_off_structure(email_text),
-            self.check_sentence_rhythm(email_text),
+        # Each check has a weight reflecting its compliance severity.
+        # Weight is used to compute a 0-100 quality score.
+        checks = [
+            (self.check_prohibited_language, (email_text,), 25),          # critical — legal liability
+            (self.check_hallucinated_numbers, (email_text, context), 20), # critical — financial accuracy
+            (self.check_tone, (email_text,), 10),                        # high — brand/reputation
+            (self.check_required_elements, (email_text, decision), 15),   # critical — regulatory compliance
+            (self.check_ai_giveaway_language, (email_text,), 8),         # medium — authenticity
+            (self.check_professional_financial_language, (email_text,), 8), # medium — professionalism
+            (self.check_plain_text_format, (email_text,), 4),            # low — formatting
+            (self.check_word_count, (email_text, decision), 4),          # low — brevity
+            (self.check_sign_off_structure, (email_text,), 3),           # low — structure
+            (self.check_sentence_rhythm, (email_text,), 3),              # warning only — AI detection
         ]
 
+        results = []
+        total_weight = 0
+        passed_weight = 0
+
+        for check_fn, args, weight in checks:
+            result = check_fn(*args)
+            result['weight'] = weight
+            results.append(result)
+            total_weight += weight
+            if result['passed']:
+                passed_weight += weight
+
+        # Quality score: 0-100 based on weighted check results
+        quality_score = round((passed_weight / total_weight) * 100) if total_weight > 0 else 0
+
+        # Attach quality score to each result list (accessible as metadata)
+        for r in results:
+            r['quality_score'] = quality_score
+
         return results
+
+    def compute_quality_score(self, results):
+        """Extract the quality score from check results.
+
+        Quality score interpretation:
+          100: Perfect — all checks passed
+          90-99: Minor issues (formatting, rhythm) — safe to send
+          70-89: Moderate issues (AI language, word count) — review recommended
+          50-69: Significant issues (missing elements, tone) — retry needed
+          0-49: Critical issues (prohibited language, hallucinated numbers) — block
+        """
+        if not results:
+            return 0
+        return results[0].get('quality_score', 0)

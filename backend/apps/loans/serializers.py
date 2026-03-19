@@ -27,7 +27,7 @@ class LoanApplicationSerializer(serializers.ModelSerializer):
             'property_value', 'deposit_amount', 'monthly_expenses',
             'existing_credit_card_limit', 'number_of_dependants',
             'employment_type', 'applicant_type', 'purpose', 'home_ownership',
-            'has_cosigner', 'has_hecs', 'has_bankruptcy',
+            'has_cosigner', 'has_hecs', 'has_bankruptcy', 'state',
             'status', 'notes', 'created_at', 'updated_at', 'decision',
         )
         read_only_fields = ('id', 'status', 'created_at', 'updated_at', 'applicant')
@@ -39,7 +39,7 @@ class LoanApplicationCreateSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'annual_income', 'credit_score', 'loan_amount', 'loan_term_months',
             'debt_to_income', 'employment_length', 'purpose', 'home_ownership',
-            'has_cosigner', 'has_hecs', 'has_bankruptcy', 'notes',
+            'has_cosigner', 'has_hecs', 'has_bankruptcy', 'state', 'notes',
             'property_value', 'deposit_amount', 'monthly_expenses',
             'existing_credit_card_limit', 'number_of_dependants',
             'employment_type', 'applicant_type',

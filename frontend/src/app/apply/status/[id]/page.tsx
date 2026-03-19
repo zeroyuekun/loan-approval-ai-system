@@ -55,15 +55,6 @@ export default function CustomerApplicationStatusPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/apply">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back
-          </Link>
-        </Button>
-      </div>
-
       {/* Status Banner */}
       <Card>
         <CardContent className="flex items-center gap-6 py-8">
@@ -177,6 +168,12 @@ export default function CustomerApplicationStatusPage() {
           </CardContent>
         </Card>
       )}
+
+      <div className="flex justify-end mt-4">
+        <Button asChild>
+          <Link href="/apply">Finished</Link>
+        </Button>
+      </div>
     </div>
   )
 }

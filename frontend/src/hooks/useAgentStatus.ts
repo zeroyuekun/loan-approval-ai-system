@@ -40,6 +40,15 @@ export function useOrchestrate() {
       queryClient.invalidateQueries({ queryKey: ['application', loanId] })
       queryClient.invalidateQueries({ queryKey: ['email', loanId] })
     },
+    onError: (error: any) => {
+      // Surface throttle errors so the button doesn't just silently fail
+      if (error?.response?.status === 429) {
+        const retryAfter = error.response.headers?.['retry-after']
+        const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
+        throw new Error(`Rate limited — try again in ${waitSec}s`)
+      }
+      throw error
+    },
   })
 }
 

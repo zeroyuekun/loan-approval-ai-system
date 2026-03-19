@@ -3,9 +3,11 @@ import re
 import time
 
 import anthropic
+import httpx
 
 from .documentation import build_documentation_checklist
 from .guardrails import GuardrailChecker
+from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
 
 
@@ -43,7 +45,10 @@ class EmailGenerator:
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
         self.guardrail_checker = GuardrailChecker()
 
     # Map ML feature names to plain-language lending criteria (Banking Code para 81)
@@ -102,21 +107,22 @@ class EmailGenerator:
         }
 
         # Build banking context string from profile data
+        # Sanitize all string values to prevent prompt injection
         banking_context = 'No banking relationship data available'
         if profile_context:
             lines = []
             if profile_context.get('account_tenure_years'):
-                lines.append(f"- Account tenure: {profile_context['account_tenure_years']} years")
+                lines.append(f"- Account tenure: {_sanitize_prompt_input(str(profile_context['account_tenure_years']), max_length=50)} years")
             if profile_context.get('loyalty_tier'):
-                lines.append(f"- Loyalty tier: {profile_context['loyalty_tier']}")
+                lines.append(f"- Loyalty tier: {_sanitize_prompt_input(str(profile_context['loyalty_tier']), max_length=100)}")
             if profile_context.get('num_products'):
-                lines.append(f"- Total banking products: {profile_context['num_products']}")
+                lines.append(f"- Total banking products: {_sanitize_prompt_input(str(profile_context['num_products']), max_length=50)}")
             if profile_context.get('on_time_payment_pct') is not None:
-                lines.append(f"- On-time payment rate: {profile_context['on_time_payment_pct']:.1f}%")
+                lines.append(f"- On-time payment rate: {float(profile_context['on_time_payment_pct']):.1f}%")
             if profile_context.get('savings_balance') is not None:
                 lines.append(f"- Savings balance: ${float(profile_context['savings_balance']):,.2f}")
             if profile_context.get('previous_loans_repaid'):
-                lines.append(f"- Previous loans repaid: {profile_context['previous_loans_repaid']}")
+                lines.append(f"- Previous loans repaid: {_sanitize_prompt_input(str(profile_context['previous_loans_repaid']), max_length=50)}")
             if profile_context.get('has_credit_card'):
                 lines.append('- Existing credit card holder')
             if profile_context.get('has_mortgage'):
@@ -132,6 +138,25 @@ class EmailGenerator:
         # Build prompt
         if decision == 'approved':
             documentation_checklist = build_documentation_checklist(application)
+
+            # Calculate real pricing for the loan
+            pricing = calculate_loan_pricing(application)
+            pricing_context = (
+                f"=== LOAN PRICING (use these EXACT figures in the email) ===\n"
+                f"Interest Rate: {pricing['interest_rate']} ({pricing['rate_type']})\n"
+                f"Comparison Rate: {pricing['comparison_rate']}*\n"
+                f"Loan Term: {pricing['loan_term_display']}\n"
+                f"Estimated Monthly Payment: {pricing['monthly_payment']}\n"
+                f"Establishment Fee: {pricing['establishment_fee']}\n"
+                f"First Repayment Date: {pricing['first_repayment_date']}\n"
+                f"Sign-by Date: {pricing['sign_by_date']}\n"
+                f"Comparison Rate Benchmark: {pricing['comparison_benchmark']}\n"
+                f"\n"
+                f"IMPORTANT: Use these exact numbers in the email. Do NOT use placeholders "
+                f"like [X.XX] for any of the above values. These have been calculated by "
+                f"our product pricing engine based on the applicant's credit profile."
+            )
+
             prompt = APPROVAL_EMAIL_PROMPT.format(
                 applicant_name=applicant_name,
                 loan_amount=float(application.loan_amount),
@@ -144,6 +169,11 @@ class EmailGenerator:
                 documentation_checklist=documentation_checklist,
                 banking_context=banking_context,
             )
+            # Append pricing context after the main prompt
+            prompt += f"\n\n{pricing_context}"
+
+            # Store pricing in context for guardrail validation
+            context['pricing'] = pricing
         else:
             reasons = self._format_denial_reasons(
                 application.decision.feature_importances
@@ -158,11 +188,31 @@ class EmailGenerator:
                 banking_context=banking_context,
             )
 
-        # Add retry feedback if not first attempt
+        # Add retry feedback if not first attempt.
+        # The feedback is structured to tell Claude exactly what failed,
+        # why it failed, and what the correct fix looks like. This
+        # graduated approach produces better corrections than just
+        # restating the error.
         if attempt > 1:
             feedback = self._last_feedback
-            prompt += f"\n\nIMPORTANT: Previous attempt failed guardrail checks: {feedback}. Please fix these issues and ensure compliance with all requirements."
-            prompt += f"\n\n(This is generation attempt {attempt} of {self.MAX_RETRIES}.)"
+            prompt += (
+                f"\n\n=== RETRY FEEDBACK (Attempt {attempt}/{self.MAX_RETRIES}) ===\n"
+                f"Your previous email FAILED the following compliance checks:\n\n"
+                f"{feedback}\n\n"
+                f"RULES FOR THIS RETRY:\n"
+                f"1. Fix ONLY the issues listed above. Do not change parts that were correct.\n"
+                f"2. If a check flagged a specific phrase, remove or replace that exact phrase.\n"
+                f"3. If a required element is missing, add it in the correct section.\n"
+                f"4. If a number was hallucinated, use ONLY the figures provided in the pricing section.\n"
+                f"5. Do not add apologies about the retry or mention that this is a corrected version.\n"
+                f"6. Maintain the same overall structure and tone — just fix the flagged issues.\n"
+            )
+            if attempt == self.MAX_RETRIES:
+                prompt += (
+                    f"\nThis is your FINAL attempt. If guardrails fail again, the email "
+                    f"will be escalated to human review. Be conservative: when in doubt, "
+                    f"use simpler language and stick to the exact template structure.\n"
+                )
 
         # Call Claude API
         from django.conf import settings as django_settings
@@ -181,12 +231,35 @@ class EmailGenerator:
 
         # Run guardrails (warning-severity checks provide retry feedback but do not block)
         guardrail_results = self.guardrail_checker.run_all_checks(body, context)
+        quality_score = self.guardrail_checker.compute_quality_score(guardrail_results)
         all_passed = all(r['passed'] for r in guardrail_results if r.get('severity') != 'warning')
 
-        # Retry if guardrails failed and we have attempts left
+        # Retry if guardrails failed and we have attempts left.
+        # Structured feedback tells Claude exactly what to fix.
         if not all_passed and attempt < self.MAX_RETRIES:
             failed_checks = [r for r in guardrail_results if not r['passed']]
-            self._last_feedback = "; ".join(f"{r['check_name']}: {r['details']}" for r in failed_checks)
+            # Group failures by severity for clearer feedback
+            critical = [r for r in failed_checks if r.get('weight', 0) >= 15]
+            moderate = [r for r in failed_checks if 5 <= r.get('weight', 0) < 15]
+            minor = [r for r in failed_checks if r.get('weight', 0) < 5]
+
+            feedback_parts = []
+            if critical:
+                feedback_parts.append(
+                    "CRITICAL (must fix): " +
+                    "; ".join(f"{r['check_name']}: {r['details']}" for r in critical)
+                )
+            if moderate:
+                feedback_parts.append(
+                    "MODERATE (should fix): " +
+                    "; ".join(f"{r['check_name']}: {r['details']}" for r in moderate)
+                )
+            if minor:
+                feedback_parts.append(
+                    "MINOR (nice to fix): " +
+                    "; ".join(f"{r['check_name']}: {r['details']}" for r in minor)
+                )
+            self._last_feedback = "\n".join(feedback_parts)
             return self.generate(application, decision, attempt=attempt + 1, confidence=confidence, profile_context=profile_context)
 
         return {
@@ -195,6 +268,7 @@ class EmailGenerator:
             'prompt_used': prompt,
             'guardrail_results': guardrail_results,
             'passed_guardrails': all_passed,
+            'quality_score': quality_score,
             'generation_time_ms': generation_time,
             'attempt_number': attempt,
         }

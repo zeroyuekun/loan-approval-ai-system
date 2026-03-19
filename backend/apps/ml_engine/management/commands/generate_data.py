@@ -1,5 +1,7 @@
+import math
 import random
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 
@@ -242,14 +244,105 @@ class Command(BaseCommand):
                     purpose=row['purpose'],
                     home_ownership=row['home_ownership'],
                     has_cosigner=bool(row['has_cosigner']),
-                    property_value=row['property_value'] if row['property_value'] > 0 else None,
-                    deposit_amount=row['deposit_amount'] if row['deposit_amount'] > 0 else None,
-                    monthly_expenses=row['monthly_expenses'],
-                    existing_credit_card_limit=row['existing_credit_card_limit'],
+                    property_value=row['property_value'] if not (isinstance(row['property_value'], float) and math.isnan(row['property_value'])) and row['property_value'] > 0 else None,
+                    deposit_amount=row['deposit_amount'] if not (isinstance(row['deposit_amount'], float) and math.isnan(row['deposit_amount'])) and row['deposit_amount'] > 0 else None,
+                    monthly_expenses=row['monthly_expenses'] if not (isinstance(row['monthly_expenses'], float) and math.isnan(row['monthly_expenses'])) else None,
+                    existing_credit_card_limit=row['existing_credit_card_limit'] if not (isinstance(row['existing_credit_card_limit'], float) and math.isnan(row['existing_credit_card_limit'])) else 0,
                     number_of_dependants=int(row['number_of_dependants']),
                     employment_type=row['employment_type'],
                     applicant_type=row['applicant_type'],
+                    has_hecs=bool(row.get('has_hecs', 0)),
+                    has_bankruptcy=bool(row.get('has_bankruptcy', 0)),
+                    state=row.get('state', 'NSW'),
                 )
                 created_count += 1
 
             self.stdout.write(self.style.SUCCESS(f'Created {created_count} LoanApplication records across {len(customers)} customers'))
+
+            # -------------------------------------------------------
+            # Named demo scenarios: 6 realistic Australian applicants
+            # that demonstrate key lending decision outcomes.
+            # -------------------------------------------------------
+            demo_scenarios = [
+                {
+                    'label': 'First Home Buyer Couple (Approved)',
+                    'username': 'sarah_chen',
+                    'annual_income': Decimal('152000.00'), 'credit_score': 810,
+                    'loan_amount': Decimal('680000.00'), 'loan_term_months': 360,
+                    'debt_to_income': Decimal('4.70'), 'employment_length': 6,
+                    'purpose': 'home', 'home_ownership': 'rent', 'has_cosigner': False,
+                    'property_value': Decimal('850000.00'), 'deposit_amount': Decimal('170000.00'),
+                    'monthly_expenses': Decimal('3400.00'), 'existing_credit_card_limit': Decimal('10000.00'),
+                    'number_of_dependants': 0, 'employment_type': 'payg_permanent',
+                    'applicant_type': 'couple', 'has_hecs': True, 'has_bankruptcy': False, 'state': 'NSW',
+                },
+                {
+                    'label': 'Regional Upgrader (Approved)',
+                    'username': 'liam_oconnor',
+                    'annual_income': Decimal('185000.00'), 'credit_score': 890,
+                    'loan_amount': Decimal('520000.00'), 'loan_term_months': 300,
+                    'debt_to_income': Decimal('3.10'), 'employment_length': 12,
+                    'purpose': 'home', 'home_ownership': 'mortgage', 'has_cosigner': False,
+                    'property_value': Decimal('780000.00'), 'deposit_amount': Decimal('260000.00'),
+                    'monthly_expenses': Decimal('3800.00'), 'existing_credit_card_limit': Decimal('15000.00'),
+                    'number_of_dependants': 2, 'employment_type': 'payg_permanent',
+                    'applicant_type': 'couple', 'has_hecs': False, 'has_bankruptcy': False, 'state': 'QLD',
+                },
+                {
+                    'label': 'Self-Employed Tradie (Borderline)',
+                    'username': 'marco_rossi',
+                    'annual_income': Decimal('135000.00'), 'credit_score': 760,
+                    'loan_amount': Decimal('620000.00'), 'loan_term_months': 360,
+                    'debt_to_income': Decimal('4.90'), 'employment_length': 5,
+                    'purpose': 'home', 'home_ownership': 'rent', 'has_cosigner': False,
+                    'property_value': Decimal('775000.00'), 'deposit_amount': Decimal('155000.00'),
+                    'monthly_expenses': Decimal('3200.00'), 'existing_credit_card_limit': Decimal('12000.00'),
+                    'number_of_dependants': 1, 'employment_type': 'self_employed',
+                    'applicant_type': 'single', 'has_hecs': False, 'has_bankruptcy': False, 'state': 'VIC',
+                },
+                {
+                    'label': 'Young Casual Worker (Denied - tenure)',
+                    'username': 'chloe_martin',
+                    'annual_income': Decimal('52000.00'), 'credit_score': 710,
+                    'loan_amount': Decimal('25000.00'), 'loan_term_months': 36,
+                    'debt_to_income': Decimal('2.80'), 'employment_length': 0,
+                    'purpose': 'personal', 'home_ownership': 'rent', 'has_cosigner': False,
+                    'property_value': None, 'deposit_amount': None,
+                    'monthly_expenses': Decimal('1800.00'), 'existing_credit_card_limit': Decimal('3000.00'),
+                    'number_of_dependants': 0, 'employment_type': 'payg_casual',
+                    'applicant_type': 'single', 'has_hecs': True, 'has_bankruptcy': False, 'state': 'VIC',
+                },
+                {
+                    'label': 'High-DTI Investor (Denied - APRA cap)',
+                    'username': 'raj_patel',
+                    'annual_income': Decimal('210000.00'), 'credit_score': 850,
+                    'loan_amount': Decimal('1300000.00'), 'loan_term_months': 360,
+                    'debt_to_income': Decimal('6.20'), 'employment_length': 15,
+                    'purpose': 'home', 'home_ownership': 'mortgage', 'has_cosigner': False,
+                    'property_value': Decimal('1625000.00'), 'deposit_amount': Decimal('325000.00'),
+                    'monthly_expenses': Decimal('4500.00'), 'existing_credit_card_limit': Decimal('25000.00'),
+                    'number_of_dependants': 3, 'employment_type': 'payg_permanent',
+                    'applicant_type': 'couple', 'has_hecs': False, 'has_bankruptcy': False, 'state': 'NSW',
+                },
+                {
+                    'label': 'Bankruptcy Recovery (Denied - bankruptcy)',
+                    'username': 'tom_anderson',
+                    'annual_income': Decimal('78000.00'), 'credit_score': 620,
+                    'loan_amount': Decimal('15000.00'), 'loan_term_months': 36,
+                    'debt_to_income': Decimal('2.10'), 'employment_length': 3,
+                    'purpose': 'personal', 'home_ownership': 'rent', 'has_cosigner': False,
+                    'property_value': None, 'deposit_amount': None,
+                    'monthly_expenses': Decimal('2200.00'), 'existing_credit_card_limit': Decimal('0.00'),
+                    'number_of_dependants': 1, 'employment_type': 'payg_permanent',
+                    'applicant_type': 'single', 'has_hecs': False, 'has_bankruptcy': True, 'state': 'SA',
+                },
+            ]
+
+            self.stdout.write('Creating named demo scenarios...')
+            for scenario in demo_scenarios:
+                user = CustomUser.objects.filter(username=scenario['username']).first()
+                if not user:
+                    continue
+                fields = {k: v for k, v in scenario.items() if k not in ('label', 'username')}
+                LoanApplication.objects.create(applicant=user, **fields)
+                self.stdout.write(f'  Created: {scenario["label"]}')

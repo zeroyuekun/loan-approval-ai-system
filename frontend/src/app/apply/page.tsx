@@ -1,11 +1,9 @@
 'use client'
 
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/lib/auth'
 import { authApi } from '@/lib/api'
 import { useApplications } from '@/hooks/useApplications'
-import { ApplicationForm } from '@/components/applications/ApplicationForm'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,7 +26,6 @@ const FIELD_LABELS: Record<string, string> = {
 
 export default function CustomerApplyPage() {
   const { user } = useAuth()
-  const [showForm, setShowForm] = useState(false)
   const { data, isLoading } = useApplications()
 
   const { data: profile, isLoading: profileLoading } = useQuery<CustomerProfile>({
@@ -42,16 +39,6 @@ export default function CustomerApplyPage() {
   const profileComplete = profile?.is_profile_complete ?? false
   const applications = data?.results || []
 
-  if (showForm) {
-    return (
-      <div>
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold">New Loan Application</h2>
-        </div>
-        <ApplicationForm onSuccessPath="/apply/status" />
-      </div>
-    )
-  }
 
   const ProfileBanner = () => {
     if (profileLoading || profileComplete) return null
@@ -71,11 +58,6 @@ export default function CustomerApplyPage() {
                 Missing: {missing.map(f => FIELD_LABELS[f] || f.replace(/_/g, ' ')).join(', ')}
               </p>
             )}
-            <Link href="/dashboard/profile">
-              <Button size="sm" className="mt-1">
-                Complete Profile
-              </Button>
-            </Link>
           </div>
         </CardContent>
       </Card>
@@ -111,12 +93,14 @@ export default function CustomerApplyPage() {
                 : 'Complete your profile to submit your first loan application.'}
             </p>
             {profileComplete ? (
-              <Button onClick={() => setShowForm(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Apply Now
-              </Button>
+              <Link href="/apply/new">
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Apply Now
+                </Button>
+              </Link>
             ) : (
-              <Link href="/dashboard/profile">
+              <Link href="/apply/profile">
                 <Button>Complete Profile</Button>
               </Link>
             )}
@@ -126,16 +110,13 @@ export default function CustomerApplyPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">Your Applications</h3>
-            <Button
-              onClick={() => setShowForm(true)}
-              size="sm"
-              disabled={!profileComplete}
-              title={profileComplete ? undefined : 'Complete your profile to apply'}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Apply Now
-            </Button>
+            <Link href={profileComplete ? '/apply/new' : '/apply/profile'}>
+              <Button size="sm">
+                Apply Now
+              </Button>
+            </Link>
           </div>
+          <div className="space-y-3">
           {applications.map((app) => (
             <Link key={app.id} href={`/apply/status/${app.id}`}>
               <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
@@ -164,6 +145,7 @@ export default function CustomerApplyPage() {
               </Card>
             </Link>
           ))}
+          </div>
         </div>
       )}
     </div>

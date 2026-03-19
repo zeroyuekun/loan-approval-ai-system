@@ -34,6 +34,7 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
   const [orchestrating, setOrchestrating] = useState(false)
   const [pipelineQueued, setPipelineQueued] = useState(false)
   const [preRunAgentId, setPreRunAgentId] = useState<string | null>(null)
+  const [pipelineError, setPipelineError] = useState<string | null>(null)
 
   // Fetch agent run with polling awareness — keeps polling while pipeline is queued
   const { data: agentRunFetched } = useAgentRun(application.id, { pipelineQueued })
@@ -56,16 +57,30 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
     }
   }, [agentRun?.id, agentRun?.status, pipelineQueued, preRunAgentId, onRefresh])
 
+  // Safety timeout: if pipelineQueued stays true for over 2 minutes,
+  // force-reset so the button isn't stuck forever.
+  useEffect(() => {
+    if (!pipelineQueued) return
+    const timer = setTimeout(() => {
+      setPipelineQueued(false)
+      setPreRunAgentId(null)
+      setPipelineError('Pipeline timed out. Please try again.')
+    }, 120_000)
+    return () => clearTimeout(timer)
+  }, [pipelineQueued])
+
   const handleOrchestrate = async () => {
     setOrchestrating(true)
+    setPipelineError(null)
     // Snapshot the current agent run ID so we can detect when a new one appears
     setPreRunAgentId(agentRun?.id ?? null)
     try {
       await orchestrate.mutateAsync(application.id)
       setPipelineQueued(true)
       onRefresh?.()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Orchestration failed:', error)
+      setPipelineError(error?.message || 'Pipeline failed to start. Please try again.')
       setPreRunAgentId(null)
     } finally {
       setOrchestrating(false)
@@ -200,32 +215,32 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
 
       {/* Actions */}
       <Card>
-        <CardContent className="flex items-center justify-center gap-4 py-6">
-          <Button
-            size="lg"
-            onClick={handleOrchestrate}
-            disabled={pipelineDisabled}
-            variant={pipelineQueued ? 'outline' : 'default'}
-          >
-            {orchestrating ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Running AI Pipeline...
-              </>
-            ) : pipelineQueued ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Pipeline Queued — Processing...
-              </>
-            ) : (
-              <>
-                <Bot className="mr-2 h-4 w-4" />
-                {application.status === 'pending' ? 'Run AI Pipeline' : 'Re-run AI Pipeline'}
-              </>
-            )}
-          </Button>
-
-          {onDelete && (
+        <CardContent className="flex flex-col items-center gap-3 py-6">
+          <div className="flex items-center justify-center gap-4">
+            <Button
+              size="lg"
+              onClick={handleOrchestrate}
+              disabled={pipelineDisabled}
+              variant={pipelineQueued ? 'outline' : 'default'}
+            >
+              {orchestrating ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Running AI Pipeline...
+                </>
+              ) : pipelineQueued ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Pipeline Queued — Processing...
+                </>
+              ) : (
+                <>
+                  <Bot className="mr-2 h-4 w-4" />
+                  {application.status === 'pending' ? 'Run AI Pipeline' : 'Re-run AI Pipeline'}
+                </>
+              )}
+            </Button>
+            {onDelete && (
             !showDeleteConfirm ? (
               <Button
                 variant="destructive"
@@ -257,6 +272,10 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
                 </Button>
               </div>
             )
+          )}
+          </div>
+          {pipelineError && (
+            <p className="text-sm text-red-600">{pipelineError}</p>
           )}
         </CardContent>
       </Card>

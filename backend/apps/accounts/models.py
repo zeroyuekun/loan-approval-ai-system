@@ -265,12 +265,17 @@ class CustomerProfile(models.Model):
     @property
     def is_profile_complete(self):
         """True when all fields required for a loan application have been filled in."""
-        return all(getattr(self, f, None) for f in self.REQUIRED_PROFILE_FIELDS)
+        return not self.missing_profile_fields
 
     @property
     def missing_profile_fields(self):
         """Return a list of required field names that are still empty."""
-        return [f for f in self.REQUIRED_PROFILE_FIELDS if not getattr(self, f, None)]
+        missing = []
+        for f in self.REQUIRED_PROFILE_FIELDS:
+            val = getattr(self, f, None)
+            if val is None or val == '':
+                missing.append(f)
+        return missing
 
     @property
     def is_loyal_customer(self):

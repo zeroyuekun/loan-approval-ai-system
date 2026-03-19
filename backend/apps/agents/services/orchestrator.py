@@ -67,7 +67,19 @@ class PipelineOrchestrator:
                 .get(pk=application_id)
             )
             if application.status == 'processing':
-                raise ValueError('Pipeline already running for this application')
+                # If processing for more than 5 minutes, treat as stale/stuck
+                from django.utils import timezone as tz
+                stale_threshold = tz.now() - tz.timedelta(minutes=5)
+                if application.updated_at > stale_threshold:
+                    raise ValueError('Pipeline already running for this application')
+                logger.warning(
+                    'Application %s: stale processing status (updated_at=%s), resetting',
+                    application_id, application.updated_at,
+                )
+                # Mark any zombie agent runs as failed
+                AgentRun.objects.filter(
+                    application=application, status__in=('pending', 'running'),
+                ).update(status='failed', error='Stale pipeline — automatically cleared')
             application.status = 'processing'
             application.save(update_fields=['status'])
 
@@ -582,7 +594,7 @@ class PipelineOrchestrator:
                 logger.info('Application %s: marketing send_approved=%s', application.pk, send_approved)
 
                 # Single save point for MarketingEmail
-                MarketingEmail.objects.create(
+                marketing_email_obj = MarketingEmail.objects.create(
                     agent_run=agent_run,
                     application=application,
                     subject=email_result_marketing['subject'],
@@ -593,6 +605,13 @@ class PipelineOrchestrator:
                     passed_guardrails=email_result_marketing['passed_guardrails'],
                     guardrail_results=email_result_marketing['guardrail_results'],
                 )
+
+                # Link the marketing BiasReport to the MarketingEmail record
+                BiasReport.objects.filter(
+                    agent_run=agent_run,
+                    report_type='marketing',
+                    marketing_email__isnull=True,
+                ).update(marketing_email=marketing_email_obj)
 
                 # Send if approved
                 if send_approved:

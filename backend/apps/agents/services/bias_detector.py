@@ -4,6 +4,7 @@ import os
 import re
 
 import anthropic
+import httpx
 from django.conf import settings as django_settings
 
 from .deterministic_prescreen import DeterministicBiasPreScreen
@@ -153,7 +154,10 @@ class BiasDetector:
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
         self.prescreener = DeterministicBiasPreScreen()
 
     def analyze(self, email_text, application_context):
@@ -232,14 +236,19 @@ class BiasDetector:
         # This is the ONLY case where LLM adds value — interpreting whether
         # a flagged phrase is genuinely discriminatory or a false positive
         # (e.g., prohibited term appearing in a legal disclosure context).
+        # The junior analyst's mandate is NARROW: classify each flag, nothing more.
+        # Finding new issues is the senior reviewer's job (Layer 3).
         logger.info('Bias pre-screen: moderate findings, deterministic_score=%d — invoking LLM for interpretation', det_score)
 
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
         sanitized_purpose = _sanitize_prompt_input(str(application_context.get('purpose', 'N/A')), max_length=200)
         sanitized_decision = _sanitize_prompt_input(str(application_context.get('decision', 'N/A')), max_length=20)
         prescreen_summary = self._format_prescreen_results(prescreen)
+        flag_detail = self._format_flag_detail(prescreen)
 
-        prompt = f"""You are a compliance analyst at an Australian bank called AussieLoanAI. Your deterministic compliance system has flagged potential issues in a loan decision email. Your job is to determine whether the flags are genuine bias concerns or false positives.
+        prompt = f"""You are a compliance analyst at an Australian bank called AussieLoanAI. You have been on the team for two years. You follow the checklist. You do not editorialize.
+
+Your deterministic compliance system flagged specific issues in a loan decision email. Your ONLY job is to classify each flag as genuine or false positive. You are NOT looking for new issues — that is your senior's job.
 
 === EMAIL TEXT ===
 {sanitized_email}
@@ -249,21 +258,26 @@ class BiasDetector:
 - Purpose: {sanitized_purpose}
 - Decision: {sanitized_decision}
 
-=== DETERMINISTIC FLAGS ===
-{prescreen_summary}
+=== DETERMINISTIC FLAGS (classify each one) ===
+{flag_detail}
 
 === YOUR TASK ===
-The deterministic system flagged this email with a score of {det_score}/100. Review the specific flags above and determine:
-1. Are any of the flagged phrases genuinely discriminatory, or are they false positives (e.g., legal disclosures, standard financial terminology)?
-2. Did the deterministic system miss any subtle bias the flags hint at?
+For EACH flag listed above, determine:
+- Is the flagged phrase genuinely discriminatory or problematic in context?
+- Or is it a false positive? Common false positives include:
+  - Legal disclosures that reference discrimination Acts (REQUIRED BY LAW, not evidence of bias)
+  - Standard financial terminology (income, credit score, DTI, employment tenure)
+  - Regulatory compliance text (cooling-off periods, AFCA references, hardship provisions)
+  - Professional banking language that regex misidentified
+
+DO NOT look for issues beyond what was flagged. Stay in your lane. If a flag is clearly a false positive, say so and move on. If a flag is genuine, cite the specific legislation or policy it violates.
 
 === SCORING ===
-- If the flags are false positives (legal disclosures, standard terms): score 0-30.
-- If the flags reveal genuine bias concerns: score matching the severity (40-100).
-- Standard financial language (income, credit score, DTI, employment tenure) is NEVER bias.
-- Legal disclosures referencing discrimination Acts are REQUIRED BY LAW, not evidence of bias.
+- If ALL flags are false positives (legal disclosures, standard terms): score 0-30.
+- If ANY flag reveals a genuine bias concern: score matching the severity (40-100).
+- Your score reflects ONLY the flags you were given, not a general assessment of the email.
 
-Use the record_bias_analysis tool to submit your findings."""
+Use the record_bias_analysis tool to submit your findings. In the analysis field, address each flag individually."""
 
         fallback = {
             'score': det_score,
@@ -307,7 +321,7 @@ Use the record_bias_analysis tool to submit your findings."""
         }
 
     def _format_prescreen_results(self, prescreen):
-        """Format pre-screen results for injection into the LLM prompt."""
+        """Format pre-screen results summary for injection into the LLM prompt."""
         lines = []
         checks = {
             'prohibited_language': 'Prohibited language',
@@ -322,23 +336,34 @@ Use the record_bias_analysis tool to submit your findings."""
         lines.append(f"- Pre-screen score: {prescreen['deterministic_score']}/100")
         return '\n'.join(lines)
 
+    def _format_flag_detail(self, prescreen):
+        """Format each individual flag with its details for the junior analyst."""
+        if not prescreen['findings']:
+            return 'No flags to classify.'
+        lines = []
+        for i, finding in enumerate(prescreen['findings'], 1):
+            check_name = finding.get('check_name', 'unknown')
+            details = finding.get('details', 'No details')
+            lines.append(f"Flag {i}: [{check_name}] {details}")
+        return '\n'.join(lines)
+
 
 # ---------------------------------------------------------------------------
 # Agent 2: Head of Compliance — senior review using a tougher model (Opus)
 # ---------------------------------------------------------------------------
 
 class AIEmailReviewer:
-    """Head of Compliance who reviews emails flagged by the junior analyst.
+    """Head of Compliance who does a holistic review of flagged emails.
 
-    Role: You are the Head of Compliance at an Australian bank. You have 18 years
-    in financial services regulation. You have seen three Royal Commissions. You
-    do not rubber-stamp your analyst's work — you interrogate it. If the junior
-    flagged something, you determine whether the flag is genuine or a false
-    positive. But you also look for things the junior MISSED: subtle framing,
-    coded language, implications that a less experienced analyst would overlook.
+    Mandate: The junior analyst and deterministic system already classified
+    specific flags (prohibited language, tone, etc). The senior's job is
+    DIFFERENT, not a stricter version of the same check. The senior reads the
+    email as a whole and looks for things regex and a junior analyst cannot
+    catch: subtle framing, coded language, contextual implications, tone shifts
+    that are individually compliant but discriminatory in aggregate.
 
-    You are tougher than the junior, not softer. You use a stronger model because
-    your judgment carries more weight — if you approve, the email ships.
+    Uses Opus (stronger model) because this requires deeper reasoning and the
+    decision carries more weight — if the senior approves, the email ships.
     """
 
     # Use Opus for the senior reviewer — tougher model, harder to fool
@@ -348,34 +373,52 @@ class AIEmailReviewer:
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
 
     def review(self, email_text, bias_result, application_context):
-        """Review a flagged email as the senior compliance authority."""
+        """Review a flagged email as the senior compliance authority.
+
+        The senior's mandate is DIFFERENT from the junior's, not stricter on the
+        same task. The junior classified deterministic flags. The senior does a
+        holistic review looking for things regex and a junior analyst cannot catch:
+        subtle framing, coded language, contextual implications, tone shifts.
+        """
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
         sanitized_analysis = _sanitize_prompt_input(str(bias_result.get('analysis', 'N/A')), max_length=2000)
         sanitized_purpose = _sanitize_prompt_input(str(application_context.get('purpose', 'N/A')), max_length=200)
         sanitized_decision = _sanitize_prompt_input(str(application_context.get('decision', 'N/A')), max_length=20)
 
-        prompt = f"""You are the Head of Compliance at AussieLoanAI, an Australian bank. You have 18 years in financial services regulation. You lived through the Hayne Royal Commission and know its specific recommendations:
-- Recommendation 1.1: Banks must act in the customer's best interests, not pass credit risk to consumers
-- Recommendation 4.9: No hawking of financial products
-- Recommendation 4.10: Do not cross-sell to vulnerable customers post-decline
+        prompt = f"""You are the Head of Compliance at AussieLoanAI, an Australian bank. You have 18 years in financial services regulation. You lived through the Hayne Royal Commission. You have personally drafted remediation programs after ASIC enforcement actions. You do not get nervous about compliance. You get precise.
 
-You have personally drafted remediation programs after ASIC enforcement actions. You do not get nervous about compliance — you get precise.
+=== WHAT HAS ALREADY BEEN CHECKED ===
+Your junior analyst and the deterministic system have ALREADY handled the following:
+- Prohibited language patterns (regex check against Australian discrimination Acts)
+- Tone violations (aggressive or inappropriate language)
+- Professional financial language compliance
+- AI-giveaway language detection
+- The junior classified each flag as genuine or false positive
 
-Your junior analyst flagged the following loan decision email with a bias score of {bias_result.get('score', 0)}/100. The email has landed on your desk.
+Junior's score: {bias_result.get('score', 0)}/100
+Junior's flag classifications: {sanitized_analysis}
+Categories the junior flagged: {', '.join(bias_result.get('categories', [])) or 'None'}
 
-Your job is NOT to rubber-stamp. You do two things:
+DO NOT re-check what the junior already covered. That work is done. If the junior flagged "debt-to-income ratio" as bias, that is not your problem to fix. Your job is different.
 
-1. INTERROGATE the junior's finding: Was it a genuine flag or a false positive? Junior analysts over-flag standard financial language. If the flagged phrase is just "debt-to-income ratio" or "employment tenure," dismiss it.
+=== YOUR MANDATE (different from the junior's) ===
+Read this email with 18 years of experience and look for what a two-year analyst and a regex engine CANNOT catch:
 
-2. LOOK FOR WHAT THE JUNIOR MISSED: Read the full email yourself. Your analyst is two years in — they catch obvious phrases but miss subtle framing, coded language, tone shifts, and implications. A sentence can be individually compliant but discriminatory in context.
+1. SUBTLE FRAMING: Does the email frame the customer's situation in a way that implies judgment about who they are rather than what their finances look like? A sentence can be individually compliant but discriminatory in context.
 
-=== JUNIOR ANALYST'S FINDINGS ===
-Score: {bias_result.get('score', 0)}/100
-Categories flagged: {', '.join(bias_result.get('categories', [])) or 'None'}
-Analysis: {sanitized_analysis}
+2. CODED LANGUAGE: Are there phrases that a sophisticated reader from a protected group would recognise as loaded, even though they pass a literal compliance check?
+
+3. CONTEXTUAL IMPLICATIONS: Given this is a {sanitized_decision} for ${application_context.get('loan_amount', 'N/A')} ({sanitized_purpose}), does the tone match what a Big 4 bank (CBA, Westpac, ANZ, NAB) would send? Would you sign off on this going out under your name?
+
+4. REGULATORY RISK: If ASIC pulled this email in a compliance audit, would you have to explain anything beyond standard lending language? Would it satisfy Banking Code of Practice 2025 para 81-91?
+
+5. CUSTOMER IMPACT: Would a customer from any protected group read this email differently than another customer receiving the same decision?
 
 === EMAIL TEXT ===
 {sanitized_email}
@@ -385,28 +428,19 @@ Analysis: {sanitized_analysis}
 - Purpose: {sanitized_purpose}
 - Decision: {sanitized_decision}
 
-=== YOUR DECISION FRAMEWORK ===
-Ask yourself these questions as a banker who has seen enforcement actions:
-
-1. If ASIC pulled this email in a compliance audit, would I have to explain anything? If yes, it fails.
-2. Would a customer from any protected group read this email differently than another customer? If yes, it fails.
-3. Is the language appropriate for a Big 4 bank in 2025? Would CBA, Westpac, ANZ, or NAB send this exact email? If not, why not?
-4. Would this email satisfy a Banking Code of Practice 2025 compliance audit under para 81-91?
-5. Did my junior flag something that is actually just standard lending language? If yes, overrule the flag.
-
-=== ASIC POST-HAYNE ENFORCEMENT PRIORITIES ===
-- Responsible lending violations (NCCP Act s 131, s 133)
-- Misleading advertising about credit terms (RG 234)
-- Pressure tactics targeting vulnerable customers
-- Cross-selling without suitability assessment (Firstmac Federal Court case 2024)
-
-Relevant legislation:
+=== RELEVANT LEGISLATION (for your reference, not for re-checking) ===
 - Sex Discrimination Act 1984 (s 22)
 - Racial Discrimination Act 1975 (s 15)
 - Disability Discrimination Act 1992 (s 24)
 - Age Discrimination Act 2004 (s 26)
-- NCCP Act 2009 (s 131, s 133, s 136) — responsible lending obligations
+- NCCP Act 2009 (s 131, s 133, s 136)
 - Banking Code of Practice 2025 (para 81-91)
+- Hayne Royal Commission Recommendations 1.1, 4.9, 4.10
+
+=== YOUR DECISION ===
+- approved=true means: "I have read this email with 18 years of experience and I see nothing that the junior and the regex missed. This email is safe to send."
+- approved=false means: "I found something the junior missed. This needs human review."
+- confidence reflects how certain you are. Below 0.70 triggers human escalation even if you approve, because the stakes are too high for a maybe.
 
 Use the record_review_decision tool to submit your decision."""
 
@@ -462,7 +496,10 @@ class MarketingBiasDetector:
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
         self.prescreener = DeterministicBiasPreScreen()
 
     def analyze(self, email_text, application_context):
@@ -528,7 +565,11 @@ class MarketingBiasDetector:
         sanitized_purpose = _sanitize_prompt_input(str(application_context.get('purpose', 'N/A')), max_length=200)
         prescreen_summary = self._format_prescreen_results(prescreen)
 
-        prompt = f"""You are a compliance analyst at AussieLoanAI. Your deterministic compliance system has flagged potential issues in a marketing email to a declined loan customer. Determine whether the flags are genuine concerns or false positives.
+        flag_detail = self._format_flag_detail(prescreen)
+
+        prompt = f"""You are a compliance analyst at AussieLoanAI. You have been on the team for two years. You follow the checklist. You do not editorialize.
+
+Your deterministic compliance system flagged specific issues in a marketing email to a declined loan customer. Your ONLY job is to classify each flag as genuine or false positive. You are NOT looking for new issues. That is your senior's job.
 
 === EMAIL TEXT ===
 {sanitized_email}
@@ -537,21 +578,26 @@ class MarketingBiasDetector:
 - Originally requested: ${application_context.get('loan_amount', 'N/A')} for {sanitized_purpose}
 - Decision: Declined
 
-=== DETERMINISTIC FLAGS ===
-{prescreen_summary}
+=== DETERMINISTIC FLAGS (classify each one) ===
+{flag_detail}
 
 === YOUR TASK ===
-The deterministic system flagged this email with a score of {det_score}/100. Review the flags and determine:
-1. Are the flagged phrases genuinely patronising, pressuring, or discriminatory?
-2. Or are they false positives (warm professional tone, standard product offers, legitimate retention language)?
+For EACH flag listed above, determine:
+- Is the flagged phrase genuinely patronising, pressuring, or discriminatory in context?
+- Or is it a false positive? Common false positives in marketing emails include:
+  - Professional warm tone misidentified as patronising
+  - Standard product presentation mistaken for pressure tactics
+  - Legitimate retention language (referencing tenure, payment history, savings) mistaken for manipulation
+  - Presenting alternative products with real numbers (this is the POINT of the email, not bias)
+
+DO NOT look for issues beyond what was flagged. Stay in your lane.
 
 === SCORING ===
-- False positives (professional tone, standard offers): score 0-30.
-- Genuine concerns (pressure tactics, patronising language, discriminatory steering): score matching severity (40-100).
-- Presenting alternative products with real numbers is the POINT of retention emails, not bias.
-- Referencing customer's banking relationship (tenure, payments, savings) for product matching is legitimate.
+- If ALL flags are false positives (professional tone, standard offers): score 0-30.
+- If ANY flag reveals a genuine concern: score matching severity (40-100).
+- Your score reflects ONLY the flags you were given, not a general assessment of the email.
 
-Use the record_marketing_bias_analysis tool to submit your findings."""
+Use the record_marketing_bias_analysis tool to submit your findings. In the analysis field, address each flag individually."""
 
         fallback = {
             'score': det_score,
@@ -592,7 +638,7 @@ Use the record_marketing_bias_analysis tool to submit your findings."""
         }
 
     def _format_prescreen_results(self, prescreen):
-        """Format pre-screen results for injection into the LLM prompt."""
+        """Format pre-screen results summary for injection into the LLM prompt."""
         lines = []
         checks = {
             'prohibited_language': 'Prohibited language',
@@ -610,23 +656,33 @@ Use the record_marketing_bias_analysis tool to submit your findings."""
         lines.append(f"- Pre-screen score: {prescreen['deterministic_score']}/100")
         return '\n'.join(lines)
 
+    def _format_flag_detail(self, prescreen):
+        """Format each individual flag with its details for the junior analyst."""
+        if not prescreen['findings']:
+            return 'No flags to classify.'
+        lines = []
+        for i, finding in enumerate(prescreen['findings'], 1):
+            check_name = finding.get('check_name', 'unknown')
+            details = finding.get('details', 'No details')
+            lines.append(f"Flag {i}: [{check_name}] {details}")
+        return '\n'.join(lines)
+
 
 # ---------------------------------------------------------------------------
 # Agent 4: Marketing Head of Compliance — senior review for marketing emails
 # ---------------------------------------------------------------------------
 
 class MarketingEmailReviewer:
-    """Senior compliance review for marketing emails, using a tougher model.
+    """Senior compliance review for marketing emails, focused on cross-selling risk.
 
-    Role: Same Head of Compliance, but now reviewing marketing material. You know
-    that marketing to declined customers is where banks get into trouble with ASIC.
-    You have seen remediation programs where banks had to refund customers who
-    were sold unsuitable products after a decline. You are protective of the
-    customer — if there is any doubt, the email does not ship.
+    Mandate: The junior analyst and deterministic system already classified
+    specific flags (patronising language, pressure tactics, etc). The senior's
+    job is DIFFERENT: assess whether the email as a whole crosses the line from
+    genuine customer retention into exploitative cross-selling. This is the
+    area where Australian banks get into trouble with ASIC (Hayne 4.9, 4.10).
 
-    But you are also a banker. You understand that retention is legitimate. A good
-    alternative offer genuinely helps the customer. Your job is to tell the
-    difference between helpful retention and exploitative cross-selling.
+    Uses Opus because distinguishing helpful retention from exploitation requires
+    judgment that a pattern-matching system or junior analyst cannot provide.
     """
 
     MODEL = 'claude-opus-4-20250514'
@@ -635,29 +691,55 @@ class MarketingEmailReviewer:
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
 
     def review(self, email_text, bias_result, application_context):
-        """Senior review of a flagged marketing email."""
+        """Senior review of a flagged marketing email.
+
+        The senior's mandate for marketing emails is specifically about
+        cross-selling risk. The junior and regex already checked language
+        patterns. The senior asks: is this email genuinely helping the
+        customer, or is it exploiting a vulnerable person post-decline?
+        """
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
         sanitized_analysis = _sanitize_prompt_input(str(bias_result.get('analysis', 'N/A')), max_length=2000)
         sanitized_purpose = _sanitize_prompt_input(str(application_context.get('purpose', 'N/A')), max_length=200)
 
-        prompt = f"""You are the Head of Compliance at AussieLoanAI. You are reviewing a marketing follow-up email to a customer whose loan was declined. Your junior analyst flagged it with a score of {bias_result.get('score', 0)}/100.
+        prompt = f"""You are the Head of Compliance at AussieLoanAI. You are reviewing a marketing follow-up email to a customer whose loan was declined.
 
-You have 18 years in banking compliance. You know the Hayne Royal Commission's specific findings:
-- Recommendation 1.1: Banks must act in the customer's best interests
-- Recommendation 4.9: No hawking of financial products
-- Recommendation 4.10: Do not cross-sell to vulnerable customers post-decline
+=== WHAT HAS ALREADY BEEN CHECKED ===
+Your junior analyst and the deterministic system have ALREADY handled:
+- Prohibited language, tone violations, patronising language detection
+- Decline language references, false urgency, guaranteed approval claims
+- AI-giveaway language, professional financial language
+- The junior classified each flag as genuine or false positive
 
-You know that marketing to declined customers is where regulators pay the closest attention. ASIC's RG 234, the NCCP Act 2009 (s 131, s 133), and the Banking Code of Practice 2025 (para 89-91) are your reference points.
+Junior's score: {bias_result.get('score', 0)}/100
+Junior's flag classifications: {sanitized_analysis}
+Categories the junior flagged: {', '.join(bias_result.get('categories', [])) or 'None'}
 
-But you are also a banker who understands retention. A customer who was declined for a $500,000 home loan might genuinely benefit from a $15,000 secured personal loan. The question is not whether we offer alternatives — it is HOW we offer them.
+DO NOT re-check what the junior already covered. That work is done.
 
-=== JUNIOR ANALYST'S FINDINGS ===
-Score: {bias_result.get('score', 0)}/100
-Categories flagged: {', '.join(bias_result.get('categories', [])) or 'None'}
-Analysis: {sanitized_analysis}
+=== YOUR MANDATE (cross-selling risk, not language policing) ===
+Marketing to declined customers is where Australian banks get into trouble with ASIC. You have seen remediation programs where banks had to refund customers who were sold unsuitable products after a decline. Your job is to assess something the junior and regex cannot: whether this email crosses the line from helpful retention into exploitative cross-selling.
+
+Ask yourself these questions:
+
+1. IS THIS GENUINELY HELPING? A customer declined for a $500,000 home loan might genuinely benefit from a $15,000 secured personal loan. But are the alternatives in this email actually appropriate for this customer's financial position (originally requested ${application_context.get('loan_amount', 'N/A')} for {sanitized_purpose}), or does it look like product-pushing?
+
+2. IS THE TIMING APPROPRIATE? The customer just received a decline letter. Does this email respect that context, or does it feel like the bank is immediately trying to sell them something else? There is a difference between "here are some options that may suit you" and "don't worry, we have other products!"
+
+3. WOULD ASIC OBJECT? If this email appeared in an ASIC compliance review of your marketing practices to declined customers, would you need to explain it? Key enforcement priorities:
+   - Hayne Recommendation 4.9: No hawking of financial products
+   - Hayne Recommendation 4.10: Do not cross-sell to vulnerable customers post-decline
+   - Firstmac Federal Court case 2024: Cross-selling without suitability assessment
+   - NCCP Act 2009 (s 131, s 133): Responsible lending obligations
+   - Banking Code of Practice 2025 (para 89-91): Marketing must not be aggressive or misleading
+
+4. WOULD A BIG 4 BANK SEND THIS? Would CBA, Westpac, ANZ, or NAB send this exact email to a declined customer? If not, why not?
 
 === EMAIL TEXT ===
 {sanitized_email}
@@ -666,19 +748,10 @@ Analysis: {sanitized_analysis}
 - Originally requested: ${application_context.get('loan_amount', 'N/A')} for {sanitized_purpose}
 - Decision: Declined
 
-=== YOUR DECISION FRAMEWORK ===
-
-1. WOULD ASIC OBJECT? If this email appeared in an ASIC compliance review of your marketing practices to declined customers, would you need to explain it? If yes, it fails. Key enforcement priorities: responsible lending violations, misleading advertising (RG 234), pressure tactics on vulnerable customers, cross-selling without suitability assessment (Firstmac Federal Court case 2024).
-
-2. IS THE TONE RIGHT? The customer just got declined. Are we treating them with dignity, or are we immediately trying to sell them something else? There is a difference between "here are some options that may suit you" and "don't worry, we have other products!"
-
-3. ARE THE PRODUCTS APPROPRIATE? Based on the context, do the offered alternatives seem financially appropriate for this customer, or does it look like product-pushing?
-
-4. BANKING CODE COMPLIANCE? Would this email satisfy a Banking Code of Practice 2025 audit under para 89-91? Marketing must not be aggressive or misleading.
-
-5. DID THE JUNIOR GET IT RIGHT? Over-flagging wastes time. If the junior flagged "warm professional tone" as patronising, overrule it. But if the junior missed subtle pressure language, catch it.
-
-6. WOULD A BIG 4 BANK SEND THIS? Would CBA, Westpac, ANZ, or NAB send this exact email to a declined customer? If not, why not?
+=== YOUR DECISION ===
+- approved=true means: "This email genuinely helps the customer explore appropriate alternatives without pressure or exploitation."
+- approved=false means: "This crosses the line from retention into cross-selling risk. It needs human review."
+- confidence reflects how certain you are. Below 0.70 means human escalation.
 
 Use the record_marketing_review_decision tool to submit your decision."""
 

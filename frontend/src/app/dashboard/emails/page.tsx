@@ -39,6 +39,7 @@ function groupByCustomer(emails: GeneratedEmail[]): CustomerGroup[] {
 }
 
 export default function EmailsPage() {
+  const [search, setSearch] = useState('')
   const { data, isLoading } = useQuery<PaginatedResponse<GeneratedEmail>>({
     queryKey: ['emails'],
     queryFn: async () => {
@@ -74,7 +75,6 @@ export default function EmailsPage() {
     )
   }
 
-  const [search, setSearch] = useState('')
   const customerGroups = groupByCustomer(emails)
   const filtered = search.trim()
     ? customerGroups.filter((g) => g.applicant_name.toLowerCase().includes(search.toLowerCase()))

@@ -76,6 +76,7 @@ def sample_application(db, customer_user):
         applicant_type='single',
         has_hecs=False,
         has_bankruptcy=False,
+        state='NSW',
     )
 
 
@@ -102,6 +103,7 @@ def home_loan_application(db, customer_user):
         applicant_type='couple',
         has_hecs=True,
         has_bankruptcy=False,
+        state='VIC',
     )
 
 
@@ -126,28 +128,30 @@ def borderline_application(db, customer_user):
         applicant_type='single',
         has_hecs=False,
         has_bankruptcy=False,
+        state='VIC',
     )
 
 
 @pytest.fixture
 def denied_application(db, customer_user):
-    """High-risk: casual, high DTI, low credit, bankruptcy history."""
+    """Denied: casual worker, under 12 months tenure (single disqualifier)."""
     return LoanApplication.objects.create(
         applicant=customer_user,
-        annual_income=Decimal('48000.00'),
-        credit_score=580,
+        annual_income=Decimal('52000.00'),
+        credit_score=710,
         loan_amount=Decimal('20000.00'),
         loan_term_months=36,
-        debt_to_income=Decimal('5.50'),
-        employment_length=1,
+        debt_to_income=Decimal('2.40'),
+        employment_length=0,
         purpose='personal',
         home_ownership='rent',
         has_cosigner=False,
-        monthly_expenses=Decimal('2600.00'),
-        existing_credit_card_limit=Decimal('5000.00'),
-        number_of_dependants=3,
+        monthly_expenses=Decimal('1800.00'),
+        existing_credit_card_limit=Decimal('3000.00'),
+        number_of_dependants=0,
         employment_type='payg_casual',
         applicant_type='single',
         has_hecs=True,
-        has_bankruptcy=True,
+        has_bankruptcy=False,
+        state='QLD',
     )

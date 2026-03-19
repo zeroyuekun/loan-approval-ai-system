@@ -119,11 +119,6 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             'id', 'is_profile_complete', 'missing_profile_fields',
-            # Identity & compliance — must be changed via branch/admin (AML/CTF Act 2006)
-            'date_of_birth', 'residency_status',
-            'primary_id_type', 'primary_id_number',
-            'secondary_id_type', 'secondary_id_number',
-            'tax_file_number_provided', 'is_politically_exposed',
             # Computed
             'total_assets', 'total_monthly_liabilities',
             # Banking — managed by the bank
