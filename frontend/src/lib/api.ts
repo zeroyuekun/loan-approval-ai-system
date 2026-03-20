@@ -6,51 +6,61 @@ const api = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
+  withCredentials: true, // Send HttpOnly cookies with every request
 })
 
-// Request interceptor to add JWT token
+// Helper to read the CSRF token from the csrftoken cookie
+function getCsrfToken(): string | null {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
+  return match ? match[1] : null
+}
+
+// Request interceptor to add CSRF token for mutating requests
 api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+  const method = (config.method || '').toLowerCase()
+  if (['post', 'put', 'patch', 'delete'].includes(method)) {
+    const csrfToken = getCsrfToken()
+    if (csrfToken) {
+      config.headers['X-CSRFToken'] = csrfToken
     }
   }
   return config
 })
 
-// Module-level variable to deduplicate concurrent refresh requests
-let refreshPromise: Promise<string> | null = null
+// Response interceptor for token refresh via cookies
+let refreshPromise: Promise<void> | null = null
 
-// Response interceptor for token refresh
+// Paths where a 401 is expected and should NOT trigger a refresh/redirect cycle
+const AUTH_CHECK_PATHS = ['/auth/me/', '/auth/me/profile/']
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config
     const isRefreshRequest = originalRequest.url?.includes('/auth/refresh/')
+    const isAuthCheck = AUTH_CHECK_PATHS.some((p) => originalRequest.url?.includes(p))
+
+    // For auth-check requests (profile fetch on mount), just let the 401 propagate
+    // so useAuth can set user=null and redirect via React Router, not a hard reload
+    if (error.response?.status === 401 && isAuthCheck) {
+      return Promise.reject(error)
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry && !isRefreshRequest) {
       originalRequest._retry = true
       try {
         // Deduplicate: if a refresh is already in flight, reuse the same promise
         if (!refreshPromise) {
           refreshPromise = (async () => {
-            const refreshToken = localStorage.getItem('refresh_token')
-            if (!refreshToken) {
-              throw new Error('No refresh token')
-            }
-            const { data } = await axios.post(`${API_URL}/auth/refresh/`, { refresh: refreshToken })
-            localStorage.setItem('access_token', data.access)
-            return data.access as string
+            // Cookie-based refresh — server reads refresh_token from HttpOnly cookie
+            await axios.post(`${API_URL}/auth/refresh/`, {}, { withCredentials: true })
           })()
         }
-        const newToken = await refreshPromise
-        originalRequest.headers.Authorization = `Bearer ${newToken}`
+        await refreshPromise
         return api(originalRequest)
       } catch {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        localStorage.removeItem('user')
-        window.location.href = '/login'
+        // Refresh failed — let the error propagate; useAuth handles the redirect
         return Promise.reject(error)
       } finally {
         refreshPromise = null
@@ -73,6 +83,7 @@ export const authApi = {
   updateCustomerDetail: (userId: number, data: any) => api.patch(`/auth/customers/${userId}/profile/`, data),
   listCustomers: (params?: any) => api.get('/auth/customers/', { params }),
   getCustomerActivity: (userId: number) => api.get(`/auth/customers/${userId}/activity/`),
+  getCsrfToken: () => api.get('/auth/csrf/'),
 }
 
 // Loans
@@ -101,8 +112,11 @@ export const emailApi = {
 // Agents
 export const agentsApi = {
   orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/`),
+  orchestrateAll: () => api.post('/agents/orchestrate-all/'),
   getRuns: (params?: any) => api.get('/agents/runs/', { params }),
   getRun: (loanId: string) => api.get(`/agents/runs/${loanId}/`),
+  submitReview: (runId: string, data: { action: 'approve' | 'deny' | 'regenerate'; note?: string }) =>
+    api.post(`/agents/review/${runId}/`, data),
 }
 
 // Tasks

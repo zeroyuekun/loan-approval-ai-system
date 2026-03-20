@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle } from 'lucide-react'
-import { formatCurrency, formatDate, formatPercent, getStatusColor } from '@/lib/utils'
+import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils'
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,
@@ -72,31 +72,6 @@ export default function CustomerApplicationStatusPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Decision Details (only show if decided) */}
-      {decision && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Decision Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-4">
-              <Badge
-                className={decision.decision === 'approved' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}
-                variant="outline"
-              >
-                {decision.decision.toUpperCase()}
-              </Badge>
-              <span className="text-sm text-muted-foreground">
-                Confidence: {formatPercent(decision.confidence)}
-              </span>
-            </div>
-            {decision.reasoning && (
-              <p className="text-sm">{decision.reasoning}</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Application Summary */}
       <div className="grid gap-6 md:grid-cols-2">

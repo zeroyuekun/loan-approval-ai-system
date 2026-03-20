@@ -26,6 +26,9 @@ class AuditLog(models.Model):
         ordering = ['-timestamp']
         # Append-only: remove delete permissions
         default_permissions = ('add', 'view')
+        indexes = [
+            models.Index(fields=['user', '-timestamp'], name='auditlog_user_timestamp'),
+        ]
 
     def __str__(self):
         return f"[{self.timestamp}] {self.action} on {self.resource_type}({self.resource_id})"
@@ -152,6 +155,15 @@ class LoanDecision(models.Model):
     )
     confidence = models.FloatField()
     risk_score = models.FloatField(null=True, blank=True)
+    risk_grade = models.CharField(
+        max_length=5, blank=True, default='',
+        choices=[
+            ('AAA', 'AAA'), ('AA', 'AA'), ('A', 'A'),
+            ('BBB', 'BBB'), ('BB', 'BB'), ('B', 'B'),
+            ('CCC', 'CCC'),
+        ],
+        help_text='APS 220 internal risk grade',
+    )
     feature_importances = models.JSONField(default=dict)
     model_version = models.CharField(max_length=100)
     reasoning = models.TextField(blank=True)

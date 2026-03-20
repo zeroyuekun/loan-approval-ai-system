@@ -7,7 +7,9 @@ import { ApplicationTable } from '@/components/applications/ApplicationTable'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem } from '@/components/ui/select'
-import { Plus, Search } from 'lucide-react'
+import { Search, Loader2 } from 'lucide-react'
+import { agentsApi } from '@/lib/api'
+import { useQueryClient } from '@tanstack/react-query'
 
 export default function ApplicationsPage() {
   const [page, setPage] = useState(1)
@@ -15,6 +17,9 @@ export default function ApplicationsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [purposeFilter, setPurposeFilter] = useState('')
+  const [checkAllState, setCheckAllState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const [checkAllResult, setCheckAllResult] = useState<{ queued: number } | null>(null)
+  const queryClient = useQueryClient()
 
   // Debounce search input by 300ms
   useEffect(() => {
@@ -31,6 +36,30 @@ export default function ApplicationsPage() {
     status: statusFilter || undefined,
     purpose: purposeFilter || undefined,
   })
+
+  const handleCheckAll = async () => {
+    setCheckAllState('loading')
+    setCheckAllResult(null)
+    try {
+      const { data } = await agentsApi.orchestrateAll()
+      setCheckAllResult({ queued: data.queued })
+      setCheckAllState('done')
+      // Refresh the applications list after a short delay
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['applications'] })
+      }, 2000)
+      // Reset the button after 5 seconds
+      setTimeout(() => {
+        setCheckAllState('idle')
+        setCheckAllResult(null)
+      }, 5000)
+    } catch {
+      setCheckAllState('idle')
+      setCheckAllResult(null)
+    }
+  }
+
+  const pendingCount = data?.results?.filter((a) => a.status === 'pending').length ?? 0
 
   return (
     <div className="space-y-6">
@@ -68,12 +97,31 @@ export default function ApplicationsPage() {
             <SelectItem value="business">Business</SelectItem>
           </Select>
         </div>
-        <Link href="/dashboard/applications/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            New Application
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleCheckAll}
+            disabled={checkAllState === 'loading'}
+          >
+            {checkAllState === 'loading' ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Processing...
+              </>
+            ) : checkAllState === 'done' ? (
+              checkAllResult?.queued
+                ? `${checkAllResult.queued} queued`
+                : 'No pending apps'
+            ) : (
+              'Check All'
+            )}
           </Button>
-        </Link>
+          <Link href="/dashboard/applications/new">
+            <Button>
+              New Application
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <ApplicationTable

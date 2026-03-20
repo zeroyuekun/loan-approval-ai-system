@@ -18,11 +18,20 @@ class AgentRun(models.Model):
     steps = models.JSONField(default=list)  # [{step, status, started_at, completed_at, result}]
     total_time_ms = models.IntegerField(null=True)
     error = models.TextField(blank=True)
+
+    # Accumulated token/cost tracking across all API calls in this run
+    total_input_tokens = models.IntegerField(default=0)
+    total_output_tokens = models.IntegerField(default=0)
+    total_cost_usd = models.DecimalField(max_digits=8, decimal_places=6, default=0)
+
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['application', '-created_at'], name='agentrun_app_created'),
+        ]
 
     def __str__(self):
         return f"AgentRun {self.id} - {self.status}"
@@ -55,6 +64,12 @@ class BiasReport(models.Model):
     requires_human_review = models.BooleanField(default=False)
     ai_review_approved = models.BooleanField(null=True, default=None)
     ai_review_reasoning = models.TextField(blank=True, default='')
+
+    # Token tracking for LLM calls in this bias check
+    input_tokens = models.IntegerField(null=True, blank=True)
+    output_tokens = models.IntegerField(null=True, blank=True)
+    estimated_cost_usd = models.DecimalField(max_digits=8, decimal_places=6, null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

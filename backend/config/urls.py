@@ -81,8 +81,48 @@ def health_check(request):
     return JsonResponse({'status': 'ok'})
 
 
+def deep_health_check(request):
+    """Deep health check verifying DB, Redis, and ML model availability."""
+    checks = {}
+
+    # Database
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+        checks['database'] = 'ok'
+    except Exception as e:
+        checks['database'] = f'error: {e}'
+
+    # Redis
+    try:
+        from django.conf import settings as django_settings
+        import redis
+        broker_url = django_settings.CELERY_BROKER_URL
+        r = redis.from_url(broker_url, socket_connect_timeout=3)
+        r.ping()
+        checks['redis'] = 'ok'
+    except Exception as e:
+        checks['redis'] = f'error: {e}'
+
+    # Active ML model
+    try:
+        from apps.ml_engine.models import ModelVersion
+        active = ModelVersion.objects.filter(is_active=True).exists()
+        checks['ml_model'] = 'ok' if active else 'no active model'
+    except Exception as e:
+        checks['ml_model'] = f'error: {e}'
+
+    all_ok = all(v == 'ok' for v in checks.values())
+    status_code = 200 if all_ok else 503
+    checks['status'] = 'healthy' if all_ok else 'degraded'
+
+    return JsonResponse(checks, status=status_code)
+
+
 urlpatterns = [
     path('api/v1/health/', health_check, name='health-check'),
+    path('api/v1/health/deep/', deep_health_check, name='deep-health-check'),
     path('admin/', admin.site.urls),
     path('api/v1/auth/', include('apps.accounts.urls')),
     path('api/v1/loans/', include('apps.loans.urls')),

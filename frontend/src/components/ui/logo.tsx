@@ -82,25 +82,15 @@ export function LogoIcon({ className }: LogoIconProps) {
         />
       </g>
 
-      {/* Vertical strike-through lines (encrypted/glitch feel) */}
-      <line x1="16" y1="6.5" x2="16" y2="25.5" stroke="#c4b5fd" strokeWidth="1" opacity="0.25" />
-      <line x1="15.2" y1="7" x2="15.2" y2="25" stroke="#c4b5fd" strokeWidth="0.3" opacity="0.15" />
-      <line x1="16.8" y1="7" x2="16.8" y2="25" stroke="#c4b5fd" strokeWidth="0.3" opacity="0.15" />
-
-      {/* Main dollar sign — S curve with sharp edges */}
+      {/* Dollar sign — single unified path: vertical line + S curve */}
       <path
-        d="M20 11 C20 11 18.8 9.5 16 9.5 C13.2 9.5 11.5 10.8 11.5 12.6 C11.5 14.8 13.5 15.5 16 16 C18.5 16.5 20.5 17.3 20.5 19.4 C20.5 21.2 18.8 22.5 16 22.5 C13.2 22.5 12 21 12 21"
+        d="M16 7 L16 25 M20 11 C20 11 18.8 9.5 16 9.5 C13.2 9.5 11.5 10.8 11.5 12.6 C11.5 14.8 13.5 15.5 16 16 C18.5 16.5 20.5 17.3 20.5 19.4 C20.5 21.2 18.8 22.5 16 22.5 C13.2 22.5 12 21 12 21"
         stroke="url(#logo-dollar)"
         strokeWidth="2.2"
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
       />
-
-      {/* Top bar */}
-      <line x1="16" y1="7" x2="16" y2="9.5" stroke="url(#logo-dollar)" strokeWidth="2" strokeLinecap="round" />
-      {/* Bottom bar */}
-      <line x1="16" y1="22.5" x2="16" y2="25" stroke="url(#logo-dollar)" strokeWidth="2" strokeLinecap="round" />
 
       {/* Data-stream particles */}
       <circle cx="6" cy="11" r="0.7" fill="#818cf8" opacity="0.5" />

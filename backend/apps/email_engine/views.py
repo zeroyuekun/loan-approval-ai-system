@@ -6,28 +6,11 @@ from rest_framework.views import APIView
 
 from apps.email_engine.models import GeneratedEmail, GuardrailLog
 from apps.email_engine.tasks import generate_email_task
-from apps.loans.models import LoanApplication
+from apps.loans.permissions import check_loan_access
 
 
 class EmailGenerationThrottle(UserRateThrottle):
     rate = '10/hour'
-
-
-def _check_loan_access(user, loan_id):
-    """Return (application, error_response) tuple. error_response is None if access is allowed."""
-    try:
-        application = LoanApplication.objects.get(pk=loan_id)
-    except LoanApplication.DoesNotExist:
-        return None, Response(
-            {'error': 'Loan application not found'},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-    if user.role not in ('admin', 'officer') and application.applicant_id != user.id:
-        return None, Response(
-            {'error': 'You do not have permission to access this loan application'},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    return application, None
 
 
 class EmailListView(APIView):
@@ -100,9 +83,7 @@ class GenerateEmailView(APIView):
 
     def post(self, request, loan_id):
         """Trigger email generation for a loan application."""
-        _, error = _check_loan_access(request.user, loan_id)
-        if error:
-            return error
+        check_loan_access(request, loan_id)
 
         decision = request.data.get('decision', 'approved')
         if decision not in ('approved', 'denied'):
@@ -123,9 +104,7 @@ class EmailDetailView(APIView):
 
     def get(self, request, loan_id):
         """Return the latest generated email for an application."""
-        _, error = _check_loan_access(request.user, loan_id)
-        if error:
-            return error
+        check_loan_access(request, loan_id)
 
         email = GeneratedEmail.objects.filter(
             application_id=loan_id

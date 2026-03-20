@@ -1,7 +1,11 @@
 import logging
 
+from django.conf import settings as django_settings
 from django.contrib.auth.hashers import check_password, make_password
+from django.middleware.csrf import get_token as get_csrf_token
 from django.shortcuts import get_object_or_404
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -18,6 +22,91 @@ from .permissions import IsAdminOrOfficer
 from .serializers import AdminCustomerProfileUpdateSerializer, CustomerProfileSerializer, LoginSerializer, RegisterSerializer, StaffCustomerDetailSerializer, UserSerializer
 
 logger = logging.getLogger(__name__)
+
+
+def _set_jwt_cookies(response, access_token, refresh_token):
+    """Set JWT tokens as HttpOnly cookies on the response."""
+    secure = getattr(django_settings, 'JWT_COOKIE_SECURE', True)
+    samesite = getattr(django_settings, 'JWT_COOKIE_SAMESITE', 'Lax')
+    access_name = getattr(django_settings, 'JWT_ACCESS_COOKIE_NAME', 'access_token')
+    refresh_name = getattr(django_settings, 'JWT_REFRESH_COOKIE_NAME', 'refresh_token')
+
+    access_max_age = int(django_settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds())
+    refresh_max_age = int(django_settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds())
+
+    response.set_cookie(
+        access_name,
+        str(access_token),
+        max_age=access_max_age,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,
+        path='/',
+    )
+    response.set_cookie(
+        refresh_name,
+        str(refresh_token),
+        max_age=refresh_max_age,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,
+        path='/',
+    )
+    return response
+
+
+def _clear_jwt_cookies(response):
+    """Remove JWT cookies from the response."""
+    access_name = getattr(django_settings, 'JWT_ACCESS_COOKIE_NAME', 'access_token')
+    refresh_name = getattr(django_settings, 'JWT_REFRESH_COOKIE_NAME', 'refresh_token')
+    response.delete_cookie(access_name, path='/')
+    response.delete_cookie(refresh_name, path='/')
+    return response
+
+
+class CookieTokenRefreshView(generics.GenericAPIView):
+    """Refresh JWT tokens using the HttpOnly refresh cookie."""
+    permission_classes = (AllowAny,)
+
+    def post(self, request, *args, **kwargs):
+        refresh_name = getattr(django_settings, 'JWT_REFRESH_COOKIE_NAME', 'refresh_token')
+        raw_refresh = request.COOKIES.get(refresh_name) or request.data.get('refresh')
+        if not raw_refresh:
+            return Response(
+                {'detail': 'No refresh token provided.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        try:
+            refresh = RefreshToken(raw_refresh)
+            new_access = refresh.access_token
+
+            # Rotate refresh token if configured
+            if django_settings.SIMPLE_JWT.get('ROTATE_REFRESH_TOKENS', False):
+                if django_settings.SIMPLE_JWT.get('BLACKLIST_AFTER_ROTATION', False):
+                    try:
+                        refresh.blacklist()
+                    except AttributeError:
+                        pass
+                refresh = RefreshToken.for_user(
+                    self._get_user_from_token(refresh)
+                )
+                new_access = refresh.access_token
+
+            response = Response({'detail': 'Token refreshed.'})
+            _set_jwt_cookies(response, new_access, refresh)
+            return response
+        except Exception:
+            response = Response(
+                {'detail': 'Token is invalid or expired.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+            _clear_jwt_cookies(response)
+            return response
+
+    def _get_user_from_token(self, token):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        return User.objects.get(pk=token['user_id'])
 
 
 class LoginRateThrottle(AnonRateThrottle):
@@ -49,13 +138,13 @@ class RegisterView(generics.CreateAPIView):
             ip_address=request.META.get('REMOTE_ADDR'),
         )
 
-        return Response({
+        response = Response({
             'user': UserSerializer(user).data,
-            'tokens': {
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-            }
         }, status=status.HTTP_201_CREATED)
+        _set_jwt_cookies(response, refresh.access_token, refresh)
+        # Ensure CSRF cookie is set for subsequent mutating requests
+        get_csrf_token(request)
+        return response
 
 
 class LoginView(generics.GenericAPIView):
@@ -120,13 +209,12 @@ class LoginView(generics.GenericAPIView):
             ip_address=request.META.get('REMOTE_ADDR'),
         )
 
-        return Response({
+        response = Response({
             'user': UserSerializer(user).data,
-            'tokens': {
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-            }
         })
+        _set_jwt_cookies(response, refresh.access_token, refresh)
+        get_csrf_token(request)
+        return response
 
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
@@ -152,7 +240,7 @@ class StaffCustomerListView(generics.ListAPIView):
     permission_classes = (IsAdminOrOfficer,)
 
     def get_queryset(self):
-        qs = CustomUser.objects.all().order_by('-created_at')
+        qs = CustomUser.objects.select_related('profile').order_by('-created_at')
         search = self.request.query_params.get('search', '').strip()
         if search:
             from django.db.models import Q
@@ -316,25 +404,86 @@ class StaffCustomerActivityView(generics.GenericAPIView):
         })
 
 
+class CustomerDataExportView(generics.GenericAPIView):
+    """Export all customer data (APP 12 — Australian Privacy Act 1988)."""
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+        data = {
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'role': user.role,
+                'created_at': user.created_at.isoformat(),
+            },
+        }
+
+        # Profile data
+        try:
+            profile = user.profile
+            data['profile'] = {
+                f.name: str(getattr(profile, f.name, ''))
+                for f in profile._meta.get_fields()
+                if hasattr(f, 'column') and f.name not in ('id', 'user')
+            }
+        except CustomerProfile.DoesNotExist:
+            data['profile'] = None
+
+        # Loan applications
+        from apps.loans.models import LoanApplication
+        apps = LoanApplication.objects.filter(applicant=user).values(
+            'id', 'loan_amount', 'purpose', 'status', 'created_at',
+        )
+        data['loan_applications'] = [
+            {k: str(v) for k, v in app.items()}
+            for app in apps
+        ]
+
+        # Audit log entries
+        audit_logs = AuditLog.objects.filter(user=user).order_by('-timestamp')[:100].values(
+            'action', 'resource_type', 'timestamp',
+        )
+        data['audit_logs'] = [
+            {k: str(v) for k, v in log.items()}
+            for log in audit_logs
+        ]
+
+        AuditLog.objects.create(
+            user=user,
+            action='data_export',
+            resource_type='CustomUser',
+            resource_id=str(user.id),
+            details={},
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return Response(data)
+
+
 class LogoutView(generics.GenericAPIView):
-    """Blacklist the provided refresh token so it cannot be reused."""
+    """Blacklist the refresh token and clear auth cookies."""
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
-        refresh = request.data.get('refresh')
+        # Try cookie first, then request body (backwards compat)
+        refresh_name = getattr(django_settings, 'JWT_REFRESH_COOKIE_NAME', 'refresh_token')
+        refresh = request.COOKIES.get(refresh_name) or request.data.get('refresh')
         if not refresh:
-            return Response(
+            response = Response(
                 {'detail': 'refresh token is required'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+            _clear_jwt_cookies(response)
+            return response
         try:
             token = RefreshToken(refresh)
             token.blacklist()
         except Exception:
-            return Response(
-                {'detail': 'Token is invalid or already blacklisted.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            pass  # Clear cookies regardless — token may already be blacklisted
 
         AuditLog.objects.create(
             user=request.user,
@@ -345,4 +494,6 @@ class LogoutView(generics.GenericAPIView):
             ip_address=request.META.get('REMOTE_ADDR'),
         )
 
-        return Response({'detail': 'Successfully logged out.'}, status=status.HTTP_200_OK)
+        response = Response({'detail': 'Successfully logged out.'}, status=status.HTTP_200_OK)
+        _clear_jwt_cookies(response)
+        return response

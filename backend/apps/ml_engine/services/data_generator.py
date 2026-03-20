@@ -55,20 +55,34 @@ class DataGenerator:
     FLOOR_RATE = 0.0575  # Big 4 floor rate (~5.75%)
 
     # HEM monthly benchmarks (Melbourne Institute 2025/2026, CPI-indexed)
+    # Expanded to 5 income brackets and 0-4+ dependants (real HEM has 6+ brackets)
     HEM_TABLE = {
-        ('single', 0, 'low'):    1600, ('single', 0, 'mid'):    2050, ('single', 0, 'high'):   2500,
-        ('single', 1, 'low'):    2150, ('single', 1, 'mid'):    2600, ('single', 1, 'high'):   3050,
-        ('single', 2, 'low'):    2500, ('single', 2, 'mid'):    3050, ('single', 2, 'high'):   3500,
-        ('couple', 0, 'low'):    2400, ('couple', 0, 'mid'):    2950, ('couple', 0, 'high'):   3500,
-        ('couple', 1, 'low'):    2850, ('couple', 1, 'mid'):    3400, ('couple', 1, 'high'):   3950,
-        ('couple', 2, 'low'):    3200, ('couple', 2, 'mid'):    3850, ('couple', 2, 'high'):   4400,
+        # Single applicants
+        ('single', 0, 'very_low'): 1400, ('single', 0, 'low'): 1600, ('single', 0, 'mid'): 2050, ('single', 0, 'high'): 2500, ('single', 0, 'very_high'): 3000,
+        ('single', 1, 'very_low'): 1900, ('single', 1, 'low'): 2150, ('single', 1, 'mid'): 2600, ('single', 1, 'high'): 3050, ('single', 1, 'very_high'): 3600,
+        ('single', 2, 'very_low'): 2200, ('single', 2, 'low'): 2500, ('single', 2, 'mid'): 3050, ('single', 2, 'high'): 3500, ('single', 2, 'very_high'): 4100,
+        ('single', 3, 'very_low'): 2500, ('single', 3, 'low'): 2850, ('single', 3, 'mid'): 3400, ('single', 3, 'high'): 3900, ('single', 3, 'very_high'): 4500,
+        ('single', 4, 'very_low'): 2800, ('single', 4, 'low'): 3150, ('single', 4, 'mid'): 3750, ('single', 4, 'high'): 4300, ('single', 4, 'very_high'): 4900,
+        # Couple applicants
+        ('couple', 0, 'very_low'): 2100, ('couple', 0, 'low'): 2400, ('couple', 0, 'mid'): 2950, ('couple', 0, 'high'): 3500, ('couple', 0, 'very_high'): 4200,
+        ('couple', 1, 'very_low'): 2550, ('couple', 1, 'low'): 2850, ('couple', 1, 'mid'): 3400, ('couple', 1, 'high'): 3950, ('couple', 1, 'very_high'): 4700,
+        ('couple', 2, 'very_low'): 2900, ('couple', 2, 'low'): 3200, ('couple', 2, 'mid'): 3850, ('couple', 2, 'high'): 4400, ('couple', 2, 'very_high'): 5200,
+        ('couple', 3, 'very_low'): 3250, ('couple', 3, 'low'): 3550, ('couple', 3, 'mid'): 4200, ('couple', 3, 'high'): 4800, ('couple', 3, 'very_high'): 5600,
+        ('couple', 4, 'very_low'): 3550, ('couple', 4, 'low'): 3900, ('couple', 4, 'mid'): 4550, ('couple', 4, 'high'): 5200, ('couple', 4, 'very_high'): 6000,
+    }
+
+    # Geographic HEM multiplier (Sydney/Melbourne higher COL, regional lower)
+    STATE_HEM_MULTIPLIER = {
+        'NSW': 1.15, 'VIC': 1.08, 'QLD': 1.00, 'WA': 1.05,
+        'SA': 0.92, 'TAS': 0.90, 'ACT': 1.10, 'NT': 1.02,
     }
 
     # Income shading by employment type (what % of income banks accept)
+    # Refined per Big 4 practice: self-employed split by tenure, casual by tenure
     INCOME_SHADING = {
         'payg_permanent': 1.00,
-        'payg_casual': 0.80,
-        'self_employed': 0.75,
+        'payg_casual': 0.80,        # <12 months same employer: 0.60 (applied dynamically)
+        'self_employed': 0.75,      # 2+ years consistent: 0.82 (applied dynamically)
         'contract': 0.85,
     }
 
@@ -255,13 +269,25 @@ class DataGenerator:
             'purpose_override': None,  # uses PURPOSE_WEIGHTS for non-home
         },
         'business_borrower': {
-            'weight': 0.15,
+            'weight': 0.12,
             'age_mean': 44, 'age_std': 9,
             'income_single_mean': 85000, 'income_couple_mean': 155000,
             'credit_score_mean': 860, 'credit_score_std': 85,
             'loan_mult_mean': 0.6, 'loan_mult_std': 0.5,
             'lvr_mean': 0.0, 'lvr_std': 0.0,
             'purpose_override': 'business',
+        },
+        # ~30-40% of Australian lending is investor loans (APRA Sep Q 2025).
+        # Investor segment has tighter DTI assessment, lower max LVR,
+        # and APRA macroprudential rules (interest-only caps, etc.)
+        'investor': {
+            'weight': 0.08,
+            'age_mean': 45, 'age_std': 8,
+            'income_single_mean': 110000, 'income_couple_mean': 190000,
+            'credit_score_mean': 890, 'credit_score_std': 65,
+            'loan_mult_mean': 4.5, 'loan_mult_std': 1.0,
+            'lvr_mean': 0.70, 'lvr_std': 0.08,  # lower LVR than owner-occ
+            'purpose_override': 'home',
         },
     }
 
@@ -656,16 +682,23 @@ class DataGenerator:
 
         return df
 
-    def _get_hem(self, applicant_type, dependants, annual_income):
-        """Look up HEM benchmark based on household composition and income."""
-        if annual_income < 60000:
+    def _get_hem(self, applicant_type, dependants, annual_income, state='NSW'):
+        """Look up HEM benchmark based on household composition, income, and state."""
+        if annual_income < 45000:
+            bracket = 'very_low'
+        elif annual_income < 60000:
             bracket = 'low'
         elif annual_income < 120000:
             bracket = 'mid'
-        else:
+        elif annual_income < 180000:
             bracket = 'high'
-        dep_key = min(dependants, 2)
-        return self.HEM_TABLE.get((applicant_type, dep_key, bracket), 2950)
+        else:
+            bracket = 'very_high'
+        dep_key = min(dependants, 4)
+        base_hem = self.HEM_TABLE.get((applicant_type, dep_key, bracket), 2950)
+        # Apply geographic multiplier
+        state_mult = self.STATE_HEM_MULTIPLIER.get(state, 1.00)
+        return int(base_hem * state_mult)
 
     def _compute_approval(self, df, rng):
         """Apply Australian lending rules to determine approval.
@@ -734,8 +767,20 @@ class DataGenerator:
 
         # =========================================================
         # STEP 1: Income shading by employment type
+        # Refined per Big 4 practice:
+        # - Self-employed 2+ years consistent: 82% (vs 75% base)
+        # - Casual 12+ months same employer: 80% (vs 60% for <12 months)
         # =========================================================
         income_shade = df['employment_type'].map(self.INCOME_SHADING).values
+        # Self-employed with 2+ years: higher acceptance
+        se_experienced = (df['employment_type'] == 'self_employed') & (df['employment_length'] >= 2)
+        income_shade = np.where(se_experienced, 0.82, income_shade)
+        # Self-employed with <2 years: lower acceptance
+        se_new = (df['employment_type'] == 'self_employed') & (df['employment_length'] < 2)
+        income_shade = np.where(se_new, 0.65, income_shade)
+        # Casual with <1 year: significantly lower
+        casual_new = (df['employment_type'] == 'payg_casual') & (df['employment_length'] < 1)
+        income_shade = np.where(casual_new, 0.60, income_shade)
         shaded_monthly_income = gross_monthly_income * income_shade
 
         # =========================================================
@@ -745,8 +790,13 @@ class DataGenerator:
         # Bankruptcy: hard deny (undischarged or within 7 years)
         approved[df['has_bankruptcy'] == 1] = 0
 
-        # APRA DTI cap: total DTI >= 6x is a hard boundary
-        approved[total_dti >= 6.0] = 0
+        # APRA DTI cap: total DTI >= 6x is a macro-prudential boundary.
+        # APRA Sep Q 2025: 6.1% of new lending has DTI >= 6, meaning some
+        # pass through with compensating factors (excellent credit, high income,
+        # strong documentation). ~15% pass-through rate for qualified applicants.
+        high_dti_mask = total_dti >= 6.0
+        high_dti_pass = high_dti_mask & (credit >= 850) & (df['annual_income'] > 150000)
+        approved[high_dti_mask & ~high_dti_pass] = 0
 
         # Credit score floor: Big 4 banks require 650+
         approved[credit < 650] = 0
@@ -806,17 +856,40 @@ class DataGenerator:
         # STEP 6: HEM-based expense calculation
         # =========================================================
         hem_values = np.array([
-            self._get_hem(at, dep, inc)
-            for at, dep, inc in zip(
-                df['applicant_type'], df['number_of_dependants'], df['annual_income']
+            self._get_hem(at, dep, inc, st)
+            for at, dep, inc, st in zip(
+                df['applicant_type'], df['number_of_dependants'],
+                df['annual_income'], df['state']
             )
         ])
         effective_expenses = np.maximum(df['monthly_expenses'], hem_values)
 
         # =========================================================
         # STEP 7: Serviceability check (APRA 3% buffer)
+        #
+        # APRA APG 223 requires assessment at the HIGHER of:
+        #   (a) customer's offered product rate + 3% buffer
+        #   (b) a floor rate (typically 5.75% for Big 4)
+        # Each application may have a different offered rate based
+        # on their risk profile, so assessment_rate is per-application.
         # =========================================================
-        assessment_rate = max(self.BASE_RATE + self.ASSESSMENT_BUFFER, self.FLOOR_RATE)
+        # Offered product rate varies by credit quality and loan type
+        # Base rate ~6.5%, with risk adjustments:
+        #   - Excellent credit (>900): -0.3%
+        #   - Good credit (800-900): base
+        #   - Fair credit (700-800): +0.5%
+        #   - High LVR (>80%): +0.2%
+        #   - Investment/business: +0.3%
+        offered_rate = np.full(n, self.BASE_RATE)
+        offered_rate = np.where(credit > 900, offered_rate - 0.003, offered_rate)
+        offered_rate = np.where((credit >= 700) & (credit <= 800), offered_rate + 0.005, offered_rate)
+        offered_rate = np.where(lvr > 0.80, offered_rate + 0.002, offered_rate)
+        offered_rate = np.where(
+            (purpose == 'business'), offered_rate + 0.003, offered_rate
+        )
+
+        # Per-application assessment rate: max(offered + buffer, floor)
+        assessment_rate = np.maximum(offered_rate + self.ASSESSMENT_BUFFER, self.FLOOR_RATE)
         monthly_rate = assessment_rate / 12
         term_months = df['loan_term_months']
 
@@ -924,6 +997,24 @@ class DataGenerator:
             np.where(df['annual_income'] > 80000, 0.60, 0.55)
         )
         approved[dsr > dsr_cap] = 0
+
+        # =========================================================
+        # STEP 8b: Retirement exit strategy
+        # If age + loan_term_years > 65, applicant will still be repaying
+        # post-retirement. Require documented exit strategy or apply penalty.
+        # APRA CPG 223 and NCCP Act responsible lending obligations.
+        # =========================================================
+        age = df['_age_proxy']
+        loan_term_years = df['loan_term_months'] / 12
+        retirement_age_at_maturity = age + loan_term_years
+        needs_exit_strategy = retirement_age_at_maturity > 65
+        # Apply penalty: deny if over retirement with weak financials
+        retirement_deny = (
+            needs_exit_strategy
+            & (credit < 850)  # no strong credit to compensate
+            & (df['annual_income'] < 120000)  # not high income
+        )
+        approved[retirement_deny] = 0
 
         # =========================================================
         # STEP 9: Composite scoring with latent variables

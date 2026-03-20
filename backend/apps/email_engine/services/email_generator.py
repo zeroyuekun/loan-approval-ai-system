@@ -5,35 +5,32 @@ import time
 import anthropic
 import httpx
 
+from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
+
 from .documentation import build_documentation_checklist
 from .guardrails import GuardrailChecker
 from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
 
 
-_INJECTION_BLOCKLIST = re.compile(
-    r'(?:ignore\s+(?:previous|above|all)\s+instructions'
-    r'|disregard\s+(?:previous|above|all)\s+instructions'
-    r'|system\s+prompt'
-    r'|you\s+are\s+now'
-    r'|new\s+instructions'
-    r'|forget\s+(?:previous|your|all)\s+instructions'
-    r'|override\s+(?:previous|your|all)\s+instructions)',
-    re.IGNORECASE,
-)
-
-
-def _sanitize_prompt_input(value, max_length=500):
-    """Strip characters and patterns that could manipulate prompt structure."""
-    if not isinstance(value, str):
-        return value
-    # Remove prompt injection characters
-    value = re.sub(r'[<>\[\]{}]', '', value)
-    # Collapse all whitespace (newlines, tabs) to single spaces
-    value = re.sub(r'\s+', ' ', value)
-    # Remove common prompt injection phrases
-    value = _INJECTION_BLOCKLIST.sub('', value)
-    return value[:max_length].strip()
+EMAIL_SUBMIT_TOOL = {
+    'name': 'submit_email',
+    'description': 'Submit the generated email with subject and body.',
+    'input_schema': {
+        'type': 'object',
+        'properties': {
+            'subject': {
+                'type': 'string',
+                'description': 'Email subject line',
+            },
+            'body': {
+                'type': 'string',
+                'description': 'Complete email body text',
+            },
+        },
+        'required': ['subject', 'body'],
+    },
+}
 
 
 class EmailGenerator:
@@ -50,6 +47,8 @@ class EmailGenerator:
             timeout=httpx.Timeout(60.0, connect=10.0),
         )
         self.guardrail_checker = GuardrailChecker()
+        self._consecutive_failures = 0
+        self._circuit_open_until = 0
 
     # Map ML feature names to plain-language lending criteria (Banking Code para 81)
     DENIAL_REASON_MAP = {
@@ -214,20 +213,46 @@ class EmailGenerator:
                     f"use simpler language and stick to the exact template structure.\n"
                 )
 
-        # Call Claude API
+        # Check circuit breaker — fallback to template if API is down
+        if self._consecutive_failures >= 3 and time.time() < self._circuit_open_until:
+            return self._generate_fallback(application, decision, context, start_time)
+
+        # Call Claude API with tool_use for structured output (with budget check)
         from django.conf import settings as django_settings
-        response = self.client.messages.create(
-            model='claude-sonnet-4-20250514',
-            max_tokens=1024,
-            temperature=getattr(django_settings, 'AI_TEMPERATURE_DECISION_EMAIL', 0.0),
-            messages=[{'role': 'user', 'content': prompt}],
-        )
+        from apps.agents.services.api_budget import ApiBudgetGuard
+        budget = ApiBudgetGuard()
+        budget.check_budget()
 
-        response_text = response.content[0].text
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            response = self.client.messages.create(
+                model='claude-sonnet-4-20250514',
+                max_tokens=1024,
+                temperature=getattr(django_settings, 'AI_TEMPERATURE_DECISION_EMAIL', 0.0),
+                messages=[{'role': 'user', 'content': prompt}],
+                tools=[EMAIL_SUBMIT_TOOL],
+                tool_choice={'type': 'tool', 'name': 'submit_email'},
+            )
+
+            # Track budget usage
+            usage = getattr(response, 'usage', None)
+            if usage:
+                input_tokens = getattr(usage, 'input_tokens', 0)
+                output_tokens = getattr(usage, 'output_tokens', 0)
+                budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens)
+            budget.record_success()
+            self._consecutive_failures = 0
+        except Exception as e:
+            budget.record_failure()
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= 3:
+                self._circuit_open_until = time.time() + 600  # 10 min cooldown
+            raise
+
+        # Extract structured output from tool_use response
+        subject, body = self._parse_tool_response(response)
         generation_time = int((time.time() - start_time) * 1000)
-
-        # Parse subject and body
-        subject, body = self._parse_response(response_text)
 
         # Run guardrails (warning-severity checks provide retry feedback but do not block)
         guardrail_results = self.guardrail_checker.run_all_checks(body, context)
@@ -271,10 +296,31 @@ class EmailGenerator:
             'quality_score': quality_score,
             'generation_time_ms': generation_time,
             'attempt_number': attempt,
+            'template_fallback': False,
+            'input_tokens': input_tokens,
+            'output_tokens': output_tokens,
         }
 
-    def _parse_response(self, text):
-        """Parse the Claude response into subject and body."""
+    def _parse_tool_response(self, response):
+        """Extract subject and body from tool_use structured response."""
+        try:
+            tool_block = next(b for b in response.content if b.type == 'tool_use')
+            subject = tool_block.input.get('subject', '').strip()
+            body = tool_block.input.get('body', '').strip()
+            if subject and body:
+                return subject, body
+        except (StopIteration, AttributeError):
+            pass
+
+        # Fallback: try to parse from text block (in case tool_use wasn't used)
+        text_block = next((b for b in response.content if b.type == 'text'), None)
+        if text_block:
+            return self._parse_text_response(text_block.text)
+
+        return 'Regarding Your Loan Application', ''
+
+    def _parse_text_response(self, text):
+        """Legacy parser for free-form text responses."""
         lines = text.strip().split('\n')
         subject = ''
         body_start = 0
@@ -285,7 +331,6 @@ class EmailGenerator:
                 body_start = i + 1
                 break
 
-        # Skip empty lines after subject
         while body_start < len(lines) and not lines[body_start].strip():
             body_start += 1
 
@@ -295,3 +340,52 @@ class EmailGenerator:
             subject = 'Regarding Your Loan Application'
 
         return subject, body
+
+    def _generate_fallback(self, application, decision, context, start_time):
+        """Generate email from static template when Claude API is unavailable."""
+        from .template_fallback import generate_approval_template, generate_denial_template
+
+        applicant_name = _sanitize_prompt_input(
+            f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
+            max_length=200,
+        ) or application.applicant.username
+
+        if decision == 'approved':
+            result = generate_approval_template(
+                applicant_name,
+                float(application.loan_amount),
+                application.get_purpose_display(),
+                pricing=context.get('pricing'),
+            )
+        else:
+            denial_reasons = self._format_denial_reasons(
+                application.decision.feature_importances
+                if hasattr(application, 'decision') and application.decision
+                else None
+            )
+            result = generate_denial_template(
+                applicant_name,
+                float(application.loan_amount),
+                application.get_purpose_display(),
+                denial_reasons=denial_reasons,
+            )
+
+        generation_time = int((time.time() - start_time) * 1000)
+
+        # Run guardrails on template output too
+        guardrail_results = self.guardrail_checker.run_all_checks(result['body'], context)
+        all_passed = all(r['passed'] for r in guardrail_results if r.get('severity') != 'warning')
+
+        return {
+            'subject': result['subject'],
+            'body': result['body'],
+            'prompt_used': '[TEMPLATE FALLBACK — Claude API unavailable]',
+            'guardrail_results': guardrail_results,
+            'passed_guardrails': all_passed,
+            'quality_score': self.guardrail_checker.compute_quality_score(guardrail_results),
+            'generation_time_ms': generation_time,
+            'attempt_number': 1,
+            'template_fallback': True,
+            'input_tokens': 0,
+            'output_tokens': 0,
+        }

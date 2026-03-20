@@ -2,7 +2,7 @@ import functools
 import uuid
 from decimal import Decimal
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -12,13 +12,24 @@ from django.utils import timezone
 
 @functools.lru_cache(maxsize=1)
 def _get_fernet():
-    key = settings.FIELD_ENCRYPTION_KEY
-    if not key:
+    """Return a MultiFernet instance supporting key rotation.
+
+    FIELD_ENCRYPTION_KEY can be a single key or comma-separated list.
+    The first key is used for encryption; all keys are tried for decryption.
+    To rotate: generate a new key, prepend it to the comma-separated list,
+    then run `python manage.py rotate_encryption_key` to re-encrypt data.
+    """
+    raw = settings.FIELD_ENCRYPTION_KEY
+    if not raw:
         raise ValueError(
             'FIELD_ENCRYPTION_KEY environment variable must be set. '
             'Generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
         )
-    return Fernet(key.encode() if isinstance(key, str) else key)
+    keys = [k.strip() for k in raw.split(',') if k.strip()]
+    fernets = [Fernet(k.encode() if isinstance(k, str) else k) for k in keys]
+    if len(fernets) == 1:
+        return fernets[0]
+    return MultiFernet(fernets)
 
 
 class EncryptedCharField(models.CharField):
@@ -221,6 +232,13 @@ class CustomerProfile(models.Model):
 
     # ── Payment history ──
     on_time_payment_pct = models.FloatField(default=100.0, help_text="Percentage of on-time payments")
+
+    # ── Privacy Act / consent tracking ──
+    privacy_consent_given = models.BooleanField(default=False, help_text='Customer consented to Privacy Collection Notice')
+    privacy_consent_date = models.DateTimeField(null=True, blank=True)
+    marketing_consent = models.BooleanField(default=False, help_text='Consent to receive marketing communications')
+    data_sharing_consent = models.BooleanField(default=False, help_text='Consent to share data with third parties')
+
     previous_loans_repaid = models.IntegerField(default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -287,3 +305,51 @@ class CustomerProfile(models.Model):
             or self.loyalty_tier in ('gold', 'platinum')
             or self.previous_loans_repaid >= 1
         )
+
+
+class KYCVerification(models.Model):
+    """Tracks AML/CTF 100-point ID verification status."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        VERIFIED = 'verified', 'Verified'
+        FAILED = 'failed', 'Failed'
+        EXPIRED = 'expired', 'Expired'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    customer = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='kyc_verifications')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+
+    # 100-point check
+    total_points = models.IntegerField(default=0, help_text='Total ID verification points (need 100)')
+    primary_id_points = models.IntegerField(default=0, help_text='Points from primary ID (e.g. passport=70)')
+    secondary_id_points = models.IntegerField(default=0, help_text='Points from secondary ID')
+    supplementary_points = models.IntegerField(default=0, help_text='Points from supplementary docs')
+
+    # Sanctions screening
+    sanctions_checked = models.BooleanField(default=False)
+    sanctions_clear = models.BooleanField(null=True, default=None)
+    sanctions_check_date = models.DateTimeField(null=True, blank=True)
+
+    # OCDD (Ongoing Customer Due Diligence)
+    next_review_date = models.DateField(null=True, blank=True)
+
+    verified_at = models.DateTimeField(null=True, blank=True)
+    verified_by = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='kyc_verifications_performed',
+    )
+    notes = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    @property
+    def is_verified(self):
+        return self.status == 'verified' and self.total_points >= 100
+
+    def __str__(self):
+        return f"KYC {self.customer.username}: {self.status} ({self.total_points} pts)"

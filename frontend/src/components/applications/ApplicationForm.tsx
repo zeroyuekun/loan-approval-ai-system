@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
@@ -76,6 +76,18 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
   const createApplication = useCreateApplication()
   const isCustomer = user?.role === 'customer'
 
+  const DRAFT_KEY = 'loan_application_draft'
+
+  const getSavedDraft = useCallback((): Partial<FormData> | null => {
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY)
+      if (saved) return JSON.parse(saved)
+    } catch { /* ignore parse errors */ }
+    return null
+  }, [])
+
+  const savedDraft = useRef(getSavedDraft())
+
   const {
     register,
     handleSubmit,
@@ -100,10 +112,21 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
       has_cosigner: false,
       has_hecs: false,
       has_bankruptcy: false,
+      ...savedDraft.current,
     },
   })
 
   const purpose = watch('purpose')
+
+  // Persist form state to localStorage on every change
+  useEffect(() => {
+    const subscription = watch((values) => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(values))
+      } catch { /* ignore quota errors */ }
+    })
+    return () => subscription.unsubscribe()
+  }, [watch])
 
   const submittingRef = useRef(false)
 
@@ -183,6 +206,7 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
     submittingRef.current = true
     try {
       const result = await createApplication.mutateAsync(data)
+      localStorage.removeItem(DRAFT_KEY)
       const basePath = onSuccessPath || '/dashboard/applications'
       router.push(`${basePath}/${result.id}`)
     } catch (error) {
@@ -305,23 +329,23 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
               </div>
               <div>
                 <Label htmlFor="employment_length">Time in Current Role (years)</Label>
-                <Input id="employment_length" type="number" min={0} {...register('employment_length')} />
+                <Input id="employment_length" type="number" min={0} aria-describedby="employment_length_help" {...register('employment_length')} />
                 {errors.employment_length && <p className="text-sm text-destructive mt-1">{errors.employment_length.message}</p>}
-                <p className="text-xs text-muted-foreground mt-1">Self-employed applicants typically need 2+ years of ABN history.</p>
+                <p id="employment_length_help" className="text-xs text-muted-foreground mt-1">Self-employed applicants typically need 2+ years of ABN history.</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="annual_income">Gross Annual Income (A$)</Label>
-                <Input id="annual_income" type="number" {...register('annual_income')} placeholder="Before tax" />
+                <Input id="annual_income" type="number" aria-describedby="annual_income_help" {...register('annual_income')} placeholder="Before tax" />
                 {errors.annual_income && <p className="text-sm text-destructive mt-1">{errors.annual_income.message}</p>}
-                <p className="text-xs text-muted-foreground mt-1">Include base salary, regular overtime, and allowances.</p>
+                <p id="annual_income_help" className="text-xs text-muted-foreground mt-1">Include base salary, regular overtime, and allowances.</p>
               </div>
               <div>
                 <Label htmlFor="credit_score">Equifax Credit Score (0–1200)</Label>
-                <Input id="credit_score" type="number" min={0} max={1200} {...register('credit_score')} placeholder="Check via Equifax or credit savvy" />
+                <Input id="credit_score" type="number" min={0} max={1200} aria-describedby="credit_score_help" {...register('credit_score')} placeholder="Check via Equifax or credit savvy" />
                 {errors.credit_score && <p className="text-sm text-destructive mt-1">{errors.credit_score.message}</p>}
-                <p className="text-xs text-muted-foreground mt-1">Australian average is ~800. Big 4 banks typically require 650+.</p>
+                <p id="credit_score_help" className="text-xs text-muted-foreground mt-1">Australian average is ~800. Big 4 banks typically require 650+.</p>
               </div>
             </div>
           </CardContent>
@@ -338,22 +362,22 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
           <CardContent className="space-y-4">
             <div>
               <Label htmlFor="monthly_expenses">Monthly Living Expenses (A$)</Label>
-              <Input id="monthly_expenses" type="number" step="0.01" min={0} {...register('monthly_expenses')} placeholder="Rent, groceries, transport, insurance, utilities, etc." />
+              <Input id="monthly_expenses" type="number" step="0.01" min={0} aria-describedby="monthly_expenses_help" {...register('monthly_expenses')} placeholder="Rent, groceries, transport, insurance, utilities, etc." />
               {errors.monthly_expenses && <p className="text-sm text-destructive mt-1">{errors.monthly_expenses.message}</p>}
-              <p className="text-xs text-muted-foreground mt-1">If left blank, the HEM benchmark for your household type will be used. Include rent/board if applicable.</p>
+              <p id="monthly_expenses_help" className="text-xs text-muted-foreground mt-1">If left blank, the HEM benchmark for your household type will be used. Include rent/board if applicable.</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="existing_credit_card_limit">Total Credit Card Limits (A$)</Label>
-                <Input id="existing_credit_card_limit" type="number" step="0.01" min={0} {...register('existing_credit_card_limit')} placeholder="Combined across all cards" />
+                <Input id="existing_credit_card_limit" type="number" step="0.01" min={0} aria-describedby="credit_card_limit_help" {...register('existing_credit_card_limit')} placeholder="Combined across all cards" />
                 {errors.existing_credit_card_limit && <p className="text-sm text-destructive mt-1">{errors.existing_credit_card_limit.message}</p>}
-                <p className="text-xs text-muted-foreground mt-1">Banks assess 3% of your total limit as a monthly commitment, even if the balance is $0.</p>
+                <p id="credit_card_limit_help" className="text-xs text-muted-foreground mt-1">Banks assess 3% of your total limit as a monthly commitment, even if the balance is $0.</p>
               </div>
               <div>
                 <Label htmlFor="debt_to_income">Debt-to-Income Ratio</Label>
-                <Input id="debt_to_income" type="number" step="0.1" min={0} max={15} {...register('debt_to_income')} placeholder="e.g. 4.5" />
+                <Input id="debt_to_income" type="number" step="0.1" min={0} max={15} aria-describedby="dti_help" {...register('debt_to_income')} placeholder="e.g. 4.5" />
                 {errors.debt_to_income && <p className="text-sm text-destructive mt-1">{errors.debt_to_income.message}</p>}
-                <p className="text-xs text-muted-foreground mt-1">Total existing debt divided by annual income. APRA caps this at 6x for most lenders.</p>
+                <p id="dti_help" className="text-xs text-muted-foreground mt-1">Total existing debt divided by annual income. APRA caps this at 6x for most lenders.</p>
               </div>
             </div>
             <div className="rounded-lg bg-muted/50 p-3">
@@ -368,11 +392,12 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
                   type="checkbox"
                   id="has_hecs"
                   className="h-4 w-4 rounded border-input mt-0.5"
+                  aria-describedby="has_hecs_help"
                   {...register('has_hecs')}
                 />
                 <div>
                   <Label htmlFor="has_hecs">I have a HECS/HELP debt</Label>
-                  <p className="text-xs text-muted-foreground">ATO compulsory repayment applies when your income exceeds the threshold (currently ~$54k). Lenders factor the repayment into serviceability.</p>
+                  <p id="has_hecs_help" className="text-xs text-muted-foreground">ATO compulsory repayment applies when your income exceeds the threshold (currently ~$54k). Lenders factor the repayment into serviceability.</p>
                 </div>
               </div>
               <div className="flex items-start gap-2">
@@ -380,11 +405,12 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
                   type="checkbox"
                   id="has_bankruptcy"
                   className="h-4 w-4 rounded border-input mt-0.5"
+                  aria-describedby="has_bankruptcy_help"
                   {...register('has_bankruptcy')}
                 />
                 <div>
                   <Label htmlFor="has_bankruptcy">I have been declared bankrupt or discharged from bankruptcy within the last 7 years</Label>
-                  <p className="text-xs text-muted-foreground">Bankruptcy remains on your credit file for 5 years from discharge. Most lenders require at least 2 years post-discharge.</p>
+                  <p id="has_bankruptcy_help" className="text-xs text-muted-foreground">Bankruptcy remains on your credit file for 5 years from discharge. Most lenders require at least 2 years post-discharge.</p>
                 </div>
               </div>
             </div>
@@ -438,15 +464,15 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="property_value">Property Value (A$)</Label>
-                    <Input id="property_value" type="number" {...register('property_value')} placeholder="Estimated or contract price" />
+                    <Input id="property_value" type="number" aria-describedby="property_value_help" {...register('property_value')} placeholder="Estimated or contract price" />
                     {errors.property_value && <p className="text-sm text-destructive mt-1">{errors.property_value.message}</p>}
-                    <p className="text-xs text-muted-foreground mt-1">Used to calculate your LVR (Loan-to-Value Ratio).</p>
+                    <p id="property_value_help" className="text-xs text-muted-foreground mt-1">Used to calculate your LVR (Loan-to-Value Ratio).</p>
                   </div>
                   <div>
                     <Label htmlFor="deposit_amount">Deposit / Genuine Savings (A$)</Label>
-                    <Input id="deposit_amount" type="number" {...register('deposit_amount')} placeholder="Held for 3+ months" />
+                    <Input id="deposit_amount" type="number" aria-describedby="deposit_amount_help" {...register('deposit_amount')} placeholder="Held for 3+ months" />
                     {errors.deposit_amount && <p className="text-sm text-destructive mt-1">{errors.deposit_amount.message}</p>}
-                    <p className="text-xs text-muted-foreground mt-1">Most lenders require 5% genuine savings for LVR above 80%.</p>
+                    <p id="deposit_amount_help" className="text-xs text-muted-foreground mt-1">Most lenders require 5% genuine savings for LVR above 80%.</p>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">LVR above 80% will require Lenders Mortgage Insurance (LMI). LVR above 95% is generally not accepted.</p>

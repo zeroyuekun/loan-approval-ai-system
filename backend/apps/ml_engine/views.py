@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin
 from apps.loans.models import AuditLog, LoanApplication
+from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import ModelVersion
 from apps.ml_engine.tasks import run_prediction_task, train_model_task
 
@@ -20,20 +21,7 @@ class PredictView(APIView):
 
     def post(self, request, loan_id):
         """Trigger ML prediction for a loan application."""
-        try:
-            application = LoanApplication.objects.get(pk=loan_id)
-        except LoanApplication.DoesNotExist:
-            return Response(
-                {'error': 'Loan application not found'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        user = request.user
-        if user.role not in ('admin', 'officer') and application.applicant_id != user.id:
-            return Response(
-                {'error': 'You do not have permission to access this loan application'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        application = check_loan_access(request, loan_id)
 
         task = run_prediction_task.delay(str(loan_id))
 

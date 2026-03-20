@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 # Module-level cache for loaded model bundles, keyed by model version ID.
+# Bounded to _MAX_CACHE_ENTRIES to prevent unbounded memory growth.
+_MAX_CACHE_ENTRIES = 3
 _model_cache = {}
 _cache_lock = threading.Lock()
 
@@ -90,6 +92,12 @@ def _load_bundle(model_version):
     bundle = joblib.load(resolved_path)
 
     with _cache_lock:
+        # Evict oldest entries if cache is at capacity
+        while len(_model_cache) >= _MAX_CACHE_ENTRIES:
+            oldest_key = next(iter(_model_cache))
+            del _model_cache[oldest_key]
+            logger.info('Evicted model version %s from cache (max %d entries)',
+                        oldest_key, _MAX_CACHE_ENTRIES)
         _model_cache[version_id] = bundle
     return bundle
 
@@ -98,6 +106,28 @@ def clear_model_cache():
     """Clear the model cache (e.g. after retraining)."""
     with _cache_lock:
         _model_cache.clear()
+
+
+def compute_risk_grade(probability):
+    """Map approval probability to APS 220 standardized risk grade.
+
+    Grades reflect probability of default (1 - approval probability).
+    """
+    pd = 1.0 - probability  # probability of default
+    if pd < 0.005:
+        return 'AAA'
+    elif pd < 0.01:
+        return 'AA'
+    elif pd < 0.03:
+        return 'A'
+    elif pd < 0.07:
+        return 'BBB'
+    elif pd < 0.15:
+        return 'BB'
+    elif pd < 0.30:
+        return 'B'
+    else:
+        return 'CCC'
 
 
 class ModelPredictor:
@@ -290,6 +320,7 @@ class ModelPredictor:
             )
 
         df = pd.DataFrame([features])
+        features_df = df.copy()  # preserve raw features for counterfactual generation
 
         # Transform using saved preprocessing artifacts
         df = self._transform(df)
@@ -366,7 +397,7 @@ class ModelPredictor:
         # Conformal prediction interval (95% coverage)
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
-        return {
+        result = {
             'prediction': prediction_label,
             'probability': probability,
             'threshold_used': threshold,
@@ -382,6 +413,24 @@ class ModelPredictor:
             'stress_test': stress_results,
             'confidence_interval': confidence_interval,
         }
+
+        # Generate counterfactual explanations for denied applications
+        if result['prediction'] == 'denied':
+            try:
+                model_bundle = {
+                    'model': self.model,
+                    'threshold': threshold,
+                }
+                result['counterfactuals'] = self._generate_counterfactuals(
+                    features_df, result['feature_importances'], model_bundle
+                )
+            except Exception as e:
+                logger.warning('Counterfactual generation failed: %s', e)
+                result['counterfactuals'] = []
+        else:
+            result['counterfactuals'] = []
+
+        return result
 
     def _check_feature_drift(self, features):
         """Check if individual feature values fall far outside training distribution.
@@ -564,3 +613,104 @@ class ModelPredictor:
             'confidence_level': 1 - alpha,
             'available': True,
         }
+
+    def _generate_counterfactuals(self, features_df, feature_importances, model_bundle):
+        """Generate counterfactual explanations for denied applications.
+
+        For top 3 negative factors, binary-search for the value that flips
+        the prediction. Returns actionable statements.
+        """
+        counterfactuals = []
+
+        if not feature_importances:
+            return counterfactuals
+
+        # Get top 3 features that most contributed to denial
+        sorted_features = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]
+
+        model = model_bundle['model']
+
+        for feature_name, importance in sorted_features:
+            if feature_name not in features_df.columns:
+                continue
+
+            current_value = features_df[feature_name].iloc[0]
+
+            # Define search bounds based on feature type
+            feature_bounds = {
+                'credit_score': (300, 1200),
+                'annual_income': (30000, 600000),
+                'debt_to_income': (0, 10),
+                'employment_length': (0, 40),
+                'loan_amount': (5000, 3500000),
+                'monthly_expenses': (800, 10000),
+                'existing_credit_card_limit': (0, 50000),
+            }
+
+            bounds = feature_bounds.get(feature_name)
+            if bounds is None:
+                continue
+
+            # Determine search direction (increase or decrease)
+            # For DTI, expenses, loan_amount: decrease is better
+            # For credit_score, income, employment: increase is better
+            decrease_is_better = feature_name in ('debt_to_income', 'monthly_expenses', 'loan_amount', 'existing_credit_card_limit')
+
+            if decrease_is_better:
+                low, high = bounds[0], float(current_value)
+            else:
+                low, high = float(current_value), bounds[1]
+
+            # Binary search for the flip point
+            flip_value = None
+            for _ in range(30):  # max iterations
+                mid = (low + high) / 2
+                test_df = features_df.copy()
+                test_df[feature_name] = mid
+
+                try:
+                    # Use the same preprocessing pipeline as predict()
+                    transformed_df = self._transform(test_df)
+                    prob = model.predict_proba(transformed_df[self.feature_cols])[0][1]
+                    threshold = model_bundle.get('threshold', 0.5)
+
+                    if prob >= threshold:
+                        flip_value = mid
+                        if decrease_is_better:
+                            low = mid
+                        else:
+                            high = mid
+                    else:
+                        if decrease_is_better:
+                            high = mid
+                        else:
+                            low = mid
+                except Exception:
+                    break
+
+            if flip_value is not None:
+                # Format the counterfactual statement
+                readable_name = feature_name.replace('_', ' ').title()
+
+                if feature_name in ('annual_income', 'loan_amount', 'monthly_expenses', 'existing_credit_card_limit'):
+                    current_fmt = f"${current_value:,.0f}"
+                    target_fmt = f"${flip_value:,.0f}"
+                elif feature_name == 'credit_score':
+                    current_fmt = f"{int(current_value)}"
+                    target_fmt = f"{int(flip_value)}"
+                elif feature_name == 'debt_to_income':
+                    current_fmt = f"{current_value:.1f}x"
+                    target_fmt = f"{flip_value:.1f}x"
+                else:
+                    current_fmt = f"{current_value:.1f}"
+                    target_fmt = f"{flip_value:.1f}"
+
+                direction = "Reducing" if decrease_is_better else "Increasing"
+                counterfactuals.append({
+                    'feature': feature_name,
+                    'current_value': float(current_value),
+                    'target_value': round(float(flip_value), 2),
+                    'statement': f"{direction} {readable_name.lower()} from {current_fmt} to {target_fmt} would change the outcome",
+                })
+
+        return counterfactuals

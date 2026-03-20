@@ -1,11 +1,17 @@
 import hashlib
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 
+import numpy as np
 from celery import shared_task
 from django.conf import settings
+from django.db.models import Avg, StdDev, Q
+from django.utils import timezone
 
 from apps.loans.models import LoanApplication, LoanDecision
-from apps.ml_engine.models import ModelVersion, PredictionLog
+from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
+
+logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, name='apps.ml_engine.tasks.train_model_task', time_limit=1800)
@@ -125,4 +131,124 @@ def run_prediction_task(self, application_id):
         'application_id': str(application_id),
         'prediction': result['prediction'],
         'probability': result['probability'],
+    }
+
+
+def _compute_psi(reference: np.ndarray, current: np.ndarray, bins: int = 10) -> float:
+    """Compute Population Stability Index between reference and current distributions."""
+    eps = 1e-4
+    breakpoints = np.linspace(0, 1, bins + 1)
+
+    ref_counts = np.histogram(reference, bins=breakpoints)[0]
+    cur_counts = np.histogram(current, bins=breakpoints)[0]
+
+    ref_pct = ref_counts / ref_counts.sum() + eps
+    cur_pct = cur_counts / cur_counts.sum() + eps
+
+    psi = np.sum((cur_pct - ref_pct) * np.log(cur_pct / ref_pct))
+    return float(psi)
+
+
+@shared_task(bind=True, name='apps.ml_engine.tasks.compute_weekly_drift_report', time_limit=600)
+def compute_weekly_drift_report(self):
+    """Compute weekly drift report comparing recent predictions to training distribution."""
+    active_version = ModelVersion.objects.filter(is_active=True).first()
+    if not active_version:
+        logger.warning('No active model version found; skipping drift report.')
+        return {'status': 'skipped', 'reason': 'no_active_model'}
+
+    now = timezone.now().date()
+    period_end = now
+    period_start = now - timedelta(days=7)
+
+    predictions = PredictionLog.objects.filter(
+        model_version=active_version,
+        created_at__date__gte=period_start,
+        created_at__date__lte=period_end,
+    )
+
+    num_predictions = predictions.count()
+    if num_predictions == 0:
+        logger.info('No predictions in the last 7 days; skipping drift report.')
+        return {'status': 'skipped', 'reason': 'no_predictions'}
+
+    probabilities = np.array(
+        list(predictions.values_list('probability', flat=True)), dtype=float
+    )
+
+    # Compute prediction distribution stats
+    mean_prob = float(np.mean(probabilities))
+    std_prob = float(np.std(probabilities))
+    approval_rate = float(np.mean(probabilities >= 0.5))
+
+    # Compute PSI against training reference distribution
+    training_meta = active_version.training_metadata or {}
+    reference_probs = training_meta.get('reference_probabilities')
+
+    psi_score = None
+    psi_per_feature = {}
+
+    if reference_probs:
+        ref_array = np.array(reference_probs, dtype=float)
+        psi_score = _compute_psi(ref_array, probabilities)
+
+        # Per-feature PSI if feature distributions are available
+        ref_feature_dists = training_meta.get('feature_distributions', {})
+        if ref_feature_dists:
+            # Get feature values from recent predictions
+            recent_features = list(predictions.values_list('feature_importances', flat=True))
+            for feature_name, ref_dist in ref_feature_dists.items():
+                cur_values = [
+                    f.get(feature_name) for f in recent_features
+                    if isinstance(f, dict) and f.get(feature_name) is not None
+                ]
+                if cur_values and ref_dist:
+                    try:
+                        psi_per_feature[feature_name] = _compute_psi(
+                            np.array(ref_dist, dtype=float),
+                            np.array(cur_values, dtype=float),
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
+    # Determine alert level
+    if psi_score is not None and psi_score >= 0.25:
+        drift_detected = True
+        alert_level = 'significant'
+    elif psi_score is not None and psi_score >= 0.1:
+        drift_detected = True
+        alert_level = 'moderate'
+    else:
+        drift_detected = False
+        alert_level = 'none'
+
+    report = DriftReport.objects.update_or_create(
+        model_version=active_version,
+        report_date=now,
+        defaults={
+            'period_start': period_start,
+            'period_end': period_end,
+            'num_predictions': num_predictions,
+            'psi_score': psi_score,
+            'psi_per_feature': psi_per_feature,
+            'mean_probability': mean_prob,
+            'std_probability': std_prob,
+            'approval_rate': approval_rate,
+            'drift_detected': drift_detected,
+            'alert_level': alert_level,
+        },
+    )[0]
+
+    if psi_score is not None and psi_score >= 0.25:
+        logger.warning(
+            'Significant model drift detected: PSI=%.4f for model %s (report %s)',
+            psi_score, active_version.id, report.id,
+        )
+
+    return {
+        'status': 'completed',
+        'report_id': str(report.id),
+        'psi_score': psi_score,
+        'alert_level': alert_level,
+        'num_predictions': num_predictions,
     }

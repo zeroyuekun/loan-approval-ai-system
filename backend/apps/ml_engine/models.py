@@ -2,6 +2,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models, transaction
 import uuid
 
@@ -15,6 +16,11 @@ class ModelVersion(models.Model):
     file_path = models.CharField(max_length=500)
     file_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hash for integrity verification")
     is_active = models.BooleanField(default=False)
+    traffic_percentage = models.IntegerField(
+        default=100,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text='Percentage of predictions routed to this model (for A/B testing)',
+    )
 
     # Metrics
     accuracy = models.FloatField(null=True)
@@ -82,3 +88,39 @@ class PredictionLog(models.Model):
 
     def __str__(self):
         return f"Prediction for {self.application_id}: {self.prediction}"
+
+
+class DriftReport(models.Model):
+    """Weekly model drift monitoring report."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    model_version = models.ForeignKey(ModelVersion, on_delete=models.CASCADE, related_name='drift_reports')
+    report_date = models.DateField(db_index=True)
+    period_start = models.DateField()
+    period_end = models.DateField()
+    num_predictions = models.IntegerField(default=0)
+
+    # Population Stability Index
+    psi_score = models.FloatField(null=True, help_text='PSI: <0.1 stable, 0.1-0.25 moderate, >0.25 significant drift')
+    psi_per_feature = models.JSONField(default=dict, help_text='PSI score per feature')
+
+    # Prediction distribution stats
+    mean_probability = models.FloatField(null=True)
+    std_probability = models.FloatField(null=True)
+    approval_rate = models.FloatField(null=True)
+
+    # Alert status
+    drift_detected = models.BooleanField(default=False)
+    alert_level = models.CharField(
+        max_length=20,
+        choices=[('none', 'None'), ('moderate', 'Moderate'), ('significant', 'Significant')],
+        default='none',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-report_date']
+        unique_together = [('model_version', 'report_date')]
+
+    def __str__(self):
+        return f"DriftReport {self.report_date}: PSI={self.psi_score}, alert={self.alert_level}"

@@ -187,6 +187,7 @@ export interface LoanDecision {
   confidence: number;
   risk_score: number | null;
   feature_importances: Record<string, number> | Array<{ feature: string; importance: number }>;
+  counterfactuals?: Array<string | { feature: string; current: number | string; target: number | string; description?: string }>;
   model_version: string;
   reasoning: string;
   created_at: string;

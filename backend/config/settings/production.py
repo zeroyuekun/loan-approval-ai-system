@@ -26,6 +26,10 @@ CSRF_COOKIE_HTTPONLY = True
 SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 
 DATABASES['default']['CONN_MAX_AGE'] = 600
+DATABASES['default'].setdefault('OPTIONS', {})['sslmode'] = 'require'
+
+# CSRF cookie must be readable by JS for cookie-based auth
+CSRF_COOKIE_HTTPONLY = False
 
 # Celery task limits
 CELERY_TASK_TIME_LIMIT = 600
@@ -42,11 +46,15 @@ LOGGING = {
             'format': '{levelname} {asctime} {module} {message}',
             'style': '{',
         },
+        'json': {
+            '()': 'pythonjsonlogger.jsonlogger.JsonFormatter',
+            'format': '%(asctime)s %(name)s %(levelname)s %(message)s',
+        },
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
+            'formatter': 'json',
         },
     },
     'root': {
@@ -62,6 +70,21 @@ LOGGING = {
         'django.request': {
             'handlers': ['console'],
             'level': 'ERROR',
+            'propagate': False,
+        },
+        'agents': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'email_engine': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ml_engine': {
+            'handlers': ['console'],
+            'level': 'INFO',
             'propagate': False,
         },
     },

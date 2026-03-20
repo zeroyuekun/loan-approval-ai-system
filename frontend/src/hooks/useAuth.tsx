@@ -24,42 +24,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data } = await authApi.getProfile()
       setUser(data)
-      localStorage.setItem('user', JSON.stringify(data))
+      // Store non-sensitive user metadata for UI rendering (not tokens)
+      sessionStorage.setItem('user', JSON.stringify(data))
       setRoleCookie(data.role)
+      return true
     } catch {
       setUser(null)
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('user')
+      sessionStorage.removeItem('user')
       clearRoleCookie()
+      return false
     }
   }, [])
 
-  // On mount, check localStorage for existing session
+  // On mount, try to restore session from HttpOnly cookies
   useEffect(() => {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      // Load cached user immediately to avoid flicker
-      const cached = localStorage.getItem('user')
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached)
-          setUser(parsed)
-          setRoleCookie(parsed.role)
-        } catch {}
-      }
-      // Then verify with the server
-      fetchProfile().finally(() => setIsLoading(false))
-    } else {
-      setIsLoading(false)
+    // Load cached user from sessionStorage for instant render
+    const cached = sessionStorage.getItem('user')
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        setUser(parsed)
+        setRoleCookie(parsed.role)
+      } catch {}
     }
+    // Verify with server (cookies are sent automatically)
+    fetchProfile().finally(() => setIsLoading(false))
   }, [fetchProfile])
 
   const login = useCallback(async (username: string, password: string) => {
+    // Ensure we have a CSRF token before the login POST
+    await authApi.getCsrfToken()
     const { data } = await authApi.login({ username, password })
-    localStorage.setItem('access_token', data.tokens.access)
-    localStorage.setItem('refresh_token', data.tokens.refresh)
-    localStorage.setItem('user', JSON.stringify(data.user))
+    // Server sets HttpOnly cookies — we only store user metadata
+    sessionStorage.setItem('user', JSON.stringify(data.user))
     setUser(data.user)
     setRoleCookie(data.user.role)
     setIsLoading(false)
@@ -67,14 +64,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router])
 
   const register = useCallback(async (formData: any) => {
+    await authApi.getCsrfToken()
     await authApi.register(formData)
     await login(formData.username, formData.password)
   }, [login])
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('user')
+  const logout = useCallback(async () => {
+    try {
+      // POST to logout — server blacklists refresh token and clears cookies
+      const api = (await import('@/lib/api')).default
+      await api.post('/auth/logout/')
+    } catch {
+      // Logout even if the API call fails
+    }
+    sessionStorage.removeItem('user')
     clearRoleCookie()
     setUser(null)
     router.replace('/login')
@@ -86,12 +89,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const resetIdleTimer = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current)
-    if (localStorage.getItem('access_token')) {
+    if (user) {
       idleTimer.current = setTimeout(() => {
         logout()
       }, IDLE_TIMEOUT_MS)
     }
-  }, [logout])
+  }, [logout, user])
 
   useEffect(() => {
     if (!user) return

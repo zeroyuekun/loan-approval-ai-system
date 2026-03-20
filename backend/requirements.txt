@@ -18,3 +18,4 @@ gunicorn>=23.0
 pytest>=8.3
 pytest-django>=4.9
 python-dotenv>=1.1
+python-json-logger>=3.2

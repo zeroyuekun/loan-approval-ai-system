@@ -165,6 +165,9 @@ class PipelineOrchestrator:
                 generation_time_ms=email_result['generation_time_ms'],
                 attempt_number=email_result['attempt_number'],
                 passed_guardrails=email_result['passed_guardrails'],
+                template_fallback=email_result.get('template_fallback', False),
+                input_tokens=email_result.get('input_tokens'),
+                output_tokens=email_result.get('output_tokens'),
             )
 
             GuardrailLog.objects.bulk_create([
@@ -180,6 +183,7 @@ class PipelineOrchestrator:
             step = self._complete_step(step, result_summary={
                 'subject': email_result['subject'],
                 'passed_guardrails': email_result['passed_guardrails'],
+                'template_fallback': email_result.get('template_fallback', False),
             })
         except Exception as e:
             logger.error('Application %s: email generation failed: %s', application_id, e)
@@ -489,10 +493,9 @@ class PipelineOrchestrator:
                 application, agent_run, steps, denial_reasons, profile_context,
             )
 
-        # Finalize
+        # Finalize — _finalize_run sets status to 'completed' internally
         with transaction.atomic():
             LoanApplication.objects.filter(pk=application.pk).update(status=decision)
-        agent_run.status = 'completed'
         self._finalize_run(agent_run, steps, start_time)
         logger.info('Agent run %s: resumed and completed with decision=%s', agent_run_id, decision)
 

@@ -24,7 +24,7 @@ export function ApplicationTable({
   totalCount,
   page,
   onPageChange,
-  pageSize = 10,
+  pageSize = 20,
 }: ApplicationTableProps) {
   const router = useRouter()
   const totalPages = Math.ceil(totalCount / pageSize)
@@ -83,28 +83,28 @@ export function ApplicationTable({
         </TableBody>
       </Table>
 
-      {(totalPages > 1 || page > 1) && (
+      {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4">
           <p className="text-sm text-muted-foreground">
-            {totalCount > 0
-              ? `Showing ${((page - 1) * pageSize) + 1} to ${Math.min(page * pageSize, totalCount)} of ${totalCount}`
-              : '\u00A0'}
+            Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalCount)} of {totalCount}
           </p>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
+              className="bg-white hover:bg-slate-50 disabled:bg-white disabled:opacity-100 disabled:text-muted-foreground/40"
               onClick={() => onPageChange(page - 1)}
               disabled={page <= 1}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <span className="text-sm">
-              Page {page} of {totalPages || page}
+              Page {page} of {totalPages}
             </span>
             <Button
               variant="outline"
               size="sm"
+              className="bg-white hover:bg-slate-50 disabled:bg-white disabled:opacity-100 disabled:text-muted-foreground/40"
               onClick={() => onPageChange(page + 1)}
               disabled={page >= totalPages}
             >

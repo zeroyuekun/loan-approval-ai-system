@@ -106,7 +106,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'apps.accounts.authentication.CookieJWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -137,12 +137,24 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
+# JWT Cookie settings (HttpOnly cookies instead of localStorage)
+JWT_COOKIE_SECURE = not DEBUG  # Secure flag in production
+JWT_COOKIE_SAMESITE = 'Lax'
+JWT_COOKIE_HTTPONLY = True
+JWT_ACCESS_COOKIE_NAME = 'access_token'
+JWT_REFRESH_COOKIE_NAME = 'refresh_token'
+
 # CORS
 CORS_ALLOWED_ORIGINS = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
     'http://localhost:3000,http://127.0.0.1:3000'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
+
+# CSRF trusted origins (must match CORS origins for cookie-based auth)
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS[:]
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = False  # Frontend JS needs to read CSRF token
 
 # Celery
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
@@ -155,6 +167,15 @@ CELERY_TASK_ROUTES = {
     'apps.ml_engine.tasks.*': {'queue': 'ml'},
     'apps.email_engine.tasks.*': {'queue': 'email'},
     'apps.agents.tasks.*': {'queue': 'agents'},
+}
+
+# Django Cache (Redis-backed)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0').replace('/0', '/1'),
+        'TIMEOUT': 300,  # 5 minutes default TTL
+    }
 }
 
 # ML Models
@@ -183,6 +204,12 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'aussieloanai@gmail.com')
+
+# AI Budget Controls
+AI_DAILY_CALL_LIMIT = int(os.environ.get('AI_DAILY_CALL_LIMIT', '500'))
+AI_DAILY_BUDGET_LIMIT_USD = float(os.environ.get('AI_DAILY_BUDGET_LIMIT_USD', '50.0'))
+AI_CIRCUIT_BREAKER_THRESHOLD = 3   # consecutive failures before circuit opens
+AI_CIRCUIT_BREAKER_COOLDOWN = 600  # seconds to keep circuit open (10 min)
 
 # AI Temperature Settings
 AI_TEMPERATURE_ANALYSIS = 0.0       # Bias detection, reviews, structured analysis

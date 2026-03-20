@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart3, Mail, Bot, UserCircle, Users } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart3, Mail, Bot, UserCircle, Users, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
 import { LogoIcon } from '@/components/ui/logo'
@@ -10,6 +10,7 @@ import { LogoIcon } from '@/components/ui/logo'
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/dashboard/applications', label: 'Applications', icon: FileText },
+  { href: '/dashboard/human-review', label: 'Human Review', icon: ShieldAlert, staffOnly: true },
   { href: '/dashboard/customers', label: 'Customers', icon: Users, staffOnly: true },
   { href: '/dashboard/profile', label: 'My Profile', icon: UserCircle },
   { href: '/dashboard/model-metrics', label: 'Model Metrics', icon: BarChart3 },
