@@ -6,8 +6,8 @@ from django.conf import settings
 from django.db import transaction
 
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
-from apps.email_engine.models import GeneratedEmail, GuardrailLog
 from apps.email_engine.services.email_generator import EmailGenerator
+from apps.email_engine.services.persistence import EmailPersistenceService
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.predictor import ModelPredictor
@@ -67,9 +67,11 @@ class PipelineOrchestrator:
                 .get(pk=application_id)
             )
             if application.status == 'processing':
-                # If processing for more than 5 minutes, treat as stale/stuck
+                # If processing for more than 10 minutes, treat as stale/stuck.
+                # Must exceed Celery soft_time_limit (540s / 9min) to avoid
+                # race conditions where a slow-but-alive task is treated as stale.
                 from django.utils import timezone as tz
-                stale_threshold = tz.now() - tz.timedelta(minutes=5)
+                stale_threshold = tz.now() - tz.timedelta(minutes=10)
                 if application.updated_at > stale_threshold:
                     raise ValueError('Pipeline already running for this application')
                 logger.warning(
@@ -118,6 +120,18 @@ class PipelineOrchestrator:
                 processing_time_ms=prediction_result['processing_time_ms'],
             )
 
+            from apps.loans.models import AuditLog
+            AuditLog.objects.create(
+                action='prediction_completed',
+                resource_type='LoanApplication',
+                resource_id=str(application.pk),
+                details={
+                    'prediction': prediction_result['prediction'],
+                    'probability': round(prediction_result['probability'], 4),
+                    'requires_human_review': prediction_result.get('requires_human_review', False),
+                },
+            )
+
             LoanDecision.objects.update_or_create(
                 application=application,
                 defaults={
@@ -155,30 +169,8 @@ class PipelineOrchestrator:
                 profile_context=profile_context,
             )
 
-            generated_email = GeneratedEmail.objects.create(
-                application=application,
-                decision=decision,
-                subject=email_result['subject'],
-                body=email_result['body'],
-                prompt_used=email_result['prompt_used'],
-                model_used='claude-sonnet-4-20250514',
-                generation_time_ms=email_result['generation_time_ms'],
-                attempt_number=email_result['attempt_number'],
-                passed_guardrails=email_result['passed_guardrails'],
-                template_fallback=email_result.get('template_fallback', False),
-                input_tokens=email_result.get('input_tokens'),
-                output_tokens=email_result.get('output_tokens'),
-            )
-
-            GuardrailLog.objects.bulk_create([
-                GuardrailLog(
-                    email=generated_email,
-                    check_name=check['check_name'],
-                    passed=check['passed'],
-                    details=check['details'],
-                )
-                for check in email_result['guardrail_results']
-            ])
+            generated_email = EmailPersistenceService.save_generated_email(application, decision, email_result)
+            EmailPersistenceService.save_guardrail_logs(generated_email, email_result.get('guardrail_results', []))
 
             step = self._complete_step(step, result_summary={
                 'subject': email_result['subject'],
@@ -227,7 +219,12 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.error('Application %s: bias check failed: %s', application_id, e)
             step = self._fail_step(step, str(e))
-            bias_result = {'score': 100, 'flagged': True, 'requires_human_review': True}
+            # With retry logic inside BiasDetector.analyze(), reaching here means
+            # a fundamental failure (e.g., missing API key, prescreen code bug).
+            # Default to moderate score that triggers AI review rather than
+            # auto-escalating to human queue on every transient failure.
+            bias_result = {'score': 65, 'flagged': True, 'requires_human_review': False,
+                           'categories': [], 'analysis': f'Bias check infrastructure error: {e}'}
 
         steps.append(step)
 
@@ -422,27 +419,8 @@ class PipelineOrchestrator:
                     profile_context=profile_context,
                 )
 
-                generated_email = GeneratedEmail.objects.create(
-                    application=application,
-                    decision='approved',
-                    subject=email_result['subject'],
-                    body=email_result['body'],
-                    prompt_used=email_result['prompt_used'],
-                    model_used='claude-sonnet-4-20250514',
-                    generation_time_ms=email_result['generation_time_ms'],
-                    attempt_number=email_result['attempt_number'],
-                    passed_guardrails=email_result['passed_guardrails'],
-                )
-
-                GuardrailLog.objects.bulk_create([
-                    GuardrailLog(
-                        email=generated_email,
-                        check_name=check['check_name'],
-                        passed=check['passed'],
-                        details=check['details'],
-                    )
-                    for check in email_result['guardrail_results']
-                ])
+                generated_email = EmailPersistenceService.save_generated_email(application, 'approved', email_result)
+                EmailPersistenceService.save_guardrail_logs(generated_email, email_result.get('guardrail_results', []))
 
                 step = self._complete_step(step, result_summary={
                     'subject': email_result['subject'],

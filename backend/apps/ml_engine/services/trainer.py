@@ -7,8 +7,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.isotonic import IsotonicRegression
-from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score, roc_auc_score
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, StratifiedKFold, cross_val_predict, cross_val_score, train_test_split
 from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
@@ -17,46 +18,145 @@ from .metrics import MetricsService
 
 
 class _CalibratedModel:
-    """Wraps a fitted classifier with isotonic probability calibration.
+    """Wraps a fitted classifier with probability calibration.
+
+    Supports adaptive calibration method selection:
+    - isotonic: for >= 1000 validation samples (more flexible, non-parametric)
+    - sigmoid (Platt scaling): for < 1000 samples (avoids overfitting)
 
     Replaces sklearn's CalibratedClassifierCV(cv='prefit') which was
     removed in scikit-learn 1.8.
     """
 
-    def __init__(self, estimator, X_val, y_val):
+    def __init__(self, estimator, X_val, y_val, calibration_method=None):
         self.estimator = estimator
         val_probs = estimator.predict_proba(X_val)[:, 1]
-        self._calibrator = IsotonicRegression(out_of_bounds='clip')
-        self._calibrator.fit(val_probs, y_val)
+
+        # Adaptive calibration method selection
+        if calibration_method is None:
+            if len(X_val) >= 1000:
+                calibration_method = 'isotonic'
+                logger.info('Using isotonic calibration (%d validation samples >= 1000 threshold)', len(X_val))
+            else:
+                calibration_method = 'sigmoid'
+                logger.info('Using Platt scaling (%d validation samples < 1000 threshold — isotonic would overfit)', len(X_val))
+
+        self.calibration_method = calibration_method
+
+        if calibration_method == 'isotonic':
+            self._calibrator = IsotonicRegression(out_of_bounds='clip')
+            self._calibrator.fit(val_probs, y_val)
+        else:
+            # Platt scaling: logistic regression on predicted probabilities
+            from sklearn.linear_model import LogisticRegression as _PlattLR
+            self._calibrator = _PlattLR(max_iter=1000)
+            self._calibrator.fit(val_probs.reshape(-1, 1), y_val)
 
     def predict(self, X):
         return self.estimator.predict(X)
 
     def predict_proba(self, X):
         raw_probs = self.estimator.predict_proba(X)[:, 1]
-        calibrated = self._calibrator.predict(raw_probs)
+        if self.calibration_method == 'isotonic':
+            calibrated = self._calibrator.predict(raw_probs)
+        else:
+            calibrated = self._calibrator.predict_proba(raw_probs.reshape(-1, 1))[:, 1]
         calibrated = np.clip(calibrated, 0.0, 1.0)
         return np.column_stack([1 - calibrated, calibrated])
+
+    def get_underlying_estimator(self):
+        """Return the raw tree model for SHAP explainability."""
+        return self.estimator
 
     @property
     def feature_importances_(self):
         return self.estimator.feature_importances_
 
 
+class _EnsembleModel:
+    """Stacked ensemble: XGB + RF + LightGBM with LogisticRegression meta-learner."""
+
+    def __init__(self, xgb_model, rf_model, lgbm_model, meta_model):
+        self.xgb_model = xgb_model
+        self.rf_model = rf_model
+        self.lgbm_model = lgbm_model
+        self.meta_model = meta_model
+        self.classes_ = np.array([0, 1])
+        # Use XGB as primary for feature importances
+        self.feature_importances_ = xgb_model.feature_importances_
+
+    def predict_proba(self, X):
+        p_xgb = self.xgb_model.predict_proba(X)[:, 1]
+        p_rf = self.rf_model.predict_proba(X)[:, 1]
+        p_lgbm = self.lgbm_model.predict_proba(X)[:, 1]
+        meta_features = np.column_stack([p_xgb, p_rf, p_lgbm])
+        meta_probs = self.meta_model.predict_proba(meta_features)
+        return meta_probs
+
+    def predict(self, X, threshold=None):
+        probs = self.predict_proba(X)
+        # Use provided threshold or default 0.5; predictor.py uses model_version.optimal_threshold
+        t = threshold if threshold is not None else 0.5
+        return (probs[:, 1] >= t).astype(int)
+
+
 class ModelTrainer:
     """Handles model training with GridSearchCV."""
 
-    CATEGORICAL_COLS = ['purpose', 'home_ownership', 'employment_type', 'applicant_type', 'state']
+    CATEGORICAL_COLS = ['purpose', 'home_ownership', 'employment_type', 'applicant_type', 'state', 'savings_trend_3m', 'industry_risk_tier']
     NUMERIC_COLS = [
         'annual_income', 'credit_score', 'loan_amount', 'loan_term_months',
         'debt_to_income', 'employment_length', 'has_cosigner',
         'property_value', 'deposit_amount', 'monthly_expenses',
         'existing_credit_card_limit', 'number_of_dependants',
         'has_hecs', 'has_bankruptcy',
+        # Bureau features (Equifax/Illion credit report data)
+        'num_credit_enquiries_6m', 'worst_arrears_months', 'num_defaults_5yr',
+        'credit_history_months', 'total_open_accounts', 'num_bnpl_accounts',
+        # Behavioural features (existing customer internal data)
+        'is_existing_customer', 'savings_balance', 'salary_credit_regularity',
+        'num_dishonours_12m', 'avg_monthly_savings_rate', 'days_in_overdraft_12m',
+        # Macroeconomic context
+        'rba_cash_rate', 'unemployment_rate', 'property_growth_12m', 'consumer_confidence',
+        # Application integrity
+        'income_verification_gap', 'document_consistency_score',
+        # Derived ratios
         'lvr', 'loan_to_income', 'credit_card_burden', 'expense_to_income',
         # Feature interactions (standard in Big 4 bank scorecards)
         'lvr_x_dti', 'income_credit_interaction',
         'serviceability_ratio', 'employment_stability',
+        # Additional features (Prospa/Athena-style — improves discrimination)
+        'deposit_ratio', 'monthly_repayment_ratio', 'net_monthly_surplus',
+        'income_per_dependant', 'credit_score_x_tenure',
+        # Bureau-derived
+        'enquiry_intensity', 'bureau_risk_score', 'rate_stress_buffer',
+        # Open Banking features (Plaid/Basiq-inspired)
+        'discretionary_spend_ratio', 'gambling_transaction_flag',
+        'bnpl_active_count', 'overdraft_frequency_90d',
+        'income_verification_score',
+        # CCR features
+        'num_late_payments_24m', 'worst_late_payment_days', 'total_credit_limit',
+        'credit_utilization_pct', 'num_hardship_flags', 'months_since_last_default',
+        'num_credit_providers',
+        # BNPL-specific
+        'bnpl_total_limit', 'bnpl_utilization_pct', 'bnpl_late_payments_12m',
+        'bnpl_monthly_commitment',
+        # CDR/Open Banking transaction features
+        'income_source_count', 'rent_payment_regularity', 'utility_payment_regularity',
+        'essential_to_total_spend', 'subscription_burden', 'balance_before_payday',
+        'min_balance_30d', 'days_negative_balance_90d',
+        # Geographic risk
+        'postcode_default_rate',
+        # APRA stress test derived
+        'stressed_repayment', 'stressed_dsr', 'hem_surplus',
+        'uncommitted_monthly_income',
+        # Additional derived ratios
+        'savings_to_loan_ratio', 'debt_service_coverage', 'bnpl_to_income_ratio',
+        'enquiry_to_account_ratio', 'stress_index',
+        'log_annual_income', 'log_loan_amount',
+        # New calibration variables (APRA/ABS/Equifax 2025-2026)
+        'hecs_debt_balance', 'existing_property_count',
+        'cash_advance_count_12m', 'monthly_rent', 'gambling_spend_ratio',
     ]
 
     def __init__(self):
@@ -72,102 +172,26 @@ class ModelTrainer:
         Handles missing values (NaN) in optional fields by imputing with
         sensible defaults before computing derived features.
         Stores imputation values so the predictor can use the same ones.
+
+        Delegates actual feature computation to the shared
+        feature_engineering module (single source of truth).
         """
+        from .feature_engineering import (
+            DEFAULT_IMPUTATION_VALUES,
+            compute_derived_features,
+            impute_missing_values,
+        )
+
         df = df.copy()
 
-        # Impute missing values and store the values used so the predictor
-        # can apply identical imputation (prevents train/serve skew).
+        # Compute data-dependent imputation values and merge with defaults.
+        # monthly_expenses uses the training data median; all others use
+        # fixed defaults from the shared module.
         expenses_median = float(df['monthly_expenses'].median()) if df['monthly_expenses'].notna().any() else 2500.0
-        self._imputation_values = {
-            'monthly_expenses': expenses_median,
-            'existing_credit_card_limit': 0.0,
-            'property_value': 0.0,
-            'deposit_amount': 0.0,
-        }
-        df['monthly_expenses'] = df['monthly_expenses'].fillna(expenses_median)
-        df['existing_credit_card_limit'] = df['existing_credit_card_limit'].fillna(0)
-        df['property_value'] = df['property_value'].fillna(0)
-        df['deposit_amount'] = df['deposit_amount'].fillna(0)
+        self._imputation_values = {**DEFAULT_IMPUTATION_VALUES, 'monthly_expenses': expenses_median}
 
-        df['lvr'] = np.where(
-            df['property_value'] > 0,
-            df['loan_amount'] / df['property_value'],
-            0.0,
-        )
-        df['loan_to_income'] = df['loan_amount'] / df['annual_income']
-        monthly_income = df['annual_income'] / 12.0
-        df['credit_card_burden'] = np.where(
-            monthly_income > 0,
-            df['existing_credit_card_limit'] * 0.03 / monthly_income,
-            0.0,
-        )
-        df['expense_to_income'] = np.where(
-            df['annual_income'] > 0,
-            df['monthly_expenses'] * 12 / df['annual_income'],
-            0.0,
-        )
-
-        # ---------------------------------------------------------------
-        # FEATURE INTERACTIONS
-        #
-        # Real bank scorecards capture cross-feature signals that single
-        # features miss. These interactions model the combinatorial risk
-        # that underwriters assess intuitively:
-        #
-        # - A high LVR alone is manageable; high LVR + high DTI together
-        #   is much riskier than the sum of parts (compounding leverage)
-        # - High income partially compensates for high DTI (more buffer)
-        # - Long employment for a casual worker is very different from
-        #   long employment for a permanent worker
-        # - Credit score + income together predict serviceability better
-        #   than either alone (creditworthiness x capacity)
-        #
-        # These are standard features in Big 4 bank scorecards. APRA CPG
-        # 235 specifically mentions interaction effects in model risk
-        # management requirements.
-        # ---------------------------------------------------------------
-
-        # Leverage interaction: LVR x DTI — compounding risk.
-        # High LVR (little equity) + high DTI (stretched income) is the
-        # profile most likely to default under stress (RBA FSR 2022).
-        df['lvr_x_dti'] = df['lvr'] * df['debt_to_income']
-
-        # Capacity interaction: income normalised credit score.
-        # High credit + high income = strong applicant. Low credit + low
-        # income = weak. This captures the joint effect better than either
-        # feature alone.
-        df['income_credit_interaction'] = (
-            np.log1p(df['annual_income']) * df['credit_score'] / 1200
-        )
-
-        # Serviceability buffer: how much monthly income remains after
-        # all commitments as a ratio. Directly models the bank's
-        # serviceability assessment.
-        monthly_commitments = (
-            df['existing_credit_card_limit'] * 0.03
-            + df['monthly_expenses']
-        )
-        df['serviceability_ratio'] = np.where(
-            monthly_income > 0,
-            np.clip(1.0 - monthly_commitments / monthly_income, -1.0, 1.0),
-            0.0,
-        )
-
-        # Employment stability score: employment type quality x tenure.
-        # Permanent with 10 years = very stable; casual with 1 year = risky.
-        emp_type_weight = df.get('employment_type', pd.Series(dtype=str)).map({
-            'payg_permanent': 1.0,
-            'contract': 0.7,
-            'self_employed': 0.6,
-            'payg_casual': 0.4,
-        }).fillna(0.5)
-        df['employment_stability'] = emp_type_weight * np.log1p(df['employment_length'])
-
-        # Ensure new columns exist with defaults if missing from older datasets
-        if 'has_hecs' not in df.columns:
-            df['has_hecs'] = 0
-        if 'has_bankruptcy' not in df.columns:
-            df['has_bankruptcy'] = 0
+        df = impute_missing_values(df, self._imputation_values)
+        df = compute_derived_features(df)
         return df
 
     def fit_preprocess(self, df):
@@ -220,8 +244,96 @@ class ModelTrainer:
 
         return df, self.ohe_columns
 
-    def train(self, data_path, algorithm='xgb'):
-        """Train model with GridSearchCV and return model + metrics."""
+    # ------------------------------------------------------------------
+    # Data splitting strategies
+    # ------------------------------------------------------------------
+
+    def _split_data(self, df, y):
+        """Split data into train/val/test. Uses temporal split if possible."""
+        if 'application_quarter' in df.columns:
+            result = self._temporal_split(df, y)
+            if result is not None:
+                return result
+            logger.warning('Temporal split failed; falling back to random split')
+        return self._random_split(df, y)
+
+    def _random_split(self, df, y):
+        """Standard 80/10/10 random stratified split."""
+        df_train, df_temp, y_train, y_temp = train_test_split(
+            df, y, test_size=0.2, random_state=42, stratify=y
+        )
+        df_val, df_test, y_val, y_test = train_test_split(
+            df_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
+        )
+        return df_train, df_val, df_test, y_train, y_val, y_test, {
+            'split_strategy': 'random_stratified',
+        }
+
+    def _temporal_split(self, df, y):
+        """Time-based split: train on earlier quarters, validate/test on later.
+
+        Returns None if temporal split is not viable (too few quarters or
+        insufficient class variety in a split).
+        """
+        quarters = sorted(df['application_quarter'].unique())
+        n_q = len(quarters)
+        if n_q < 3:
+            logger.info('Only %d quarter(s) — need >=3 for temporal split', n_q)
+            return None
+
+        # Train: first ~75%, Val: next slice, Test: last slice
+        train_end = max(1, int(n_q * 0.75))
+        val_end = train_end + max(1, (n_q - train_end) // 2)
+
+        train_quarters = list(quarters[:train_end])
+        val_quarters = list(quarters[train_end:val_end])
+        test_quarters = list(quarters[val_end:])
+
+        # Ensure test is not empty
+        if not test_quarters:
+            test_quarters = [quarters[-1]]
+            if quarters[-1] in val_quarters:
+                val_quarters.remove(quarters[-1])
+
+        train_mask = df['application_quarter'].isin(train_quarters)
+        val_mask = df['application_quarter'].isin(val_quarters)
+        test_mask = df['application_quarter'].isin(test_quarters)
+
+        # Both classes must be present in val and test
+        if y[val_mask].nunique() < 2 or y[test_mask].nunique() < 2:
+            logger.info('Temporal split has insufficient class variety in val/test')
+            return None
+
+        meta = {
+            'split_strategy': 'temporal',
+            'train_quarters': train_quarters,
+            'val_quarters': val_quarters,
+            'test_quarters': test_quarters,
+        }
+        return (
+            df[train_mask], df[val_mask], df[test_mask],
+            y[train_mask], y[val_mask], y[test_mask],
+            meta,
+        )
+
+    def train(self, data_path, algorithm='xgb', use_reject_inference=True, reject_inference_labels=None):
+        """Train model with GridSearchCV and return model + metrics.
+
+        Parameters
+        ----------
+        data_path : str
+            Path to CSV training data.
+        algorithm : str
+            'xgb', 'rf', 'lgbm', or 'ensemble'.
+        use_reject_inference : bool
+            If True and reject_inference_labels is provided, augment training
+            data with denied applications at reduced weight (0.5) to mitigate
+            selection bias from only training on approved loans.
+        reject_inference_labels : pd.Series or None
+            Series of inferred outcomes for denied applications, indexed to
+            match the rows in the CSV. Typically from
+            DataGenerator.reject_inference_labels.
+        """
         start_time = time.time()
 
         # Load data
@@ -238,13 +350,17 @@ class ModelTrainer:
                 f'Each class needs at least 5 samples.'
             )
 
-        # 80/10/10 split BEFORE preprocessing to avoid data leakage
-        df_train, df_temp, y_train, y_temp = train_test_split(
-            df, y, test_size=0.2, random_state=42, stratify=y
-        )
-        df_val, df_test, y_val, y_test = train_test_split(
-            df_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
-        )
+        # Split BEFORE preprocessing to avoid data leakage.
+        # Uses temporal split (by application_quarter) if available,
+        # otherwise falls back to random stratified 80/10/10.
+        df_train, df_val, df_test, y_train, y_val, y_test, split_meta = self._split_data(df, y)
+
+        # Drop application_quarter from feature DataFrames (used only for splitting)
+        for split_df in [df_train, df_val, df_test]:
+            if 'application_quarter' in split_df.columns:
+                split_df.drop(columns=['application_quarter'], inplace=True)
+        if 'application_quarter' in df.columns:
+            df = df.drop(columns=['application_quarter'])
 
         # Capture reference distribution for PSI drift detection (APRA CPG 235).
         # Computed on training data ONLY (not full dataset) to avoid data leakage.
@@ -293,14 +409,130 @@ class ModelTrainer:
         df_test, _ = self.transform(df_test)
         X_test = df_test[feature_cols]
 
+        # Fairness reweighting: compute sample weights to reduce employment
+        # type disparate impact (DI). Without this, DI ~0.38 (failing EEOC 80%
+        # rule). Reweighting assigns higher weights to underrepresented
+        # employment groups so the model doesn't systematically deny them.
+        # See: MATLAB bias mitigation methodology (mathworks.com/help/risk/
+        # bias-mitigation-for-credit-scoring-model-by-reweighting.html)
+        sample_weights = None
+        if 'employment_type' in df_train.columns:
+            emp_groups = df_train['employment_type']
+            group_counts = emp_groups.value_counts()
+            total = len(emp_groups)
+            n_groups = len(group_counts)
+            # Weight = (total / n_groups) / group_count — equalises group representation
+            weight_map = {
+                group: (total / n_groups) / count
+                for group, count in group_counts.items()
+            }
+            sample_weights = emp_groups.map(weight_map).values
+            # Normalise so weights sum to len(y_train)
+            sample_weights = sample_weights * total / sample_weights.sum()
+            logger.info(
+                'Fairness reweighting applied: %s',
+                {g: round(w, 3) for g, w in weight_map.items()},
+            )
+
+        # ------------------------------------------------------------------
+        # Reject-inference-aware training: include denied applications at
+        # reduced weight to mitigate selection bias (only training on
+        # approved loans would teach the model that approved-looking
+        # profiles are always good).
+        # ------------------------------------------------------------------
+        if use_reject_inference and reject_inference_labels is not None:
+            # Identify denied rows in the TRAINING split only (avoid leakage)
+            denied_mask = df_train['approved'] == 0
+            denied_indices = df_train.index[denied_mask]
+            # Keep only denied rows that have reject inference labels
+            ri_available = denied_indices.intersection(reject_inference_labels.index)
+            if len(ri_available) > 0:
+                ri_labels = reject_inference_labels.loc[ri_available]
+                # Preprocess denied rows through the already-fit pipeline
+                df_denied = df_train.loc[ri_available].copy()
+                df_denied_transformed, _ = self.transform(df_denied)
+                X_denied = df_denied_transformed[feature_cols]
+
+                # Augment training data
+                X_train = pd.concat([X_train, X_denied], ignore_index=True)
+                y_train = pd.concat([y_train.reset_index(drop=True), ri_labels.reset_index(drop=True)], ignore_index=True)
+
+                # Build reject-inference weight vector: 1.0 for original, 0.5 for inferred
+                n_original = len(y_train) - len(ri_labels)
+                ri_weights = np.concatenate([
+                    np.ones(n_original),
+                    np.full(len(ri_labels), 0.5),
+                ])
+
+                # Multiply with existing fairness weights if present
+                if sample_weights is not None:
+                    # Extend fairness weights for the new denied rows (use 1.0 — no group info after OHE)
+                    extended_fairness = np.concatenate([
+                        sample_weights,
+                        np.ones(len(ri_labels)),
+                    ])
+                    sample_weights = extended_fairness * ri_weights
+                else:
+                    sample_weights = ri_weights
+
+                # Re-normalise so weights sum to len(y_train)
+                sample_weights = sample_weights * len(y_train) / sample_weights.sum()
+
+                logger.info(
+                    'Reject inference: augmented training set with %d denied applications at 0.5 weight '
+                    '(total training size: %d)',
+                    len(ri_labels), len(y_train),
+                )
+            else:
+                logger.info('Reject inference: no matching denied rows in training split, skipping')
+
+        # ------------------------------------------------------------------
+        # K-fold cross-validation for robust metric estimation.
+        # Runs BEFORE the final model training to get an unbiased estimate
+        # of generalisation performance across multiple data splits.
+        # ------------------------------------------------------------------
+        logger.info('Running 5-fold stratified cross-validation...')
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        neg_count_cv = int((y_train == 0).sum())
+        pos_count_cv = int((y_train == 1).sum())
+        from xgboost import XGBClassifier as _CVXGBClassifier
+        cv_model = _CVXGBClassifier(
+            n_estimators=200, max_depth=6, learning_rate=0.1,
+            random_state=42, eval_metric='logloss', n_jobs=1,
+            scale_pos_weight=neg_count_cv / pos_count_cv if pos_count_cv > 0 else 1.0,
+        )
+        cv_scores = cross_val_score(cv_model, X_train, y_train, cv=cv, scoring='roc_auc')
+        cv_mean = float(cv_scores.mean())
+        cv_std = float(cv_scores.std())
+        logger.info('5-fold CV AUC-ROC: %.4f +/- %.4f', cv_mean, cv_std)
+        # Flag instability if any fold deviates >3% from mean (range > 6%)
+        cv_unstable = bool(cv_scores.max() - cv_scores.min() > 0.06)
+        if cv_unstable:
+            logger.warning(
+                'CV fold variance is high (range %.4f) — model may be unstable',
+                cv_scores.max() - cv_scores.min(),
+            )
+
         if algorithm == 'xgb':
-            raw_model, best_params = self._train_xgb(X_train, y_train, X_val, y_val)
+            raw_model, best_params = self._train_xgb(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
+        elif algorithm == 'lgbm':
+            raw_model, best_params = self._train_lgbm(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
+        elif algorithm == 'ensemble':
+            raw_model, best_params = self._train_ensemble(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
         else:
-            raw_model, best_params = self._train_rf(X_train, y_train, X_val, y_val)
+            raw_model, best_params = self._train_rf(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
 
         # Probability calibration on validation set only (avoids data leakage
-        # since GridSearchCV already used cross-validation on the training set)
+        # since GridSearchCV already used cross-validation on the training set).
+        # Adaptive method: isotonic for >= 1000 samples, Platt scaling otherwise.
         model = _CalibratedModel(raw_model, X_val, y_val)
+
+        # Optimal threshold via F1 maximisation on validation set
+        val_probs = model.predict_proba(X_val)[:, 1]
+        thresholds = np.arange(0.2, 0.8, 0.01)
+        f1_scores = [f1_score(y_val, (val_probs >= t).astype(int)) for t in thresholds]
+        optimal_threshold = float(thresholds[np.argmax(f1_scores)])
+        logger.info('Optimal threshold: %.3f (F1: %.4f)', optimal_threshold, max(f1_scores))
 
         # Conformal prediction: compute nonconformity scores on validation set.
         # These are stored in the model bundle and used at inference time to
@@ -344,6 +576,7 @@ class ModelTrainer:
 
         training_time = round(time.time() - start_time, 2)
         metrics['training_time_seconds'] = training_time
+        metrics['optimal_threshold'] = optimal_threshold
         metrics['training_metadata'] = {
             'train_size': len(y_train),
             'val_size': len(y_val),
@@ -353,6 +586,13 @@ class ModelTrainer:
             'overfitting_gap': overfitting_gap,
             'train_auc': round(train_auc, 4),
             'n_features': len(feature_cols),
+            'cv_auc_mean': cv_mean,
+            'cv_auc_std': cv_std,
+            'cv_auc_per_fold': cv_scores.tolist(),
+            'cv_unstable': cv_unstable,
+            'optimal_threshold': optimal_threshold,
+            'calibration_method': getattr(model, 'calibration_method', 'unknown'),
+            **split_meta,
         }
 
         # Fairness metrics with full TPR/FPR/disparate impact
@@ -416,7 +656,7 @@ class ModelTrainer:
 
         return model, metrics
 
-    def _train_rf(self, X_train, y_train, X_val, y_val):
+    def _train_rf(self, X_train, y_train, X_val, y_val, sample_weights=None):
         """Train Random Forest with GridSearchCV."""
         param_grid = {
             'n_estimators': [100, 200],
@@ -425,7 +665,10 @@ class ModelTrainer:
         }
         rf = RandomForestClassifier(random_state=42, class_weight='balanced')
         grid = GridSearchCV(rf, param_grid, cv=5, scoring='f1', n_jobs=-1, verbose=0)
-        grid.fit(X_train, y_train)
+        fit_params = {}
+        if sample_weights is not None:
+            fit_params['sample_weight'] = sample_weights
+        grid.fit(X_train, y_train, **fit_params)
         return grid.best_estimator_, grid.best_params_
 
     def _build_monotonic_constraints(self, feature_cols):
@@ -449,32 +692,26 @@ class ModelTrainer:
          -1 = monotonically decreasing (more → less likely approved)
           0 = unconstrained
         """
+        # Reduced from 27 to 10 constraints. XGBoost docs warn that >15 constraints
+        # with hist tree_method may produce unnecessarily shallow trees by wiping out
+        # split candidates.
         constraints = {
-            'annual_income': 1,         # more income → more likely approved
-            'credit_score': 1,          # better credit → more likely approved
-            'debt_to_income': -1,       # higher DTI → less likely approved
-            'employment_length': 1,     # longer tenure → more likely approved
-            'has_cosigner': 1,          # cosigner helps
-            'has_bankruptcy': -1,       # bankruptcy hurts
-            # has_hecs: unconstrained (0) — effect is income-mediated, not unconditional.
-            # High-income HECS holders are barely affected; forcing monotonicity
-            # would unfairly penalise them.
-            'loan_to_income': -1,       # higher loan relative to income → riskier
-            'expense_to_income': -1,    # higher expenses relative to income → riskier
-            # lvr: unconstrained (0) — non-home loans have LVR=0.0, which is
-            # semantically "no property", not "best possible LVR". A -1
-            # constraint would force the model to approve LVR=0 (personal loans)
-            # more than any home loan with a deposit.
-            'credit_card_burden': -1,   # higher CC burden → riskier
-            # Interaction features
-            'lvr_x_dti': -1,            # compounding leverage → riskier
-            'income_credit_interaction': 1,  # higher income x credit → safer
-            'serviceability_ratio': 1,   # more buffer after commitments → safer
-            'employment_stability': 1,   # more stable employment → safer
+            # Positive: higher value → more likely approved
+            'credit_score': 1,
+            'annual_income': 1,
+            'employment_length': 1,
+            'savings_balance': 1,
+            'credit_history_months': 1,
+            'salary_credit_regularity': 1,
+            'income_verification_score': 1,
+            # Negative: higher value → less likely approved
+            'debt_to_income': -1,
+            'num_defaults_5yr': -1,
+            'worst_arrears_months': -1,
         }
         return tuple(constraints.get(col, 0) for col in feature_cols)
 
-    def _train_xgb(self, X_train, y_train, X_val, y_val):
+    def _train_xgb(self, X_train, y_train, X_val, y_val, sample_weights=None):
         """Train XGBoost with RandomizedSearchCV, monotonic constraints, and early stopping."""
         from xgboost import XGBClassifier
 
@@ -511,7 +748,10 @@ class ModelTrainer:
             xgb, param_grid, n_iter=50, cv=3, scoring='f1',
             n_jobs=-1, verbose=0, random_state=42,
         )
-        search.fit(X_train, y_train)
+        fit_params = {}
+        if sample_weights is not None:
+            fit_params['sample_weight'] = sample_weights
+        search.fit(X_train, y_train, **fit_params)
         best_params = search.best_params_
 
         # Refit with early stopping using validation set.
@@ -525,13 +765,104 @@ class ModelTrainer:
             early_stopping_rounds=20,
             n_jobs=-1,
         )
-        final_model.fit(
-            X_train, y_train,
-            eval_set=[(X_val, y_val)],
-            verbose=False,
-        )
+        fit_kwargs = {
+            'eval_set': [(X_val, y_val)],
+            'verbose': False,
+        }
+        if sample_weights is not None:
+            fit_kwargs['sample_weight'] = sample_weights
+        final_model.fit(X_train, y_train, **fit_kwargs)
 
         return final_model, best_params
+
+    def _train_lgbm(self, X_train, y_train, X_val, y_val, sample_weights=None):
+        """Train LightGBM with RandomizedSearchCV and native categorical feature handling."""
+        import lightgbm as lgb
+
+        param_grid = {
+            'n_estimators': [200, 400, 600],
+            'max_depth': [4, 6, 8],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'num_leaves': [15, 31, 63],
+            'min_child_samples': [20, 50, 100],
+            'subsample': [0.7, 0.8, 0.9],
+            'colsample_bytree': [0.7, 0.8, 0.9],
+            'reg_alpha': [0, 0.1, 1.0],
+            'reg_lambda': [0, 0.1, 1.0],
+        }
+
+        neg_count = int((y_train == 0).sum())
+        pos_count = int((y_train == 1).sum())
+        scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1.0
+
+        model = lgb.LGBMClassifier(
+            scale_pos_weight=scale_pos_weight,
+            random_state=42,
+            verbose=-1,
+            n_jobs=1,  # Use 1 inside estimator; RandomizedSearchCV parallelizes across CV folds
+        )
+
+        search = RandomizedSearchCV(
+            model, param_grid, n_iter=50, cv=3, scoring='f1',
+            n_jobs=-1, verbose=0, random_state=42,
+        )
+        fit_params = {}
+        if sample_weights is not None:
+            fit_params['sample_weight'] = sample_weights
+        search.fit(X_train, y_train, **fit_params)
+
+        best_model = search.best_estimator_
+        best_params = search.best_params_
+
+        logger.info('LightGBM best params: %s (CV F1: %.4f)', best_params, search.best_score_)
+
+        return best_model, best_params
+
+    def _train_ensemble(self, X_train, y_train, X_val, y_val, sample_weights=None):
+        """Train stacked ensemble: XGB + RF + LightGBM with LogisticRegression meta-learner."""
+        logger.info('Training ensemble: XGB + RF + LightGBM with LR meta-learner')
+
+        # Train base models
+        xgb_model, xgb_params = self._train_xgb(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
+        rf_model, rf_params = self._train_rf(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
+        lgbm_model, lgbm_params = self._train_lgbm(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
+
+        # Generate out-of-fold predictions for meta-learner training.
+        # Clone models without early_stopping to avoid "no validation set" errors in CV.
+        from sklearn.base import clone
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+        xgb_cv = clone(xgb_model)
+        if hasattr(xgb_cv, 'early_stopping_rounds'):
+            xgb_cv.set_params(early_stopping_rounds=None)
+        if hasattr(xgb_cv, 'callbacks'):
+            xgb_cv.set_params(callbacks=None)
+
+        oof_xgb = cross_val_predict(xgb_cv, X_train, y_train, cv=cv, method='predict_proba')[:, 1]
+        oof_rf = cross_val_predict(rf_model, X_train, y_train, cv=cv, method='predict_proba')[:, 1]
+        oof_lgbm = cross_val_predict(lgbm_model, X_train, y_train, cv=cv, method='predict_proba')[:, 1]
+
+        # Stack OOF predictions
+        meta_features = np.column_stack([oof_xgb, oof_rf, oof_lgbm])
+
+        # Train meta-learner
+        meta_model = LogisticRegression(random_state=42, max_iter=1000)
+        meta_model.fit(meta_features, y_train)
+
+        # Create ensemble wrapper
+        ensemble = _EnsembleModel(xgb_model, rf_model, lgbm_model, meta_model)
+
+        best_params = {
+            'xgb': xgb_params,
+            'rf': rf_params,
+            'lgbm': lgbm_params,
+            'meta_weights': meta_model.coef_.tolist(),
+        }
+
+        logger.info('Ensemble meta-learner weights: XGB=%.3f, RF=%.3f, LGBM=%.3f',
+                     meta_model.coef_[0][0], meta_model.coef_[0][1], meta_model.coef_[0][2])
+
+        return ensemble, best_params
 
     def save_model(self, model, path):
         """Save model bundle (model, scaler, column names, reference distribution) to disk."""

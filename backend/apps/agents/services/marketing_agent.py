@@ -33,7 +33,7 @@ def _sanitize_prompt_input(value, max_length=500):
 
 MARKETING_EMAIL_PROMPT = """You are drafting a follow-up email for AussieLoanAI, an Australian bank. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline. Instead, it acknowledges that the customer recently applied and pivots directly to alternative products the customer qualifies for.
 
-The tone matches our other correspondence: professional, warm, customer-service-friendly. Clean formatting with no box-drawing dividers or UPPERCASE headers. Plain-text section labels. The customer should feel valued and that we genuinely want to help them find a path forward.
+The tone matches our other correspondence: professional banking communication that reads like it was written by a person, not a system. Clean formatting with no box-drawing dividers or UPPERCASE headers. Plain-text section labels. Sarah Mitchell has reviewed the customer's profile and is presenting alternatives she believes are relevant — with the authority of a senior lending officer and the clarity of someone who wants to be understood.
 
 === COMPLIANCE RULES ===
 1. Do NOT repeat the decline decision. The customer already received that letter. Instead, acknowledge they recently applied and pivot to alternatives.
@@ -82,7 +82,7 @@ The tone matches our other correspondence: professional, warm, customer-service-
 2. "Dear {applicant_first_name}," followed by a blank line.
 
 3. OPENING (2\u20133 sentences):
-   Acknowledge their recent application briefly ("Following your recent loan application with us..."). Do NOT restate the decline. Pivot immediately to: "We value you as a customer and want to help you explore some options that may work for your situation." Follow with a blank line.
+   Acknowledge their recent application briefly ("Following your recent loan application with us..."). Do NOT restate the decline. Pivot directly to the alternatives: "We have looked at your profile and there are a few options worth considering." Do NOT use performative phrases like "we value you as a customer" or "we genuinely want to help" \u2014 show value by offering something useful, not by saying you value them. Follow with a blank line.
 
 4. For each alternative offer, use a clean section with a label on its own line:
 
@@ -121,22 +121,23 @@ Email: aussieloanai@gmail.com
    - ABN and Australian Credit Licence
 
 === TONE ===
-- Professional, warm, and customer-service-friendly. Matches the tone of our approval and decline letters.
-- The customer should feel valued and that someone looked at their profile.
-- Present offers as genuinely useful options, not consolation prizes.
-- Use contractions naturally: "you're", "we've", "we'd", "it's", "that's".
-- No patronising language, no false urgency.
+- Sarah Mitchell is a senior lending officer who has reviewed this customer's profile and found alternatives worth presenting. She writes as a banking professional — composed, knowledgeable, and considerate — not as a marketing department running a campaign.
+- The email should feel like a specific recommendation from a specific person, not a mass follow-up. But it must still read as correspondence from a licensed credit provider. Professional register, human delivery.
+- Present offers as useful options backed by the customer's actual numbers, not consolation prizes. Do not oversell or be falsely enthusiastic.
+- Use contractions naturally: "you're", "we've", "we'd", "it's", "that's". But keep the overall register appropriate for banking correspondence — warm contractions, not casual slang.
+- No patronising language, no false urgency, no performative empathy ("we value you", "we truly care", "we understand how you feel").
 - Do NOT repeat the decline. They already know. This email is about what comes next.
-- Every sentence delivers value, information, or reassurance.
+- Do NOT presume their emotions. No "we know this isn't what you wanted" or "we understand this is disappointing."
+- Every sentence delivers value or information. No filler, no emotional performance.
 
 === TONE CALIBRATION EXAMPLE ===
-Do NOT copy verbatim. Study the clean structure, the brief acknowledgement without repeating the decline, the benefit-led product presentation, and the warm personal closing.
+Do NOT copy verbatim. Study the clean structure, the brief acknowledgement without repeating the decline, the benefit-led product presentation, and the direct personal closing. Notice there is no performative empathy or "we value you" language \u2014 value is shown by offering something useful.
 
 Subject: Next steps for your AussieLoanAI loan application
 
 Dear Neville,
 
-Following your recent Personal Loan application with us, we wanted to reach out because we value you as a customer and want to help you get the funding you need. We've reviewed your profile and identified some options that may be a good fit for your situation.
+Following your recent Personal Loan application with us, we have looked at your profile and there are a few options worth considering.
 
 We can offer you a Secured Personal Loan, which uses a savings account, term deposit, or vehicle as collateral. This is often a strong path forward for customers in your position.
 
@@ -241,20 +242,37 @@ class MarketingAgent:
             current_prompt += f"\n\nIMPORTANT: Previous attempt failed compliance checks: {feedback}. Fix these issues."
             current_prompt += f"\n\n(This is generation attempt {attempt} of {self.MAX_RETRIES}.)"
 
-        response = self.client.messages.create(
-            model='claude-sonnet-4-20250514',
-            max_tokens=1500,
-            temperature=getattr(django_settings, 'AI_TEMPERATURE_MARKETING', 0.2),
-            messages=[{'role': 'user', 'content': current_prompt}],
-        )
+        import logging as _logging
+        _logger = _logging.getLogger('agents.marketing_agent')
+
+        response = None
+        for api_attempt in range(3):
+            try:
+                response = self.client.messages.create(
+                    model='claude-sonnet-4-20250514',
+                    max_tokens=1500,
+                    temperature=getattr(django_settings, 'AI_TEMPERATURE_MARKETING', 0.2),
+                    messages=[{'role': 'user', 'content': current_prompt}],
+                )
+                break
+            except Exception as api_err:
+                _logger.warning('Marketing email API attempt %d failed: %s', api_attempt + 1, api_err)
+                if api_attempt < 2:
+                    time.sleep(2 ** api_attempt)
+                else:
+                    raise
 
         response_text = response.content[0].text
         generation_time_ms = int((time.time() - start_time) * 1000)
 
         subject, body = self._parse_response(response_text)
 
-        # Run guardrails — marketing emails use the 'marketing' context
-        guardrail_results = self._run_marketing_guardrails(body, application)
+        # Run unified guardrails with email_type='marketing'
+        context = {
+            'decision': 'denied',
+            'loan_amount': float(application.loan_amount) if application.loan_amount else None,
+        }
+        guardrail_results = self.guardrail_checker.run_all_checks(body, context, email_type='marketing')
         all_passed = all(r['passed'] for r in guardrail_results if r.get('severity') != 'warning')
 
         if not all_passed and attempt < self.MAX_RETRIES:
@@ -336,7 +354,7 @@ class MarketingAgent:
         passed = len(found) == 0
         details = f"Found decline references: {', '.join(str(f) for f in found)}" if not passed else "No decline language detected"
         return {
-            'check_name': 'no_decline_language',
+            'check_name': 'No Decline Language',
             'passed': passed,
             'details': details,
         }
@@ -365,7 +383,7 @@ class MarketingAgent:
         passed = len(found) == 0
         details = f"Patronising language found: {', '.join(found)}" if not passed else "No patronising language detected"
         return {
-            'check_name': 'patronising_language',
+            'check_name': 'Patronising Language',
             'passed': passed,
             'details': details,
         }
@@ -394,7 +412,7 @@ class MarketingAgent:
         passed = len(found) == 0
         details = f"False urgency language found: {', '.join(found)}" if not passed else "No false urgency detected"
         return {
-            'check_name': 'false_urgency',
+            'check_name': 'False Urgency',
             'passed': passed,
             'details': details,
         }
@@ -431,7 +449,7 @@ class MarketingAgent:
             else "No guaranteed approval language detected"
         )
         return {
-            'check_name': 'no_guaranteed_approval',
+            'check_name': 'No Guaranteed Approval',
             'passed': passed,
             'details': details,
         }
@@ -458,6 +476,12 @@ class MarketingAgent:
         r'\bevery step of the way\b',
         r'\bwe understand how important\b',
         r'\bwe understand this (?:may be|is) disappointing\b',
+        r'\bnot the outcome you were hoping for\b',
+        r'\bnot what you (?:were hoping|wanted|expected)\b',
+        r'\bwe value you as a customer\b',
+        r'\bwe (?:truly|genuinely) (?:want|care|value)\b',
+        r'\bwe are pleased to inform you\b',
+        r'\bwe want to be transparent about\b',
         r'\bregardless of (?:this|the) outcome\b',
         r'\bshould you have any questions at all\b',
         # Transitional adverbs (strongest AI-tell)
@@ -520,7 +544,7 @@ class MarketingAgent:
         )
 
         return {
-            'check_name': 'ai_giveaway_language',
+            'check_name': 'AI Giveaway Language',
             'passed': passed,
             'details': details,
         }
@@ -549,7 +573,7 @@ class MarketingAgent:
         )
 
         return {
-            'check_name': 'plain_text_format',
+            'check_name': 'Plain Text Format',
             'passed': passed,
             'details': details,
         }
@@ -569,7 +593,7 @@ class MarketingAgent:
         ]
         has_cta = any(phrase in text_lower for phrase in cta_phrases)
         return {
-            'check_name': 'call_to_action',
+            'check_name': 'Call to Action',
             'passed': has_cta,
             'details': 'Clear call to action present' if has_cta else 'Missing call to action (phone, branch visit, or reply)',
         }

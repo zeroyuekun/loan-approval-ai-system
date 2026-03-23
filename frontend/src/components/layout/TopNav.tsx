@@ -16,17 +16,17 @@ export function TopNav({ title, onMenuClick }: TopNavProps) {
   const [showDropdown, setShowDropdown] = useState(false)
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200/60 bg-white/95 backdrop-blur-xl px-4 lg:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/[0.06] gradient-sidebar lg:border-slate-200/60 lg:bg-white/95 lg:bg-none lg:backdrop-blur-xl px-4 lg:px-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
+        <Button variant="ghost" size="icon" className="lg:hidden text-white" onClick={onMenuClick}>
           <Menu className="h-5 w-5" />
         </Button>
-        <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+        <h2 className="text-lg font-semibold tracking-tight text-white lg:text-foreground">{title}</h2>
       </div>
 
       <div className="relative">
         <button
-          className="flex items-center gap-2 rounded-full border border-slate-200/60 bg-gradient-to-b from-white to-slate-50 px-3 py-1.5 text-sm font-medium shadow-soft transition-all hover:shadow-elevated"
+          className="flex items-center gap-2 rounded-full border border-white/20 lg:border-slate-200/60 bg-white/10 lg:bg-gradient-to-b lg:from-white lg:to-slate-50 px-3 py-1.5 text-sm font-medium shadow-soft transition-all hover:shadow-elevated"
           onClick={() => setShowDropdown(!showDropdown)}
           aria-expanded={showDropdown}
           aria-haspopup="true"
@@ -34,8 +34,8 @@ export function TopNav({ title, onMenuClick }: TopNavProps) {
           <div className="flex h-6 w-6 items-center justify-center rounded-full gradient-primary text-[11px] font-semibold text-white">
             {user?.first_name?.[0] || user?.username?.[0]?.toUpperCase()}
           </div>
-          <span className="hidden sm:inline text-foreground">{user?.username}</span>
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="hidden sm:inline text-white lg:text-foreground">{user?.username}</span>
+          <ChevronDown className="h-3.5 w-3.5 text-slate-300 lg:text-muted-foreground" />
         </button>
 
         {showDropdown && (
