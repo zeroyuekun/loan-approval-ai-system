@@ -5,11 +5,11 @@ import time
 import joblib
 import numpy as np
 import pandas as pd
+from django.conf import settings
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.isotonic import IsotonicRegression
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score, roc_auc_score
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, StratifiedKFold, cross_val_predict, cross_val_score, train_test_split
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, StratifiedKFold, cross_val_score, train_test_split
 from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,9 @@ class _CalibratedModel:
 
     def predict_proba(self, X):
         raw_probs = self.estimator.predict_proba(X)[:, 1]
-        if self.calibration_method == 'isotonic':
+        # Backward compat: old model bundles may not have calibration_method attribute
+        method = getattr(self, 'calibration_method', 'isotonic')
+        if method == 'isotonic':
             calibrated = self._calibrator.predict(raw_probs)
         else:
             calibrated = self._calibrator.predict_proba(raw_probs.reshape(-1, 1))[:, 1]
@@ -71,33 +73,6 @@ class _CalibratedModel:
     @property
     def feature_importances_(self):
         return self.estimator.feature_importances_
-
-
-class _EnsembleModel:
-    """Stacked ensemble: XGB + RF + LightGBM with LogisticRegression meta-learner."""
-
-    def __init__(self, xgb_model, rf_model, lgbm_model, meta_model):
-        self.xgb_model = xgb_model
-        self.rf_model = rf_model
-        self.lgbm_model = lgbm_model
-        self.meta_model = meta_model
-        self.classes_ = np.array([0, 1])
-        # Use XGB as primary for feature importances
-        self.feature_importances_ = xgb_model.feature_importances_
-
-    def predict_proba(self, X):
-        p_xgb = self.xgb_model.predict_proba(X)[:, 1]
-        p_rf = self.rf_model.predict_proba(X)[:, 1]
-        p_lgbm = self.lgbm_model.predict_proba(X)[:, 1]
-        meta_features = np.column_stack([p_xgb, p_rf, p_lgbm])
-        meta_probs = self.meta_model.predict_proba(meta_features)
-        return meta_probs
-
-    def predict(self, X, threshold=None):
-        probs = self.predict_proba(X)
-        # Use provided threshold or default 0.5; predictor.py uses model_version.optimal_threshold
-        t = threshold if threshold is not None else 0.5
-        return (probs[:, 1] >= t).astype(int)
 
 
 class ModelTrainer:
@@ -184,11 +159,13 @@ class ModelTrainer:
 
         df = df.copy()
 
-        # Compute data-dependent imputation values and merge with defaults.
-        # monthly_expenses uses the training data median; all others use
-        # fixed defaults from the shared module.
-        expenses_median = float(df['monthly_expenses'].median()) if df['monthly_expenses'].notna().any() else 2500.0
-        self._imputation_values = {**DEFAULT_IMPUTATION_VALUES, 'monthly_expenses': expenses_median}
+        # Compute data-dependent imputation values: use training data medians
+        # for all numeric columns, with shared defaults as fallback.
+        data_medians = {}
+        for col in self.NUMERIC_COLS:
+            if col in df.columns and df[col].notna().any():
+                data_medians[col] = float(df[col].median())
+        self._imputation_values = {**DEFAULT_IMPUTATION_VALUES, **data_medians}
 
         df = impute_missing_values(df, self._imputation_values)
         df = compute_derived_features(df)
@@ -324,7 +301,7 @@ class ModelTrainer:
         data_path : str
             Path to CSV training data.
         algorithm : str
-            'xgb', 'rf', 'lgbm', or 'ensemble'.
+            'xgb' or 'rf'.
         use_reject_inference : bool
             If True and reject_inference_labels is provided, augment training
             data with denied applications at reduced weight (0.5) to mitigate
@@ -388,6 +365,16 @@ class ModelTrainer:
                         'histogram_edges': bin_edges.tolist(),
                     }
         self._reference_distribution = ref_dist
+
+        # Data-driven feature bounds: [1st percentile, 99th percentile]
+        feature_bounds = {}
+        for col in self.NUMERIC_COLS:
+            if col in df_train.columns:
+                vals = df_train[col].dropna().values
+                if len(vals) > 10:
+                    p1, p99 = float(np.percentile(vals, 1)), float(np.percentile(vals, 99))
+                    feature_bounds[col] = (p1, p99)
+        self._feature_bounds = feature_bounds
 
         # Save original test indices before transform() resets them
         test_original_indices = df_test.index.copy()
@@ -515,10 +502,6 @@ class ModelTrainer:
 
         if algorithm == 'xgb':
             raw_model, best_params = self._train_xgb(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
-        elif algorithm == 'lgbm':
-            raw_model, best_params = self._train_lgbm(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
-        elif algorithm == 'ensemble':
-            raw_model, best_params = self._train_ensemble(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
         else:
             raw_model, best_params = self._train_rf(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
 
@@ -527,12 +510,13 @@ class ModelTrainer:
         # Adaptive method: isotonic for >= 1000 samples, Platt scaling otherwise.
         model = _CalibratedModel(raw_model, X_val, y_val)
 
-        # Optimal threshold via F1 maximisation on validation set
+        # Cost-optimal threshold via MetricsService (FP:FN = 5:1 banking cost matrix)
         val_probs = model.predict_proba(X_val)[:, 1]
-        thresholds = np.arange(0.2, 0.8, 0.01)
-        f1_scores = [f1_score(y_val, (val_probs >= t).astype(int)) for t in thresholds]
-        optimal_threshold = float(thresholds[np.argmax(f1_scores)])
-        logger.info('Optimal threshold: %.3f (F1: %.4f)', optimal_threshold, max(f1_scores))
+        metrics_svc = MetricsService()
+        val_threshold_analysis = metrics_svc.compute_threshold_analysis(y_val, val_probs)
+        optimal_threshold = float(val_threshold_analysis['cost_optimal_threshold'])
+        f1_threshold = float(val_threshold_analysis['f1_optimal_threshold'])
+        logger.info('Cost-optimal threshold: %.3f (F1-optimal: %.3f)', optimal_threshold, f1_threshold)
 
         # Conformal prediction: compute nonconformity scores on validation set.
         # These are stored in the model bundle and used at inference time to
@@ -592,6 +576,7 @@ class ModelTrainer:
             'cv_unstable': cv_unstable,
             'optimal_threshold': optimal_threshold,
             'calibration_method': getattr(model, 'calibration_method', 'unknown'),
+            'group_thresholds': getattr(self, '_group_thresholds', {}),
             **split_meta,
         }
 
@@ -607,6 +592,42 @@ class ModelTrainer:
                     )
                     fairness_metrics[col] = fairness_result
         metrics['fairness'] = fairness_metrics
+
+        # Post-processing: per-group threshold adjustment for employment_type
+        # Ensures disparate impact meets EEOC 80% rule (DI >= 0.80)
+        group_thresholds = {}
+        target_di = getattr(settings, 'ML_FAIRNESS_TARGET_DI', 0.80)
+
+        if 'employment_type' in fairness_metrics and 'employment_type' in df_test_raw.columns:
+            emp_groups = fairness_metrics['employment_type']['groups']
+            max_approval = max(g['predicted_approval_rate'] for g in emp_groups.values())
+            target_approval = max_approval * target_di
+
+            # Use raw test data for group membership (before one-hot encoding)
+            test_emp_values = df_test_raw['employment_type'].values
+
+            for group_name, group_data in emp_groups.items():
+                if group_data['predicted_approval_rate'] >= target_approval:
+                    group_thresholds[group_name] = optimal_threshold
+                else:
+                    group_mask = test_emp_values == group_name
+                    group_probs = y_prob[group_mask]
+                    if len(group_probs) == 0:
+                        group_thresholds[group_name] = optimal_threshold
+                        continue
+                    # Lower threshold until approval rate meets target
+                    for t in np.arange(optimal_threshold, 0.05, -0.01):
+                        rate = float((group_probs >= t).mean())
+                        if rate >= target_approval:
+                            group_thresholds[group_name] = float(round(t, 2))
+                            break
+                    else:
+                        group_thresholds[group_name] = 0.05  # floor
+
+            logger.info('Per-group fairness thresholds: %s (target DI: %.2f, target approval: %.3f)',
+                        group_thresholds, target_di, target_approval)
+
+        self._group_thresholds = group_thresholds
 
         # WOE/IV analysis on RAW (unscaled) data so bin edges are in
         # interpretable units (credit_score 650-750, not z-scores).
@@ -692,9 +713,8 @@ class ModelTrainer:
          -1 = monotonically decreasing (more → less likely approved)
           0 = unconstrained
         """
-        # Reduced from 27 to 10 constraints. XGBoost docs warn that >15 constraints
-        # with hist tree_method may produce unnecessarily shallow trees by wiping out
-        # split candidates.
+        # Up to 21 constraints. Using max_bin=512 to compensate for the larger
+        # constraint set and preserve sufficient split candidates.
         constraints = {
             # Positive: higher value → more likely approved
             'credit_score': 1,
@@ -704,10 +724,23 @@ class ModelTrainer:
             'credit_history_months': 1,
             'salary_credit_regularity': 1,
             'income_verification_score': 1,
+            # Additional positive: higher value → more likely approved
+            'property_value': 1,
+            'deposit_amount': 1,
+            'has_cosigner': 1,
+            'on_time_payment_pct': 1,
+            'savings_to_loan_ratio': 1,
+            'debt_service_coverage': 1,
             # Negative: higher value → less likely approved
             'debt_to_income': -1,
             'num_defaults_5yr': -1,
             'worst_arrears_months': -1,
+            # Additional negative: higher value → less likely approved
+            'existing_credit_card_limit': -1,
+            'monthly_expenses': -1,
+            'num_credit_enquiries_6m': -1,
+            'bureau_risk_score': -1,
+            'stressed_dsr': -1,
         }
         return tuple(constraints.get(col, 0) for col in feature_cols)
 
@@ -724,14 +757,15 @@ class ModelTrainer:
         monotonic = self._build_monotonic_constraints(list(X_train.columns))
 
         param_grid = {
-            'n_estimators': [100, 200, 300],
-            'max_depth': [3, 6, 9],
+            'n_estimators': [200, 300],
+            'max_depth': [4, 5, 6],
             'learning_rate': [0.01, 0.1],
             'subsample': [0.8, 1.0],
             'min_child_weight': [1, 5],
             'colsample_bytree': [0.8, 1.0],
             'reg_alpha': [0, 0.1],
             'reg_lambda': [1, 5],
+            'gamma': [0, 0.1],
         }
         # n_jobs=1 here so XGBoost does NOT spawn its own thread pool
         # inside each RandomizedSearchCV worker (n_jobs=-1 below).
@@ -742,10 +776,11 @@ class ModelTrainer:
             eval_metric='logloss',
             scale_pos_weight=scale_pos_weight,
             monotone_constraints=monotonic,
+            max_bin=getattr(settings, 'ML_MAX_BIN', 512),
             n_jobs=1,
         )
         search = RandomizedSearchCV(
-            xgb, param_grid, n_iter=50, cv=3, scoring='f1',
+            xgb, param_grid, n_iter=30, cv=3, scoring='f1',
             n_jobs=-1, verbose=0, random_state=42,
         )
         fit_params = {}
@@ -762,7 +797,8 @@ class ModelTrainer:
             eval_metric='logloss',
             scale_pos_weight=scale_pos_weight,
             monotone_constraints=monotonic,
-            early_stopping_rounds=20,
+            early_stopping_rounds=getattr(settings, 'ML_EARLY_STOPPING_ROUNDS', 30),
+            max_bin=getattr(settings, 'ML_MAX_BIN', 512),
             n_jobs=-1,
         )
         fit_kwargs = {
@@ -774,95 +810,6 @@ class ModelTrainer:
         final_model.fit(X_train, y_train, **fit_kwargs)
 
         return final_model, best_params
-
-    def _train_lgbm(self, X_train, y_train, X_val, y_val, sample_weights=None):
-        """Train LightGBM with RandomizedSearchCV and native categorical feature handling."""
-        import lightgbm as lgb
-
-        param_grid = {
-            'n_estimators': [200, 400, 600],
-            'max_depth': [4, 6, 8],
-            'learning_rate': [0.01, 0.05, 0.1],
-            'num_leaves': [15, 31, 63],
-            'min_child_samples': [20, 50, 100],
-            'subsample': [0.7, 0.8, 0.9],
-            'colsample_bytree': [0.7, 0.8, 0.9],
-            'reg_alpha': [0, 0.1, 1.0],
-            'reg_lambda': [0, 0.1, 1.0],
-        }
-
-        neg_count = int((y_train == 0).sum())
-        pos_count = int((y_train == 1).sum())
-        scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1.0
-
-        model = lgb.LGBMClassifier(
-            scale_pos_weight=scale_pos_weight,
-            random_state=42,
-            verbose=-1,
-            n_jobs=1,  # Use 1 inside estimator; RandomizedSearchCV parallelizes across CV folds
-        )
-
-        search = RandomizedSearchCV(
-            model, param_grid, n_iter=50, cv=3, scoring='f1',
-            n_jobs=-1, verbose=0, random_state=42,
-        )
-        fit_params = {}
-        if sample_weights is not None:
-            fit_params['sample_weight'] = sample_weights
-        search.fit(X_train, y_train, **fit_params)
-
-        best_model = search.best_estimator_
-        best_params = search.best_params_
-
-        logger.info('LightGBM best params: %s (CV F1: %.4f)', best_params, search.best_score_)
-
-        return best_model, best_params
-
-    def _train_ensemble(self, X_train, y_train, X_val, y_val, sample_weights=None):
-        """Train stacked ensemble: XGB + RF + LightGBM with LogisticRegression meta-learner."""
-        logger.info('Training ensemble: XGB + RF + LightGBM with LR meta-learner')
-
-        # Train base models
-        xgb_model, xgb_params = self._train_xgb(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
-        rf_model, rf_params = self._train_rf(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
-        lgbm_model, lgbm_params = self._train_lgbm(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
-
-        # Generate out-of-fold predictions for meta-learner training.
-        # Clone models without early_stopping to avoid "no validation set" errors in CV.
-        from sklearn.base import clone
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-        xgb_cv = clone(xgb_model)
-        if hasattr(xgb_cv, 'early_stopping_rounds'):
-            xgb_cv.set_params(early_stopping_rounds=None)
-        if hasattr(xgb_cv, 'callbacks'):
-            xgb_cv.set_params(callbacks=None)
-
-        oof_xgb = cross_val_predict(xgb_cv, X_train, y_train, cv=cv, method='predict_proba')[:, 1]
-        oof_rf = cross_val_predict(rf_model, X_train, y_train, cv=cv, method='predict_proba')[:, 1]
-        oof_lgbm = cross_val_predict(lgbm_model, X_train, y_train, cv=cv, method='predict_proba')[:, 1]
-
-        # Stack OOF predictions
-        meta_features = np.column_stack([oof_xgb, oof_rf, oof_lgbm])
-
-        # Train meta-learner
-        meta_model = LogisticRegression(random_state=42, max_iter=1000)
-        meta_model.fit(meta_features, y_train)
-
-        # Create ensemble wrapper
-        ensemble = _EnsembleModel(xgb_model, rf_model, lgbm_model, meta_model)
-
-        best_params = {
-            'xgb': xgb_params,
-            'rf': rf_params,
-            'lgbm': lgbm_params,
-            'meta_weights': meta_model.coef_.tolist(),
-        }
-
-        logger.info('Ensemble meta-learner weights: XGB=%.3f, RF=%.3f, LGBM=%.3f',
-                     meta_model.coef_[0][0], meta_model.coef_[0][1], meta_model.coef_[0][2])
-
-        return ensemble, best_params
 
     def save_model(self, model, path):
         """Save model bundle (model, scaler, column names, reference distribution) to disk."""
@@ -885,6 +832,8 @@ class ModelTrainer:
             # Used at inference to compute prediction intervals with guaranteed
             # coverage. Stored as sorted array for fast quantile lookup.
             'conformal_scores': getattr(self, '_conformal_scores', np.array([])),
+            'feature_bounds': getattr(self, '_feature_bounds', {}),
+            'group_thresholds': getattr(self, '_group_thresholds', {}),
         }
         # Self-healing: validate pipeline consistency before saving
         self._validate_pipeline_consistency(bundle)
