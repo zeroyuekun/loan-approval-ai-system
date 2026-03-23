@@ -255,12 +255,34 @@ class MarketingAgent:
                     messages=[{'role': 'user', 'content': current_prompt}],
                 )
                 break
-            except Exception as api_err:
+            except anthropic.AuthenticationError as api_err:
+                _logger.error('Marketing email API auth error (not retryable): %s', api_err)
+                raise
+            except anthropic.RateLimitError as api_err:
+                _logger.warning('Marketing email API attempt %d rate limited: %s', api_attempt + 1, api_err)
+                if api_attempt < 2:
+                    time.sleep(2 ** (api_attempt + 1))
+                else:
+                    raise
+            except (anthropic.APITimeoutError, anthropic.APIConnectionError) as api_err:
                 _logger.warning('Marketing email API attempt %d failed: %s', api_attempt + 1, api_err)
                 if api_attempt < 2:
                     time.sleep(2 ** api_attempt)
                 else:
                     raise
+            except anthropic.APIStatusError as api_err:
+                if api_err.status_code >= 500:
+                    _logger.warning('Marketing email API attempt %d server error (%d): %s', api_attempt + 1, api_err.status_code, api_err)
+                    if api_attempt < 2:
+                        time.sleep(2 ** api_attempt)
+                    else:
+                        raise
+                else:
+                    _logger.error('Marketing email API client error (%d, not retryable): %s', api_err.status_code, api_err)
+                    raise
+            except Exception as api_err:
+                _logger.critical('Marketing email API UNEXPECTED failure attempt %d: %s', api_attempt + 1, api_err, exc_info=True)
+                raise
 
         response_text = response.content[0].text
         generation_time_ms = int((time.time() - start_time) * 1000)
@@ -655,5 +677,5 @@ class MarketingAgent:
                 f"- On-Time Payment Rate: {profile.on_time_payment_pct:.1f}%\n"
                 f"- Loyal Customer: {'Yes' if profile.is_loyal_customer else 'No'}"
             )
-        except Exception:
+        except (AttributeError,):  # RelatedObjectDoesNotExist is a subclass
             return "- No banking relationship data available"

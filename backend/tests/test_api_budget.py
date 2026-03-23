@@ -1,0 +1,77 @@
+"""Tests for ApiBudgetGuard: daily limits, circuit breaker, and Redis failure modes."""
+
+from unittest.mock import MagicMock
+
+import pytest
+from django.test import override_settings
+
+from apps.agents.services.api_budget import ApiBudgetGuard, BudgetExhausted, CircuitOpen
+
+
+def _guard(mock_redis):
+    """Create an ApiBudgetGuard with a pre-injected mock Redis client."""
+    g = ApiBudgetGuard()
+    g._redis = mock_redis
+    return g
+
+
+@override_settings(AI_DAILY_CALL_LIMIT=500)
+def test_budget_check_passes():
+    """Under daily limit -> check_budget succeeds silently."""
+    r = MagicMock()
+    r.exists.return_value = False
+    r.get.return_value = b'100'
+    _guard(r).check_budget()
+
+
+@override_settings(AI_DAILY_CALL_LIMIT=500)
+def test_budget_exhausted():
+    """At daily limit -> raises BudgetExhausted."""
+    r = MagicMock()
+    r.exists.return_value = False
+    r.get.return_value = b'500'
+    with pytest.raises(BudgetExhausted, match='Daily API call limit reached'):
+        _guard(r).check_budget()
+
+
+def test_circuit_open():
+    """Circuit breaker key present -> raises CircuitOpen."""
+    r = MagicMock()
+    r.exists.return_value = True
+    r.ttl.return_value = 300
+    with pytest.raises(CircuitOpen, match='Circuit breaker open'):
+        _guard(r).check_budget()
+
+
+def test_record_call_increments():
+    """record_call increments the daily counter via pipeline."""
+    r = MagicMock()
+    pipe = MagicMock()
+    r.pipeline.return_value = pipe
+    _guard(r).record_call(input_tokens=500, output_tokens=200)
+    pipe.incr.assert_called_once()
+    pipe.execute.assert_called_once()
+
+
+@override_settings(AI_CIRCUIT_BREAKER_THRESHOLD=3, AI_CIRCUIT_BREAKER_COOLDOWN=600)
+def test_failures_trip_breaker():
+    """After threshold consecutive failures, circuit breaker key is set."""
+    r = MagicMock()
+    r.incr.return_value = 3
+    _guard(r).record_failure()
+    r.setex.assert_called_once_with('ai_budget:circuit_breaker', 600, 1)
+
+
+def test_success_resets_failures():
+    """record_success deletes the consecutive failure counter."""
+    r = MagicMock()
+    _guard(r).record_success()
+    r.delete.assert_called_once_with('ai_budget:consecutive_failures')
+
+
+def test_redis_down_fails_open():
+    """When Redis is unreachable, check_budget allows the call (fail-open)."""
+    r = MagicMock()
+    r.exists.side_effect = ConnectionError('Redis connection refused')
+    # Should not raise
+    _guard(r).check_budget()

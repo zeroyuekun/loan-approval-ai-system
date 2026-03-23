@@ -19,6 +19,12 @@ class AgentRun(models.Model):
     total_time_ms = models.IntegerField(null=True)
     error = models.TextField(blank=True)
 
+    failure_category = models.CharField(
+        max_length=20, null=True, blank=True,
+        choices=[('transient', 'Transient'), ('permanent', 'Permanent'), ('config_error', 'Config Error')],
+    )
+    retry_count = models.IntegerField(default=0)
+
     # Accumulated token/cost tracking across all API calls in this run
     total_input_tokens = models.IntegerField(default=0)
     total_output_tokens = models.IntegerField(default=0)

@@ -280,14 +280,43 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
                 )
                 result = _extract_tool_result(response, fallback)
                 break
-            except Exception as e:
+            except anthropic.AuthenticationError as e:
+                logger.error('LLM bias interpretation auth error (not retryable): %s', e)
+                result = fallback
+                break
+            except anthropic.RateLimitError as e:
+                logger.warning('LLM bias interpretation attempt %d rate limited: %s', attempt + 1, e)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(2 ** (attempt + 1))  # longer backoff for rate limits
+                else:
+                    logger.error('LLM bias interpretation failed after 3 attempts (rate limit) — falling back to deterministic')
+                    result = fallback
+            except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
                 logger.warning('LLM bias interpretation attempt %d failed: %s', attempt + 1, e)
                 if attempt < 2:
                     import time as _time
-                    _time.sleep(2 ** attempt)  # 1s, 2s backoff
+                    _time.sleep(2 ** attempt)
                 else:
                     logger.error('LLM bias interpretation failed after 3 attempts — falling back to deterministic')
                     result = fallback
+            except anthropic.APIStatusError as e:
+                if e.status_code >= 500:
+                    logger.warning('LLM bias interpretation attempt %d server error (%d): %s', attempt + 1, e.status_code, e)
+                    if attempt < 2:
+                        import time as _time
+                        _time.sleep(2 ** attempt)
+                    else:
+                        logger.error('LLM bias interpretation failed after 3 attempts (server error) — falling back to deterministic')
+                        result = fallback
+                else:
+                    logger.error('LLM bias interpretation client error (%d, not retryable): %s', e.status_code, e)
+                    result = fallback
+                    break
+            except Exception as e:
+                logger.critical('LLM bias interpretation UNEXPECTED failure attempt %d: %s', attempt + 1, e, exc_info=True)
+                result = fallback
+                break
 
         llm_raw_score = result.get('score', det_score)
 
@@ -464,7 +493,19 @@ Use the record_review_decision tool to submit your decision."""
                 )
                 result = _extract_tool_result(response, fallback)
                 break
-            except Exception as e:
+            except anthropic.AuthenticationError as e:
+                logger.error('Senior review auth error (not retryable): %s', e)
+                result = fallback
+                break
+            except anthropic.RateLimitError as e:
+                logger.warning('Senior review attempt %d rate limited: %s', attempt + 1, e)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(2 ** (attempt + 1))
+                else:
+                    logger.error('Senior review failed after 3 attempts (rate limit) — defaulting to human escalation')
+                    result = fallback
+            except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
                 logger.warning('Senior review attempt %d failed: %s', attempt + 1, e)
                 if attempt < 2:
                     import time as _time
@@ -472,6 +513,23 @@ Use the record_review_decision tool to submit your decision."""
                 else:
                     logger.error('Senior review failed after 3 attempts — defaulting to human escalation')
                     result = fallback
+            except anthropic.APIStatusError as e:
+                if e.status_code >= 500:
+                    logger.warning('Senior review attempt %d server error (%d): %s', attempt + 1, e.status_code, e)
+                    if attempt < 2:
+                        import time as _time
+                        _time.sleep(2 ** attempt)
+                    else:
+                        logger.error('Senior review failed after 3 attempts (server error) — defaulting to human escalation')
+                        result = fallback
+                else:
+                    logger.error('Senior review client error (%d, not retryable): %s', e.status_code, e)
+                    result = fallback
+                    break
+            except Exception as e:
+                logger.critical('Senior review UNEXPECTED failure attempt %d: %s', attempt + 1, e, exc_info=True)
+                result = fallback
+                break
 
         return {
             'approved': result.get('approved', False),
@@ -632,7 +690,19 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
                 )
                 result = _extract_tool_result(response, fallback)
                 break
-            except Exception as e:
+            except anthropic.AuthenticationError as e:
+                logger.error('LLM marketing bias auth error (not retryable): %s', e)
+                result = fallback
+                break
+            except anthropic.RateLimitError as e:
+                logger.warning('LLM marketing bias attempt %d rate limited: %s', attempt + 1, e)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(2 ** (attempt + 1))
+                else:
+                    logger.error('LLM marketing bias failed after 3 attempts (rate limit) — falling back to deterministic')
+                    result = fallback
+            except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
                 logger.warning('LLM marketing bias attempt %d failed: %s', attempt + 1, e)
                 if attempt < 2:
                     import time as _time
@@ -640,6 +710,23 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
                 else:
                     logger.error('LLM marketing bias failed after 3 attempts — falling back to deterministic')
                     result = fallback
+            except anthropic.APIStatusError as e:
+                if e.status_code >= 500:
+                    logger.warning('LLM marketing bias attempt %d server error (%d): %s', attempt + 1, e.status_code, e)
+                    if attempt < 2:
+                        import time as _time
+                        _time.sleep(2 ** attempt)
+                    else:
+                        logger.error('LLM marketing bias failed after 3 attempts (server error) — falling back to deterministic')
+                        result = fallback
+                else:
+                    logger.error('LLM marketing bias client error (%d, not retryable): %s', e.status_code, e)
+                    result = fallback
+                    break
+            except Exception as e:
+                logger.critical('LLM marketing bias UNEXPECTED failure attempt %d: %s', attempt + 1, e, exc_info=True)
+                result = fallback
+                break
 
         llm_raw_score = result.get('score', det_score)
         # Deterministic weighted higher (60%) due to LLM agreeableness bias (TNR < 25%, ACL 2025)
@@ -797,7 +884,19 @@ Use the record_marketing_review_decision tool to submit your decision."""
                 )
                 result = _extract_tool_result(response, fallback)
                 break
-            except Exception as e:
+            except anthropic.AuthenticationError as e:
+                logger.error('Marketing senior review auth error (not retryable): %s', e)
+                result = fallback
+                break
+            except anthropic.RateLimitError as e:
+                logger.warning('Marketing senior review attempt %d rate limited: %s', attempt + 1, e)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(2 ** (attempt + 1))
+                else:
+                    logger.error('Marketing senior review failed after 3 attempts (rate limit) — defaulting to human escalation')
+                    result = fallback
+            except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
                 logger.warning('Marketing senior review attempt %d failed: %s', attempt + 1, e)
                 if attempt < 2:
                     import time as _time
@@ -805,6 +904,23 @@ Use the record_marketing_review_decision tool to submit your decision."""
                 else:
                     logger.error('Marketing senior review failed after 3 attempts — defaulting to human escalation')
                     result = fallback
+            except anthropic.APIStatusError as e:
+                if e.status_code >= 500:
+                    logger.warning('Marketing senior review attempt %d server error (%d): %s', attempt + 1, e.status_code, e)
+                    if attempt < 2:
+                        import time as _time
+                        _time.sleep(2 ** attempt)
+                    else:
+                        logger.error('Marketing senior review failed after 3 attempts (server error) — defaulting to human escalation')
+                        result = fallback
+                else:
+                    logger.error('Marketing senior review client error (%d, not retryable): %s', e.status_code, e)
+                    result = fallback
+                    break
+            except Exception as e:
+                logger.critical('Marketing senior review UNEXPECTED failure attempt %d: %s', attempt + 1, e, exc_info=True)
+                result = fallback
+                break
 
         return {
             'approved': result.get('approved', False),

@@ -156,7 +156,23 @@ RULES:
             if result is None:
                 raise ValueError('No tool result extracted')
             return result
-        except Exception:
+        except (anthropic.AuthenticationError, anthropic.RateLimitError,
+                anthropic.APITimeoutError, anthropic.APIConnectionError,
+                anthropic.APIStatusError) as e:
+            import logging as _logging
+            _logging.getLogger('agents.next_best_offer').warning('NBO messaging LLM call failed: %s', e)
+            # Fallback: generate basic reasoning from the benefit text
+            return {
+                'offer_reasoning': [o.get('benefit', '') for o in offers],
+                'analysis': 'We have identified alternative products based on your financial profile.',
+                'personalized_message': (
+                    'Thank you for your interest in banking with us. '
+                    'We have some tailored options that may suit your needs.'
+                ),
+            }
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger('agents.next_best_offer').critical('NBO messaging UNEXPECTED failure: %s', e, exc_info=True)
             # Fallback: generate basic reasoning from the benefit text
             return {
                 'offer_reasoning': [o.get('benefit', '') for o in offers],
@@ -266,7 +282,7 @@ Respond with the marketing message text only, no JSON wrapping."""
                 f"- Previous Loans Repaid: {profile.previous_loans_repaid}\n"
                 f"- Loyal Customer: {'Yes' if profile.is_loyal_customer else 'No'}"
             )
-        except Exception:
+        except (AttributeError,):  # RelatedObjectDoesNotExist is a subclass
             return (
                 "- No banking relationship data available\n"
                 "- This appears to be a new customer"

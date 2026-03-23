@@ -12,6 +12,10 @@ from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.predictor import ModelPredictor
 
+from apps.agents.exceptions import (
+    LLMServiceError, MLPredictionError, PipelineStepError,
+)
+
 from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector, MarketingEmailReviewer
 from .marketing_agent import MarketingAgent
 from .next_best_offer import NextBestOfferGenerator
@@ -30,7 +34,7 @@ class PipelineOrchestrator:
         """
         try:
             profile = application.applicant.profile
-        except Exception:
+        except (AttributeError,):  # RelatedObjectDoesNotExist is a subclass
             logger.info('Application %s: no customer profile available', application.pk)
             return None
 
@@ -148,8 +152,15 @@ class PipelineOrchestrator:
             })
             logger.info('Application %s: prediction=%s prob=%.3f',
                         application_id, prediction_result['prediction'], prediction_result['probability'])
-        except Exception as e:
+        except (MLPredictionError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: ML prediction failed: %s', application_id, e)
+            step = self._fail_step(step, str(e))
+            self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(status='review')
+            return agent_run
+        except Exception as e:
+            logger.critical('Application %s: UNEXPECTED failure at ml_prediction: %s', application_id, e, exc_info=True)
             step = self._fail_step(step, str(e))
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
@@ -177,8 +188,16 @@ class PipelineOrchestrator:
                 'passed_guardrails': email_result['passed_guardrails'],
                 'template_fallback': email_result.get('template_fallback', False),
             })
-        except Exception as e:
+        except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: email generation failed: %s', application_id, e)
+            step = self._fail_step(step, str(e))
+            steps.append(step)
+            self._finalize_run(agent_run, steps, start_time, error=str(e))
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+            return agent_run
+        except Exception as e:
+            logger.critical('Application %s: UNEXPECTED failure at email_generation: %s', application_id, e, exc_info=True)
             step = self._fail_step(step, str(e))
             steps.append(step)
             self._finalize_run(agent_run, steps, start_time, error=str(e))
@@ -216,13 +235,18 @@ class PipelineOrchestrator:
                 'bias_score': bias_result['score'],
                 'flagged': bias_result['flagged'],
             })
-        except Exception as e:
+        except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: bias check failed: %s', application_id, e)
             step = self._fail_step(step, str(e))
             # With retry logic inside BiasDetector.analyze(), reaching here means
             # a fundamental failure (e.g., missing API key, prescreen code bug).
             # Default to moderate score that triggers AI review rather than
             # auto-escalating to human queue on every transient failure.
+            bias_result = {'score': 65, 'flagged': True, 'requires_human_review': False,
+                           'categories': [], 'analysis': f'Bias check infrastructure error: {e}'}
+        except Exception as e:
+            logger.critical('Application %s: UNEXPECTED failure at bias_check: %s', application_id, e, exc_info=True)
+            step = self._fail_step(step, str(e))
             bias_result = {'score': 65, 'flagged': True, 'requires_human_review': False,
                            'categories': [], 'analysis': f'Bias check infrastructure error: {e}'}
 
@@ -267,8 +291,12 @@ class PipelineOrchestrator:
                     'approved': review_result['approved'],
                     'confidence': review_result['confidence'],
                 })
-            except Exception as e:
+            except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Application %s: AI email review failed: %s', application_id, e)
+                step = self._fail_step(step, str(e))
+                review_result = {'approved': False}
+            except Exception as e:
+                logger.critical('Application %s: UNEXPECTED failure at ai_email_review: %s', application_id, e, exc_info=True)
                 step = self._fail_step(step, str(e))
                 review_result = {'approved': False}
 
@@ -332,8 +360,11 @@ class PipelineOrchestrator:
                     'sent': False,
                     'reason': 'No recipient email or guardrails not passed',
                 })
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError) as e:
             logger.error('Application %s: email delivery failed: %s', application_id, e)
+            step = self._fail_step(step, str(e))
+        except Exception as e:
+            logger.critical('Application %s: UNEXPECTED failure at email_delivery: %s', application_id, e, exc_info=True)
             step = self._fail_step(step, str(e))
         steps.append(step)
 
@@ -426,8 +457,12 @@ class PipelineOrchestrator:
                     'subject': email_result['subject'],
                     'passed_guardrails': email_result['passed_guardrails'],
                 })
-            except Exception as e:
+            except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Agent run %s: approval email generation failed: %s', agent_run_id, e)
+                step = self._fail_step(step, str(e))
+                email_result = None
+            except Exception as e:
+                logger.critical('Agent run %s: UNEXPECTED failure at approval email_generation: %s', agent_run_id, e, exc_info=True)
                 step = self._fail_step(step, str(e))
                 email_result = None
             steps.append(step)
@@ -452,8 +487,11 @@ class PipelineOrchestrator:
                             'sent': False,
                             'reason': 'No recipient email',
                         })
-                except Exception as e:
+                except (ConnectionError, TimeoutError, OSError) as e:
                     logger.error('Agent run %s: approval email delivery failed: %s', agent_run_id, e)
+                    step = self._fail_step(step, str(e))
+                except Exception as e:
+                    logger.critical('Agent run %s: UNEXPECTED failure at approval email_delivery: %s', agent_run_id, e, exc_info=True)
                     step = self._fail_step(step, str(e))
                 steps.append(step)
 
@@ -506,8 +544,11 @@ class PipelineOrchestrator:
                 'num_offers': len(nbo_result['offers']),
                 'customer_retention_score': nbo_result.get('customer_retention_score', 0),
             })
-        except Exception as e:
+        except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: NBO generation failed: %s', application.pk, e)
+            step = self._fail_step(step, str(e))
+        except Exception as e:
+            logger.critical('Application %s: UNEXPECTED failure at next_best_offers: %s', application.pk, e, exc_info=True)
             step = self._fail_step(step, str(e))
 
         steps.append(step)
@@ -531,8 +572,11 @@ class PipelineOrchestrator:
                     'message_length': len(marketing_result['marketing_message']),
                     'generation_time_ms': marketing_result['generation_time_ms'],
                 })
-            except Exception as e:
+            except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Application %s: marketing message failed: %s', application.pk, e)
+                step = self._fail_step(step, str(e))
+            except Exception as e:
+                logger.critical('Application %s: UNEXPECTED failure at marketing_message_generation: %s', application.pk, e, exc_info=True)
                 step = self._fail_step(step, str(e))
 
             steps.append(step)
@@ -553,8 +597,11 @@ class PipelineOrchestrator:
                     'attempt_number': email_result_marketing['attempt_number'],
                     'generation_time_ms': email_result_marketing['generation_time_ms'],
                 })
-            except Exception as e:
+            except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Application %s: marketing email generation failed: %s', application.pk, e)
+                step = self._fail_step(step, str(e))
+            except Exception as e:
+                logger.critical('Application %s: UNEXPECTED failure at marketing_email_generation: %s', application.pk, e, exc_info=True)
                 step = self._fail_step(step, str(e))
 
             steps.append(step)
@@ -568,8 +615,11 @@ class PipelineOrchestrator:
                         steps, send_approved = self._run_marketing_bias_check(
                             email_result_marketing, application, agent_run, steps,
                         )
-                    except Exception as e:
+                    except (LLMServiceError, ConnectionError, TimeoutError) as e:
                         logger.error('Application %s: marketing bias check failed: %s', application.pk, e)
+                        send_approved = False
+                    except Exception as e:
+                        logger.critical('Application %s: UNEXPECTED failure at marketing_bias_check: %s', application.pk, e, exc_info=True)
                         send_approved = False
 
                 logger.info('Application %s: marketing send_approved=%s', application.pk, send_approved)
@@ -618,8 +668,11 @@ class PipelineOrchestrator:
                                 'sent': False,
                                 'reason': 'No recipient email',
                             })
-                    except Exception as e:
+                    except (ConnectionError, TimeoutError, OSError) as e:
                         logger.error('Application %s: marketing email delivery failed: %s', application.pk, e)
+                        step = self._fail_step(step, str(e))
+                    except Exception as e:
+                        logger.critical('Application %s: UNEXPECTED failure at marketing_email_delivery: %s', application.pk, e, exc_info=True)
                         step = self._fail_step(step, str(e))
 
                     steps.append(step)
@@ -663,8 +716,12 @@ class PipelineOrchestrator:
                 'bias_score': marketing_bias_result['score'],
                 'flagged': marketing_bias_result['flagged'],
             })
-        except Exception as e:
+        except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: marketing bias check failed: %s', application.pk, e)
+            step = self._fail_step(step, str(e))
+            marketing_bias_result = {'score': 100, 'flagged': True, 'requires_human_review': True}
+        except Exception as e:
+            logger.critical('Application %s: UNEXPECTED failure at marketing_bias_check: %s', application.pk, e, exc_info=True)
             step = self._fail_step(step, str(e))
             marketing_bias_result = {'score': 100, 'flagged': True, 'requires_human_review': True}
         steps.append(step)
@@ -694,8 +751,12 @@ class PipelineOrchestrator:
                     'approved': review_result['approved'],
                     'confidence': review_result['confidence'],
                 })
-            except Exception as e:
+            except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Application %s: marketing AI review failed: %s', application.pk, e)
+                step = self._fail_step(step, str(e))
+                review_result = {'approved': False}
+            except Exception as e:
+                logger.critical('Application %s: UNEXPECTED failure at marketing_ai_review: %s', application.pk, e, exc_info=True)
                 step = self._fail_step(step, str(e))
                 review_result = {'approved': False}
             steps.append(step)

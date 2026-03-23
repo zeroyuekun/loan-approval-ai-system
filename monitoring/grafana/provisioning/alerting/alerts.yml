@@ -1,0 +1,295 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Loan Approval Alerts
+    folder: General
+    interval: 1m
+    rules:
+      - uid: high-error-rate
+        title: High Error Rate (>5%)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(django_http_responses_total_by_status_total{status=~"5.."}[5m])) / sum(rate(django_http_responses_total_by_status_total[5m]))
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.05]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Error rate exceeds 5% — investigate backend logs"
+        labels:
+          severity: critical
+
+      - uid: high-api-latency
+        title: High API Latency (p95 > 2s)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: histogram_quantile(0.95, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket[5m])) by (le))
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "API p95 latency exceeds 2 seconds — check slow queries or ML prediction times"
+        labels:
+          severity: warning
+
+      - uid: health-check-failing
+        title: Health Check Failing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: up{job="django-backend"}
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+        noDataState: Alerting
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "Backend service is DOWN — Prometheus cannot reach the /metrics endpoint"
+        labels:
+          severity: critical
+
+      - uid: celery-queue-backlog
+        title: Celery Queue Backlog
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(celery_queue_length) or vector(0)
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [100]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Celery queue backlog exceeds 100 tasks — check worker capacity and task throughput"
+        labels:
+          severity: warning
+
+      - uid: ml-prediction-latency-high
+        title: ML Prediction Latency p95 > 3s
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: histogram_quantile(0.95, sum(rate(ml_prediction_latency_seconds_bucket[5m])) by (le))
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "ML prediction p95 latency exceeds 3 seconds — check model complexity or resource contention"
+        labels:
+          severity: warning
+
+      - uid: ml-anomalous-approval-rate
+        title: Anomalous Approval Rate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(ml_predictions_total{decision="approved"}[30m])) / sum(rate(ml_predictions_total[30m])) * 100
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: outside_range
+                    params: [40, 85]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          summary: "Approval rate is outside the expected 40-85% range — check model drift or data quality"
+        labels:
+          severity: warning
+
+      - uid: ml-drift-warnings-high
+        title: Drift Warnings > 10%
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(ml_drift_warnings_total[10m])) / sum(rate(ml_predictions_total[10m]))
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.10]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "Over 10% of predictions have drift warnings — model may be operating outside its training distribution"
+        labels:
+          severity: warning
+
+      - uid: ml-prediction-volume-zero
+        title: ML Prediction Volume Zero
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(ml_predictions_total[10m]))
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [0.0001]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+        noDataState: Alerting
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "No ML predictions in the last 10 minutes — check if the prediction service is running"
+        labels:
+          severity: critical
