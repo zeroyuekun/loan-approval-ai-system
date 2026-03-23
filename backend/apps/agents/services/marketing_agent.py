@@ -231,9 +231,19 @@ class MarketingAgent:
             nbo_analysis=nbo_result.get('analysis', 'N/A'),
         )
 
-        return self._generate_with_retries(application, prompt, start_time)
+        # Extract NBO offer amounts for guardrail validation
+        nbo_amounts = []
+        for offer in nbo_result.get('offers', []):
+            if offer.get('amount'):
+                nbo_amounts.append(float(offer['amount']))
+            if offer.get('monthly_repayment'):
+                nbo_amounts.append(float(offer['monthly_repayment']))
+            if offer.get('fortnightly_repayment'):
+                nbo_amounts.append(float(offer['fortnightly_repayment']))
 
-    def _generate_with_retries(self, application, prompt, start_time, attempt=1):
+        return self._generate_with_retries(application, prompt, start_time, nbo_amounts=nbo_amounts)
+
+    def _generate_with_retries(self, application, prompt, start_time, attempt=1, nbo_amounts=None):
         """Generate the email with guardrail retry logic."""
         from django.conf import settings as django_settings
         current_prompt = prompt
@@ -293,6 +303,7 @@ class MarketingAgent:
         context = {
             'decision': 'denied',
             'loan_amount': float(application.loan_amount) if application.loan_amount else None,
+            'nbo_amounts': nbo_amounts or [],
         }
         guardrail_results = self.guardrail_checker.run_all_checks(body, context, email_type='marketing')
         all_passed = all(r['passed'] for r in guardrail_results if r.get('severity') != 'warning')
@@ -300,7 +311,7 @@ class MarketingAgent:
         if not all_passed and attempt < self.MAX_RETRIES:
             failed_checks = [r for r in guardrail_results if not r['passed']]
             self._last_feedback = "; ".join(f"{r['check_name']}: {r['details']}" for r in failed_checks)
-            return self._generate_with_retries(application, prompt, start_time, attempt + 1)
+            return self._generate_with_retries(application, prompt, start_time, attempt + 1, nbo_amounts=nbo_amounts)
 
         return {
             'subject': subject,

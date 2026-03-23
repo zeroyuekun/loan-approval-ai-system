@@ -341,12 +341,39 @@ class PipelineOrchestrator:
 
             # AI reviewer approved with high confidence — continue pipeline
 
+        # Guardrail failure → escalate to human review (email must be checked
+        # by a banker before it can be sent to the customer).
+        if email_result and not email_result['passed_guardrails']:
+            failed_checks = [
+                r['check_name'] for r in email_result.get('guardrail_results', [])
+                if not r['passed']
+            ]
+            logger.warning(
+                'Application %s: guardrails failed after %d attempts — escalating to human review. '
+                'Failed checks: %s',
+                application_id, email_result.get('attempt_number', 1), ', '.join(failed_checks),
+            )
+            step = self._start_step('email_delivery')
+            step = self._complete_step(step, result_summary={
+                'sent': False,
+                'reason': 'Guardrails failed — escalated to human review',
+                'failed_guardrails': failed_checks,
+            })
+            steps.append(step)
+
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(status='review')
+            agent_run.status = 'escalated'
+            agent_run.error = f'Email guardrails failed: {", ".join(failed_checks)}'
+            self._finalize_run(agent_run, steps, start_time)
+            return agent_run
+
         # Send decision email to customer
         step = self._start_step('email_delivery')
         try:
             from apps.email_engine.services.sender import send_decision_email
             recipient = application.applicant.email
-            if recipient and generated_email and email_result['passed_guardrails']:
+            if recipient and generated_email:
                 send_result = send_decision_email(recipient, email_result['subject'], email_result['body'])
                 if send_result['sent']:
                     step = self._complete_step(step, result_summary={
@@ -358,7 +385,7 @@ class PipelineOrchestrator:
             else:
                 step = self._complete_step(step, result_summary={
                     'sent': False,
-                    'reason': 'No recipient email or guardrails not passed',
+                    'reason': 'No recipient email or generated email missing',
                 })
         except (ConnectionError, TimeoutError, OSError) as e:
             logger.error('Application %s: email delivery failed: %s', application_id, e)
@@ -382,9 +409,13 @@ class PipelineOrchestrator:
                 application, agent_run, steps, denial_reasons, profile_context,
             )
 
-        # Finalize
+        # Finalize — update application status to final decision
         with transaction.atomic():
-            LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+            rows = LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+            if rows == 0:
+                logger.error('Application %s: status update to %s affected 0 rows', application_id, decision)
+            else:
+                logger.info('Application %s: status updated to %s', application_id, decision)
         self._finalize_run(agent_run, steps, start_time)
         logger.info('Application %s: pipeline completed with decision=%s', application_id, decision)
 
@@ -467,8 +498,31 @@ class PipelineOrchestrator:
                 email_result = None
             steps.append(step)
 
+            # Guardrail failure on resume → re-escalate for human review
+            if email_result and not email_result.get('passed_guardrails'):
+                failed_checks = [
+                    r['check_name'] for r in email_result.get('guardrail_results', [])
+                    if not r['passed']
+                ]
+                logger.warning(
+                    'Agent run %s: approval email guardrails failed on resume — re-escalating. '
+                    'Failed checks: %s',
+                    agent_run_id, ', '.join(failed_checks),
+                )
+                step = self._start_step('email_delivery')
+                step = self._complete_step(step, result_summary={
+                    'sent': False,
+                    'reason': 'Guardrails failed on resume — re-escalated to human review',
+                    'failed_guardrails': failed_checks,
+                })
+                steps.append(step)
+                agent_run.status = 'escalated'
+                agent_run.error = f'Email guardrails failed on resume: {", ".join(failed_checks)}'
+                self._finalize_run(agent_run, steps, start_time)
+                return agent_run
+
             # Send the approval email
-            if email_result and email_result.get('passed_guardrails'):
+            if email_result:
                 step = self._start_step('email_delivery')
                 try:
                     from apps.email_engine.services.sender import send_decision_email
