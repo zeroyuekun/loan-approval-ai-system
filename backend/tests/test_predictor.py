@@ -1,13 +1,29 @@
 """Tests for ML predictor input validation and consistency checks."""
 
 from django.test import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class PredictorInputValidationTestCase(TestCase):
-    def test_feature_bounds_validation(self):
+    @patch('apps.ml_engine.services.predictor._load_bundle')
+    @patch('apps.ml_engine.services.model_selector.select_model_version')
+    def test_feature_bounds_validation(self, mock_select, mock_load):
         """Feature bounds should reject out-of-range values."""
         from apps.ml_engine.services.predictor import ModelPredictor
+        mock_select.return_value = MagicMock(id=1, version_label='test-v1')
+        mock_load.return_value = {
+            'model': MagicMock(),
+            'scaler': MagicMock(),
+            'feature_cols': [],
+            'label_encoders': None,
+            'categorical_cols': [],
+            'numeric_cols': [],
+            'reference_distribution': {},
+            'imputation_values': {},
+            'feature_bounds': {},
+            'group_thresholds': {},
+            'conformal_scores': [],
+        }
         predictor = ModelPredictor()
 
         # Create a mock application with invalid credit score
@@ -47,11 +63,12 @@ class RiskGradeTestCase(TestCase):
         """Risk grades should map correctly from probability."""
         from apps.ml_engine.services.predictor import compute_risk_grade
 
-        self.assertEqual(compute_risk_grade(0.999), 'AAA')
-        self.assertEqual(compute_risk_grade(0.995), 'AAA')
-        self.assertEqual(compute_risk_grade(0.98), 'AA')
-        self.assertEqual(compute_risk_grade(0.95), 'A')
-        self.assertEqual(compute_risk_grade(0.90), 'BBB')
-        self.assertEqual(compute_risk_grade(0.80), 'BB')
-        self.assertEqual(compute_risk_grade(0.60), 'B')
-        self.assertEqual(compute_risk_grade(0.30), 'CCC')
+        # pd = 1 - probability; thresholds: <0.005=AAA, <0.01=AA, <0.03=A, <0.07=BBB, <0.15=BB, <0.30=B, else CCC
+        self.assertEqual(compute_risk_grade(0.999), 'AAA')   # pd=0.001
+        self.assertEqual(compute_risk_grade(0.995), 'AA')    # pd=0.005
+        self.assertEqual(compute_risk_grade(0.98), 'A')      # pd=0.02
+        self.assertEqual(compute_risk_grade(0.95), 'BBB')    # pd=0.05
+        self.assertEqual(compute_risk_grade(0.90), 'BB')     # pd=0.10
+        self.assertEqual(compute_risk_grade(0.80), 'B')      # pd=0.20
+        self.assertEqual(compute_risk_grade(0.60), 'CCC')    # pd=0.40
+        self.assertEqual(compute_risk_grade(0.30), 'CCC')    # pd=0.70

@@ -2,23 +2,45 @@
 
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from rest_framework import status
 
-from apps.accounts.models import CustomUser
+from apps.accounts.models import CustomerProfile, CustomUser
 from apps.loans.models import LoanApplication
 
 
 @override_settings(
     CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}},
+    FIELD_ENCRYPTION_KEY='Q1bXXPr1cYO3Cjd7uP5J8nWRxzdBjQrTAosMayGV3CA=',
 )
 class LoanCRUDTestCase(TestCase):
     def setUp(self):
+        cache.clear()
+        # Clear the Fernet lru_cache so it picks up the test encryption key
+        from apps.accounts.models import _get_fernet
+        _get_fernet.cache_clear()
         self.customer = CustomUser.objects.create_user(
             username='customer1', password='TestPass123!',
             email='customer@example.com', role='customer',
         )
+        # Complete the auto-created customer profile (required by LoanApplicationCreateSerializer)
+        profile = self.customer.profile
+        profile.date_of_birth = '1990-01-15'
+        profile.phone = '0412345678'
+        profile.address_line_1 = '123 Test St'
+        profile.suburb = 'Sydney'
+        profile.state = 'NSW'
+        profile.postcode = '2000'
+        profile.residency_status = 'citizen'
+        profile.primary_id_type = 'drivers_licence'
+        profile.primary_id_number = 'DL12345678'
+        profile.employment_status = 'payg_permanent'
+        profile.gross_annual_income = 85000
+        profile.housing_situation = 'renting'
+        profile.number_of_dependants = 0
+        profile.save()
         self.officer = CustomUser.objects.create_user(
             username='officer1', password='TestPass123!',
             email='officer@example.com', role='officer',

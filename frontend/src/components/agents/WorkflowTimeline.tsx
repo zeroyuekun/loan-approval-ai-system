@@ -2,6 +2,7 @@
 
 import { AgentStep } from '@/types'
 import { CheckCircle, Loader2, XCircle, Circle } from 'lucide-react'
+import { formatStepName, formatResultSummary } from './stepLabels'
 
 interface WorkflowTimelineProps {
   steps: AgentStep[]
@@ -42,18 +43,25 @@ function getDuration(step: AgentStep): string | null {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-const STEP_LABELS: Record<string, string> = {
-  ml_prediction: 'ML Prediction',
-  email_generation: 'Email Generation',
-  bias_check: 'Bias Check',
-  ai_email_review: 'AI Email Review',
-  human_escalation: 'Human Escalation',
-  human_escalation_severe_bias: 'Human Escalation (Severe Bias)',
-  human_escalation_after_retries: 'Human Escalation (After Retries)',
-  next_best_offers: 'Next Best Offers',
-  marketing_message_generation: 'Marketing Message',
-  human_review_approved: 'Human Review Approved',
-  human_review_decision: 'Human Review Decision',
+function ResultSummaryDisplay({ summary }: { summary: string | Record<string, any> | null | undefined }) {
+  const items = formatResultSummary(summary)
+  if (items.length === 0) return null
+
+  // Single unlabelled string
+  if (items.length === 1 && !items[0].label) {
+    return <p className="text-sm text-muted-foreground mt-1">{items[0].value}</p>
+  }
+
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+      {items.map(({ label, value }) => (
+        <span key={label} className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground/70">{label}:</span>{' '}
+          {value}
+        </span>
+      ))}
+    </div>
+  )
 }
 
 export function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
@@ -69,20 +77,14 @@ export function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
           </div>
           <div className="pb-6 flex-1">
             <div className="flex items-center gap-2">
-              <p className="text-sm font-medium">{STEP_LABELS[step.step_name] || step.step_name}</p>
+              <p className="text-sm font-medium">{formatStepName(step.step_name)}</p>
               {getDuration(step) && (
                 <span className="text-xs text-muted-foreground">({getDuration(step)})</span>
               )}
             </div>
-            {step.result_summary && (
-              <p className="text-sm text-muted-foreground mt-0.5">
-                {typeof step.result_summary === 'string'
-                  ? step.result_summary
-                  : Object.entries(step.result_summary).map(([k, v]) => `${k}: ${v}`).join(', ')}
-              </p>
-            )}
+            <ResultSummaryDisplay summary={step.result_summary} />
             {step.error && (
-              <p className="text-sm text-destructive mt-0.5">{step.error}</p>
+              <p className="text-sm text-destructive mt-1">{step.error}</p>
             )}
           </div>
         </div>

@@ -65,12 +65,21 @@ class ModelVersion(models.Model):
                 raise ValidationError(
                     {'file_path': 'Model file must have .joblib extension'}
                 )
+        if self.is_active:
+            other_traffic = (
+                ModelVersion.objects.filter(is_active=True)
+                .exclude(pk=self.pk)
+                .aggregate(total=models.Sum('traffic_percentage'))['total']
+            ) or 0
+            if other_traffic + (self.traffic_percentage or 0) > 100:
+                raise ValidationError(
+                    f'Total traffic would be {other_traffic + (self.traffic_percentage or 0)}% '
+                    f'(max 100%). Reduce other models\' traffic first.'
+                )
 
     def save(self, *args, **kwargs):
         self.clean()
         with transaction.atomic():
-            if self.is_active:
-                ModelVersion.objects.filter(is_active=True).exclude(pk=self.pk).update(is_active=False)
             super().save(*args, **kwargs)
 
 

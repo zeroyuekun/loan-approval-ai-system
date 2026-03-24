@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, ReactNode } from 'react'
+import { useState, useEffect, useCallback, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthContext } from '@/lib/auth'
 import { authApi } from '@/lib/api'
@@ -82,34 +82,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
     router.replace('/login')
   }, [router])
-
-  // Auto log-off after 5 minutes of inactivity
-  const IDLE_TIMEOUT_MS = 5 * 60 * 1000
-  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const resetIdleTimer = useCallback(() => {
-    if (idleTimer.current) clearTimeout(idleTimer.current)
-    if (user) {
-      idleTimer.current = setTimeout(() => {
-        logout()
-      }, IDLE_TIMEOUT_MS)
-    }
-  }, [logout, user])
-
-  useEffect(() => {
-    if (!user) return
-
-    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click']
-    const handler = () => resetIdleTimer()
-
-    events.forEach((e) => window.addEventListener(e, handler, { passive: true }))
-    resetIdleTimer()
-
-    return () => {
-      events.forEach((e) => window.removeEventListener(e, handler))
-      if (idleTimer.current) clearTimeout(idleTimer.current)
-    }
-  }, [user, resetIdleTimer])
 
   return (
     <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>

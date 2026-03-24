@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from django.conf import settings as django_settings
 from sklearn.calibration import calibration_curve
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -117,7 +118,7 @@ class MetricsService:
 
     def compute_threshold_analysis(self, y_true, y_prob):
         """Sweep thresholds 0.05-0.95 and find optimal thresholds."""
-        thresholds = np.arange(0.05, 1.0, 0.05)
+        thresholds = np.arange(0.05, 0.96, 0.01)
         sweep = []
         for t in thresholds:
             y_pred_t = (np.array(y_prob) >= t).astype(int)
@@ -154,10 +155,9 @@ class MetricsService:
         # - FN: lost revenue only (customer can reapply or go elsewhere)
         # APRA's approach to credit risk (APS 220) weights default losses
         # heavily; Big 4 banks typically use 3:1 to 10:1 FP:FN cost ratios.
+        fp_fn_ratio = getattr(django_settings, 'ML_COST_FP_FN_RATIO', 5)
         def cost(entry):
-            # Lower cost is better
-            # cost = cost_FP * FPR + cost_FN * (1 - recall)
-            return 5 * entry['fpr'] + 1 * (1 - entry['recall'])
+            return fp_fn_ratio * entry['fpr'] + 1 * (1 - entry['recall'])
 
         cost_optimal = min(sweep, key=cost)['threshold']
 
@@ -705,8 +705,12 @@ class MetricsService:
         X_combined = np.vstack([X_train, X_test])
         y_combined = np.concatenate([np.zeros(n_train), np.ones(n_test)])
 
+        # Impute NaN with column median (LR can't handle missing values)
+        from sklearn.impute import SimpleImputer
+        imputer = SimpleImputer(strategy='median')
+        X_combined = imputer.fit_transform(X_combined)
+
         lr = LogisticRegression(random_state=42, max_iter=500, solver='lbfgs')
-        # Simple cross-val: train on 80%, test on 20%
         from sklearn.model_selection import cross_val_score
         scores = cross_val_score(lr, X_combined, y_combined, cv=3, scoring='roc_auc')
         mean_auc = float(np.mean(scores))

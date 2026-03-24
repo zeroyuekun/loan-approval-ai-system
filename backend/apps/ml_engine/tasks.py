@@ -38,7 +38,9 @@ def train_model_task(self, algorithm='xgb', data_path=None):
             sha256.update(chunk)
     file_hash = sha256.hexdigest()
 
-    # ModelVersion.save() atomically deactivates other versions when is_active=True
+    # Deactivate all existing active models before activating the new one
+    ModelVersion.objects.filter(is_active=True).update(is_active=False, traffic_percentage=0)
+
     mv = ModelVersion.objects.create(
         algorithm=algorithm,
         version=version_str,
@@ -116,6 +118,7 @@ def run_prediction_task(self, application_id):
             'decision': result['prediction'],
             'confidence': result['probability'],
             'feature_importances': result['feature_importances'],
+            'shap_values': result.get('shap_values', {}),
             'model_version': result['model_version'],
         },
     )

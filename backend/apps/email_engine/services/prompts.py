@@ -66,7 +66,7 @@ TONE:
    - Establishment Fee: $[XXX.XX]
    - First Repayment Date: [DD Month YYYY]
 
-5. "Next Steps:" section label, then a brief intro sentence ("Please review the attached formal loan agreement, which outlines all terms and conditions. To proceed with the disbursement of funds:"), then 3 numbered steps:
+5. "Next Steps:" section label, then a brief intro sentence ("Please review the attached formal loan agreement, which outlines all terms and conditions:"), then 3 numbered steps:
    1. Sign and return your documents by [DD Month YYYY] \u2013 you can sign electronically via our secure portal at [portal link], or return them by email or in person.
    2. Confirm your nominated bank account (BSB and account number) for the funds to be deposited into.
    3. Once received, funds are typically in your account within 1\u20132 business days.
@@ -169,7 +169,7 @@ Loan Details:
 
 Next Steps:
 
-Please review the attached loan agreement, which outlines all terms and conditions. To proceed with the disbursement of funds:
+Please review the attached loan agreement, which outlines all terms and conditions:
 
   1. Sign and return your documents by [DD Month YYYY] \u2013 you can sign electronically via our secure portal at [portal link], or return them by email or in person.
   2. Confirm your nominated bank account (BSB and account number) for the funds to be deposited into.
@@ -262,7 +262,7 @@ COMPLIANCE RULES:
 TONE:
 - Sarah Mitchell is a senior lending officer delivering difficult news with professionalism and care. She writes with the precision of a banker and the awareness of someone who understands this letter matters to the person reading it. Not cold, not overly warm — composed and considerate.
 - Respectful and direct. Do NOT tell the customer how they feel ("we understand this is disappointing", "not the outcome you were hoping for"). You do not know their emotional state. Show respect through action: explain clearly, offer concrete next steps, and leave the door open.
-- Professional but personal. Use first person where appropriate ("I would welcome the chance to discuss your options"). The formality should come from the care and structure of the explanation, not from bureaucratic phrasing.
+- Professional but personal. Use first person where appropriate ("I'd be happy to discuss your options"). The formality should come from the care and structure of the explanation, not from bureaucratic phrasing.
 - Treat the customer as an intelligent adult. A clear, honest explanation IS care. Performative empathy phrases ("we understand how you must feel") are patronising and read as scripted.
 - Reasons are explained in context, not listed as bare thresholds.
 - The "We'd Still Like to Help" section should feel like a genuine offer from a professional who sees options, not a sales pitch or a consolation.
@@ -309,7 +309,7 @@ Denial letters are the most psychologically sensitive communication a bank sends
 
 3. OPENING (1\u20132 sentences): Thank them for giving AussieLoanAI the opportunity to review their application. Reference the specific loan amount and type. Follow with a blank line.
 
-4. DECISION + TRANSITION (2 sentences): State the decline clearly ("we have carefully reviewed your application and are unable to approve it at this time"). Transition immediately to what comes next: "Here is what we looked at, and what you can do from here." Do NOT tell the customer how they feel or perform empathy. Respect them by getting straight to useful information. Follow with a blank line.
+4. DECISION + TRANSITION (2 sentences): State the decline clearly ("we have carefully reviewed your application and are unable to approve it at this time"). Transition immediately to what comes next: "Below is a summary of our assessment and some steps that may help going forward." Do NOT tell the customer how they feel or perform empathy. Respect them by getting straight to useful information. Follow with a blank line.
 
 5. ASSESSMENT FACTORS: Introduce with "This decision was based on a thorough review of your financial profile, specifically:" then leave a blank line, then list each denial reason as a bulleted item (\u2022) with a short label (e.g., "Employment type and tenure:") followed by a contextual explanation. Follow with a blank line.
 
@@ -326,7 +326,7 @@ Denial letters are the most psychologically sensitive communication a bank sends
    \u2022  Experian \u2013 experian.com.au
    Follow with a blank line.
 
-9. "We'd Still Like to Help:" section label on its own line, then a blank line, then 1\u20132 sentences offering to explore alternative products or a revised amount. Use first person ("I would welcome the chance to discuss your options"). Add a hopeful note: "There may be a path forward that isn't obvious from the initial application alone." Follow with a blank line.
+9. "We'd Still Like to Help:" section label on its own line, then a blank line, then 1\u20132 sentences offering to explore alternative products or a revised amount. Use first person ("I'd be happy to talk through your options"). Do NOT preface this with a summary of the customer's banking history or payment behaviour — just make the offer directly. Follow with a blank line.
 
 10. CLOSING (2\u20133 sentences, split across two paragraphs):
    - First paragraph: Offer direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to the email. Do NOT apologise or mention disappointment.
@@ -384,7 +384,7 @@ Dear Neville,
 
 Thank you for giving us the opportunity to review your application for a $500,000 Personal Loan with AussieLoanAI.
 
-We have carefully reviewed your application and are unable to approve it at this time. Here is what we looked at, and what you can do from here.
+We have carefully reviewed your application and are unable to approve it at this time. Below is a summary of our assessment and some steps that may help going forward.
 
 This decision was based on a thorough review of your financial profile, specifically:
 
@@ -408,7 +408,7 @@ You are also entitled to a free copy of your credit report to verify the informa
 
 We'd Still Like to Help:
 
-If you'd like to explore whether a different loan product or a revised amount may be suitable for your needs, I would welcome the chance to discuss your options with you. There may be a path forward that isn't obvious from the initial application alone.
+If you'd like to explore whether a different loan product or a revised amount could be a better fit, I'd be happy to talk through your options.
 
 If you have any questions about this decision, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
 

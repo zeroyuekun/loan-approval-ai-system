@@ -31,16 +31,27 @@ def _cleanup_stuck_application(application_id):
 @shared_task(
     bind=True,
     name='apps.agents.tasks.orchestrate_pipeline_task',
+    acks_late=True,
     time_limit=600,
     soft_time_limit=540,
     autoretry_for=(ConnectionError, TimeoutError, OSError),
     retry_backoff=True,
     max_retries=3,
 )
-def orchestrate_pipeline_task(self, application_id):
+def orchestrate_pipeline_task(self, application_id, force=False):
     """Run the full loan processing pipeline."""
     from apps.agents.models import AgentRun
     from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    # Idempotency: skip if already completed (unless force re-run)
+    if not force:
+        existing = AgentRun.objects.filter(
+            application_id=application_id,
+            status='completed'
+        ).exists()
+        if existing:
+            logger.info('Pipeline already completed for application %s, skipping (idempotent)', application_id)
+            return {'status': 'already_completed', 'application_id': str(application_id)}
 
     # Redis dedup lock: prevent concurrent runs for the same application
     lock_key = f'orchestrate_lock:{application_id}'
@@ -55,11 +66,32 @@ def orchestrate_pipeline_task(self, application_id):
     except (ConnectionError, TimeoutError, OSError):
         # Let Celery's autoretry handle these — don't cleanup yet
         raise
-    except Exception:
+    except Exception as e:
         _cleanup_stuck_application(application_id)
+        try:
+            from apps.loans.models import AuditLog
+            AuditLog.objects.create(
+                action='pipeline_failed',
+                resource_type='LoanApplication',
+                resource_id=str(application_id),
+                details={'error': str(e)},
+            )
+        except Exception:
+            logger.warning('Failed to create audit log for pipeline failure on %s', application_id)
         raise
     finally:
         cache.delete(lock_key)
+
+    try:
+        from apps.loans.models import AuditLog
+        AuditLog.objects.create(
+            action='pipeline_completed',
+            resource_type='LoanApplication',
+            resource_id=str(application_id),
+            details={'status': agent_run.status, 'agent_run_id': str(agent_run.id)},
+        )
+    except Exception:
+        logger.warning('Failed to create audit log for pipeline completion on %s', application_id)
 
     return {
         'agent_run_id': str(agent_run.id),
@@ -72,6 +104,7 @@ def orchestrate_pipeline_task(self, application_id):
 @shared_task(
     bind=True,
     name='apps.agents.tasks.resume_pipeline_task',
+    acks_late=True,
     time_limit=600,
     soft_time_limit=540,
     autoretry_for=(ConnectionError, TimeoutError, OSError),

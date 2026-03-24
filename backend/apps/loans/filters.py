@@ -1,6 +1,6 @@
 import django_filters
 
-from .models import LoanApplication
+from .models import AuditLog, LoanApplication
 
 
 class LoanApplicationFilter(django_filters.FilterSet):
@@ -28,3 +28,14 @@ class LoanApplicationFilter(django_filters.FilterSet):
         return queryset.exclude(
             agent_runs__status='escalated',
         )
+
+
+class AuditLogFilter(django_filters.FilterSet):
+    action = django_filters.CharFilter()
+    resource_type = django_filters.CharFilter()
+    timestamp_after = django_filters.DateTimeFilter(field_name='timestamp', lookup_expr='gte')
+    timestamp_before = django_filters.DateTimeFilter(field_name='timestamp', lookup_expr='lte')
+
+    class Meta:
+        model = AuditLog
+        fields = ['action', 'resource_type']

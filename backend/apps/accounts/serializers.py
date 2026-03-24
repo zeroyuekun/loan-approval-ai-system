@@ -40,7 +40,15 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        user = authenticate(username=data['username'], password=data['password'])
+        username_or_email = data['username']
+        # Allow login with email: resolve to username first
+        if '@' in username_or_email:
+            try:
+                user_obj = CustomUser.objects.get(email=username_or_email)
+                username_or_email = user_obj.username
+            except CustomUser.DoesNotExist:
+                raise serializers.ValidationError('Invalid credentials.')
+        user = authenticate(username=username_or_email, password=data['password'])
         if not user:
             raise serializers.ValidationError('Invalid credentials.')
         if not user.is_active:

@@ -1,0 +1,27 @@
+target-version = "py313"
+line-length = 120
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "S",    # flake8-bandit (security)
+]
+ignore = [
+    "S101",   # assert used (OK in tests)
+    "S105",   # hardcoded password (false positives in settings defaults)
+    "S106",   # hardcoded password argument
+    "S110",   # try-except-pass
+    "E501",   # line too long (handled by formatter)
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+"*/migrations/**" = ["E501"]
+
+[lint.isort]
+known-first-party = ["apps", "config"]

@@ -19,23 +19,28 @@ make migrate    # Run database migrations
 make seed       # Generate 10K synthetic records + train XGBoost model
 ```
 
-Frontend: http://localhost:3000 | Backend API: http://localhost:8000 | Grafana: http://localhost:3001
+Frontend: http://localhost:3000 | Backend API: http://localhost:8500 | Grafana: http://localhost:3001
 
 Default login: `admin` / `admin1234`
 
 ## Running Tests
 
 ```bash
-# Backend (pytest, requires 70% coverage)
+# Backend (pytest, requires 80% coverage)
 make test
 
 # Specific test suites
 make test-auth
 make test-ml
 
-# Frontend
-cd frontend && npm run lint
-cd frontend && npx tsc --noEmit
+# Frontend unit tests (Vitest, requires 30% coverage)
+cd frontend && npm test
+
+# Frontend tests with coverage report
+cd frontend && npm run test:ci
+
+# Frontend E2E tests (requires Docker stack running)
+cd frontend && npx playwright test
 ```
 
 ## Linting and Formatting
@@ -78,7 +83,7 @@ Other directories:
 
 1. **Branch naming:** `feat/description`, `fix/description`, `docs/description`
 2. **Commits:** Descriptive messages. Prefix with `feat:`, `fix:`, `docs:`, `refactor:`, `test:` as appropriate.
-3. **CI must pass:** Backend tests (70% coverage minimum), Ruff lint, ESLint, TypeScript type check, Bandit SAST scan, dependency audit, Docker build.
+3. **CI must pass:** Backend tests (80% coverage), frontend tests (30% coverage), Ruff lint, ESLint, TypeScript type check, Bandit SAST scan, dependency audit, Docker build.
 4. **One concern per PR.** Keep changes focused and reviewable.
 
 ## References

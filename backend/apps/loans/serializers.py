@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.serializers import UserSerializer
-from .models import LoanApplication, LoanDecision
+from .models import AuditLog, FraudCheck, LoanApplication, LoanDecision
 
 
 class LoanDecisionSerializer(serializers.ModelSerializer):
@@ -10,7 +10,16 @@ class LoanDecisionSerializer(serializers.ModelSerializer):
         model = LoanDecision
         fields = (
             'id', 'decision', 'confidence', 'risk_score',
-            'feature_importances', 'model_version', 'reasoning',
+            'feature_importances', 'shap_values', 'decision_waterfall',
+            'model_version', 'reasoning', 'created_at',
+        )
+
+
+class FraudCheckSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FraudCheck
+        fields = (
+            'id', 'passed', 'risk_score', 'checks', 'flagged_reasons',
             'created_at',
         )
 
@@ -18,6 +27,7 @@ class LoanDecisionSerializer(serializers.ModelSerializer):
 class LoanApplicationSerializer(serializers.ModelSerializer):
     decision = LoanDecisionSerializer(read_only=True)
     applicant = UserSerializer(read_only=True)
+    latest_fraud_check = serializers.SerializerMethodField()
 
     class Meta:
         model = LoanApplication
@@ -28,9 +38,17 @@ class LoanApplicationSerializer(serializers.ModelSerializer):
             'existing_credit_card_limit', 'number_of_dependants',
             'employment_type', 'applicant_type', 'purpose', 'home_ownership',
             'has_cosigner', 'has_hecs', 'has_bankruptcy', 'state',
-            'status', 'notes', 'created_at', 'updated_at', 'decision',
+            'status', 'notes', 'conditions', 'conditions_met',
+            'created_at', 'updated_at', 'decision',
+            'latest_fraud_check',
         )
-        read_only_fields = ('id', 'status', 'created_at', 'updated_at', 'applicant')
+        read_only_fields = ('id', 'status', 'conditions', 'conditions_met', 'created_at', 'updated_at', 'applicant')
+
+    def get_latest_fraud_check(self, obj):
+        fraud_check = obj.fraud_checks.first() if hasattr(obj, 'fraud_checks') else None
+        if fraud_check is None:
+            return None
+        return FraudCheckSerializer(fraud_check).data
 
 
 class LoanApplicationCreateSerializer(serializers.ModelSerializer):
@@ -77,3 +95,11 @@ class LoanApplicationCustomerUpdateSerializer(serializers.ModelSerializer):
         model = LoanApplication
         fields = ('id', 'notes')
         read_only_fields = ('id',)
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True, default=None)
+
+    class Meta:
+        model = AuditLog
+        fields = ('id', 'timestamp', 'username', 'action', 'resource_type', 'resource_id', 'details', 'ip_address')

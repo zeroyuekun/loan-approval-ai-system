@@ -1,6 +1,6 @@
 'use client'
 
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Label } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
@@ -33,33 +33,43 @@ export function FairnessCard({ fairnessMetrics }: FairnessCardProps) {
 
         return (
           <Card key={attribute}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
+            <CardHeader className="pb-4">
+              <div className="flex items-start justify-between gap-4">
                 <div>
                   <CardTitle className="text-base">Fairness: {label}</CardTitle>
-                  <CardDescription className="flex items-center gap-2 mt-1">
-                    <span>Equalized Odds Diff: {eqOddsDiff.toFixed(4)}</span>
+                  <CardDescription className="mt-1.5">
+                    Equalized Odds Diff: {eqOddsDiff.toFixed(4)}
                   </CardDescription>
                 </div>
                 <Badge
-                  className={passes80
+                  className={`shrink-0 ${passes80
                     ? 'bg-green-100 text-green-800 border-green-200'
                     : 'bg-red-100 text-red-800 border-red-200'
-                  }
+                  }`}
                   variant="outline"
                 >
-                  DI Ratio: {disparateImpact.toFixed(3)} {passes80 ? 'PASS' : 'FAIL'}
+                  DI: {disparateImpact.toFixed(3)} {passes80 ? 'PASS' : 'FAIL'}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis domain={[0, 100]} label={{ value: '%', angle: -90, position: 'insideLeft' }} />
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
+                  <XAxis
+                    dataKey="group"
+                    tick={{ fontSize: 10 }}
+                    interval={0}
+                    angle={-25}
+                    textAnchor="end"
+                    height={60}
+                    tickLine={{ stroke: '#d1d5db' }}
+                  />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }}>
+                    <Label value="%" angle={-90} position="insideLeft" offset={10} style={{ fontSize: 12, fill: '#6b7280', textAnchor: 'middle' }} />
+                  </YAxis>
                   <Tooltip formatter={(value: number) => `${value}%`} />
-                  <Legend />
+                  <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: 11, paddingBottom: 8 }} />
                   <Bar dataKey="Actual Approval" fill="#60a5fa" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="Predicted Approval" fill="#34d399" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="TPR" fill="#a78bfa" radius={[4, 4, 0, 0]} />

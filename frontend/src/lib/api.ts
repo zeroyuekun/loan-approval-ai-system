@@ -128,6 +128,11 @@ export const agentsApi = {
     api.post(`/agents/review/${runId}/`, data),
 }
 
+// Audit
+export const auditApi = {
+  list: (params?: any) => api.get('/loans/audit-logs/', { params }),
+}
+
 // Tasks
 export const tasksApi = {
   getStatus: (taskId: string) => api.get(`/tasks/${taskId}/status/`),

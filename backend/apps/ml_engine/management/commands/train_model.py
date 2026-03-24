@@ -15,7 +15,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             '--algorithm', type=str, default='xgb', choices=['rf', 'xgb'],
-            help='Algorithm to use: rf (Random Forest) or xgb (XGBoost). Default: xgb',
+            help='Algorithm: rf (Random Forest), xgb (XGBoost). Default: xgb',
         )
         parser.add_argument(
             '--data-path', type=str, default='.tmp/synthetic_loans.csv',

@@ -31,134 +31,60 @@ def _sanitize_prompt_input(value, max_length=500):
     return value[:max_length].strip()
 
 
-MARKETING_EMAIL_PROMPT = """You are drafting a follow-up email for AussieLoanAI, an Australian bank. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline. Instead, it acknowledges that the customer recently applied and pivots directly to alternative products the customer qualifies for.
+MARKETING_EMAIL_PROMPT = """You are filling in a templated follow-up email for AussieLoanAI. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline.
 
-The tone matches our other correspondence: professional banking communication that reads like it was written by a person, not a system. Clean formatting with no box-drawing dividers or UPPERCASE headers. Plain-text section labels. Sarah Mitchell has reviewed the customer's profile and is presenting alternatives she believes are relevant — with the authority of a senior lending officer and the clarity of someone who wants to be understood.
+YOUR JOB: Fill in ONLY the bracketed placeholders below. Do NOT rewrite, rephrase, or rearrange the template. Every word outside a bracket must appear EXACTLY as written. If a section is wrapped in {{IF ...}} / {{END IF}}, include it only when the condition is true; otherwise omit that entire block (including its label).
 
 === COMPLIANCE RULES ===
-1. Do NOT repeat the decline decision. The customer already received that letter. Instead, acknowledge they recently applied and pivot to alternatives.
-2. Under Banking Code 2025 (para 89-91), marketing must not be aggressive, misleading, or create undue pressure.
-3. Under NCCP Act 2009 (s133), products offered must be "not unsuitable" for the customer.
-4. Under ASIC RG 234, claims must not be misleading. Never imply guaranteed approval for credit products.
-5. "Guaranteed returns" is permitted ONLY for term deposits (government-backed under Financial Claims Scheme).
-6. Never reference protected characteristics (race, gender, religion, disability, marital status, age).
-7. Australian English spelling: finalised, recognised, organisation, colour, favour, centre.
-8. Australian financial terms: term deposit, everyday account, fortnight, p.a., settlement.
-9. Use the customer's ACTUAL numbers from the data below. Do not invent figures.
-10. Spam Act 2003 (Cth): include unsubscribe option and physical address in footer.
+1. Do NOT repeat the decline decision or use "declined", "denied", "rejected", "unsuccessful".
+2. Use ONLY the figures from the OFFER DATA below. Do NOT invent numbers.
+3. "Guaranteed returns" is permitted ONLY for term deposits (Financial Claims Scheme).
+4. For credit products, NEVER say "guaranteed" anything.
+5. Australian English spelling throughout.
+6. Never reference protected characteristics.
 
-=== CUSTOMER CONTEXT ===
-- Name: {applicant_name}
+=== CUSTOMER DATA ===
+- Full Name: {applicant_name}
 - First Name: {applicant_first_name}
 - Requested: ${loan_amount:,.2f} for {purpose}
-- Credit Score: {credit_score} (Equifax, 0-1200)
+- Credit Score: {credit_score}
 - Annual Income: ${annual_income:,.2f}
 - Employment: {employment_type} ({employment_length} years)
 
 === BANKING RELATIONSHIP ===
 {banking_context}
 
-=== ALTERNATIVE OFFERS (pre-calculated by product engine) ===
+=== OFFER DATA (from product engine — use these exact figures) ===
 {offers_detail}
 
 === RETENTION INTELLIGENCE ===
-- Customer Retention Score: {retention_score}/100
+- Retention Score: {retention_score}/100
 - Loyalty Factors: {loyalty_factors}
-- Retention Strategy: {nbo_analysis}
+- Strategy: {nbo_analysis}
 
-=== SPACING RULES ===
-- Leave a BLANK LINE between every section and paragraph.
-- Section labels appear on their own line, followed by a blank line, then the section content.
-- Leave a blank line before and after bulleted lists.
-- The sign-off block, separator, and footer are each separated by a blank line.
-
-=== EMAIL FORMAT (follow this structure exactly) ===
-
-1. Subject line (prefix with "Subject: "):
-   Format: "Next steps for your AussieLoanAI loan application"
-   or "{applicant_first_name}, some options worth considering"
-   NEVER use "denied", "rejected", "declined", or "unsuccessful" in the subject.
-
-2. "Dear {applicant_first_name}," followed by a blank line.
-
-3. OPENING (2\u20133 sentences):
-   Acknowledge their recent application briefly ("Following your recent loan application with us..."). Do NOT restate the decline. Pivot directly to the alternatives: "We have looked at your profile and there are a few options worth considering." Do NOT use performative phrases like "we value you as a customer" or "we genuinely want to help" \u2014 show value by offering something useful, not by saying you value them. Follow with a blank line.
-
-4. For each alternative offer, use a clean section with a label on its own line:
-
-   "Why consider this option:" or "Option [N]:" as a plain-text section label, then a blank line, then:
-   \u2022  Key benefit 1 (e.g., "Higher approval odds: Often approved for borrowers building their credit history.")
-   \u2022  Key benefit 2 (e.g., "Lower interest rates: Because the risk is lower with collateral in place.")
-
-   After the bullets, leave a blank line, then include 1\u20132 sentences explaining how this specific product fits THIS customer, using their actual numbers where available.
-
-   Leave a blank line between each offer section.
-
-   For term deposits, you may say "Guaranteed returns" and "Government protected*" (with footnote).
-   For credit products (loans, credit cards), NEVER say "guaranteed" anything.
-
-5. CLOSING (split across two paragraphs):
-   - First paragraph: Express genuine interest in helping. Use first person: "If any of these options interest you, I'd welcome the chance to talk them through with you." Provide direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to this email.
-   - Second paragraph (after a blank line): Close with this exact line (substituting the customer's first name): "Thanks for coming to us, [First Name]. We'd love to help you find the right option when you're ready." Do NOT rephrase or reword this line.
-
-6. Sign-off (after a blank line):
-
-Sincerely,
-
-Sarah Mitchell
-Senior Lending Officer
-AussieLoanAI Pty Ltd
-ABN 12 345 678 901 | Australian Credit Licence No. 012345
-Ph: 1300 000 000
-Email: aussieloanai@gmail.com
-
-7. Footer (after a separator line) with legal disclaimers:
-   \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-   - Financial Claims Scheme footnote (* for term deposits if applicable)
-   - Rate conditions footnote (** for bonus rates if applicable)
-   - General advice warning and TMD/PDS reference
-   - Unsubscribe line and physical address
-   - ABN and Australian Credit Licence
-
-=== TONE ===
-- Sarah Mitchell is a senior lending officer who has reviewed this customer's profile and found alternatives worth presenting. She writes as a banking professional — composed, knowledgeable, and considerate — not as a marketing department running a campaign.
-- The email should feel like a specific recommendation from a specific person, not a mass follow-up. But it must still read as correspondence from a licensed credit provider. Professional register, human delivery.
-- Present offers as useful options backed by the customer's actual numbers, not consolation prizes. Do not oversell or be falsely enthusiastic.
-- Use contractions naturally: "you're", "we've", "we'd", "it's", "that's". But keep the overall register appropriate for banking correspondence — warm contractions, not casual slang.
-- No patronising language, no false urgency, no performative empathy ("we value you", "we truly care", "we understand how you feel").
-- Do NOT repeat the decline. They already know. This email is about what comes next.
-- Do NOT presume their emotions. No "we know this isn't what you wanted" or "we understand this is disappointing."
-- Every sentence delivers value or information. No filler, no emotional performance.
-
-=== TONE CALIBRATION EXAMPLE ===
-Do NOT copy verbatim. Study the clean structure, the brief acknowledgement without repeating the decline, the benefit-led product presentation, and the direct personal closing. Notice there is no performative empathy or "we value you" language \u2014 value is shown by offering something useful.
+=== EMAIL TEMPLATE (output this exactly, filling only the [...] placeholders) ===
 
 Subject: Next steps for your AussieLoanAI loan application
 
-Dear Neville,
+Dear {applicant_first_name},
 
-Following your recent Personal Loan application with us, we have looked at your profile and there are a few options worth considering.
+Following your recent loan application with us, we've looked at your profile and there are a few options worth considering.
 
-We can offer you a Secured Personal Loan, which uses a savings account, term deposit, or vehicle as collateral. This is often a strong path forward for customers in your position.
+[FOR EACH OFFER in the OFFER DATA above, output one block in this exact format. Output up to 3 offers.]
 
-Why consider this option:
+Option [N]: [Offer Name]
 
-  \u2022  Higher approval odds: Secured loans are often approved for borrowers who may not qualify for an unsecured product of the same size.
-  \u2022  Lower interest rates: Because the risk is lower for both parties when collateral is in place.
-  \u2022  Flexible terms: Loan terms from 12 to 60 months, with repayments structured to suit your income.
+\u2022  [Benefit headline 1]: [One sentence explaining the benefit, 10\u201320 words.]
+\u2022  [Benefit headline 2]: [One sentence explaining the benefit, 10\u201320 words.]
+\u2022  [Benefit headline 3 — only if the offer data provides a third distinct benefit]: [One sentence, 10\u201320 words.]
 
-Based on your current savings balance and income, a secured loan of up to $[XX,XXX] may be available to you at a competitive rate.
+[One sentence connecting this offer to the customer's actual numbers from the data above. Use a specific figure — e.g. their savings balance, income, or payment history. Keep to 15\u201325 words.]
 
-We'd also like to highlight our Goal Saver Account:
+[END FOR EACH]
 
-  \u2022  Earn up to 5.20% p.a.** on your savings with no lock-in period.
-  \u2022  Building a consistent savings pattern strengthens future loan applications.
+If any of these options interest you, I'd be happy to talk them through with you. You can contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
 
-If any of these options interest you, I'd welcome the chance to talk them through with you. There may be a path forward that works well for your goals.
-
-You can contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-
-Thanks for coming to us, Neville. We'd love to help you find the right option when you're ready.
+Thanks for coming to us, {applicant_first_name}. We'd love to help you find the right option when you're ready.
 
 Sincerely,
 
@@ -170,13 +96,30 @@ Ph: 1300 000 000
 Email: aussieloanai@gmail.com
 
 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-**The 5.20% p.a. bonus rate applies when you deposit a minimum of $100 per month and make no withdrawals. If conditions are not met in a given month, the base rate of [X.XX]% p.a. will apply. Rate is variable and subject to change.
+{{IF any offer is a term deposit}}
+*Deposits up to $250,000 per account holder per authorised deposit-taking institution are protected under the Australian Government's Financial Claims Scheme.
+{{END IF}}
 
-Interest rates are current as at [DD/MM/YYYY] and are subject to change without notice. This email contains general information only and does not take into account your personal financial situation, objectives, or needs. Before making a decision, please consider whether the product is appropriate for you. Full terms and conditions, including the Target Market Determination and Product Disclosure Statement, are available at www.aussieloanai.com.au.
+{{IF any offer references a bonus interest rate}}
+**The [X.XX]% p.a. bonus rate applies when you deposit a minimum of $[XXX] per month and make no withdrawals. If conditions are not met in a given month, the base rate of [X.XX]% p.a. will apply. Rate is variable and subject to change.
+{{END IF}}
+
+Interest rates are current as at [DD/MM/YYYY — use today's date] and are subject to change without notice. This email contains general information only and does not take into account your personal financial situation, objectives, or needs. Before making a decision, please consider whether the product is appropriate for you. Full terms and conditions, including the Target Market Determination and Product Disclosure Statement, are available at www.aussieloanai.com.au.
 
 You are receiving this email because you are an existing AussieLoanAI customer. If you no longer wish to receive marketing communications from us, you can unsubscribe here or manage your communication preferences in your account settings. AussieLoanAI Pty Ltd, Sydney NSW 2000.
 
-(End of calibration example. Adapt structure, products, and numbers for this customer's actual data.)
+=== RULES FOR FILLING PLACEHOLDERS ===
+1. Benefit headlines are 2\u20135 words (e.g. "Lower interest rates", "Guaranteed returns*", "No lock-in period").
+2. Benefit sentences are factual, 10\u201320 words, no performative language.
+3. The customer-fit sentence must cite a SPECIFIC number from their data.
+4. Do NOT add sections, paragraphs, or sentences beyond what the template specifies.
+5. Do NOT rephrase the opening line, closing lines, sign-off, or footer. Copy them verbatim.
+6. For term deposit benefits you may use "Guaranteed returns*" and "Government protected*".
+7. No filler words: "additionally", "furthermore", "moreover", "in addition", "we value you".
+8. BANNED words/phrases: "leverage", "risk-free", "empower", "navigate", "journey", "rest assured", "comprehensive", "holistic". Use plain alternatives (e.g. "use" not "leverage", "no-risk" or "guaranteed" not "risk-free").
+11. The customer-fit sentence must state a FACT from their data, not judge the customer's character. NEVER write "you've proven", "you've demonstrated", "you've shown", "your track record proves", or any phrasing that grades the customer's behaviour. Instead, cite the number directly: "With $12,000 in savings, this account could start earning from day one." The customer is not being evaluated — they are being offered a product.
+9. Use contractions naturally: "you're", "we've", "it's". No slang.
+10. Remove any {{IF ...}} / {{END IF}} markers from the output — they are instructions, not content.
 """
 
 
@@ -300,11 +243,20 @@ class MarketingAgent:
         subject, body = self._parse_response(response_text)
 
         # Run unified guardrails with email_type='marketing'
+        # Include customer profile amounts so guardrails don't flag them
+        # as hallucinated (income, savings are real data cited in the email).
         context = {
             'decision': 'denied',
             'loan_amount': float(application.loan_amount) if application.loan_amount else None,
             'nbo_amounts': nbo_amounts or [],
+            'annual_income': float(application.annual_income) if application.annual_income else None,
         }
+        try:
+            profile = application.applicant.profile
+            context['savings_balance'] = float(profile.savings_balance) if profile.savings_balance else None
+            context['checking_balance'] = float(profile.checking_balance) if profile.checking_balance else None
+        except AttributeError:
+            pass
         guardrail_results = self.guardrail_checker.run_all_checks(body, context, email_type='marketing')
         all_passed = all(r['passed'] for r in guardrail_results if r.get('severity') != 'warning')
 
@@ -406,6 +358,11 @@ class MarketingAgent:
             r'\bwe understand how you feel\b',
             r'\bwe can imagine how\b',
             r'\bunfortunately for you\b',
+            r'\byou[\u2019\']ve proven\b',
+            r'\byou[\u2019\']ve demonstrated\b',
+            r'\byou[\u2019\']ve shown\b',
+            r'\byour track record proves\b',
+            r'\byou can reliably\b',
         ]
         found = []
         for pattern in patronising_patterns:

@@ -85,10 +85,10 @@ def _mkt_msg():
 
 
 @pytest.fixture
-def mkt_model_version(db):
+def mkt_model_version(db, settings):
     return ModelVersion.objects.create(
         algorithm='rf', version='test-v1',
-        file_path='/app/ml_models/test_model.joblib', is_active=True,
+        file_path=str(settings.ML_MODELS_DIR / 'test_model.joblib'), is_active=True,
     )
 
 

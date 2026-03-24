@@ -88,7 +88,8 @@ class CookieTokenRefreshView(generics.GenericAPIView):
                     try:
                         refresh.blacklist()
                     except AttributeError:
-                        pass
+                        import logging
+                        logging.getLogger('accounts').debug('Token blacklist not available — skipping')
                 refresh = RefreshToken.for_user(
                     self._get_user_from_token(refresh)
                 )

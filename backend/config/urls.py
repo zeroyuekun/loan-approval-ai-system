@@ -7,6 +7,7 @@ import json
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework import status as http_status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -121,6 +122,7 @@ def deep_health_check(request):
 
 
 urlpatterns = [
+    path('', include('django_prometheus.urls')),
     path('api/v1/health/', health_check, name='health-check'),
     path('api/v1/health/deep/', deep_health_check, name='deep-health-check'),
     path('admin/', admin.site.urls),
@@ -130,4 +132,7 @@ urlpatterns = [
     path('api/v1/emails/', include('apps.email_engine.urls')),
     path('api/v1/agents/', include('apps.agents.urls')),
     path('api/v1/tasks/<str:task_id>/status/', TaskStatusView.as_view(), name='task-status'),
+    # API Documentation
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 ]

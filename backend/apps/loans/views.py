@@ -1,11 +1,17 @@
+import logging
+
 from rest_framework import viewsets, permissions
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
+from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import CustomerProfile
+
+logger = logging.getLogger(__name__)
 from apps.accounts.permissions import IsAdmin
-from .filters import LoanApplicationFilter
+from .filters import AuditLogFilter, LoanApplicationFilter
 from .models import AuditLog, LoanApplication
-from .serializers import LoanApplicationCreateSerializer, LoanApplicationCustomerUpdateSerializer, LoanApplicationSerializer
+from .serializers import AuditLogSerializer, LoanApplicationCreateSerializer, LoanApplicationCustomerUpdateSerializer, LoanApplicationSerializer
 
 
 class IsOwnerOrStaff(permissions.BasePermission):
@@ -20,6 +26,14 @@ class IsOwnerOrStaff(permissions.BasePermission):
 class LoanApplicationViewSet(viewsets.ModelViewSet):
     filterset_class = LoanApplicationFilter
     ordering_fields = ['created_at', 'loan_amount', 'credit_score', 'status']
+    search_fields = [
+        'applicant__first_name',
+        'applicant__last_name',
+        'applicant__email',
+        'applicant__username',
+        'notes',
+        'purpose',
+    ]
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -30,9 +44,10 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        qs = LoanApplication.objects.select_related('applicant', 'decision').prefetch_related('fraud_checks')
         if user.role in ('admin', 'officer'):
-            return LoanApplication.objects.all().select_related('applicant', 'decision')
-        return LoanApplication.objects.filter(applicant=user).select_related('applicant', 'decision')
+            return qs.all()
+        return qs.filter(applicant=user)
 
     def get_permissions(self):
         if self.action == 'destroy':
@@ -67,6 +82,14 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             ip_address=self.request.META.get('REMOTE_ADDR'),
         )
 
+        # Auto-trigger AI pipeline for new applications
+        from apps.agents.tasks import orchestrate_pipeline_task
+        try:
+            orchestrate_pipeline_task.delay(str(instance.pk))
+            logger.info('Auto-triggered pipeline for application %s', instance.pk)
+        except Exception as e:
+            logger.warning('Failed to auto-trigger pipeline for %s: %s', instance.pk, e)
+
     def perform_update(self, serializer):
         instance = serializer.save()
         AuditLog.objects.create(
@@ -89,3 +112,15 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             ip_address=self.request.META.get('REMOTE_ADDR'),
         )
         super().perform_destroy(instance)
+
+
+class AuditLogViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
+    serializer_class = AuditLogSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdmin]
+    filterset_class = AuditLogFilter
+    search_fields = ['resource_id', 'user__username', 'action']
+    ordering_fields = ['timestamp', 'action']
+    ordering = ['-timestamp']
+
+    def get_queryset(self):
+        return AuditLog.objects.all().select_related('user')

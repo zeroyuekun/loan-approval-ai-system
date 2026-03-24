@@ -1,55 +1,16 @@
-import functools
 import uuid
 from decimal import Decimal
 
-from cryptography.fernet import Fernet, InvalidToken, MultiFernet
-from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
+from apps.accounts.fields import EncryptedCharField  # noqa: F401 — used by this module and migrations
+from apps.accounts.utils.encryption import get_fernet
 
-@functools.lru_cache(maxsize=1)
-def _get_fernet():
-    """Return a MultiFernet instance supporting key rotation.
-
-    FIELD_ENCRYPTION_KEY can be a single key or comma-separated list.
-    The first key is used for encryption; all keys are tried for decryption.
-    To rotate: generate a new key, prepend it to the comma-separated list,
-    then run `python manage.py rotate_encryption_key` to re-encrypt data.
-    """
-    raw = settings.FIELD_ENCRYPTION_KEY
-    if not raw:
-        raise ValueError(
-            'FIELD_ENCRYPTION_KEY environment variable must be set. '
-            'Generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
-        )
-    keys = [k.strip() for k in raw.split(',') if k.strip()]
-    fernets = [Fernet(k.encode() if isinstance(k, str) else k) for k in keys]
-    if len(fernets) == 1:
-        return fernets[0]
-    return MultiFernet(fernets)
-
-
-class EncryptedCharField(models.CharField):
-    """CharField that encrypts values at rest using Fernet symmetric encryption."""
-
-    def get_prep_value(self, value):
-        if value is None or value == '':
-            return value
-        f = _get_fernet()
-        return f.encrypt(value.encode()).decode()
-
-    def from_db_value(self, value, expression, connection):
-        if value is None or value == '':
-            return value
-        try:
-            f = _get_fernet()
-            return f.decrypt(value.encode()).decode()
-        except InvalidToken:
-            # Value may be unencrypted (pre-migration data)
-            return value
+# Backward-compatible alias — existing tests and commands import _get_fernet from here.
+_get_fernet = get_fernet
 
 
 class CustomUser(AbstractUser):
@@ -75,10 +36,26 @@ class CustomUser(AbstractUser):
         return False
 
     def record_failed_login(self):
-        self.failed_login_attempts += 1
-        if self.failed_login_attempts >= 10:
-            self.locked_until = timezone.now() + timezone.timedelta(minutes=30)
-        self.save(update_fields=['failed_login_attempts', 'locked_until'])
+        from django.db.models import F
+        CustomUser.objects.filter(pk=self.pk).update(
+            failed_login_attempts=F('failed_login_attempts') + 1
+        )
+        self.refresh_from_db()
+
+        if self.failed_login_attempts >= 15:
+            lock_minutes = 1440  # 24 hours
+        elif self.failed_login_attempts >= 10:
+            lock_minutes = 30
+        elif self.failed_login_attempts >= 8:
+            lock_minutes = 5
+        elif self.failed_login_attempts >= 5:
+            lock_minutes = 1
+        else:
+            lock_minutes = 0
+
+        if lock_minutes > 0:
+            self.locked_until = timezone.now() + timezone.timedelta(minutes=lock_minutes)
+            CustomUser.objects.filter(pk=self.pk).update(locked_until=self.locked_until)
 
     def reset_failed_logins(self):
         if self.failed_login_attempts > 0 or self.locked_until:
@@ -135,6 +112,11 @@ class Industry(models.TextChoices):
 
 class CustomerProfile(models.Model):
     """Tracks a customer's personal details, compliance documents, and banking history."""
+
+    # PII ENCRYPTION NOTE: primary_id_number and secondary_id_number use
+    # EncryptedCharField (Fernet AES-128-CBC). Other PII fields (DOB, income,
+    # address) stored in plaintext for ORM query/filter compatibility.
+    # Full PII-at-rest: use PostgreSQL pgcrypto or RDS encrypted storage.
 
     class Tier(models.TextChoices):
         STANDARD = 'standard', 'Standard'

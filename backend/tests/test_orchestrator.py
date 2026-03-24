@@ -117,12 +117,12 @@ def _wire_denied(mocks):
 
 
 @pytest.fixture
-def model_version(db):
+def model_version(db, settings):
     """Create a ModelVersion record so PredictionLog FK is valid."""
     return ModelVersion.objects.create(
         algorithm='rf',
         version='test-v1',
-        file_path='/app/ml_models/test_model.joblib',
+        file_path=str(settings.ML_MODELS_DIR / 'test_model.joblib'),
         is_active=True,
     )
 

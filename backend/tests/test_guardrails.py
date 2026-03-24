@@ -19,14 +19,33 @@ Comparison Rate: 6.45% p.a.*
 Loan Term: 30 years
 Monthly Repayment: $2,134.56
 
-Important Information:
-Under the National Consumer Credit Protection Act 2009, you have a 14-day cooling-off period.
-For complaints, contact the Australian Financial Complaints Authority (AFCA) at www.afca.org.au.
+Next Steps:
 
-*Comparison rate calculated on a secured loan of $150,000 over 25 years.
+Please review the attached loan agreement. To proceed:
+
+  1. Sign and return your documents by 22 April 2026.
+  2. Confirm your nominated bank account.
+  3. Funds are typically in your account within 1\u20132 business days.
+
+Before You Sign:
+
+Take the time to read the full terms carefully, including fees.
+
+If your circumstances have changed, please let us know. You are welcome to seek independent advice.
+
+You will have access to a cooling-off period after signing.
+
+If you experience financial difficulty, contact our Financial Hardship team on 1300 000 001 or aussieloanai@gmail.com.
+
+Contact me at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to this email.
 
 Kind regards,
 AussieLoanAI Lending Team
+
+\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+*Comparison rate of 6.45% p.a. applies only to the example given. Different amounts and terms will result in different comparison rates.
+
+If unresolved, contact the Australian Financial Complaints Authority (AFCA) on 1800 931 678 or at www.afca.org.au.
 """
         context = {
             'applicant_name': 'John Smith',
@@ -37,8 +56,10 @@ AussieLoanAI Lending Team
                 'interest_rate': '6.14% p.a.',
                 'comparison_rate': '6.45% p.a.',
                 'monthly_payment': '$2,134.56',
+                'monthly_payment_number': 2134.56,
                 'loan_term_display': '30 years',
                 'establishment_fee': '$600.00',
+                'establishment_fee_number': 600.00,
             },
         }
         results = self.checker.run_all_checks(body, context)

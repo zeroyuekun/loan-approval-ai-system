@@ -81,6 +81,14 @@ def _random_phone():
     return f'04{random.randint(10, 99)} {random.randint(100, 999)} {random.randint(100, 999)}'
 
 
+def _safe_val(row, col, cast=float, default=None):
+    """Convert DataFrame value to Django-safe value, handling NaN."""
+    val = row.get(col)
+    if val is None or (isinstance(val, float) and math.isnan(val)):
+        return default
+    return cast(val)
+
+
 def _build_profile_data(index):
     """Generate realistic, correlated profile data for a customer."""
     addr = AU_ADDRESSES[index % len(AU_ADDRESSES)]
@@ -171,8 +179,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--num-records', type=int, default=10000,
-            help='Number of records to generate (default: 10000)',
+            '--num-records', type=int, default=50000,
+            help='Number of records to generate (default: 50000)',
         )
         parser.add_argument(
             '--output', type=str, default='.tmp/synthetic_loans.csv',
@@ -182,16 +190,21 @@ class Command(BaseCommand):
             '--create-db-records', type=int, default=100,
             help='Number of LoanApplication records to create in DB (default: 100)',
         )
+        parser.add_argument(
+            '--label-noise-rate', type=float, default=0.05,
+            help='Fraction of approved loans flipped to denied as label noise (default: 0.05)',
+        )
 
     def handle(self, *args, **options):
         num_records = options['num_records']
         output_path = options['output']
         db_count = options['create_db_records']
+        label_noise_rate = options['label_noise_rate']
 
         self.stdout.write(f'Generating {num_records} synthetic loan records...')
 
         generator = DataGenerator()
-        df = generator.generate(num_records=num_records)
+        df = generator.generate(num_records=num_records, label_noise_rate=label_noise_rate)
         generator.save_to_csv(df, output_path)
 
         self.stdout.write(self.style.SUCCESS(f'Saved {num_records} records to {output_path}'))
@@ -254,6 +267,28 @@ class Command(BaseCommand):
                     has_hecs=bool(row.get('has_hecs', 0)),
                     has_bankruptcy=bool(row.get('has_bankruptcy', 0)),
                     state=row.get('state', 'NSW'),
+                    # Bureau features
+                    num_credit_enquiries_6m=_safe_val(row, 'num_credit_enquiries_6m', int),
+                    worst_arrears_months=_safe_val(row, 'worst_arrears_months', int),
+                    num_defaults_5yr=_safe_val(row, 'num_defaults_5yr', int),
+                    credit_history_months=_safe_val(row, 'credit_history_months', int),
+                    total_open_accounts=_safe_val(row, 'total_open_accounts', int),
+                    num_bnpl_accounts=_safe_val(row, 'num_bnpl_accounts', int),
+                    # Behavioural features
+                    is_existing_customer=bool(row.get('is_existing_customer', 0)),
+                    savings_balance=_safe_val(row, 'savings_balance'),
+                    salary_credit_regularity=_safe_val(row, 'salary_credit_regularity'),
+                    num_dishonours_12m=_safe_val(row, 'num_dishonours_12m', int),
+                    avg_monthly_savings_rate=_safe_val(row, 'avg_monthly_savings_rate'),
+                    days_in_overdraft_12m=_safe_val(row, 'days_in_overdraft_12m', int),
+                    # Macroeconomic context
+                    rba_cash_rate=_safe_val(row, 'rba_cash_rate'),
+                    unemployment_rate=_safe_val(row, 'unemployment_rate'),
+                    property_growth_12m=_safe_val(row, 'property_growth_12m'),
+                    consumer_confidence=_safe_val(row, 'consumer_confidence'),
+                    # Application integrity
+                    income_verification_gap=_safe_val(row, 'income_verification_gap'),
+                    document_consistency_score=_safe_val(row, 'document_consistency_score'),
                 )
                 created_count += 1
 
@@ -275,6 +310,15 @@ class Command(BaseCommand):
                     'monthly_expenses': Decimal('3400.00'), 'existing_credit_card_limit': Decimal('10000.00'),
                     'number_of_dependants': 0, 'employment_type': 'payg_permanent',
                     'applicant_type': 'couple', 'has_hecs': True, 'has_bankruptcy': False, 'state': 'NSW',
+                    'is_existing_customer': True, 'num_credit_enquiries_6m': 1,
+                    'worst_arrears_months': 0, 'num_defaults_5yr': 0, 'credit_history_months': 72,
+                    'total_open_accounts': 3, 'num_bnpl_accounts': 0,
+                    'savings_balance': Decimal('45000.00'), 'salary_credit_regularity': 0.98,
+                    'num_dishonours_12m': 0, 'avg_monthly_savings_rate': 0.15,
+                    'days_in_overdraft_12m': 0,
+                    'rba_cash_rate': 4.35, 'unemployment_rate': 4.1,
+                    'property_growth_12m': 5.2, 'consumer_confidence': 82.5,
+                    'income_verification_gap': 0.02, 'document_consistency_score': 0.97,
                 },
                 {
                     'label': 'Regional Upgrader (Approved)',
@@ -287,6 +331,15 @@ class Command(BaseCommand):
                     'monthly_expenses': Decimal('3800.00'), 'existing_credit_card_limit': Decimal('15000.00'),
                     'number_of_dependants': 2, 'employment_type': 'payg_permanent',
                     'applicant_type': 'couple', 'has_hecs': False, 'has_bankruptcy': False, 'state': 'QLD',
+                    'is_existing_customer': True, 'num_credit_enquiries_6m': 0,
+                    'worst_arrears_months': 0, 'num_defaults_5yr': 0, 'credit_history_months': 180,
+                    'total_open_accounts': 5, 'num_bnpl_accounts': 0,
+                    'savings_balance': Decimal('95000.00'), 'salary_credit_regularity': 1.0,
+                    'num_dishonours_12m': 0, 'avg_monthly_savings_rate': 0.22,
+                    'days_in_overdraft_12m': 0,
+                    'rba_cash_rate': 4.35, 'unemployment_rate': 4.1,
+                    'property_growth_12m': 3.8, 'consumer_confidence': 82.5,
+                    'income_verification_gap': 0.01, 'document_consistency_score': 0.99,
                 },
                 {
                     'label': 'Self-Employed Tradie (Borderline)',
@@ -299,6 +352,15 @@ class Command(BaseCommand):
                     'monthly_expenses': Decimal('3200.00'), 'existing_credit_card_limit': Decimal('12000.00'),
                     'number_of_dependants': 1, 'employment_type': 'self_employed',
                     'applicant_type': 'single', 'has_hecs': False, 'has_bankruptcy': False, 'state': 'VIC',
+                    'is_existing_customer': False, 'num_credit_enquiries_6m': 3,
+                    'worst_arrears_months': 0, 'num_defaults_5yr': 0, 'credit_history_months': 60,
+                    'total_open_accounts': 4, 'num_bnpl_accounts': 1,
+                    'savings_balance': Decimal('28000.00'), 'salary_credit_regularity': 0.75,
+                    'num_dishonours_12m': 0, 'avg_monthly_savings_rate': 0.08,
+                    'days_in_overdraft_12m': 5,
+                    'rba_cash_rate': 4.35, 'unemployment_rate': 4.1,
+                    'property_growth_12m': 4.5, 'consumer_confidence': 82.5,
+                    'income_verification_gap': 0.12, 'document_consistency_score': 0.88,
                 },
                 {
                     'label': 'Young Casual Worker (Denied - tenure)',
@@ -311,6 +373,15 @@ class Command(BaseCommand):
                     'monthly_expenses': Decimal('1800.00'), 'existing_credit_card_limit': Decimal('3000.00'),
                     'number_of_dependants': 0, 'employment_type': 'payg_casual',
                     'applicant_type': 'single', 'has_hecs': True, 'has_bankruptcy': False, 'state': 'VIC',
+                    'is_existing_customer': False, 'num_credit_enquiries_6m': 2,
+                    'worst_arrears_months': 0, 'num_defaults_5yr': 0, 'credit_history_months': 18,
+                    'total_open_accounts': 2, 'num_bnpl_accounts': 2,
+                    'savings_balance': Decimal('3500.00'), 'salary_credit_regularity': 0.55,
+                    'num_dishonours_12m': 1, 'avg_monthly_savings_rate': 0.03,
+                    'days_in_overdraft_12m': 12,
+                    'rba_cash_rate': 4.35, 'unemployment_rate': 4.1,
+                    'property_growth_12m': 4.5, 'consumer_confidence': 82.5,
+                    'income_verification_gap': 0.08, 'document_consistency_score': 0.91,
                 },
                 {
                     'label': 'High-DTI Investor (Denied - APRA cap)',
@@ -323,6 +394,15 @@ class Command(BaseCommand):
                     'monthly_expenses': Decimal('4500.00'), 'existing_credit_card_limit': Decimal('25000.00'),
                     'number_of_dependants': 3, 'employment_type': 'payg_permanent',
                     'applicant_type': 'couple', 'has_hecs': False, 'has_bankruptcy': False, 'state': 'NSW',
+                    'is_existing_customer': True, 'num_credit_enquiries_6m': 4,
+                    'worst_arrears_months': 0, 'num_defaults_5yr': 0, 'credit_history_months': 210,
+                    'total_open_accounts': 8, 'num_bnpl_accounts': 0,
+                    'savings_balance': Decimal('120000.00'), 'salary_credit_regularity': 1.0,
+                    'num_dishonours_12m': 0, 'avg_monthly_savings_rate': 0.18,
+                    'days_in_overdraft_12m': 0,
+                    'rba_cash_rate': 4.35, 'unemployment_rate': 4.1,
+                    'property_growth_12m': 5.2, 'consumer_confidence': 82.5,
+                    'income_verification_gap': 0.01, 'document_consistency_score': 0.98,
                 },
                 {
                     'label': 'Bankruptcy Recovery (Denied - bankruptcy)',
@@ -335,6 +415,15 @@ class Command(BaseCommand):
                     'monthly_expenses': Decimal('2200.00'), 'existing_credit_card_limit': Decimal('0.00'),
                     'number_of_dependants': 1, 'employment_type': 'payg_permanent',
                     'applicant_type': 'single', 'has_hecs': False, 'has_bankruptcy': True, 'state': 'SA',
+                    'is_existing_customer': False, 'num_credit_enquiries_6m': 5,
+                    'worst_arrears_months': 3, 'num_defaults_5yr': 2, 'credit_history_months': 48,
+                    'total_open_accounts': 1, 'num_bnpl_accounts': 0,
+                    'savings_balance': Decimal('2000.00'), 'salary_credit_regularity': 0.85,
+                    'num_dishonours_12m': 2, 'avg_monthly_savings_rate': 0.02,
+                    'days_in_overdraft_12m': 30,
+                    'rba_cash_rate': 4.35, 'unemployment_rate': 4.1,
+                    'property_growth_12m': 4.5, 'consumer_confidence': 82.5,
+                    'income_verification_gap': 0.05, 'document_consistency_score': 0.82,
                 },
             ]
 

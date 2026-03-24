@@ -39,6 +39,10 @@ class GuardrailLog(models.Model):
     check_name = models.CharField(max_length=100)
     passed = models.BooleanField()
     details = models.TextField(blank=True)
+    category = models.CharField(
+        max_length=20, default='decision',
+        choices=[('shared', 'Shared'), ('decision', 'Decision'), ('marketing', 'Marketing')],
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

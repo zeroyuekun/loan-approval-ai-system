@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useApplication } from '@/hooks/useApplications'
@@ -7,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle, Loader2 } from 'lucide-react'
 import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils'
 
 const statusIcons: Record<string, React.ReactNode> = {
@@ -28,7 +29,19 @@ const statusMessages: Record<string, string> = {
 
 export default function CustomerApplicationStatusPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: application, isLoading } = useApplication(id)
+  const { data: application, isLoading, refetch } = useApplication(id)
+
+  // Poll every 5 seconds while the application is still being processed
+  useEffect(() => {
+    if (!application) return
+    if (application.status === 'pending' || application.status === 'processing') {
+      const interval = setInterval(() => {
+        refetch()
+      }, 5000)
+      return () => clearInterval(interval)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- poll restart depends only on status change, not full application object
+  }, [application?.status, refetch])
 
   if (isLoading) {
     return (
@@ -69,6 +82,12 @@ export default function CustomerApplicationStatusPage() {
             <p className="text-muted-foreground">
               {statusMessages[application.status] || 'Status unknown.'}
             </p>
+            {(application.status === 'pending' || application.status === 'processing') && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mt-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Your application is being assessed by our AI system...
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

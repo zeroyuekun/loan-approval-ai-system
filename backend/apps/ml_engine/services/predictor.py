@@ -252,7 +252,15 @@ class ModelPredictor:
         Raises ValueError with details on any out-of-bounds values.
         """
         bounds = {**FEATURE_BOUNDS}
-        bounds.update(self.feature_bounds)  # data-driven bounds override hardcoded
+        # Data-driven bounds can only widen the hardcoded range, never narrow it.
+        # This prevents the training set's min/max from rejecting legitimate
+        # edge-case applicants (e.g. credit_score 620, 3 months arrears).
+        for col, (data_lo, data_hi) in self.feature_bounds.items():
+            if col in bounds:
+                hard_lo, hard_hi = bounds[col]
+                bounds[col] = (min(hard_lo, data_lo), max(hard_hi, data_hi))
+            else:
+                bounds[col] = (data_lo, data_hi)
 
         errors = []
         for col, (lo, hi) in bounds.items():

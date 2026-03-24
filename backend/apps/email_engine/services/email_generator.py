@@ -86,8 +86,9 @@ class EmailGenerator:
 
     def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
         """Generate an approval/denial email for the given loan application."""
-        # Reset retry state at the start of each generate() call
-        self._last_feedback = ''
+        # Reset retry state only on the first attempt (not recursive retries)
+        if attempt == 1:
+            self._last_feedback = ''
 
         start_time = time.time()
 
@@ -223,12 +224,17 @@ class EmailGenerator:
         budget = ApiBudgetGuard()
         budget.check_budget()
 
+        # Approval emails are much longer (loan details, next steps, documentation,
+        # before-you-sign, hardship, attachments, comparison rate footnote, AFCA).
+        # 1024 tokens truncates the tool_use JSON, producing an empty body.
+        token_limit = 4096 if decision == 'approved' else 2048
+
         input_tokens = 0
         output_tokens = 0
         try:
             response = self.client.messages.create(
                 model='claude-sonnet-4-20250514',
-                max_tokens=1024,
+                max_tokens=token_limit,
                 temperature=getattr(django_settings, 'AI_TEMPERATURE_DECISION_EMAIL', 0.0),
                 messages=[{'role': 'user', 'content': prompt}],
                 tools=[EMAIL_SUBMIT_TOOL],
@@ -303,12 +309,26 @@ class EmailGenerator:
 
     def _parse_tool_response(self, response):
         """Extract subject and body from tool_use structured response."""
+        import logging
+        logger = logging.getLogger('email_engine.generator')
+
+        # Detect truncation: stop_reason == 'max_tokens' means the response
+        # was cut off and the tool_use JSON is likely incomplete/empty.
+        stop_reason = getattr(response, 'stop_reason', None)
+        if stop_reason == 'max_tokens':
+            logger.warning('Claude response truncated (stop_reason=max_tokens) — '
+                           'max_tokens too low for this email template')
+
         try:
             tool_block = next(b for b in response.content if b.type == 'tool_use')
             subject = tool_block.input.get('subject', '').strip()
             body = tool_block.input.get('body', '').strip()
             if subject and body:
                 return subject, body
+            # Tool block found but body is empty — likely truncated
+            if subject and not body:
+                logger.warning('Tool response has subject but empty body '
+                               '(stop_reason=%s) — falling back to text parse', stop_reason)
         except (StopIteration, AttributeError):
             pass
 

@@ -5,6 +5,7 @@ from celery import shared_task
 from django.utils import timezone
 
 from apps.email_engine.models import GeneratedEmail, GuardrailAnalytics, GuardrailLog
+from apps.email_engine.services.persistence import EmailPersistenceService
 from apps.loans.models import LoanApplication
 
 logger = logging.getLogger('email_engine.tasks')
@@ -20,29 +21,9 @@ def generate_email_task(self, application_id, decision):
     generator = EmailGenerator()
     result = generator.generate(application, decision)
 
-    # Save email record
-    email = GeneratedEmail.objects.create(
-        application=application,
-        decision=decision,
-        subject=result['subject'],
-        body=result['body'],
-        prompt_used=result['prompt_used'],
-        model_used='claude-sonnet-4-20250514',
-        generation_time_ms=result['generation_time_ms'],
-        attempt_number=result['attempt_number'],
-        passed_guardrails=result['passed_guardrails'],
-    )
-
-    # Save guardrail logs
-    GuardrailLog.objects.bulk_create([
-        GuardrailLog(
-            email=email,
-            check_name=check['check_name'],
-            passed=check['passed'],
-            details=check['details'],
-        )
-        for check in result['guardrail_results']
-    ])
+    # Save email record and guardrail logs
+    email = EmailPersistenceService.save_generated_email(application, decision, result)
+    EmailPersistenceService.save_guardrail_logs(email, result.get('guardrail_results', []))
 
     # Send email to customer if guardrails passed
     email_sent = False
@@ -53,6 +34,21 @@ def generate_email_task(self, application_id, decision):
             subject=result['subject'],
             body=result['body'],
         )
+
+    # Audit trail: log email generation/delivery
+    from apps.loans.models import AuditLog
+    AuditLog.objects.create(
+        action='email_sent' if email_sent else 'email_generated',
+        resource_type='GeneratedEmail',
+        resource_id=str(email.id),
+        details={
+            'decision': decision,
+            'passed_guardrails': result['passed_guardrails'],
+            'attempt_number': result['attempt_number'],
+            'email_sent': email_sent,
+            'template_fallback': result.get('template_fallback', False),
+        },
+    )
 
     return {
         'email_id': str(email.id),

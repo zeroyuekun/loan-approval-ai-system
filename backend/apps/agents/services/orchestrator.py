@@ -8,7 +8,8 @@ from django.db import transaction
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.persistence import EmailPersistenceService
-from apps.loans.models import LoanApplication, LoanDecision
+from apps.loans.models import FraudCheck, LoanApplication, LoanDecision
+from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.predictor import ModelPredictor
 
@@ -24,6 +25,7 @@ logger = logging.getLogger('agents.orchestrator')
 
 # Step timeout budgets — configurable via settings for environment-specific tuning.
 STEP_TIMEOUT_BUDGETS_MS = getattr(settings, 'ORCHESTRATOR_STEP_TIMEOUTS', {
+    'fraud_check': 10_000,
     'ml_prediction': 30_000,
     'email_generation': 60_000,
     'bias_check': 60_000,
@@ -45,6 +47,24 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(settings, 'ORCHESTRATOR_STEP_TIMEOUTS', {
 
 class PipelineOrchestrator:
     """Runs the full loan processing pipeline end to end."""
+
+    @staticmethod
+    def _waterfall_entry(step: str, result: str, reason_code: str, detail: str) -> dict:
+        """Create a single decision waterfall entry for ASIC RG 209 audit trail."""
+        return {
+            'step': step,
+            'result': result,
+            'reason_code': reason_code,
+            'detail': detail,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _save_waterfall(application, waterfall: list) -> None:
+        """Persist the decision waterfall to the LoanDecision record."""
+        LoanDecision.objects.filter(application=application).update(
+            decision_waterfall=waterfall,
+        )
 
     def _build_profile_context(self, application):
         """Build a dict of customer profile data for downstream services.
@@ -77,6 +97,80 @@ class PipelineOrchestrator:
             'occupation': getattr(profile, 'occupation', ''),
             'industry': getattr(profile, 'industry', ''),
         }
+
+    @staticmethod
+    def _evaluate_conditions(application) -> list:
+        """Evaluate risk factors and return a list of condition dicts.
+
+        Only called when the ML model would approve.  Each condition is a dict
+        with keys: type, description, required, satisfied, satisfied_at.
+        """
+        conditions: list[dict] = []
+
+        # Income verification gap
+        gap = getattr(application, 'income_verification_gap', None)
+        if gap is not None and gap > 0.15:
+            conditions.append({
+                'type': 'income_verification',
+                'description': (
+                    f'Income verification gap of {gap:.0%} exceeds 15% threshold. '
+                    'Please provide additional income documentation.'
+                ),
+                'required': True,
+                'satisfied': False,
+                'satisfied_at': None,
+            })
+
+        # Self-employed with short tenure
+        if (
+            application.employment_type == 'self_employed'
+            and application.employment_length < 2
+        ):
+            conditions.append({
+                'type': 'employment_verification',
+                'description': (
+                    'Self-employed applicant with less than 2 years tenure. '
+                    'Please provide business financials and tax returns.'
+                ),
+                'required': True,
+                'satisfied': False,
+                'satisfied_at': None,
+            })
+
+        # Home purchase without property valuation
+        if application.purpose == 'home' and application.property_value is None:
+            conditions.append({
+                'type': 'valuation_required',
+                'description': (
+                    'Home loan requires an independent property valuation. '
+                    'A certified valuation report must be provided.'
+                ),
+                'required': True,
+                'satisfied': False,
+                'satisfied_at': None,
+            })
+
+        # Large loan without cosigner and modest income
+        loan_amount = float(application.loan_amount)
+        annual_income = float(application.annual_income)
+        if (
+            loan_amount > 500_000
+            and not application.has_cosigner
+            and annual_income < 100_000
+        ):
+            conditions.append({
+                'type': 'guarantor_needed',
+                'description': (
+                    f'Loan amount ${loan_amount:,.0f} exceeds $500,000 without a '
+                    f'co-signer and annual income ${annual_income:,.0f} is below $100,000. '
+                    'A guarantor is required.'
+                ),
+                'required': True,
+                'satisfied': False,
+                'satisfied_at': None,
+            })
+
+        return conditions
 
     def orchestrate(self, application_id):
         """Run prediction -> email -> bias check -> NBO for a loan application."""
@@ -125,9 +219,69 @@ class PipelineOrchestrator:
         )
 
         steps = []
+        waterfall = []
         prediction_result = None
         email_result = None
         generated_email = None
+
+        # Step 0: Fraud Detection / Velocity Checks
+        step = self._start_step('fraud_check')
+        try:
+            fraud_service = FraudDetectionService()
+            fraud_result = fraud_service.run_checks(application)
+
+            FraudCheck.objects.create(
+                application=application,
+                passed=fraud_result['passed'],
+                risk_score=fraud_result['risk_score'],
+                checks=fraud_result['checks'],
+                flagged_reasons=fraud_result['flagged_reasons'],
+            )
+
+            fraud_status = 'pass' if fraud_result['passed'] else 'fail'
+            fraud_reason = 'FRAUD_CLEAR' if fraud_result['passed'] else 'FRAUD_VELOCITY'
+            fraud_detail = 'No fraud indicators detected' if fraud_result['passed'] else \
+                f'Fraud flags: {"; ".join(fraud_result["flagged_reasons"])}'
+            waterfall.append(self._waterfall_entry(
+                'fraud_check', fraud_status, fraud_reason, fraud_detail,
+            ))
+
+            step = self._complete_step(step, result_summary={
+                'passed': fraud_result['passed'],
+                'risk_score': fraud_result['risk_score'],
+                'flagged_reasons': fraud_result['flagged_reasons'],
+            })
+            logger.info('Application %s: fraud check passed=%s risk_score=%.2f',
+                        application_id, fraud_result['passed'], fraud_result['risk_score'])
+        except Exception as e:
+            logger.critical('Application %s: UNEXPECTED failure at fraud_check: %s', application_id, e, exc_info=True)
+            waterfall.append(self._waterfall_entry(
+                'fraud_check', 'skip', 'FRAUD_CHECK_ERROR',
+                f'Fraud check infrastructure failure: {e}',
+            ))
+            step = self._fail_step(step, str(e), failure_category=None)
+            # Fraud check infra failure — continue to ML prediction rather than blocking
+            fraud_result = {'passed': True, 'risk_score': 0.0, 'checks': [], 'flagged_reasons': []}
+
+        steps.append(step)
+
+        # If fraud check failed, set to review and skip ML prediction
+        if not fraud_result['passed']:
+            waterfall.append(self._waterfall_entry(
+                'final_decision', 'fail', 'ESCALATED_FRAUD',
+                f'Fraud check failed, escalated to review',
+            ))
+            self._save_waterfall(application, waterfall)
+
+            application_note = f'Fraud flags: {"; ".join(fraud_result["flagged_reasons"])}'
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(
+                    status='review',
+                    notes=application_note,
+                )
+            self._finalize_run(agent_run, steps, start_time, error=application_note)
+            logger.warning('Application %s: fraud check failed — sent to review', application_id)
+            return agent_run
 
         # Step 1: ML Prediction
         step = self._start_step('ml_prediction')
@@ -167,6 +321,41 @@ class PipelineOrchestrator:
                 },
             )
 
+            # Record policy-level waterfall entries derived from application data
+            if application.has_bankruptcy:
+                waterfall.append(self._waterfall_entry(
+                    'policy_rules', 'fail', 'BANKRUPTCY_FLAG',
+                    'Applicant has undischarged bankruptcy or within 7-year window',
+                ))
+            else:
+                waterfall.append(self._waterfall_entry(
+                    'policy_rules', 'pass', 'BANKRUPTCY_CLEAR',
+                    'No bankruptcy flag on application',
+                ))
+
+            dti = float(application.debt_to_income)
+            dti_cap = 6.0
+            if dti > dti_cap:
+                waterfall.append(self._waterfall_entry(
+                    'policy_rules', 'fail', 'DTI_EXCEEDED',
+                    f'Debt-to-income ratio {dti:.2f} exceeds cap of {dti_cap}',
+                ))
+            else:
+                waterfall.append(self._waterfall_entry(
+                    'policy_rules', 'pass', 'DTI_WITHIN_LIMIT',
+                    f'Debt-to-income ratio {dti:.2f} within cap of {dti_cap}',
+                ))
+
+            # ML prediction waterfall entry
+            prob = prediction_result['probability']
+            ml_result = 'pass' if prediction_result['prediction'] == 'approved' else 'fail'
+            ml_reason = 'MODEL_APPROVED' if ml_result == 'pass' else 'MODEL_DENIED'
+            waterfall.append(self._waterfall_entry(
+                'ml_prediction', ml_result, ml_reason,
+                f'Model prediction: {prediction_result["prediction"]} '
+                f'(confidence={prob:.4f}, model={prediction_result["model_version"]})',
+            ))
+
             step = self._complete_step(step, result_summary={
                 'prediction': prediction_result['prediction'],
                 'probability': prediction_result['probability'],
@@ -175,6 +364,11 @@ class PipelineOrchestrator:
                         application_id, prediction_result['prediction'], prediction_result['probability'])
         except (MLPredictionError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: ML prediction failed: %s', application_id, e)
+            waterfall.append(self._waterfall_entry(
+                'ml_prediction', 'fail', 'MODEL_ERROR',
+                f'ML prediction failed: {e}',
+            ))
+            self._save_waterfall(application, waterfall)
             step = self._fail_step(step, str(e), failure_category='transient')
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
@@ -182,6 +376,11 @@ class PipelineOrchestrator:
             return agent_run
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at ml_prediction: %s', application_id, e, exc_info=True)
+            waterfall.append(self._waterfall_entry(
+                'ml_prediction', 'fail', 'MODEL_ERROR',
+                f'ML prediction unexpected failure: {e}',
+            ))
+            self._save_waterfall(application, waterfall)
             step = self._fail_step(step, str(e), failure_category=None)
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
@@ -190,6 +389,37 @@ class PipelineOrchestrator:
 
         steps.append(step)
         decision = prediction_result['prediction']
+
+        # Step 1b: Conditional approval — check for risk factors that require
+        # conditions before full approval.  Only applies when the ML model
+        # would approve; denied applications skip this entirely.
+        conditions = []
+        if decision == 'approved':
+            conditions = self._evaluate_conditions(application)
+            if conditions:
+                decision = 'conditional'
+                with transaction.atomic():
+                    LoanApplication.objects.filter(pk=application.pk).update(
+                        conditions=conditions,
+                        conditions_met=False,
+                    )
+                # Update the LoanDecision to reflect conditional status
+                LoanDecision.objects.filter(application=application).update(
+                    decision='approved',
+                    reasoning=(
+                        'Conditionally approved — conditions: '
+                        + ', '.join(c['type'] for c in conditions)
+                    ),
+                )
+                waterfall.append(self._waterfall_entry(
+                    'conditional_check', 'conditional', 'CONDITIONAL_APPROVAL',
+                    f'Approved subject to {len(conditions)} condition(s): '
+                    + ', '.join(c['type'] for c in conditions),
+                ))
+                logger.info(
+                    'Application %s: conditional approval with %d condition(s)',
+                    application_id, len(conditions),
+                )
 
         # Step 2: Generate Email
         step = self._start_step('email_generation')
@@ -204,6 +434,13 @@ class PipelineOrchestrator:
             generated_email = EmailPersistenceService.save_generated_email(application, decision, email_result)
             EmailPersistenceService.save_guardrail_logs(generated_email, email_result.get('guardrail_results', []))
 
+            email_status = 'pass' if email_result['passed_guardrails'] else 'conditional'
+            waterfall.append(self._waterfall_entry(
+                'email_generation', email_status, 'EMAIL_GENERATED',
+                f'Email generated (guardrails_passed={email_result["passed_guardrails"]}, '
+                f'template_fallback={email_result.get("template_fallback", False)})',
+            ))
+
             step = self._complete_step(step, result_summary={
                 'subject': email_result['subject'],
                 'passed_guardrails': email_result['passed_guardrails'],
@@ -211,6 +448,11 @@ class PipelineOrchestrator:
             })
         except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: email generation failed: %s', application_id, e)
+            waterfall.append(self._waterfall_entry(
+                'email_generation', 'fail', 'EMAIL_ERROR',
+                f'Email generation failed: {e}',
+            ))
+            self._save_waterfall(application, waterfall)
             step = self._fail_step(step, str(e), failure_category='transient')
             steps.append(step)
             self._finalize_run(agent_run, steps, start_time, error=str(e))
@@ -219,6 +461,11 @@ class PipelineOrchestrator:
             return agent_run
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at email_generation: %s', application_id, e, exc_info=True)
+            waterfall.append(self._waterfall_entry(
+                'email_generation', 'fail', 'EMAIL_ERROR',
+                f'Email generation unexpected failure: {e}',
+            ))
+            self._save_waterfall(application, waterfall)
             step = self._fail_step(step, str(e), failure_category=None)
             steps.append(step)
             self._finalize_run(agent_run, steps, start_time, error=str(e))
@@ -273,6 +520,15 @@ class PipelineOrchestrator:
 
         steps.append(step)
 
+        # Waterfall entry for bias check
+        bias_flagged = bias_result.get('flagged', False)
+        waterfall.append(self._waterfall_entry(
+            'bias_check',
+            'fail' if bias_flagged else 'pass',
+            'BIAS_FLAGGED' if bias_flagged else 'BIAS_CLEAR',
+            f'Bias score={bias_result.get("score", 0)}, flagged={bias_flagged}',
+        ))
+
         # Step 4: Handle bias results
         bias_score = bias_result.get('score', 0)
         bias_threshold_pass = getattr(settings, 'BIAS_THRESHOLD_PASS', 60)
@@ -280,6 +536,12 @@ class PipelineOrchestrator:
 
         # Score above review threshold: Severe bias — escalate directly to human
         if bias_score > bias_threshold_review:
+            waterfall.append(self._waterfall_entry(
+                'final_decision', 'fail', 'ESCALATED_SEVERE_BIAS',
+                f'Severe bias detected (score {bias_score} > {bias_threshold_review}), escalated to human review',
+            ))
+            self._save_waterfall(application, waterfall)
+
             step = self._start_step('human_escalation_severe_bias')
             step = self._complete_step(step, result_summary={
                 'bias_score': bias_score,
@@ -328,6 +590,12 @@ class PipelineOrchestrator:
 
             if not ai_approved:
                 # AI reviewer confirmed bias — escalate to human
+                waterfall.append(self._waterfall_entry(
+                    'final_decision', 'fail', 'ESCALATED_BIAS_CONFIRMED',
+                    'AI reviewer confirmed potential bias, escalated to human review',
+                ))
+                self._save_waterfall(application, waterfall)
+
                 step = self._start_step('human_escalation')
                 step = self._complete_step(step, result_summary={
                     'bias_score': bias_score,
@@ -344,6 +612,12 @@ class PipelineOrchestrator:
 
             if ai_approved and ai_confidence < 0.7:
                 # Low confidence approval — escalate for safety
+                waterfall.append(self._waterfall_entry(
+                    'final_decision', 'fail', 'ESCALATED_LOW_CONFIDENCE',
+                    f'AI reviewer approved with low confidence ({ai_confidence:.2f} < 0.70), escalated for safety',
+                ))
+                self._save_waterfall(application, waterfall)
+
                 step = self._start_step('human_escalation_low_confidence')
                 step = self._complete_step(step, result_summary={
                     'bias_score': bias_score,
@@ -369,6 +643,12 @@ class PipelineOrchestrator:
                 r['check_name'] for r in email_result.get('guardrail_results', [])
                 if not r['passed']
             ]
+            waterfall.append(self._waterfall_entry(
+                'final_decision', 'fail', 'ESCALATED_GUARDRAIL_FAILURE',
+                f'Email guardrails failed ({", ".join(failed_checks)}), escalated to human review',
+            ))
+            self._save_waterfall(application, waterfall)
+
             logger.warning(
                 'Application %s: guardrails failed after %d attempts — escalating to human review. '
                 'Failed checks: %s',
@@ -429,6 +709,20 @@ class PipelineOrchestrator:
             steps = self._run_nbo_and_marketing_pipeline(
                 application, agent_run, steps, denial_reasons, profile_context,
             )
+
+        # Final decision waterfall entry
+        final_reason_map = {
+            'approved': 'APPROVED',
+            'conditional': 'CONDITIONAL_APPROVED',
+            'denied': 'DENIED',
+        }
+        final_reason = final_reason_map.get(decision, decision.upper())
+        waterfall.append(self._waterfall_entry(
+            'final_decision', 'pass' if decision in ('approved', 'conditional') else 'fail',
+            final_reason,
+            f'Pipeline completed with decision: {decision}',
+        ))
+        self._save_waterfall(application, waterfall)
 
         # Finalize — update application status to final decision
         with transaction.atomic():

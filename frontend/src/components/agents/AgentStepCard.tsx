@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { AgentStep } from '@/types'
 import { CheckCircle, Loader2, XCircle, Circle, ChevronDown, ChevronRight } from 'lucide-react'
+import { formatStepName, formatResultSummary } from './stepLabels'
 
 interface AgentStepCardProps {
   step: AgentStep
@@ -30,6 +31,8 @@ export function AgentStepCard({ step }: AgentStepCardProps) {
     ? `${((new Date(step.completed_at).getTime() - new Date(step.started_at).getTime()) / 1000).toFixed(1)}s`
     : null
 
+  const summaryItems = formatResultSummary(step.result_summary)
+
   return (
     <Card>
       <CardHeader
@@ -48,7 +51,7 @@ export function AgentStepCard({ step }: AgentStepCardProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            <CardTitle className="text-sm">{step.step_name}</CardTitle>
+            <CardTitle className="text-sm">{formatStepName(step.step_name)}</CardTitle>
           </div>
           <div className="flex items-center gap-2">
             {duration && <span className="text-xs text-muted-foreground">{duration}</span>}
@@ -58,15 +61,26 @@ export function AgentStepCard({ step }: AgentStepCardProps) {
       </CardHeader>
       {expanded && (
         <CardContent className="pt-0">
-          {step.result_summary && (
-            <p className="text-sm text-muted-foreground mb-2">{step.result_summary}</p>
-          )}
+          {summaryItems.length > 0 ? (
+            summaryItems.length === 1 && !summaryItems[0].label ? (
+              <p className="text-sm text-muted-foreground mb-2">{summaryItems[0].value}</p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 mb-2">
+                {summaryItems.map(({ label, value }) => (
+                  <div key={label} className="text-sm">
+                    <span className="text-muted-foreground">{label}</span>
+                    <p className="font-medium">{value}</p>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : null}
           {step.error && (
             <div className="rounded-md bg-destructive/10 p-3">
               <p className="text-sm text-destructive">{step.error}</p>
             </div>
           )}
-          {!step.result_summary && !step.error && (
+          {summaryItems.length === 0 && !step.error && (
             <p className="text-sm text-muted-foreground">No details available</p>
           )}
         </CardContent>

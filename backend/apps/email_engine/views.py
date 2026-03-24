@@ -45,6 +45,7 @@ class EmailListView(APIView):
                     'check_name': log.check_name,
                     'passed': log.passed,
                     'details': log.details,
+                    'category': log.category,
                 }
                 for log in email.guardrail_checks.all()
             ]

@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { MarketingEmail } from '@/types'
 import { Mail, ShieldCheck, ShieldAlert, Clock, RefreshCw } from 'lucide-react'
+import { GuardrailLogDisplay } from '@/components/emails/GuardrailLogDisplay'
+import { FormattedEmailBody } from '@/components/emails/EmailPreview'
 
 interface MarketingEmailCardProps {
   email: MarketingEmail
@@ -54,39 +56,13 @@ export function MarketingEmailCard({ email }: MarketingEmailCardProps) {
             </div>
           </div>
           <div className="text-sm text-foreground/90 whitespace-pre-line leading-relaxed">
-            {email.body}
+            <FormattedEmailBody body={email.body} />
           </div>
         </div>
 
-        {/* Guardrail Results */}
+        {/* Unified Compliance Checks */}
         {email.guardrail_results && email.guardrail_results.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Compliance Checks</h4>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {email.guardrail_results.map((check, i) => (
-                <div
-                  key={i}
-                  className={`flex items-start gap-2 rounded-md border p-2.5 text-xs ${
-                    check.passed
-                      ? 'bg-green-50/50 border-green-200'
-                      : 'bg-red-50/50 border-red-200'
-                  }`}
-                >
-                  {check.passed ? (
-                    <ShieldCheck className="h-3.5 w-3.5 text-green-600 mt-0.5 shrink-0" />
-                  ) : (
-                    <ShieldAlert className="h-3.5 w-3.5 text-red-600 mt-0.5 shrink-0" />
-                  )}
-                  <div>
-                    <span className="font-medium capitalize">
-                      {check.check_name.replace(/_/g, ' ')}
-                    </span>
-                    <p className="text-muted-foreground mt-0.5">{check.details}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <GuardrailLogDisplay checks={email.guardrail_results} />
         )}
       </CardContent>
     </Card>

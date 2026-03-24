@@ -626,7 +626,7 @@ export default function CustomerProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Personal Details */}
+      {/* Personal Details + Living Situation — side by side */}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -655,6 +655,79 @@ export default function CustomerProfilePage() {
             ) : null}
           </CardContent>
         </Card>
+
+        <div className="flex flex-col gap-6">
+          {/* Living Situation */}
+          <Card className="flex-1">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <UserCircle className="h-5 w-5 text-muted-foreground" />
+                <CardTitle className="text-base">Living Situation</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <EditableSelect label="Housing Situation" value={profile.housing_situation} displayValue={housingSituationLabels[profile.housing_situation] || profile.housing_situation} field="housing_situation" editing={editing} editData={editData} onChange={handleEditField} options={housingSituationLabels} />
+              <EditableField label="Time at Current Address (Years)" value={profile.time_at_current_address_years} field="time_at_current_address_years" editing={editing} editData={editData} onChange={handleEditField} type="number" />
+              <EditableField label="Number of Dependants" value={profile.number_of_dependants} field="number_of_dependants" editing={editing} editData={editData} onChange={handleEditField} type="number" />
+              {editing ? (
+                <>
+                  <EditableField label="Previous Suburb" value={profile.previous_suburb} field="previous_suburb" editing={editing} editData={editData} onChange={handleEditField} />
+                  <EditableField label="Previous State" value={profile.previous_state} field="previous_state" editing={editing} editData={editData} onChange={handleEditField} />
+                  <EditableField label="Previous Postcode" value={profile.previous_postcode} field="previous_postcode" editing={editing} editData={editData} onChange={handleEditField} />
+                </>
+              ) : (
+                (() => {
+                  const prevAddress = [profile.previous_suburb, profile.previous_state, profile.previous_postcode].filter(Boolean).join(', ')
+                  return prevAddress ? (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground shrink-0">Previous Address</span>
+                      <span className="text-right">{prevAddress}</span>
+                    </div>
+                  ) : null
+                })()
+              )}
+              <EditableSelect label="Preferred Contact Method" value={profile.preferred_contact_method} displayValue={contactMethodLabels[profile.preferred_contact_method] || profile.preferred_contact_method} field="preferred_contact_method" editing={editing} editData={editData} onChange={handleEditField} options={contactMethodLabels} />
+            </CardContent>
+          </Card>
+
+          {/* Identity & Compliance */}
+          <Card className="flex-1">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Shield className="h-5 w-5 text-muted-foreground" />
+                <CardTitle className="text-base">Identity &amp; Compliance</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <EditableSelect label="Residency" value={profile.residency_status} displayValue={residencyLabels[profile.residency_status] || profile.residency_status} field="residency_status" editing={editing} editData={editData} onChange={handleEditField} options={residencyLabels} />
+              <EditableSelect label="Primary ID" value={profile.primary_id_type} displayValue={idTypeLabels[profile.primary_id_type] || profile.primary_id_type} field="primary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={idTypeLabels} />
+              {editing && (
+                <EditableField label="Primary ID Number" value="" field="primary_id_number" editing={editing} editData={editData} onChange={handleEditField} />
+              )}
+              <EditableSelect label="Secondary ID" value={profile.secondary_id_type} displayValue={idTypeLabels[profile.secondary_id_type] || profile.secondary_id_type} field="secondary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={{...idTypeLabels, '': 'None'}} />
+              {editing && (
+                <EditableField label="Secondary ID Number" value="" field="secondary_id_number" editing={editing} editData={editData} onChange={handleEditField} />
+              )}
+              {editing ? (
+                <>
+                  <EditableBool value={profile.tax_file_number_provided} label="TFN Provided" field="tax_file_number_provided" editing={editing} editData={editData} onChange={handleEditField} />
+                  <EditableBool value={profile.is_politically_exposed} label="Politically Exposed Person" field="is_politically_exposed" editing={editing} editData={editData} onChange={handleEditField} />
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">TFN Provided</span>
+                    <span>{profile.tax_file_number_provided ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Politically Exposed</span>
+                    <span>{profile.is_politically_exposed ? 'Yes' : 'No'}</span>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* Employment & Income */}
@@ -720,79 +793,6 @@ export default function CustomerProfilePage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Living Situation */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <UserCircle className="h-5 w-5 text-muted-foreground" />
-            <CardTitle className="text-base">Living Situation</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <EditableSelect label="Housing Situation" value={profile.housing_situation} displayValue={housingSituationLabels[profile.housing_situation] || profile.housing_situation} field="housing_situation" editing={editing} editData={editData} onChange={handleEditField} options={housingSituationLabels} />
-          <EditableField label="Time at Current Address (Years)" value={profile.time_at_current_address_years} field="time_at_current_address_years" editing={editing} editData={editData} onChange={handleEditField} type="number" />
-          <EditableField label="Number of Dependants" value={profile.number_of_dependants} field="number_of_dependants" editing={editing} editData={editData} onChange={handleEditField} type="number" />
-          {editing ? (
-            <>
-              <EditableField label="Previous Suburb" value={profile.previous_suburb} field="previous_suburb" editing={editing} editData={editData} onChange={handleEditField} />
-              <EditableField label="Previous State" value={profile.previous_state} field="previous_state" editing={editing} editData={editData} onChange={handleEditField} />
-              <EditableField label="Previous Postcode" value={profile.previous_postcode} field="previous_postcode" editing={editing} editData={editData} onChange={handleEditField} />
-            </>
-          ) : (
-            (() => {
-              const prevAddress = [profile.previous_suburb, profile.previous_state, profile.previous_postcode].filter(Boolean).join(', ')
-              return prevAddress ? (
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground shrink-0">Previous Address</span>
-                  <span className="text-right">{prevAddress}</span>
-                </div>
-              ) : null
-            })()
-          )}
-          <EditableSelect label="Preferred Contact Method" value={profile.preferred_contact_method} displayValue={contactMethodLabels[profile.preferred_contact_method] || profile.preferred_contact_method} field="preferred_contact_method" editing={editing} editData={editData} onChange={handleEditField} options={contactMethodLabels} />
-        </CardContent>
-      </Card>
-
-      {/* Identity & Compliance */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-muted-foreground" />
-              <CardTitle className="text-base">Identity &amp; Compliance</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <EditableSelect label="Residency" value={profile.residency_status} displayValue={residencyLabels[profile.residency_status] || profile.residency_status} field="residency_status" editing={editing} editData={editData} onChange={handleEditField} options={residencyLabels} />
-            <EditableSelect label="Primary ID" value={profile.primary_id_type} displayValue={idTypeLabels[profile.primary_id_type] || profile.primary_id_type} field="primary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={idTypeLabels} />
-            {editing && (
-              <EditableField label="Primary ID Number" value="" field="primary_id_number" editing={editing} editData={editData} onChange={handleEditField} />
-            )}
-            <EditableSelect label="Secondary ID" value={profile.secondary_id_type} displayValue={idTypeLabels[profile.secondary_id_type] || profile.secondary_id_type} field="secondary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={{...idTypeLabels, '': 'None'}} />
-            {editing && (
-              <EditableField label="Secondary ID Number" value="" field="secondary_id_number" editing={editing} editData={editData} onChange={handleEditField} />
-            )}
-            {editing ? (
-              <>
-                <EditableBool value={profile.tax_file_number_provided} label="TFN Provided" field="tax_file_number_provided" editing={editing} editData={editData} onChange={handleEditField} />
-                <EditableBool value={profile.is_politically_exposed} label="Politically Exposed Person" field="is_politically_exposed" editing={editing} editData={editData} onChange={handleEditField} />
-              </>
-            ) : (
-              <>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">TFN Provided</span>
-                  <span>{profile.tax_file_number_provided ? 'Yes' : 'No'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Politically Exposed</span>
-                  <span>{profile.is_politically_exposed ? 'Yes' : 'No'}</span>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
 
       {/* Loan Applications */}
       <Card>
@@ -893,8 +893,13 @@ export default function CustomerProfilePage() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <Badge variant="outline" className={email.decision === 'approved' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}>
-                          {email.decision}
+                        <Badge variant="outline" className={
+                          email.decision === 'approved' ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800' :
+                          email.decision === 'denied' ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800' :
+                          email.decision === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800' :
+                          'bg-zinc-50 text-zinc-700 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-700'
+                        }>
+                          {email.decision.toUpperCase()}
                         </Badge>
                         {email.passed_guardrails ? (
                           <CheckCircle className="h-4 w-4 text-green-600" />

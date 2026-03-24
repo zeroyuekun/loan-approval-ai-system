@@ -174,6 +174,29 @@ export interface LoanApplication {
   applicant_type: 'single' | 'couple';
   has_hecs?: boolean;
   has_bankruptcy?: boolean;
+
+  // Australian Credit Profile
+  credit_utilization_pct?: number | null;
+  num_late_payments_24m?: number | null;
+  worst_late_payment_days?: number | null;
+  num_hardship_flags?: number | null;
+  total_credit_limit?: number | null;
+  num_credit_providers?: number | null;
+  bnpl_active_count?: number | null;
+  bnpl_utilization_pct?: number | null;
+  bnpl_late_payments_12m?: number | null;
+  bnpl_monthly_commitment?: number | null;
+  stress_index?: number | null;
+  hem_surplus?: number | null;
+  debt_service_coverage?: number | null;
+  stressed_dsr?: number | null;
+  salary_credit_regularity?: number | null;
+  income_source_count?: number | null;
+  days_negative_balance_90d?: number | null;
+  min_balance_30d?: number | null;
+  actual_outcome?: string | null;
+  months_to_outcome?: number | null;
+
   status: 'pending' | 'processing' | 'approved' | 'denied' | 'review';
   notes: string;
   created_at: string;
@@ -187,6 +210,7 @@ export interface LoanDecision {
   confidence: number;
   risk_score: number | null;
   feature_importances: Record<string, number> | Array<{ feature: string; importance: number }>;
+  shap_values?: Record<string, number>;
   counterfactuals?: Array<string | { feature: string; current: number | string; target: number | string; description?: string }>;
   model_version: string;
   reasoning: string;

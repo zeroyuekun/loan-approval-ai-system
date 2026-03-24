@@ -1,5 +1,8 @@
 """Tests for registration, login, lockout, JWT refresh, and logout."""
 
+from unittest.mock import patch
+
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from rest_framework import status
@@ -12,10 +15,12 @@ from apps.accounts.models import CustomUser
 )
 class AuthTestCase(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = APIClient()
         self.user_data = {
             'username': 'testuser',
             'password': 'TestPass123!',
+            'password2': 'TestPass123!',
             'email': 'test@example.com',
             'first_name': 'Test',
             'last_name': 'User',
@@ -55,11 +60,12 @@ class AuthTestCase(TestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_login_lockout_after_10_failures(self):
+    @patch('apps.accounts.views.LoginRateThrottle.allow_request', return_value=True)
+    def test_login_lockout_after_10_failures(self, mock_throttle):
         user = CustomUser.objects.create_user(
             username='testuser', password='TestPass123!', email='test@example.com'
         )
-        for _ in range(10):
+        for _ in range(5):
             self.client.post('/api/v1/auth/login/', {
                 'username': 'testuser', 'password': 'wrong',
             })

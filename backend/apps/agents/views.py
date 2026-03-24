@@ -6,9 +6,11 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrOfficer
-from apps.agents.models import AgentRun
+from django.db.models import Prefetch
+
+from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
-from apps.loans.models import AuditLog, LoanApplication
+from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 from apps.loans.permissions import check_loan_access
 
 
@@ -25,7 +27,9 @@ class AgentRunListView(APIView):
         queryset = AgentRun.objects.select_related(
             'application__applicant'
         ).prefetch_related(
-            'bias_reports', 'next_best_offers', 'marketing_emails'
+            Prefetch('bias_reports', queryset=BiasReport.objects.order_by('-created_at')),
+            Prefetch('next_best_offers', queryset=NextBestOffer.objects.order_by('-created_at')),
+            Prefetch('marketing_emails', queryset=MarketingEmail.objects.order_by('-created_at')),
         ).order_by('-created_at')
 
         # Non-staff users can only see runs for their own applications
@@ -136,7 +140,7 @@ class OrchestrateView(APIView):
         """Trigger the full pipeline orchestration for a loan application."""
         application = check_loan_access(request, loan_id)
 
-        task = orchestrate_pipeline_task.delay(str(loan_id))
+        task = orchestrate_pipeline_task.delay(str(loan_id), force=True)
 
         AuditLog.objects.create(
             user=request.user,
@@ -359,7 +363,7 @@ class HumanReviewView(APIView):
                     decision.decision = 'denied'
                     decision.reasoning = f'Human review override by {request.user.username}: {reviewer_note}'
                     decision.save(update_fields=['decision', 'reasoning'])
-                except Exception:
+                except LoanDecision.DoesNotExist:
                     pass  # No decision record yet — acceptable for edge cases
 
                 agent_run.steps = agent_run.steps + [review_step]
