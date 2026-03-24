@@ -144,7 +144,9 @@ services:
       - internal
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      target: builder
     restart: unless-stopped
     ports:
       - "3000:3000"
