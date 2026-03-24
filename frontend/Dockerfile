@@ -1,16 +1,31 @@
-FROM node:22-alpine
+# --- Build stage ---
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 
 RUN npm run build
 
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup && \
-    chown -R appuser:appgroup /app
+# --- Production stage ---
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+COPY --from=builder /app/package*.json ./
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=appuser:appgroup /app/next.config.js ./
+
 USER appuser
 
 EXPOSE 3000

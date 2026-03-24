@@ -38,6 +38,7 @@ services:
 
   backend:
     build: ./backend
+    image: loan-approval-backend
     restart: unless-stopped
     ports:
       - "8500:8000"
@@ -65,7 +66,7 @@ services:
       - internal
 
   celery_worker_ml:
-    build: ./backend
+    image: loan-approval-backend
     restart: unless-stopped
     depends_on:
       db:
@@ -93,7 +94,7 @@ services:
       - internal
 
   celery_worker_io:
-    build: ./backend
+    image: loan-approval-backend
     restart: unless-stopped
     depends_on:
       db:
@@ -121,7 +122,7 @@ services:
       - internal
 
   celery_beat:
-    build: ./backend
+    image: loan-approval-backend
     restart: unless-stopped
     depends_on:
       db:
@@ -170,9 +171,11 @@ services:
     networks:
       - internal
 
+  # --- Monitoring stack (opt-in via: docker compose --profile monitoring up) ---
   prometheus:
     image: prom/prometheus:latest
     container_name: loan-approval-prometheus
+    profiles: ["monitoring"]
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./monitoring/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml
@@ -189,6 +192,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: loan-approval-grafana
+    profiles: ["monitoring"]
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
@@ -207,6 +211,7 @@ services:
   alertmanager:
     image: prom/alertmanager:latest
     container_name: loan-approval-alertmanager
+    profiles: ["monitoring"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:9093:9093"
@@ -220,6 +225,7 @@ services:
   celery-exporter:
     image: danihodovic/celery-exporter:latest
     container_name: loan-approval-celery-exporter
+    profiles: ["monitoring"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:9808:9808"
@@ -234,6 +240,7 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:latest
     container_name: loan-approval-postgres-exporter
+    profiles: ["monitoring"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:9187:9187"
