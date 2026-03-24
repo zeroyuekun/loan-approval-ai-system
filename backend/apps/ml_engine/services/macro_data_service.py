@@ -409,6 +409,120 @@ class MacroDataService:
         return None
 
     # ------------------------------------------------------------------
+    # APRA Quarterly ADI Property Exposure benchmarks
+    # ------------------------------------------------------------------
+
+    # APRA Quarterly ADI Property Exposure benchmarks (Sep Q 2025)
+    # Source: apra.gov.au/quarterly-authorised-deposit-taking-institution-statistics
+    # No REST API — values transcribed from published XLSX releases.
+    # Updated quarterly; hardcoded with published_date for audit trail.
+    APRA_QUARTERLY_BENCHMARKS = {
+        'Q3_2025': {
+            'published_date': '2025-11-28',
+            'npl_rate': 0.0104,
+            'arrears_30_rate': 0.0031,
+            'arrears_60_rate': 0.0013,
+            'arrears_90_rate': 0.0047,
+            'total_arrears_rate': 0.0091,
+            'lvr_80_plus_pct': 0.308,
+            'dti_6_plus_pct': 0.061,
+            'owner_occupier_arrears_90': 0.0042,
+            'investor_arrears_90': 0.0057,
+            'by_state': {
+                'NSW': 0.0039, 'VIC': 0.0052, 'QLD': 0.0048,
+                'WA': 0.0055, 'SA': 0.0041, 'TAS': 0.0035,
+                'NT': 0.0068, 'ACT': 0.0028,
+            },
+        },
+        'Q2_2025': {
+            'published_date': '2025-08-29',
+            'npl_rate': 0.0098,
+            'arrears_30_rate': 0.0029,
+            'arrears_60_rate': 0.0012,
+            'arrears_90_rate': 0.0044,
+            'total_arrears_rate': 0.0085,
+            'lvr_80_plus_pct': 0.312,
+            'dti_6_plus_pct': 0.058,
+            'owner_occupier_arrears_90': 0.0039,
+            'investor_arrears_90': 0.0053,
+            'by_state': {
+                'NSW': 0.0037, 'VIC': 0.0049, 'QLD': 0.0045,
+                'WA': 0.0052, 'SA': 0.0038, 'TAS': 0.0033,
+                'NT': 0.0065, 'ACT': 0.0026,
+            },
+        },
+    }
+
+    def _latest_apra_quarter(self) -> str:
+        """Return the key for the most recent APRA quarterly benchmark."""
+        return max(self.APRA_QUARTERLY_BENCHMARKS.keys())
+
+    def get_apra_quarterly_arrears(self, quarter: str = None) -> dict:
+        """Fetch APRA quarterly ADI property exposure benchmarks.
+
+        APRA publishes via XLSX (no REST API), so we maintain a transcribed
+        lookup table updated when new quarterly data is published.
+
+        Source: apra.gov.au/quarterly-authorised-deposit-taking-institution-statistics
+
+        Args:
+            quarter: e.g. 'Q3_2025'. Defaults to latest available.
+
+        Returns dict with: npl_rate, arrears_30/60/90_rate, total_arrears_rate,
+            lvr_80_plus_pct, dti_6_plus_pct, by_state, published_date
+        """
+        if quarter is None:
+            quarter = self._latest_apra_quarter()
+
+        benchmarks = self.APRA_QUARTERLY_BENCHMARKS.get(quarter)
+        if benchmarks is None:
+            available = sorted(self.APRA_QUARTERLY_BENCHMARKS.keys())
+            logger.warning(
+                'APRA quarter %s not available — available quarters: %s. '
+                'Falling back to latest.',
+                quarter, available,
+            )
+            quarter = self._latest_apra_quarter()
+            benchmarks = self.APRA_QUARTERLY_BENCHMARKS[quarter]
+
+        logger.info(
+            'Returning APRA benchmarks for %s (published %s)',
+            quarter, benchmarks['published_date'],
+        )
+        return {**benchmarks, 'quarter': quarter}
+
+    def get_apra_state_arrears(self, state: str, quarter: str = None) -> float:
+        """Get 90+ day arrears rate for a specific state from APRA data.
+
+        Args:
+            state: Australian state code (e.g. 'NSW', 'VIC').
+            quarter: e.g. 'Q3_2025'. Defaults to latest available.
+
+        Returns:
+            90+ day arrears rate as a float (e.g. 0.0039 for NSW).
+
+        Raises:
+            ValueError: If the state code is not found in APRA data.
+        """
+        data = self.get_apra_quarterly_arrears(quarter)
+        by_state = data.get('by_state', {})
+
+        state_upper = state.upper()
+        if state_upper not in by_state:
+            valid_states = sorted(by_state.keys())
+            raise ValueError(
+                f'State {state!r} not found in APRA data. '
+                f'Valid states: {valid_states}'
+            )
+
+        rate = by_state[state_upper]
+        logger.info(
+            'APRA 90+ day arrears for %s (%s): %.4f',
+            state_upper, data['quarter'], rate,
+        )
+        return rate
+
+    # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------
 
