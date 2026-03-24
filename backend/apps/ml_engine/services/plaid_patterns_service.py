@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Plaid sandbox integration — US banking data patterns for lending research.
 
 IMPORTANT: This service connects to Plaid's US sandbox to extract behavioral

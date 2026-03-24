@@ -22,7 +22,8 @@ from .next_best_offer import NextBestOfferGenerator
 
 logger = logging.getLogger('agents.orchestrator')
 
-STEP_TIMEOUT_BUDGETS_MS = {
+# Step timeout budgets — configurable via settings for environment-specific tuning.
+STEP_TIMEOUT_BUDGETS_MS = getattr(settings, 'ORCHESTRATOR_STEP_TIMEOUTS', {
     'ml_prediction': 30_000,
     'email_generation': 60_000,
     'bias_check': 60_000,
@@ -39,7 +40,7 @@ STEP_TIMEOUT_BUDGETS_MS = {
     'human_escalation_low_confidence': 5_000,
     'human_review_approved': 5_000,
     'marketing_email_blocked': 5_000,
-}
+})
 
 
 class PipelineOrchestrator:
@@ -58,16 +59,16 @@ class PipelineOrchestrator:
             return None
 
         return {
-            'savings_balance': profile.savings_balance,
-            'checking_balance': profile.checking_balance,
-            'account_tenure_years': profile.account_tenure_years,
-            'loyalty_tier': profile.get_loyalty_tier_display(),
-            'num_products': profile.num_products,
-            'on_time_payment_pct': profile.on_time_payment_pct,
-            'previous_loans_repaid': profile.previous_loans_repaid,
-            'has_credit_card': profile.has_credit_card,
-            'has_mortgage': profile.has_mortgage,
-            'has_auto_loan': profile.has_auto_loan,
+            'savings_balance': getattr(profile, 'savings_balance', None),
+            'checking_balance': getattr(profile, 'checking_balance', None),
+            'account_tenure_years': getattr(profile, 'account_tenure_years', None),
+            'loyalty_tier': profile.get_loyalty_tier_display() if hasattr(profile, 'get_loyalty_tier_display') else None,
+            'num_products': getattr(profile, 'num_products', None),
+            'on_time_payment_pct': getattr(profile, 'on_time_payment_pct', None),
+            'previous_loans_repaid': getattr(profile, 'previous_loans_repaid', None),
+            'has_credit_card': getattr(profile, 'has_credit_card', None),
+            'has_mortgage': getattr(profile, 'has_mortgage', None),
+            'has_auto_loan': getattr(profile, 'has_auto_loan', None),
             'gross_annual_income': getattr(profile, 'gross_annual_income', None),
             'superannuation_balance': getattr(profile, 'superannuation_balance', None),
             'total_assets': profile.total_assets if hasattr(profile, 'total_assets') else None,
@@ -161,6 +162,7 @@ class PipelineOrchestrator:
                     'decision': prediction_result['prediction'],
                     'confidence': prediction_result['probability'],
                     'feature_importances': prediction_result['feature_importances'],
+                    'shap_values': prediction_result.get('shap_values', {}),
                     'model_version': prediction_result['model_version'],
                 },
             )
@@ -603,7 +605,7 @@ class PipelineOrchestrator:
         try:
             nbo_result = nbo_generator.generate(application, denial_reasons=denial_reasons)
 
-            NextBestOffer.objects.create(
+            nbo_record = NextBestOffer.objects.create(
                 agent_run=agent_run,
                 application=application,
                 offers=nbo_result['offers'],
@@ -636,10 +638,8 @@ class PipelineOrchestrator:
                 marketing_result = nbo_generator.generate_marketing_message(
                     application, nbo_result['offers'], denial_reasons=denial_reasons,
                 )
-                nbo_record = agent_run.next_best_offers.order_by('-created_at').first()
-                if nbo_record:
-                    nbo_record.marketing_message = marketing_result['marketing_message']
-                    nbo_record.save(update_fields=['marketing_message'])
+                nbo_record.marketing_message = marketing_result['marketing_message']
+                nbo_record.save(update_fields=['marketing_message'])
 
                 step = self._complete_step(step, result_summary={
                     'message_length': len(marketing_result['marketing_message']),

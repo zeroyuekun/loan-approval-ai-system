@@ -151,16 +151,21 @@ class TestPlaidBehavioralPatterns:
         assert actual_fields == expected_fields
 
     def test_field_types(self):
+        """Verify field type annotations are present and correct.
+
+        Note: with `from __future__ import annotations`, f.type returns
+        string representations, not actual type objects.
+        """
         field_types = {f.name: f.type for f in fields(PlaidBehavioralPatterns)}
-        assert field_types['income_streams_detected'] == int
-        assert field_types['income_regularity_score'] == float
-        assert field_types['recurring_expense_count'] == int
-        assert field_types['discretionary_spend_ratio'] == float
-        assert field_types['overdraft_frequency_90d'] == int
-        assert field_types['average_daily_balance'] == float
-        assert field_types['savings_trend'] == str
-        assert field_types['transaction_categories'] == dict
-        assert field_types['insights'] == list[str]
+        assert 'int' in str(field_types['income_streams_detected'])
+        assert 'float' in str(field_types['income_regularity_score'])
+        assert 'int' in str(field_types['recurring_expense_count'])
+        assert 'float' in str(field_types['discretionary_spend_ratio'])
+        assert 'int' in str(field_types['overdraft_frequency_90d'])
+        assert 'float' in str(field_types['average_daily_balance'])
+        assert 'str' in str(field_types['savings_trend'])
+        assert 'dict' in str(field_types['transaction_categories'])
+        assert 'list' in str(field_types['insights'])
 
 
 # ---------------------------------------------------------------------------

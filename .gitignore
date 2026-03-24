@@ -56,6 +56,9 @@ token.json
 htmlcov/
 .pytest_cache/
 
+# Hypothesis (property-based testing cache)
+.hypothesis/
+
 # Celery beat schedule
 celerybeat-schedule*
 

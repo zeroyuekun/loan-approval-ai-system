@@ -242,8 +242,8 @@ class ModelPredictor:
             state = getattr(application, 'state', None)
             if state:
                 return state
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug('Could not read state from application, defaulting to NSW: %s', e)
         return 'NSW'
 
     def _validate_input(self, features: dict):
@@ -535,8 +535,8 @@ class ModelPredictor:
             ml_prediction_confidence.observe(result['probability'])
             if result.get('drift_warnings'):
                 ml_drift_warnings_total.inc()
-        except Exception:
-            pass  # Never let metrics emission break predictions
+        except Exception as e:
+            logger.debug('Prometheus metrics emission failed (non-blocking): %s', e)
 
         # === Champion/Challenger Shadow Scoring ===
         # If challenger models exist, score with them too (shadow mode)
@@ -871,7 +871,8 @@ class ModelPredictor:
                             high = mid
                         else:
                             low = mid
-                except Exception:
+                except Exception as e:
+                    logger.debug('Counterfactual binary search step failed: %s', e)
                     break
 
             if flip_value is not None:
