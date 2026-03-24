@@ -1,0 +1,6 @@
+10003	WARN	(Vulnerable JS Library)
+10010	WARN	(Cookie No HttpOnly Flag)
+10011	WARN	(Cookie Without Secure Flag)
+10015	WARN	(Incomplete or No Cache-control Header Set)
+10037	WARN	(Server Leaks Information via "X-Powered-By")
+10098	IGNORE	(Cross-Domain Misconfiguration - we use CORS intentionally)
