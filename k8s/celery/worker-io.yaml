@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker-io
+  namespace: loan-approval
+  labels:
+    app.kubernetes.io/name: celery-worker-io
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: aussieloanai
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: celery-worker-io
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: celery-worker-io
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: aussieloanai
+    spec:
+      containers:
+        - name: celery-worker-io
+          image: ghcr.io/OWNER/loan-approval-ai-system/backend:latest
+          command:
+            - celery
+            - -A
+            - config
+            - worker
+            - -l
+            - info
+            - -Q
+            - email,agents,default
+            - --concurrency=4
+          envFrom:
+            - configMapRef:
+                name: loan-approval-config
+            - secretRef:
+                name: loan-approval-secrets
+          startupProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - config
+                - inspect
+                - ping
+            failureThreshold: 10
+            periodSeconds: 5
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - config
+                - inspect
+                - ping
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 15
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 512Mi
+              cpu: 500m

@@ -40,3 +40,39 @@ groups:
           severity: warning
         annotations:
           summary: "ML prediction p95 latency is {{ $value }}s (threshold 5s) — check model complexity or resource contention"
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="django"} > 500 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Django process using >500MB memory"
+          description: "Check for memory leaks in model cache or guardrail processing."
+
+      - alert: PredictionErrorRate
+        expr: rate(ml_predictions_total{decision="error"}[5m]) / rate(ml_predictions_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ML prediction error rate >5%"
+          description: "More than 5% of predictions are failing. Check model availability."
+
+      - alert: GuardrailViolationRate
+        expr: rate(guardrail_checks_total{result="fail"}[1h]) / rate(guardrail_checks_total[1h]) > 0.30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Email guardrail failure rate >30%"
+          description: "High guardrail failure rate may indicate prompt drift or template issues."
+
+      - alert: WorkerMemoryLeak
+        expr: rate(process_resident_memory_bytes{job=~"celery.*"}[1h]) > 10 * 1024 * 1024
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Celery worker memory growing >10MB/hour"
+          description: "Possible memory leak in worker process. Consider restarting."

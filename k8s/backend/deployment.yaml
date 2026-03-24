@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: loan-approval
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: aussieloanai
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: aussieloanai
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/OWNER/loan-approval-ai-system/backend:latest
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+          command:
+            - gunicorn
+            - config.wsgi:application
+            - --bind
+            - 0.0.0.0:8000
+            - --workers
+            - "4"
+            - --threads
+            - "2"
+          envFrom:
+            - configMapRef:
+                name: loan-approval-config
+            - secretRef:
+                name: loan-approval-secrets
+          startupProbe:
+            httpGet:
+              path: /api/v1/health/
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health/
+              port: 8000
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health/deep/
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 3
+            initialDelaySeconds: 30
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 512Mi
+              cpu: 500m

@@ -24,4 +24,5 @@ python-dotenv==1.2.2
 python-json-logger>=3.2
 django-prometheus==2.4.1
 drf-spectacular==0.29.0
+django-csp==4.0
 hypothesis>=6.100

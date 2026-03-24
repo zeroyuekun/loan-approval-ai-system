@@ -1,0 +1,209 @@
+{
+  "uid": "aussie-loan-ai-slo",
+  "title": "AussieLoanAI — SLO Dashboard",
+  "tags": ["loan-approval", "slo", "prometheus"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Availability SLO (target 99.5%)",
+      "description": "Percentage of successful (non-5xx) HTTP responses over the selected time range",
+      "type": "gauge",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1 - (sum(rate(django_http_responses_total_by_status_total{status=~\"5..\"}[24h])) / sum(rate(django_http_responses_total_by_status_total[24h])))",
+          "legendFormat": "Availability",
+          "interval": "",
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.99 },
+              { "color": "green", "value": 0.995 }
+            ]
+          },
+          "unit": "percentunit",
+          "decimals": 3,
+          "min": 0.95,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Prediction Latency SLO (p95 < 2s)",
+      "description": "95th percentile prediction latency — target under 2 seconds",
+      "type": "gauge",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(ml_prediction_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 latency",
+          "interval": "",
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1.5 },
+              { "color": "red", "value": 2 }
+            ]
+          },
+          "unit": "s",
+          "decimals": 3,
+          "min": 0,
+          "max": 5
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Error Budget Remaining (30d window)",
+      "description": "Monthly error budget remaining based on 99.5% availability SLO. Budget = 0.5% of total requests.",
+      "type": "stat",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1 - ((sum(increase(django_http_responses_total_by_status_total{status=~\"5..\"}[30d])) / sum(increase(django_http_responses_total_by_status_total[30d]))) / 0.005)",
+          "legendFormat": "Budget Remaining",
+          "interval": "",
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.25 },
+              { "color": "green", "value": 0.5 }
+            ]
+          },
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Current Error Rate",
+      "description": "Percentage of 5xx responses over the last 5 minutes",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(django_http_responses_total_by_status_total{status=~\"5..\"}[5m])) / sum(rate(django_http_responses_total_by_status_total[5m])) * 100",
+          "legendFormat": "Error %",
+          "interval": "",
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "error %",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    }
+  ]
+}

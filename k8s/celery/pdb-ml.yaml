@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: celery-worker-ml-pdb
+  namespace: loan-approval
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: celery-worker-ml
+      app.kubernetes.io/component: worker

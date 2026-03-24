@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: loan-approval
+  labels:
+    app: loan-approval
+    component: backup
+spec:
+  # Daily at 2:00 AM AEST (UTC+10) = 16:00 UTC previous day
+  schedule: "0 16 * * *"
+  timeZone: "Australia/Sydney"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: loan-approval
+            component: backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pg-backup
+              image: postgres:16-alpine
+              command:
+                - /bin/sh
+                - -c
+                - /scripts/backup.sh /backups
+              envFrom:
+                - secretRef:
+                    name: loan-approval-secrets
+              env:
+                - name: PGHOST
+                  value: "postgres-service"
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: loan-approval-secrets
+                      key: POSTGRES_USER
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: loan-approval-secrets
+                      key: POSTGRES_DB
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: loan-approval-secrets
+                      key: POSTGRES_PASSWORD
+              volumeMounts:
+                - name: backup-volume
+                  mountPath: /backups
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: backup-volume
+              persistentVolumeClaim:
+                claimName: postgres-backup-pvc
+            - name: scripts
+              configMap:
+                name: backup-scripts
+                defaultMode: 0755

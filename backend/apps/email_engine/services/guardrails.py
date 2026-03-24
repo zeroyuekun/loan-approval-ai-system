@@ -6,142 +6,142 @@ class GuardrailChecker:
 
     PROHIBITED_TERMS = [
         # Discriminatory language patterns (use non-capturing groups so findall returns the full match)
-        r'\b(?:race|racial|ethnicity|ethnic)\b',
-        r'\b(?:religion|religious|church|mosque|synagogue|temple)\b',
-        r'\b(?:gender|sex|male|female|transgender)\b',
-        r'\b(?:pregnant|pregnancy|maternity)\b',
-        r'\b(?:disability|disabled|handicap)\b',
-        r'\b(?:national origin|nationality|immigrant|alien)\b',
-        r'\b(?:marital status|married|divorced|widowed)\b',
+        re.compile(r'\b(?:race|racial|ethnicity|ethnic)\b', re.IGNORECASE),
+        re.compile(r'\b(?:religion|religious|church|mosque|synagogue|temple)\b', re.IGNORECASE),
+        re.compile(r'\b(?:gender|sex|male|female|transgender)\b', re.IGNORECASE),
+        re.compile(r'\b(?:pregnant|pregnancy|maternity)\b', re.IGNORECASE),
+        re.compile(r'\b(?:disability|disabled|handicap)\b', re.IGNORECASE),
+        re.compile(r'\b(?:national origin|nationality|immigrant|alien)\b', re.IGNORECASE),
+        re.compile(r'\b(?:marital status|married|divorced|widowed)\b', re.IGNORECASE),
         # "single" only triggers when NOT followed by common financial/application nouns
-        r'\bsingle\b(?!\s+(?:\w+\s+)*?(?:payment|applicant|application|account|transaction|loan|source|income|person|borrower|repayment|monthly|amount|point|entry|deposit|product|obligation|contact|reference|instalment|rate|fee|charge|document|step|purpose|entity|item|place|call|email|platform|portal|goal|saver|everyday|savings|option|alternative|offer|phone|number|line|action|digit|click|visit))',
+        re.compile(r'\bsingle\b(?!\s+(?:\w+\s+)*?(?:payment|applicant|application|account|transaction|loan|source|income|person|borrower|repayment|monthly|amount|point|entry|deposit|product|obligation|contact|reference|instalment|rate|fee|charge|document|step|purpose|entity|item|place|call|email|platform|portal|goal|saver|everyday|savings|option|alternative|offer|phone|number|line|action|digit|click|visit))', re.IGNORECASE),
         # "age" only triggers when NOT in financial/legal contexts
-        r'\bage\b(?!\s*(?:of|action|notice|requirement|pension|bracket|limit|discrimination|act|group|range|related|based|verification|eligibility|threshold))',
+        re.compile(r'\bage\b(?!\s*(?:of|action|notice|requirement|pension|bracket|limit|discrimination|act|group|range|related|based|verification|eligibility|threshold))', re.IGNORECASE),
     ]
 
     AGGRESSIVE_TERMS = [
-        r'\b(stupid|idiot|foolish|incompetent)\b',
-        r'\b(demand|insist|must immediately)\b',
-        r'\b(threat|threaten|consequences)\b',
-        r'\b(never|always)\s+(will|should|can)\b',
-        r'\b(you failed|your fault|blame)\b',
-        r'\b(unacceptable|disgraceful|shocking)\b',
+        re.compile(r'\b(stupid|idiot|foolish|incompetent)\b', re.IGNORECASE),
+        re.compile(r'\b(demand|insist|must immediately)\b', re.IGNORECASE),
+        re.compile(r'\b(threat|threaten|consequences)\b', re.IGNORECASE),
+        re.compile(r'\b(never|always)\s+(will|should|can)\b', re.IGNORECASE),
+        re.compile(r'\b(you failed|your fault|blame)\b', re.IGNORECASE),
+        re.compile(r'\b(unacceptable|disgraceful|shocking)\b', re.IGNORECASE),
     ]
 
     # AI-giveaway phrases that real bank officers never use
     AI_GIVEAWAY_TERMS = [
         # "pleased to inform" and "pleased to confirm" are legitimate in formal approval letters
-        # r'\bpleased to (?:inform|advise)\b',
-        r'\bdelighted\b',
-        r'\bthrilled\b',
-        r'\bgreat news\b',
-        r'\bexciting\b',
-        r'\bwe are happy to\b',
-        r'\bI wanted to reach out\b',
-        r'\bnavigate\b',
-        # r'\bjourney\b',  # Removed: legitimate in Australian lending ("home ownership journey")
-        r'\bleverage\b',
-        r'\bempower\b',
-        # r'\bcomprehensive\b',  # Removed: legitimate in formal letters ("comprehensive loan agreement")
-        r'\btailored\b',
-        r'\brest assured\b',
-        # r'\bdon[\u2019\']t hesitate\b',  # Removed: legitimate in formal approval/customer-service correspondence
-        # r'\bwe are here to help\b',  # Removed: legitimate in hardship/customer-service sections
-        r'\bwalk you through\b',
-        r'\bevery step of the way\b',
-        r'\bwe understand how important\b',
-        r'\bwe understand this (?:may be|is) disappointing\b',
-        r'\bnot the outcome you were hoping for\b',
-        r'\bwe (?:understand|know) (?:this|how) (?:is|may be|must be) (?:difficult|hard|tough|frustrating)\b',
-        r'\bwe want to be transparent about\b',
-        # r'\bwe appreciate the trust\b',  # Removed: legitimate closing in approval letters
-        r'\bregardless of (?:this|the) outcome\b',
-        r'\bshould you have any questions at all\b',
+        # re.compile(r'\bpleased to (?:inform|advise)\b', re.IGNORECASE),
+        re.compile(r'\bdelighted\b', re.IGNORECASE),
+        re.compile(r'\bthrilled\b', re.IGNORECASE),
+        re.compile(r'\bgreat news\b', re.IGNORECASE),
+        re.compile(r'\bexciting\b', re.IGNORECASE),
+        re.compile(r'\bwe are happy to\b', re.IGNORECASE),
+        re.compile(r'\bI wanted to reach out\b', re.IGNORECASE),
+        re.compile(r'\bnavigate\b', re.IGNORECASE),
+        # re.compile(r'\bjourney\b', re.IGNORECASE),  # Removed: legitimate in Australian lending ("home ownership journey")
+        re.compile(r'\bleverage\b', re.IGNORECASE),
+        re.compile(r'\bempower\b', re.IGNORECASE),
+        # re.compile(r'\bcomprehensive\b', re.IGNORECASE),  # Removed: legitimate in formal letters ("comprehensive loan agreement")
+        re.compile(r'\btailored\b', re.IGNORECASE),
+        re.compile(r'\brest assured\b', re.IGNORECASE),
+        # re.compile(r'\bdon[\u2019\']t hesitate\b', re.IGNORECASE),  # Removed: legitimate in formal approval/customer-service correspondence
+        # re.compile(r'\bwe are here to help\b', re.IGNORECASE),  # Removed: legitimate in hardship/customer-service sections
+        re.compile(r'\bwalk you through\b', re.IGNORECASE),
+        re.compile(r'\bevery step of the way\b', re.IGNORECASE),
+        re.compile(r'\bwe understand how important\b', re.IGNORECASE),
+        re.compile(r'\bwe understand this (?:may be|is) disappointing\b', re.IGNORECASE),
+        re.compile(r'\bnot the outcome you were hoping for\b', re.IGNORECASE),
+        re.compile(r'\bwe (?:understand|know) (?:this|how) (?:is|may be|must be) (?:difficult|hard|tough|frustrating)\b', re.IGNORECASE),
+        re.compile(r'\bwe want to be transparent about\b', re.IGNORECASE),
+        # re.compile(r'\bwe appreciate the trust\b', re.IGNORECASE),  # Removed: legitimate closing in approval letters
+        re.compile(r'\bregardless of (?:this|the) outcome\b', re.IGNORECASE),
+        re.compile(r'\bshould you have any questions at all\b', re.IGNORECASE),
         # Transitional adverbs (strongest AI-tell)
-        r'\badditionally\b',
-        r'\bfurthermore\b',
-        r'\bmoreover\b',
-        r'\bin addition\b',
-        r'\bconsequently\b',
-        r'\bas such\b',
-        r'\baccordingly\b',
+        re.compile(r'\badditionally\b', re.IGNORECASE),
+        re.compile(r'\bfurthermore\b', re.IGNORECASE),
+        re.compile(r'\bmoreover\b', re.IGNORECASE),
+        re.compile(r'\bin addition\b', re.IGNORECASE),
+        re.compile(r'\bconsequently\b', re.IGNORECASE),
+        re.compile(r'\bas such\b', re.IGNORECASE),
+        re.compile(r'\baccordingly\b', re.IGNORECASE),
         # Hedging qualifiers
-        r'\bmay potentially\b',
-        r'\bcould potentially\b',
-        r'\bit is possible that\b',
-        r'\bmight be able to\b',
+        re.compile(r'\bmay potentially\b', re.IGNORECASE),
+        re.compile(r'\bcould potentially\b', re.IGNORECASE),
+        re.compile(r'\bit is possible that\b', re.IGNORECASE),
+        re.compile(r'\bmight be able to\b', re.IGNORECASE),
         # Performative empathy
-        r'\bwe understand that\b',
-        r'\bwe recognise that\b',
-        r'\bwe appreciate that\b',
+        re.compile(r'\bwe understand that\b', re.IGNORECASE),
+        re.compile(r'\bwe recognise that\b', re.IGNORECASE),
+        re.compile(r'\bwe appreciate that\b', re.IGNORECASE),
         # Over-formal constructions
-        r'\bwe would like to\b',
-        r'\bwe would like you to\b',
-        r'\bshould you wish to\b',
-        r'\bshould you require\b',
-        r'\bshould you have any\b',
-        r'\bwe wish you\b',
-        # r'\bwe are pleased to inform you\b',  # Removed: industry-standard in AU banking (ANZ, CBA, Westpac all use it)
-        r'\bwe appreciate your trust in\b',
-        r'\bwe truly (?:value|care|appreciate)\b',
-        r'\bit is our pleasure to\b',
-        # r'\bwe look forward to\b',  # Removed: legitimate closing in approval letters
+        re.compile(r'\bwe would like to\b', re.IGNORECASE),
+        re.compile(r'\bwe would like you to\b', re.IGNORECASE),
+        re.compile(r'\bshould you wish to\b', re.IGNORECASE),
+        re.compile(r'\bshould you require\b', re.IGNORECASE),
+        re.compile(r'\bshould you have any\b', re.IGNORECASE),
+        re.compile(r'\bwe wish you\b', re.IGNORECASE),
+        # re.compile(r'\bwe are pleased to inform you\b', re.IGNORECASE),  # Removed: industry-standard in AU banking (ANZ, CBA, Westpac all use it)
+        re.compile(r'\bwe appreciate your trust in\b', re.IGNORECASE),
+        re.compile(r'\bwe truly (?:value|care|appreciate)\b', re.IGNORECASE),
+        re.compile(r'\bit is our pleasure to\b', re.IGNORECASE),
+        # re.compile(r'\bwe look forward to\b', re.IGNORECASE),  # Removed: legitimate closing in approval letters
         # AI closing/filler patterns
-        r'\bplease feel free to\b',
-        r'\bwe are available\b',
-        r'\bthank you for trusting\b',
-        r'\bin order to\b',
-        r'\bat this point in time\b',
-        r'\bit is important to note that\b',
-        r'\bit is worth noting that\b',
-        r'\bmoving forward\b',
-        r'\bgoing forward\b',
+        re.compile(r'\bplease feel free to\b', re.IGNORECASE),
+        re.compile(r'\bwe are available\b', re.IGNORECASE),
+        re.compile(r'\bthank you for trusting\b', re.IGNORECASE),
+        re.compile(r'\bin order to\b', re.IGNORECASE),
+        re.compile(r'\bat this point in time\b', re.IGNORECASE),
+        re.compile(r'\bit is important to note that\b', re.IGNORECASE),
+        re.compile(r'\bit is worth noting that\b', re.IGNORECASE),
+        re.compile(r'\bmoving forward\b', re.IGNORECASE),
+        re.compile(r'\bgoing forward\b', re.IGNORECASE),
     ]
 
     # Unprofessional financial language — real banks never use these
     # Sources: ASIC RG 234 (misleading/deceptive conduct), NCCP Act s133
     UNPROFESSIONAL_FINANCIAL_TERMS = [
-        r'\bguaranteed approval\b',
-        r'\b100% approval\b',
-        r'\bno questions asked\b',
-        r'\brisk[- ]free\b',
-        r'\btoo good to (?:be true|pass up)\b',
-        r'\byou deserve\b',
-        r'\byou[\u2019\']ve earned\b(?!\s+(?:through|over|with|by|during|in))',
+        re.compile(r'\bguaranteed approval\b', re.IGNORECASE),
+        re.compile(r'\b100% approval\b', re.IGNORECASE),
+        re.compile(r'\bno questions asked\b', re.IGNORECASE),
+        re.compile(r'\brisk[- ]free\b', re.IGNORECASE),
+        re.compile(r'\btoo good to (?:be true|pass up)\b', re.IGNORECASE),
+        re.compile(r'\byou deserve\b', re.IGNORECASE),
+        re.compile(r'\byou[\u2019\']ve earned\b(?!\s+(?:through|over|with|by|during|in))', re.IGNORECASE),
         # "congratulations" removed: appropriate in formal approval letters
-        r'\bexclusive(?:ly)? for you\b',
-        r'\bbest (?:rate|deal|offer) (?:in|on the) (?:market|australia)\b',
-        r'\blowest (?:rate|fee|cost)\b',
-        r'\bno (?:hidden |extra )?(?:fees|charges|costs)\b',
-        r'\b(?:pre[- ]?approved|already approved)\b',
-        r'\blimited (?:time|spots?|availability)\b',
-        r'\bdon[\u2019\']t miss (?:out|this)\b',
+        re.compile(r'\bexclusive(?:ly)? for you\b', re.IGNORECASE),
+        re.compile(r'\bbest (?:rate|deal|offer) (?:in|on the) (?:market|australia)\b', re.IGNORECASE),
+        re.compile(r'\blowest (?:rate|fee|cost)\b', re.IGNORECASE),
+        re.compile(r'\bno (?:hidden |extra )?(?:fees|charges|costs)\b', re.IGNORECASE),
+        re.compile(r'\b(?:pre[- ]?approved|already approved)\b', re.IGNORECASE),
+        re.compile(r'\blimited (?:time|spots?|availability)\b', re.IGNORECASE),
+        re.compile(r'\bdon[\u2019\']t miss (?:out|this)\b', re.IGNORECASE),
     ]
 
     # Phrases that are factually correct but demeaning in context.
     # Each tuple: (pattern, better_alternative, context_note)
     DIGNITY_VIOLATIONS = [
-        (r'\byou (?:have |had )?no (?:job|employment|work|income)\b', 'your current employment situation', 'Implies personal failing rather than circumstance'),
-        (r'\byou (?:are|were) unemployed\b', 'your employment status at the time of application', 'Labels the person, not the situation'),
-        (r'\byou lost your job\b', 'a change in your employment circumstances', 'Assigns fault to the customer'),
-        (r'\byou (?:are|were) (?:let go|fired|sacked|terminated|made redundant)\b', 'a change in your employment circumstances', 'Too blunt about job loss'),
-        (r'\byou lack (?:stable |steady )?employment\b', 'your employment tenure at the time of application', 'Implies personal deficiency'),
-        (r'\byou(?:r)? (?:do not|don[\u2019\']t) have a (?:stable |steady |permanent )?job\b', 'your current employment arrangement', 'Implies personal failing'),
-        (r'\byou(?:r income is| earn| make) (?:too little|not enough|insufficient)\b', 'the loan amount relative to your verified income', 'Passes judgment on earning capacity'),
-        (r'\byou cannot afford\b', 'the requested amount exceeded our serviceability thresholds', 'Implies personal inadequacy'),
-        (r'\byou(?:r)? (?:do not|don[\u2019\']t) earn enough\b', 'your income relative to the loan amount', 'Judges the person not the ratio'),
-        (r'\byour (?:poor|bad|low|weak) (?:credit|finances|financial)\b', 'your credit profile at the time of assessment', 'Value judgment on the person'),
-        (r'\byou(?:r)? (?:failed|inability) to (?:pay|repay|meet|manage)\b', 'repayment capacity based on our assessment', 'Implies personal failure'),
-        (r'\byour debt (?:is|was) too (?:high|much|large)\b', 'your existing obligations relative to income', 'Sounds like a personal lecture'),
-        (r'\byou (?:are|were) (?:in |carrying )?too much debt\b', 'your debt-to-income ratio', 'Blames the customer'),
-        (r'\byou(?:r)? (?:have |had )?(?:a )?(?:bad|poor|terrible|awful) credit\b', 'your credit history at the time of assessment', 'Labels the person through their credit'),
-        (r'\byou (?:defaulted|missed payments)\b', 'your repayment history as reported by credit bureaus', 'Accusatory tone'),
-        (r'\byou went bankrupt\b', 'a prior bankruptcy event on your credit file', 'Defines the person by the event'),
-        (r'\byou (?:have |had )?no savings\b', 'your savings position at the time of application', 'Implies irresponsibility'),
-        (r'\byou are too (?:old|young)\b', 'the loan term relative to standard lending criteria', 'Direct age discrimination'),
-        (r'\byou(?:r)? (?:do not|don[\u2019\']t) own (?:a |your )?(?:home|property|house)\b', 'your current accommodation arrangements', 'Implies lesser status for renters'),
-        (r'\byou (?:are|were) (?:not |un)?(?:suitable|eligible|qualified|worthy)\b', 'your application did not meet our lending criteria at this time', 'Labels the person as deficient'),
-        (r'\byou (?:are|were) (?:a |an )?(?:high|greater|elevated) risk\b', 'the risk profile of this application', 'Labels the human as a risk'),
+        (re.compile(r'\byou (?:have |had )?no (?:job|employment|work|income)\b', re.IGNORECASE), 'your current employment situation', 'Implies personal failing rather than circumstance'),
+        (re.compile(r'\byou (?:are|were) unemployed\b', re.IGNORECASE), 'your employment status at the time of application', 'Labels the person, not the situation'),
+        (re.compile(r'\byou lost your job\b', re.IGNORECASE), 'a change in your employment circumstances', 'Assigns fault to the customer'),
+        (re.compile(r'\byou (?:are|were) (?:let go|fired|sacked|terminated|made redundant)\b', re.IGNORECASE), 'a change in your employment circumstances', 'Too blunt about job loss'),
+        (re.compile(r'\byou lack (?:stable |steady )?employment\b', re.IGNORECASE), 'your employment tenure at the time of application', 'Implies personal deficiency'),
+        (re.compile(r'\byou(?:r)? (?:do not|don[\u2019\']t) have a (?:stable |steady |permanent )?job\b', re.IGNORECASE), 'your current employment arrangement', 'Implies personal failing'),
+        (re.compile(r'\byou(?:r income is| earn| make) (?:too little|not enough|insufficient)\b', re.IGNORECASE), 'the loan amount relative to your verified income', 'Passes judgment on earning capacity'),
+        (re.compile(r'\byou cannot afford\b', re.IGNORECASE), 'the requested amount exceeded our serviceability thresholds', 'Implies personal inadequacy'),
+        (re.compile(r'\byou(?:r)? (?:do not|don[\u2019\']t) earn enough\b', re.IGNORECASE), 'your income relative to the loan amount', 'Judges the person not the ratio'),
+        (re.compile(r'\byour (?:poor|bad|low|weak) (?:credit|finances|financial)\b', re.IGNORECASE), 'your credit profile at the time of assessment', 'Value judgment on the person'),
+        (re.compile(r'\byou(?:r)? (?:failed|inability) to (?:pay|repay|meet|manage)\b', re.IGNORECASE), 'repayment capacity based on our assessment', 'Implies personal failure'),
+        (re.compile(r'\byour debt (?:is|was) too (?:high|much|large)\b', re.IGNORECASE), 'your existing obligations relative to income', 'Sounds like a personal lecture'),
+        (re.compile(r'\byou (?:are|were) (?:in |carrying )?too much debt\b', re.IGNORECASE), 'your debt-to-income ratio', 'Blames the customer'),
+        (re.compile(r'\byou(?:r)? (?:have |had )?(?:a )?(?:bad|poor|terrible|awful) credit\b', re.IGNORECASE), 'your credit history at the time of assessment', 'Labels the person through their credit'),
+        (re.compile(r'\byou (?:defaulted|missed payments)\b', re.IGNORECASE), 'your repayment history as reported by credit bureaus', 'Accusatory tone'),
+        (re.compile(r'\byou went bankrupt\b', re.IGNORECASE), 'a prior bankruptcy event on your credit file', 'Defines the person by the event'),
+        (re.compile(r'\byou (?:have |had )?no savings\b', re.IGNORECASE), 'your savings position at the time of application', 'Implies irresponsibility'),
+        (re.compile(r'\byou are too (?:old|young)\b', re.IGNORECASE), 'the loan term relative to standard lending criteria', 'Direct age discrimination'),
+        (re.compile(r'\byou(?:r)? (?:do not|don[\u2019\']t) own (?:a |your )?(?:home|property|house)\b', re.IGNORECASE), 'your current accommodation arrangements', 'Implies lesser status for renters'),
+        (re.compile(r'\byou (?:are|were) (?:not |un)?(?:suitable|eligible|qualified|worthy)\b', re.IGNORECASE), 'your application did not meet our lending criteria at this time', 'Labels the person as deficient'),
+        (re.compile(r'\byou (?:are|were) (?:a |an )?(?:high|greater|elevated) risk\b', re.IGNORECASE), 'the risk profile of this application', 'Labels the human as a risk'),
     ]
 
     # Psychology-informed reframes: (pattern, suggestion, research_basis)
@@ -150,55 +150,55 @@ class GuardrailChecker:
     # Peak-end rule (Kahneman), dual-process theory (System 1/2)
     PSYCHOLOGY_REFRAMES = {
         'negative_framing': [
-            (r'\bwe cannot (?:offer|provide|approve|give|extend|grant)\b',
+            (re.compile(r'\bwe cannot (?:offer|provide|approve|give|extend|grant)\b', re.IGNORECASE),
              'reframe around what you CAN do: "what we can offer is..."',
              'Framing effect: gain-framed language improves perception by 15-30%'),
-            (r'\byou are unable to\b',
+            (re.compile(r'\byou are unable to\b', re.IGNORECASE),
              'reframe as situational: "your application at this time"',
              'Framing effect: attribute to situation, not the person'),
-            (r'\bthis is not possible\b',
+            (re.compile(r'\bthis is not possible\b', re.IGNORECASE),
              '"what is possible is..." or "an option available to you is..."',
              'Positive reframing converts constraints into alternatives'),
-            (r'\bthere is no (?:way|option|possibility)\b',
+            (re.compile(r'\bthere is no (?:way|option|possibility)\b', re.IGNORECASE),
              '"the options available to you include..."',
              'Loss aversion: finality triggers 2x the emotional pain'),
         ],
         'institutional_coldness': [
-            (r'\bthe bank has (?:determined|decided|concluded)\b',
+            (re.compile(r'\bthe bank has (?:determined|decided|concluded)\b', re.IGNORECASE),
              'use first person: "I\'ve reviewed..." or "after looking at your details..."',
              'Hayne Commission: institutional voice creates power imbalance'),
-            (r'\bour systems? (?:indicate|show|flag|record)\b',
+            (re.compile(r'\bour systems? (?:indicate|show|flag|record)\b', re.IGNORECASE),
              '"when I reviewed your application..."',
              'Monzo: active voice always; never hide behind systems'),
-            (r'\b(?:per|as per) our (?:policy|policies|records|guidelines)\b',
+            (re.compile(r'\b(?:per|as per) our (?:policy|policies|records|guidelines)\b', re.IGNORECASE),
              'explain the reason directly: "because..." or "the reason is..."',
              'Banking Code para 7(c): treat with sensitivity, respect and compassion'),
-            (r'\bit has been determined (?:that|by)\b',
+            (re.compile(r'\bit has been determined (?:that|by)\b', re.IGNORECASE),
              '"I\'ve found that..." or "after reviewing your application..."',
              'Passive voice hides accountability; active voice builds trust'),
         ],
         'finality_language': [
-            (r'\bthis decision is final\b',
+            (re.compile(r'\bthis decision is final\b', re.IGNORECASE),
              '"this decision is based on your circumstances at the time of application"',
              'ABA Guideline 2025: frame as "not yet", not permanent rejection'),
-            (r'\bthere is nothing (?:more|else|further) we can do\b',
+            (re.compile(r'\bthere is nothing (?:more|else|further) we can do\b', re.IGNORECASE),
              '"if your circumstances change, please reach out"',
              'Loss aversion: finality doubles emotional impact'),
-            (r'\bwe have closed your\b',
+            (re.compile(r'\bwe have closed your\b', re.IGNORECASE),
              'describe what happens next rather than what has ended',
              'Peak-end rule: the final message determines the lasting memory'),
-            (r'\bno further action (?:will be|is|can be) taken\b',
+            (re.compile(r'\bno further action (?:will be|is|can be) taken\b', re.IGNORECASE),
              '"if you\'d like to discuss this further..."',
              'Credit union research: supportive denials increase future loyalty'),
-            (r'\bthis matter is (?:closed|concluded|finalised)\b',
+            (re.compile(r'\bthis matter is (?:closed|concluded|finalised)\b', re.IGNORECASE),
              'end with forward-looking language and a direct contact',
              'Banking Code para 172: respond promptly to requests to discuss difficulties'),
         ],
         'weak_closings': [
-            (r'\bwe wish you (?:well|all the best|good luck|the best)\b',
+            (re.compile(r'\bwe wish you (?:well|all the best|good luck|the best)\b', re.IGNORECASE),
              'use specific warmth: "Thanks for coming to us, [Name]. We\'d love to help you find the right option when you\'re ready."',
              'Peak-end rule: generic well-wishes feel dismissive'),
-            (r'\bgood luck (?:with|in|for)\b',
+            (re.compile(r'\bgood luck (?:with|in|for)\b', re.IGNORECASE),
              '"if you\'d like to explore other options, I\'m here to help"',
              'Recency effect: final sentences determine overall satisfaction'),
         ],
@@ -207,16 +207,16 @@ class GuardrailChecker:
     # Grammar patterns that undermine professionalism in formal banking correspondence
     # Source: Australian Style Manual
     GRAMMAR_ISSUES = [
-        (r"\bcan[\u2019']t\b", "cannot"),
-        (r"\bwon[\u2019']t\b", "will not"),
-        (r"\bshouldn[\u2019']t\b", "should not"),
-        (r"\bcouldn[\u2019']t\b", "could not"),
-        (r"\bwouldn[\u2019']t\b", "would not"),
-        (r"\bhaven[\u2019']t\b", "have not"),
-        (r"\bhasn[\u2019']t\b", "has not"),
-        (r"\baren[\u2019']t\b", "are not"),
-        (r"\bwasn[\u2019']t\b", "was not"),
-        (r"\bweren[\u2019']t\b", "were not"),
+        (re.compile(r"\bcan[\u2019']t\b", re.IGNORECASE), "cannot"),
+        (re.compile(r"\bwon[\u2019']t\b", re.IGNORECASE), "will not"),
+        (re.compile(r"\bshouldn[\u2019']t\b", re.IGNORECASE), "should not"),
+        (re.compile(r"\bcouldn[\u2019']t\b", re.IGNORECASE), "could not"),
+        (re.compile(r"\bwouldn[\u2019']t\b", re.IGNORECASE), "would not"),
+        (re.compile(r"\bhaven[\u2019']t\b", re.IGNORECASE), "have not"),
+        (re.compile(r"\bhasn[\u2019']t\b", re.IGNORECASE), "has not"),
+        (re.compile(r"\baren[\u2019']t\b", re.IGNORECASE), "are not"),
+        (re.compile(r"\bwasn[\u2019']t\b", re.IGNORECASE), "was not"),
+        (re.compile(r"\bweren[\u2019']t\b", re.IGNORECASE), "were not"),
         # Note: "don't", "isn't", "it's", "we'd", "you'll", "we're", "I'm" excluded
         # intentionally — our tone calibration uses these for warmth.
     ]
@@ -255,7 +255,7 @@ class GuardrailChecker:
         found_terms = []
 
         for pattern in self.PROHIBITED_TERMS:
-            matches = re.findall(pattern, raw_lower)
+            matches = pattern.findall(raw_lower)
             if matches:
                 found_terms.extend(matches)
 
@@ -267,7 +267,7 @@ class GuardrailChecker:
             found_terms = []
 
             for pattern in self.PROHIBITED_TERMS:
-                matches = re.findall(pattern, text_lower)
+                matches = pattern.findall(text_lower)
                 if matches:
                     found_terms.extend(matches)
 
@@ -301,7 +301,7 @@ class GuardrailChecker:
         )
         # Strip Financial Claims Scheme disclosure (standard $250,000 guarantee)
         text_to_check = re.sub(
-            r'\*?[Tt]erm deposits? up to \$250,000.*?Financial Claims Scheme\.?',
+            r'\*?[Dd]eposits? up to \$250,000.*?Financial Claims Scheme\.?',
             '', text_to_check, flags=re.DOTALL,
         )
 
@@ -331,6 +331,16 @@ class GuardrailChecker:
         if pricing.get('establishment_fee_number'):
             ef = pricing['establishment_fee_number']
             valid_amounts.add(f"${ef:,.2f}")
+
+        # Add customer profile amounts as valid (for marketing emails that
+        # reference income, savings, etc. from the customer's actual data).
+        for profile_key in ('annual_income', 'savings_balance', 'checking_balance'):
+            profile_val = context.get(profile_key)
+            if profile_val is not None:
+                pv = float(profile_val)
+                valid_amounts.add(f"${pv:,.2f}")
+                valid_amounts.add(f"${pv:,.0f}")
+                valid_amounts.add(f"${int(pv):,}")
 
         # For marketing emails with NBO offers, also allow derived amounts
         # (interest earned, monthly savings targets, fortnightly amounts) that are
@@ -415,7 +425,7 @@ class GuardrailChecker:
         found_issues = []
 
         for pattern in self.AGGRESSIVE_TERMS:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found_issues.extend(matches)
 
@@ -434,7 +444,7 @@ class GuardrailChecker:
         found_phrases = []
 
         for pattern in self.AI_GIVEAWAY_TERMS:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found_phrases.extend(matches)
 
@@ -457,7 +467,7 @@ class GuardrailChecker:
         found_issues = []
 
         for pattern in self.UNPROFESSIONAL_FINANCIAL_TERMS:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found_issues.extend(matches)
 
@@ -652,7 +662,7 @@ class GuardrailChecker:
         text_lower = text.lower()
         found_issues = []
         for pattern, alternative, note in self.DIGNITY_VIOLATIONS:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found_issues.append(f'"{matches[0]}" \u2192 use "{alternative}" ({note})')
         passed = len(found_issues) == 0
@@ -667,7 +677,7 @@ class GuardrailChecker:
             if category == 'weak_closings' and decision == 'approved':
                 continue
             for pattern, suggestion, research in patterns:
-                matches = re.findall(pattern, text_lower)
+                matches = pattern.findall(text_lower)
                 if matches:
                     found_issues.append({'category': category, 'phrase': matches[0], 'suggestion': suggestion})
         # Cognitive load: sentences over 40 words (exclude regulatory footer)
@@ -689,7 +699,7 @@ class GuardrailChecker:
         """Check for casual contractions inappropriate for formal banking letters."""
         found_issues = []
         for pattern, formal_form in self.GRAMMAR_ISSUES:
-            matches = re.findall(pattern, text)
+            matches = pattern.findall(text)
             if matches:
                 found_issues.append(f'"{matches[0]}" \u2192 use "{formal_form}"')
         passed = len(found_issues) == 0
@@ -742,59 +752,59 @@ class GuardrailChecker:
     # email list because product descriptions legitimately use "comprehensive"
     # and "tailored", and customer follow-ups use "don't hesitate".
     MARKETING_AI_GIVEAWAY_TERMS = [
-        r'\bpleased to (?:confirm|inform|advise)\b',
-        r'\bdelighted\b',
-        r'\bthrilled\b',
-        r'\bgreat news\b',
-        r'\bexciting\b',
-        r'\bwe are happy to\b',
-        r'\bnavigate\b',
-        r'\bjourney\b',
-        r'\bleverage\b',
-        r'\bempower\b',
-        r'\brest assured\b',
-        r'\bevery step of the way\b',
-        r'\bwe understand how important\b',
-        r'\bwe understand this (?:may be|is) disappointing\b',
-        r'\bnot the outcome you were hoping for\b',
-        r'\bnot what you (?:were hoping|wanted|expected)\b',
-        r'\bwe value you as a customer\b',
-        r'\bwe (?:truly|genuinely) (?:want|care|value)\b',
-        r'\bwe are pleased to inform you\b',
-        r'\bwe want to be transparent about\b',
-        r'\bregardless of (?:this|the) outcome\b',
-        r'\bshould you have any questions at all\b',
-        r'\badditionally\b',
-        r'\bfurthermore\b',
-        r'\bmoreover\b',
-        r'\bin addition\b',
-        r'\bconsequently\b',
-        r'\bas such\b',
-        r'\baccordingly\b',
-        r'\bmay potentially\b',
-        r'\bcould potentially\b',
-        r'\bit is possible that\b',
-        r'\bmight be able to\b',
-        r'\bwe understand that\b',
-        r'\bwe recognise that\b',
-        r'\bwe would like to\b',
-        r'\bwe would like you to\b',
-        r'\bshould you wish to\b',
-        r'\bshould you require\b',
-        r'\bshould you have any\b',
-        r'\bwe wish you\b',
-        r'\bplease feel free to\b',
-        r'\bwe are committed to\b',
-        r'\bwe remain committed to\b',
-        r'\bwe are available\b',
-        r'\bthank you for choosing\b',
-        r'\bthank you for trusting\b',
-        r'\bin order to\b',
-        r'\bat this point in time\b',
-        r'\bit is important to note that\b',
-        r'\bit is worth noting that\b',
-        r'\bmoving forward\b',
-        r'\bgoing forward\b',
+        re.compile(r'\bpleased to (?:confirm|inform|advise)\b', re.IGNORECASE),
+        re.compile(r'\bdelighted\b', re.IGNORECASE),
+        re.compile(r'\bthrilled\b', re.IGNORECASE),
+        re.compile(r'\bgreat news\b', re.IGNORECASE),
+        re.compile(r'\bexciting\b', re.IGNORECASE),
+        re.compile(r'\bwe are happy to\b', re.IGNORECASE),
+        re.compile(r'\bnavigate\b', re.IGNORECASE),
+        re.compile(r'\bjourney\b', re.IGNORECASE),
+        re.compile(r'\bleverage\b', re.IGNORECASE),
+        re.compile(r'\bempower\b', re.IGNORECASE),
+        re.compile(r'\brest assured\b', re.IGNORECASE),
+        re.compile(r'\bevery step of the way\b', re.IGNORECASE),
+        re.compile(r'\bwe understand how important\b', re.IGNORECASE),
+        re.compile(r'\bwe understand this (?:may be|is) disappointing\b', re.IGNORECASE),
+        re.compile(r'\bnot the outcome you were hoping for\b', re.IGNORECASE),
+        re.compile(r'\bnot what you (?:were hoping|wanted|expected)\b', re.IGNORECASE),
+        re.compile(r'\bwe value you as a customer\b', re.IGNORECASE),
+        re.compile(r'\bwe (?:truly|genuinely) (?:want|care|value)\b', re.IGNORECASE),
+        re.compile(r'\bwe are pleased to inform you\b', re.IGNORECASE),
+        re.compile(r'\bwe want to be transparent about\b', re.IGNORECASE),
+        re.compile(r'\bregardless of (?:this|the) outcome\b', re.IGNORECASE),
+        re.compile(r'\bshould you have any questions at all\b', re.IGNORECASE),
+        re.compile(r'\badditionally\b', re.IGNORECASE),
+        re.compile(r'\bfurthermore\b', re.IGNORECASE),
+        re.compile(r'\bmoreover\b', re.IGNORECASE),
+        re.compile(r'\bin addition\b', re.IGNORECASE),
+        re.compile(r'\bconsequently\b', re.IGNORECASE),
+        re.compile(r'\bas such\b', re.IGNORECASE),
+        re.compile(r'\baccordingly\b', re.IGNORECASE),
+        re.compile(r'\bmay potentially\b', re.IGNORECASE),
+        re.compile(r'\bcould potentially\b', re.IGNORECASE),
+        re.compile(r'\bit is possible that\b', re.IGNORECASE),
+        re.compile(r'\bmight be able to\b', re.IGNORECASE),
+        re.compile(r'\bwe understand that\b', re.IGNORECASE),
+        re.compile(r'\bwe recognise that\b', re.IGNORECASE),
+        re.compile(r'\bwe would like to\b', re.IGNORECASE),
+        re.compile(r'\bwe would like you to\b', re.IGNORECASE),
+        re.compile(r'\bshould you wish to\b', re.IGNORECASE),
+        re.compile(r'\bshould you require\b', re.IGNORECASE),
+        re.compile(r'\bshould you have any\b', re.IGNORECASE),
+        re.compile(r'\bwe wish you\b', re.IGNORECASE),
+        re.compile(r'\bplease feel free to\b', re.IGNORECASE),
+        re.compile(r'\bwe are committed to\b', re.IGNORECASE),
+        re.compile(r'\bwe remain committed to\b', re.IGNORECASE),
+        re.compile(r'\bwe are available\b', re.IGNORECASE),
+        re.compile(r'\bthank you for choosing\b', re.IGNORECASE),
+        re.compile(r'\bthank you for trusting\b', re.IGNORECASE),
+        re.compile(r'\bin order to\b', re.IGNORECASE),
+        re.compile(r'\bat this point in time\b', re.IGNORECASE),
+        re.compile(r'\bit is important to note that\b', re.IGNORECASE),
+        re.compile(r'\bit is worth noting that\b', re.IGNORECASE),
+        re.compile(r'\bmoving forward\b', re.IGNORECASE),
+        re.compile(r'\bgoing forward\b', re.IGNORECASE),
     ]
 
     def check_marketing_ai_giveaway_language(self, text):
@@ -802,7 +812,7 @@ class GuardrailChecker:
         text_lower = text.lower()
         found_phrases = []
         for pattern in self.MARKETING_AI_GIVEAWAY_TERMS:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found_phrases.extend(matches)
         passed = len(found_phrases) == 0
@@ -836,15 +846,15 @@ class GuardrailChecker:
         """Marketing emails must not restate the decline decision."""
         text_lower = text.lower()
         decline_phrases = [
-            r'\b(declined|denied|rejected|unsuccessful|turned down)\b',
-            r'\b(did not meet|does not meet|failed to meet)\b',
-            r'\b(unable to approve|cannot approve|could not approve)\b',
-            r'\bapplication was not\b',
-            r'\bwe regret\b',
+            re.compile(r'\b(declined|denied|rejected|unsuccessful|turned down)\b', re.IGNORECASE),
+            re.compile(r'\b(did not meet|does not meet|failed to meet)\b', re.IGNORECASE),
+            re.compile(r'\b(unable to approve|cannot approve|could not approve)\b', re.IGNORECASE),
+            re.compile(r'\bapplication was not\b', re.IGNORECASE),
+            re.compile(r'\bwe regret\b', re.IGNORECASE),
         ]
         found = []
         for pattern in decline_phrases:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found.extend(matches)
         passed = len(found) == 0
@@ -855,20 +865,20 @@ class GuardrailChecker:
         """Marketing emails must not patronise declined customers."""
         text_lower = text.lower()
         patronising_patterns = [
-            r'\bwe know this is hard\b',
-            r'\bwe know you[\u2019\']re disappointed\b',
-            r'\bdon[\u2019\']t worry\b',
-            r'\bit[\u2019\']s okay\b',
-            r'\bcheer up\b',
-            r'\bkeep your chin up\b',
-            r'\bthis isn[\u2019\']t the end\b',
-            r'\bwe understand how you feel\b',
-            r'\bwe can imagine how\b',
-            r'\bunfortunately for you\b',
+            re.compile(r'\bwe know this is hard\b', re.IGNORECASE),
+            re.compile(r'\bwe know you[\u2019\']re disappointed\b', re.IGNORECASE),
+            re.compile(r'\bdon[\u2019\']t worry\b', re.IGNORECASE),
+            re.compile(r'\bit[\u2019\']s okay\b', re.IGNORECASE),
+            re.compile(r'\bcheer up\b', re.IGNORECASE),
+            re.compile(r'\bkeep your chin up\b', re.IGNORECASE),
+            re.compile(r'\bthis isn[\u2019\']t the end\b', re.IGNORECASE),
+            re.compile(r'\bwe understand how you feel\b', re.IGNORECASE),
+            re.compile(r'\bwe can imagine how\b', re.IGNORECASE),
+            re.compile(r'\bunfortunately for you\b', re.IGNORECASE),
         ]
         found = []
         for pattern in patronising_patterns:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found.extend(matches)
         passed = len(found) == 0
@@ -879,20 +889,20 @@ class GuardrailChecker:
         """Marketing emails must not create false urgency (Banking Code 2025 para 89-91)."""
         text_lower = text.lower()
         urgency_patterns = [
-            r'\blimited time\b',
-            r'\bact now\b',
-            r'\boffer expires\b',
-            r'\bdon[\u2019\']t miss out\b',
-            r'\brates are rising\b',
-            r'\block in now\b',
-            r'\bonly available to\b',
-            r'\bhurry\b',
-            r'\blast chance\b',
-            r'\bbefore it[\u2019\']s too late\b',
+            re.compile(r'\blimited time\b', re.IGNORECASE),
+            re.compile(r'\bact now\b', re.IGNORECASE),
+            re.compile(r'\boffer expires\b', re.IGNORECASE),
+            re.compile(r'\bdon[\u2019\']t miss out\b', re.IGNORECASE),
+            re.compile(r'\brates are rising\b', re.IGNORECASE),
+            re.compile(r'\block in now\b', re.IGNORECASE),
+            re.compile(r'\bonly available to\b', re.IGNORECASE),
+            re.compile(r'\bhurry\b', re.IGNORECASE),
+            re.compile(r'\blast chance\b', re.IGNORECASE),
+            re.compile(r'\bbefore it[\u2019\']s too late\b', re.IGNORECASE),
         ]
         found = []
         for pattern in urgency_patterns:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found.extend(matches)
         passed = len(found) == 0
@@ -907,18 +917,18 @@ class GuardrailChecker:
         """
         text_lower = text.lower()
         guarantee_patterns = [
-            r'\bguaranteed\s+(?:approval|to\s+be\s+approved)\b',
-            r'\b100%\s+(?:approval|chance|certain)\b',
-            r'\byou\s+will\s+(?:definitely|certainly)\s+(?:be\s+approved|qualify)\b',
-            r'\bpre[- ]?approved\b',
-            r'\binstant\s+approval\b',
-            r'\bautomatic(?:ally)?\s+approv(?:ed|al)\b',
-            r'\bno\s+(?:credit\s+)?check(?:s)?\s+(?:required|needed)\b',
-            r'\bno\s+questions\s+asked\b',
+            re.compile(r'\bguaranteed\s+(?:approval|to\s+be\s+approved)\b', re.IGNORECASE),
+            re.compile(r'\b100%\s+(?:approval|chance|certain)\b', re.IGNORECASE),
+            re.compile(r'\byou\s+will\s+(?:definitely|certainly)\s+(?:be\s+approved|qualify)\b', re.IGNORECASE),
+            re.compile(r'\bpre[- ]?approved\b', re.IGNORECASE),
+            re.compile(r'\binstant\s+approval\b', re.IGNORECASE),
+            re.compile(r'\bautomatic(?:ally)?\s+approv(?:ed|al)\b', re.IGNORECASE),
+            re.compile(r'\bno\s+(?:credit\s+)?check(?:s)?\s+(?:required|needed)\b', re.IGNORECASE),
+            re.compile(r'\bno\s+questions\s+asked\b', re.IGNORECASE),
         ]
         found = []
         for pattern in guarantee_patterns:
-            matches = re.findall(pattern, text_lower)
+            matches = pattern.findall(text_lower)
             if matches:
                 found.extend(matches)
         passed = len(found) == 0
@@ -968,6 +978,12 @@ class GuardrailChecker:
             email_type: 'decision' or 'marketing' — only affects which variant
                         of AI giveaway and format checks to use.
         """
+        # Guard against pathologically large input
+        if len(email_text) > 100_000:
+            return [{'check_name': 'Input Length', 'passed': False,
+                     'details': f'Email exceeds maximum length ({len(email_text):,} chars)',
+                     'weight': 15, 'quality_score': 0}]
+
         decision = context.get('decision', 'approved')
 
         # Pick the correct variant for checks that differ by email type

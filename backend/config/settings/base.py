@@ -48,6 +48,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django_prometheus.middleware.PrometheusBeforeMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'csp.middleware.CSPMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -163,6 +164,22 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_CREDENTIALS = True
 
+# Content Security Policy (django-csp 4.0+)
+# Uses CONTENT_SECURITY_POLICY dict format.
+# Start in report-only mode to avoid breaking existing functionality.
+CONTENT_SECURITY_POLICY = {
+    "REPORT_ONLY": True,
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],  # Required for DRF browsable API + shadcn
+        "img-src": ["'self'", "data:"],
+        "font-src": ["'self'"],
+        "connect-src": ["'self'"],
+        "frame-ancestors": ["'none'"],
+    },
+}
+
 # CSRF trusted origins (must match CORS origins for cookie-based auth)
 CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS[:]
 CSRF_COOKIE_SAMESITE = 'Lax'
@@ -221,6 +238,10 @@ PASSWORD_HASHERS = [
 
 # Field-level encryption key for PII (Fernet)
 FIELD_ENCRYPTION_KEY = os.environ.get('FIELD_ENCRYPTION_KEY', '')
+
+if not FIELD_ENCRYPTION_KEY and not DEBUG:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('FIELD_ENCRYPTION_KEY must be set in production')
 
 # Email (Gmail SMTP)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

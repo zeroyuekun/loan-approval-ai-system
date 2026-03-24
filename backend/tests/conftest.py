@@ -238,3 +238,35 @@ def escalated_agent_run(sample_application, db):
     )
 
     return run
+
+
+# ---------------------------------------------------------------------------
+# Celery integration fixtures (for tests that go through real Redis broker)
+# ---------------------------------------------------------------------------
+
+def _redis_available():
+    """Check if Redis broker is reachable."""
+    try:
+        import redis
+        r = redis.Redis(host='localhost', port=6379, db=0, socket_connect_timeout=1)
+        r.ping()
+        return True
+    except Exception:
+        return False
+
+
+skip_without_redis = pytest.mark.skipif(
+    not _redis_available(),
+    reason='Redis not available (tests run in Docker/CI)',
+)
+
+
+@pytest.fixture(scope='session')
+def celery_config():
+    """Configure Celery for integration testing."""
+    return {
+        'broker_url': 'redis://localhost:6379/0',
+        'result_backend': 'redis://localhost:6379/0',
+        'task_always_eager': False,
+        'task_eager_propagates': False,
+    }
