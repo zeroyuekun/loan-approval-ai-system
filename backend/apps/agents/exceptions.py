@@ -5,6 +5,16 @@ modes (e.g. rate limits, model not found) and truly unexpected errors, so
 that logging, retry logic, and failure categorisation are precise.
 """
 
+from enum import Enum
+
+
+class FailureCategory(str, Enum):
+    """Classifies pipeline step failures for monitoring and retry decisions."""
+    TRANSIENT = 'transient'
+    PERMANENT = 'permanent'
+    INFRASTRUCTURE = 'infrastructure'
+    UNKNOWN = 'unknown'
+
 
 class PipelineError(Exception):
     """Base for all pipeline errors."""
@@ -14,9 +24,11 @@ class PipelineError(Exception):
 class PipelineStepError(PipelineError):
     """A named pipeline step failed."""
 
-    def __init__(self, step_name: str, message: str, retryable: bool = False):
+    def __init__(self, step_name: str, message: str, retryable: bool = False,
+                 category: 'FailureCategory | None' = None):
         self.step_name = step_name
         self.retryable = retryable
+        self.category = category
         super().__init__(message)
 
 

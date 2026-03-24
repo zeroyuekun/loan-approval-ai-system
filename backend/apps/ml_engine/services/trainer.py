@@ -500,6 +500,19 @@ class ModelTrainer:
                 cv_scores.max() - cv_scores.min(),
             )
 
+        cv_report = {
+            'n_splits': 5,
+            'strategy': 'StratifiedKFold',
+            'scoring': 'roc_auc',
+            'fold_scores': cv_scores.tolist(),
+            'mean': cv_mean,
+            'std': cv_std,
+            'min': float(cv_scores.min()),
+            'max': float(cv_scores.max()),
+            'range': float(cv_scores.max() - cv_scores.min()),
+            'unstable': cv_unstable,
+        }
+
         if algorithm == 'xgb':
             raw_model, best_params = self._train_xgb(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
         else:
@@ -574,6 +587,7 @@ class ModelTrainer:
             'cv_auc_std': cv_std,
             'cv_auc_per_fold': cv_scores.tolist(),
             'cv_unstable': cv_unstable,
+            'cv_report': cv_report,
             'optimal_threshold': optimal_threshold,
             'calibration_method': getattr(model, 'calibration_method', 'unknown'),
             'group_thresholds': getattr(self, '_group_thresholds', {}),
@@ -685,7 +699,11 @@ class ModelTrainer:
             'min_samples_split': [2, 5],
         }
         rf = RandomForestClassifier(random_state=42, class_weight='balanced')
-        grid = GridSearchCV(rf, param_grid, cv=5, scoring='f1', n_jobs=-1, verbose=0)
+        grid = GridSearchCV(
+            rf, param_grid,
+            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+            scoring='f1', n_jobs=-1, verbose=0,
+        )
         fit_params = {}
         if sample_weights is not None:
             fit_params['sample_weight'] = sample_weights
@@ -780,8 +798,9 @@ class ModelTrainer:
             n_jobs=1,
         )
         search = RandomizedSearchCV(
-            xgb, param_grid, n_iter=30, cv=3, scoring='f1',
-            n_jobs=-1, verbose=0, random_state=42,
+            xgb, param_grid, n_iter=30,
+            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+            scoring='f1', n_jobs=-1, verbose=0, random_state=42,
         )
         fit_params = {}
         if sample_weights is not None:

@@ -1,6 +1,7 @@
 import axios from 'axios'
+import { toast } from 'sonner'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500/api/v1'
 
 const api = axios.create({
   baseURL: API_URL,
@@ -65,6 +66,14 @@ api.interceptors.response.use(
       } finally {
         refreshPromise = null
       }
+    }
+    // Show toast for non-401 errors (401s handled by refresh logic)
+    if (error.response?.status && error.response.status !== 401) {
+      const message = error.response?.data?.detail
+        || error.response?.data?.error
+        || error.message
+        || 'An unexpected error occurred'
+      toast.error(message)
     }
     return Promise.reject(error)
   }

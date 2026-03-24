@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatPercent } from '@/lib/utils'
 import { Cpu, Loader2, CheckCircle, XCircle } from 'lucide-react'
+import { toast } from 'sonner'
 
 function ElapsedTimer() {
   const [seconds, setSeconds] = useState(0)
@@ -35,12 +36,22 @@ export default function ModelMetricsPage() {
   const { data: metrics, isLoading, isError } = useModelMetrics()
   const { user } = useAuth()
   const { trainingStatus, trainingAlgorithm, ...trainModel } = useTrainModel()
-  const [selectedAlgorithm, setSelectedAlgorithm] = useState('rf')
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState('xgb')
   const isTraining = trainModel.isPending || trainingStatus === 'training'
-  const activeTrainingLabel = (trainingAlgorithm || selectedAlgorithm) === 'rf' ? 'Random Forest' : 'XGBoost'
+  const algorithmLabels: Record<string, string> = {
+    rf: 'Random Forest', xgb: 'XGBoost',
+  }
+  const activeTrainingLabel = algorithmLabels[trainingAlgorithm || selectedAlgorithm] || selectedAlgorithm
 
   const handleTrain = () => {
-    trainModel.mutate(selectedAlgorithm)
+    trainModel.mutate(selectedAlgorithm, {
+      onSuccess: () => {
+        toast.success('Model training started')
+      },
+      onError: () => {
+        toast.error('Failed to start training')
+      },
+    })
   }
 
   if (isLoading) {
@@ -76,8 +87,8 @@ export default function ModelMetricsPage() {
           {user?.role === 'admin' && (
             <div className="flex items-center gap-2 justify-center">
               <Select value={selectedAlgorithm} onChange={(e) => setSelectedAlgorithm(e.target.value)}>
-                <SelectItem value="rf">Random Forest</SelectItem>
                 <SelectItem value="xgb">XGBoost</SelectItem>
+                <SelectItem value="rf">Random Forest</SelectItem>
               </Select>
               <Button onClick={handleTrain} disabled={isTraining}>
                 {isTraining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -108,7 +119,7 @@ export default function ModelMetricsPage() {
     )
   }
 
-  const algorithmLabel = metrics.algorithm === 'rf' ? 'Random Forest' : 'XGBoost'
+  const algorithmLabel = algorithmLabels[metrics.algorithm] || metrics.algorithm
 
   return (
     <div className="space-y-6">
@@ -154,11 +165,6 @@ export default function ModelMetricsPage() {
                 <span className="text-xs text-blue-500">Typically 3-5 minutes</span>
               </div>
             </div>
-            <div className="hidden sm:block">
-              <div className="h-2 w-32 rounded-full bg-blue-100 overflow-hidden">
-                <div className="h-full w-full bg-blue-500 rounded-full animate-pulse origin-left" style={{ animation: 'pulse 2s ease-in-out infinite' }} />
-              </div>
-            </div>
           </CardContent>
         </Card>
       )}
@@ -184,25 +190,23 @@ export default function ModelMetricsPage() {
       )}
 
       {/* Key Metrics */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
         {[
           { label: 'Accuracy', value: metrics.accuracy },
           { label: 'Precision', value: metrics.precision },
           { label: 'Recall', value: metrics.recall },
           { label: 'F1 Score', value: metrics.f1_score },
           { label: 'AUC-ROC', value: metrics.auc_roc },
-          ...(metrics.gini_coefficient != null ? [{ label: 'Gini Coefficient', value: metrics.gini_coefficient }] : []),
+          ...(metrics.gini_coefficient != null ? [{ label: 'Gini', value: metrics.gini_coefficient }] : []),
           ...(metrics.ks_statistic != null ? [{ label: 'KS Statistic', value: metrics.ks_statistic }] : []),
           ...(metrics.brier_score != null ? [{ label: 'Brier Score', value: metrics.brier_score }] : []),
         ].map((m) => (
           <Card key={m.label}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">{m.label}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">
+            <CardContent className="pt-5 pb-4">
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">{m.label}</p>
+              <p className="text-2xl font-bold tabular-nums">
                 {m.value != null
-                  ? ['Brier Score', 'Gini Coefficient', 'KS Statistic'].includes(m.label)
+                  ? ['Brier Score', 'Gini', 'KS Statistic'].includes(m.label)
                     ? m.value.toFixed(4)
                     : formatPercent(m.value)
                   : '—'}
@@ -233,7 +237,7 @@ export default function ModelMetricsPage() {
       {/* Banking Metrics */}
       {(metrics.calibration_data?.fraction_of_positives || metrics.threshold_analysis?.sweep) && (
         <>
-          <h3 className="text-lg font-semibold mt-8">Banking Metrics</h3>
+          <h3 className="text-lg font-semibold pt-2">Banking Metrics</h3>
           <div className="grid gap-6 md:grid-cols-2">
             {metrics.calibration_data?.fraction_of_positives && (
               <CalibrationChart
@@ -257,7 +261,7 @@ export default function ModelMetricsPage() {
       {/* Fairness Analysis */}
       {metrics.fairness_metrics && Object.keys(metrics.fairness_metrics).length > 0 && (
         <>
-          <h3 className="text-lg font-semibold mt-8">Fairness Analysis</h3>
+          <h3 className="text-lg font-semibold pt-2">Fairness Analysis</h3>
           <FairnessCard fairnessMetrics={metrics.fairness_metrics} />
         </>
       )}
@@ -265,31 +269,42 @@ export default function ModelMetricsPage() {
       {/* Model Diagnostics */}
       {(metrics.decile_analysis?.deciles || metrics.training_metadata) && (
         <>
-          <h3 className="text-lg font-semibold mt-8">Model Diagnostics</h3>
+          <h3 className="text-lg font-semibold pt-2">Model Diagnostics</h3>
           <div className="grid gap-6 md:grid-cols-2">
             {metrics.decile_analysis?.deciles && (
               <DecileChart deciles={metrics.decile_analysis.deciles} />
             )}
             {metrics.training_metadata && Object.keys(metrics.training_metadata).length > 0 && (
               <Card>
-                <CardHeader>
+                <CardHeader className="pb-4">
                   <CardTitle className="text-base">Training Metadata</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  {Object.entries(metrics.training_metadata).map(([key, value]) => (
-                    <div key={key} className="flex justify-between">
-                      <span className="text-muted-foreground">{key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
-                      <span className="font-mono">
-                        {typeof value === 'number' ? (Number.isInteger(value) ? value : value.toFixed(4)) : String(value)}
-                      </span>
-                    </div>
-                  ))}
-                  {metrics.optimal_threshold != null && (
-                    <div className="flex justify-between pt-2 border-t">
-                      <span className="text-muted-foreground font-medium">Active Threshold</span>
-                      <span className="font-mono font-semibold">{metrics.optimal_threshold.toFixed(2)}</span>
-                    </div>
-                  )}
+                <CardContent className="px-0">
+                  <div className="divide-y divide-border">
+                    {Object.entries(metrics.training_metadata).map(([key, value]) => (
+                      <div key={key} className="grid grid-cols-2 gap-4 px-6 py-2.5">
+                        <span className="text-sm text-muted-foreground">
+                          {key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                        </span>
+                        <span
+                          className="text-sm font-mono text-right tabular-nums truncate"
+                          title={typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                        >
+                          {typeof value === 'number'
+                            ? (Number.isInteger(value) ? value.toLocaleString() : value.toFixed(4))
+                            : typeof value === 'object'
+                              ? JSON.stringify(value)
+                              : String(value)}
+                        </span>
+                      </div>
+                    ))}
+                    {metrics.optimal_threshold != null && (
+                      <div className="grid grid-cols-2 gap-4 px-6 py-2.5 bg-muted/30">
+                        <span className="text-sm font-medium text-muted-foreground">Active Threshold</span>
+                        <span className="text-sm font-mono font-semibold text-right tabular-nums">{metrics.optimal_threshold.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             )}

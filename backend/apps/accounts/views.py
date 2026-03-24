@@ -2,7 +2,7 @@ import logging
 
 from django.conf import settings as django_settings
 from django.contrib.auth.hashers import check_password, make_password
-from django.middleware.csrf import get_token as get_csrf_token
+from django.middleware.csrf import get_token as get_csrf_token, rotate_token
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -11,6 +11,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from django.utils.html import escape
 
 from apps.loans.models import AuditLog
 
@@ -213,6 +215,7 @@ class LoginView(generics.GenericAPIView):
             'user': UserSerializer(user).data,
         })
         _set_jwt_cookies(response, refresh.access_token, refresh)
+        rotate_token(request)
         get_csrf_token(request)
         return response
 
@@ -323,8 +326,8 @@ class StaffCustomerActivityView(generics.GenericAPIView):
                 'id': str(email.id),
                 'application_id': str(email.application_id),
                 'decision': email.decision,
-                'subject': email.subject,
-                'body': email.body,
+                'subject': escape(email.subject),
+                'body': escape(email.body),
                 'model_used': email.model_used,
                 'generation_time_ms': email.generation_time_ms,
                 'attempt_number': email.attempt_number,
@@ -372,8 +375,8 @@ class StaffCustomerActivityView(generics.GenericAPIView):
             marketing_emails = [
                 {
                     'id': str(me.id),
-                    'subject': me.subject,
-                    'body': me.body,
+                    'subject': escape(me.subject),
+                    'body': escape(me.body),
                     'passed_guardrails': me.passed_guardrails,
                     'guardrail_results': me.guardrail_results,
                     'generation_time_ms': me.generation_time_ms,

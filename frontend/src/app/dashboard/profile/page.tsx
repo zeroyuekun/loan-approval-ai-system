@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Save, Shield, UserCircle, Building2, CreditCard, Briefcase, Landmark, Home } from 'lucide-react'
+import { toast } from 'sonner'
 
 export default function ProfilePage() {
   const { user } = useAuth()
@@ -91,6 +92,7 @@ export default function ProfilePage() {
       queryClient.invalidateQueries({ queryKey: ['customerProfile'] })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
+      toast.success('Profile saved successfully')
     },
   })
 
@@ -539,7 +541,7 @@ export default function ProfilePage() {
               <Label htmlFor="primary_id_type">Document Type</Label>
               <Select id="primary_id_type" name="primary_id_type" value={(form.primary_id_type as string) || ''} onChange={handleChange}>
                 <SelectItem value="">Select...</SelectItem>
-                <SelectItem value="drivers_licence">Driver's Licence</SelectItem>
+                <SelectItem value="drivers_licence">Driver&apos;s Licence</SelectItem>
                 <SelectItem value="passport">Australian Passport</SelectItem>
               </Select>
             </div>
@@ -558,7 +560,7 @@ export default function ProfilePage() {
               <Select id="secondary_id_type" name="secondary_id_type" value={(form.secondary_id_type as string) || ''} onChange={handleChange}>
                 <SelectItem value="">Select...</SelectItem>
                 <SelectItem value="medicare">Medicare Card</SelectItem>
-                <SelectItem value="drivers_licence">Driver's Licence</SelectItem>
+                <SelectItem value="drivers_licence">Driver&apos;s Licence</SelectItem>
                 <SelectItem value="passport">Australian Passport</SelectItem>
                 <SelectItem value="immicard">ImmiCard</SelectItem>
               </Select>

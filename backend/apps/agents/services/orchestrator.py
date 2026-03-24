@@ -22,6 +22,25 @@ from .next_best_offer import NextBestOfferGenerator
 
 logger = logging.getLogger('agents.orchestrator')
 
+STEP_TIMEOUT_BUDGETS_MS = {
+    'ml_prediction': 30_000,
+    'email_generation': 60_000,
+    'bias_check': 60_000,
+    'ai_email_review': 60_000,
+    'email_delivery': 30_000,
+    'next_best_offers': 60_000,
+    'marketing_message_generation': 60_000,
+    'marketing_email_generation': 60_000,
+    'marketing_bias_check': 60_000,
+    'marketing_ai_review': 60_000,
+    'marketing_email_delivery': 30_000,
+    'human_escalation': 5_000,
+    'human_escalation_severe_bias': 5_000,
+    'human_escalation_low_confidence': 5_000,
+    'human_review_approved': 5_000,
+    'marketing_email_blocked': 5_000,
+}
+
 
 class PipelineOrchestrator:
     """Runs the full loan processing pipeline end to end."""
@@ -154,14 +173,14 @@ class PipelineOrchestrator:
                         application_id, prediction_result['prediction'], prediction_result['probability'])
         except (MLPredictionError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: ML prediction failed: %s', application_id, e)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category='transient')
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
                 LoanApplication.objects.filter(pk=application.pk).update(status='review')
             return agent_run
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at ml_prediction: %s', application_id, e, exc_info=True)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category=None)
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
                 LoanApplication.objects.filter(pk=application.pk).update(status='review')
@@ -190,7 +209,7 @@ class PipelineOrchestrator:
             })
         except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: email generation failed: %s', application_id, e)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category='transient')
             steps.append(step)
             self._finalize_run(agent_run, steps, start_time, error=str(e))
             with transaction.atomic():
@@ -198,7 +217,7 @@ class PipelineOrchestrator:
             return agent_run
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at email_generation: %s', application_id, e, exc_info=True)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category=None)
             steps.append(step)
             self._finalize_run(agent_run, steps, start_time, error=str(e))
             with transaction.atomic():
@@ -237,7 +256,7 @@ class PipelineOrchestrator:
             })
         except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: bias check failed: %s', application_id, e)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category='transient')
             # With retry logic inside BiasDetector.analyze(), reaching here means
             # a fundamental failure (e.g., missing API key, prescreen code bug).
             # Default to moderate score that triggers AI review rather than
@@ -246,7 +265,7 @@ class PipelineOrchestrator:
                            'categories': [], 'analysis': f'Bias check infrastructure error: {e}'}
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at bias_check: %s', application_id, e, exc_info=True)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category=None)
             bias_result = {'score': 65, 'flagged': True, 'requires_human_review': False,
                            'categories': [], 'analysis': f'Bias check infrastructure error: {e}'}
 
@@ -293,11 +312,11 @@ class PipelineOrchestrator:
                 })
             except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Application %s: AI email review failed: %s', application_id, e)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category='transient')
                 review_result = {'approved': False}
             except Exception as e:
                 logger.critical('Application %s: UNEXPECTED failure at ai_email_review: %s', application_id, e, exc_info=True)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category=None)
                 review_result = {'approved': False}
 
             steps.append(step)
@@ -389,10 +408,10 @@ class PipelineOrchestrator:
                 })
         except (ConnectionError, TimeoutError, OSError) as e:
             logger.error('Application %s: email delivery failed: %s', application_id, e)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category='transient')
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at email_delivery: %s', application_id, e, exc_info=True)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category=None)
         steps.append(step)
 
         # Step 5: NBO + Marketing pipeline (if denied)
@@ -490,11 +509,11 @@ class PipelineOrchestrator:
                 })
             except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Agent run %s: approval email generation failed: %s', agent_run_id, e)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category='transient')
                 email_result = None
             except Exception as e:
                 logger.critical('Agent run %s: UNEXPECTED failure at approval email_generation: %s', agent_run_id, e, exc_info=True)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category=None)
                 email_result = None
             steps.append(step)
 
@@ -543,10 +562,10 @@ class PipelineOrchestrator:
                         })
                 except (ConnectionError, TimeoutError, OSError) as e:
                     logger.error('Agent run %s: approval email delivery failed: %s', agent_run_id, e)
-                    step = self._fail_step(step, str(e))
+                    step = self._fail_step(step, str(e), failure_category='transient')
                 except Exception as e:
                     logger.critical('Agent run %s: UNEXPECTED failure at approval email_delivery: %s', agent_run_id, e, exc_info=True)
-                    step = self._fail_step(step, str(e))
+                    step = self._fail_step(step, str(e), failure_category=None)
                 steps.append(step)
 
         elif decision == 'denied':
@@ -600,10 +619,10 @@ class PipelineOrchestrator:
             })
         except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: NBO generation failed: %s', application.pk, e)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category='transient')
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at next_best_offers: %s', application.pk, e, exc_info=True)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category=None)
 
         steps.append(step)
 
@@ -628,10 +647,10 @@ class PipelineOrchestrator:
                 })
             except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Application %s: marketing message failed: %s', application.pk, e)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category='transient')
             except Exception as e:
                 logger.critical('Application %s: UNEXPECTED failure at marketing_message_generation: %s', application.pk, e, exc_info=True)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category=None)
 
             steps.append(step)
 
@@ -653,10 +672,10 @@ class PipelineOrchestrator:
                 })
             except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Application %s: marketing email generation failed: %s', application.pk, e)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category='transient')
             except Exception as e:
                 logger.critical('Application %s: UNEXPECTED failure at marketing_email_generation: %s', application.pk, e, exc_info=True)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category=None)
 
             steps.append(step)
 
@@ -724,10 +743,10 @@ class PipelineOrchestrator:
                             })
                     except (ConnectionError, TimeoutError, OSError) as e:
                         logger.error('Application %s: marketing email delivery failed: %s', application.pk, e)
-                        step = self._fail_step(step, str(e))
+                        step = self._fail_step(step, str(e), failure_category='transient')
                     except Exception as e:
                         logger.critical('Application %s: UNEXPECTED failure at marketing_email_delivery: %s', application.pk, e, exc_info=True)
-                        step = self._fail_step(step, str(e))
+                        step = self._fail_step(step, str(e), failure_category=None)
 
                     steps.append(step)
 
@@ -772,11 +791,11 @@ class PipelineOrchestrator:
             })
         except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error('Application %s: marketing bias check failed: %s', application.pk, e)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category='transient')
             marketing_bias_result = {'score': 100, 'flagged': True, 'requires_human_review': True}
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at marketing_bias_check: %s', application.pk, e, exc_info=True)
-            step = self._fail_step(step, str(e))
+            step = self._fail_step(step, str(e), failure_category=None)
             marketing_bias_result = {'score': 100, 'flagged': True, 'requires_human_review': True}
         steps.append(step)
 
@@ -807,11 +826,11 @@ class PipelineOrchestrator:
                 })
             except (LLMServiceError, ConnectionError, TimeoutError) as e:
                 logger.error('Application %s: marketing AI review failed: %s', application.pk, e)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category='transient')
                 review_result = {'approved': False}
             except Exception as e:
                 logger.critical('Application %s: UNEXPECTED failure at marketing_ai_review: %s', application.pk, e, exc_info=True)
-                step = self._fail_step(step, str(e))
+                step = self._fail_step(step, str(e), failure_category=None)
                 review_result = {'approved': False}
             steps.append(step)
 
@@ -834,21 +853,48 @@ class PipelineOrchestrator:
             'status': 'running',
             'started_at': datetime.now(timezone.utc).isoformat(),
             'completed_at': None,
+            'duration_ms': None,
+            'timeout_ms': STEP_TIMEOUT_BUDGETS_MS.get(step_name, 120_000),
             'result_summary': None,
             'error': None,
+            'failure_category': None,
         }
 
     def _complete_step(self, step, result_summary=None):
+        now = datetime.now(timezone.utc)
         step['status'] = 'completed'
-        step['completed_at'] = datetime.now(timezone.utc).isoformat()
+        step['completed_at'] = now.isoformat()
+        started = datetime.fromisoformat(step['started_at'])
+        step['duration_ms'] = int((now - started).total_seconds() * 1000)
         step['result_summary'] = result_summary
+        timeout_ms = step.get('timeout_ms', 120_000)
+        if step['duration_ms'] > timeout_ms:
+            logger.warning(
+                'Step %s exceeded timeout budget: %dms > %dms',
+                step['step_name'], step['duration_ms'], timeout_ms,
+            )
         return step
 
-    def _fail_step(self, step, error):
+    def _fail_step(self, step, error, failure_category=None):
+        now = datetime.now(timezone.utc)
         step['status'] = 'failed'
-        step['completed_at'] = datetime.now(timezone.utc).isoformat()
+        step['completed_at'] = now.isoformat()
+        started = datetime.fromisoformat(step['started_at'])
+        step['duration_ms'] = int((now - started).total_seconds() * 1000)
         step['error'] = error
+        step['failure_category'] = failure_category or self._categorize_error(error)
         return step
+
+    def _categorize_error(self, error):
+        """Classify an error string into a failure category for monitoring."""
+        error_lower = str(error).lower()
+        if any(term in error_lower for term in ['timeout', 'rate limit', '429', 'timed out']):
+            return 'transient'
+        if any(term in error_lower for term in ['auth', '401', '403', 'not found', 'model not found', 'invalid']):
+            return 'permanent'
+        if any(term in error_lower for term in ['redis', 'database', 'connection refused', 'connection reset', 'broken pipe']):
+            return 'infrastructure'
+        return 'unknown'
 
     def _finalize_run(self, agent_run, steps, start_time, error=None):
         total_time = int((time.time() - start_time) * 1000)

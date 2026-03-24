@@ -17,7 +17,10 @@ if not _secret_key and not DEBUG:
         'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
     )
 SECRET_KEY = _secret_key or 'django-insecure-dev-key-change-in-production'
-ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = [
+    h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+    if h.strip()
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -28,6 +31,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Third party
     'rest_framework',
+    'drf_spectacular',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_filters',
@@ -38,9 +42,11 @@ INSTALLED_APPS = [
     'apps.ml_engine',
     'apps.email_engine',
     'apps.agents',
+    'django_prometheus',
 ]
 
 MIDDLEWARE = [
+    'django_prometheus.middleware.PrometheusBeforeMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -49,6 +55,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -126,6 +133,7 @@ REST_FRAMEWORK = {
         'anon': '20/min',
         'user': '60/min',
     },
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 # Simple JWT
@@ -145,10 +153,14 @@ JWT_ACCESS_COOKIE_NAME = 'access_token'
 JWT_REFRESH_COOKIE_NAME = 'refresh_token'
 
 # CORS
-CORS_ALLOWED_ORIGINS = os.environ.get(
-    'CORS_ALLOWED_ORIGINS',
-    'http://localhost:3000,http://127.0.0.1:3000'
-).split(',')
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        'CORS_ALLOWED_ORIGINS',
+        'http://localhost:3000,http://127.0.0.1:3000'
+    ).split(',')
+    if origin.strip()
+]
 CORS_ALLOW_CREDENTIALS = True
 
 # CSRF trusted origins (must match CORS origins for cookie-based auth)
@@ -181,11 +193,25 @@ CACHES = {
 # ML Models
 ML_MODELS_DIR = BASE_DIR / 'ml_models'
 
+# ML Training Configuration
+ML_EARLY_STOPPING_ROUNDS = 30
+ML_COST_FP_FN_RATIO = 5  # FP cost : FN cost ratio for threshold optimization
+ML_FAIRNESS_TARGET_DI = 0.80  # Target disparate impact ratio (EEOC 80% rule)
+ML_OVERFITTING_THRESHOLD = 0.05  # Flag if train-test AUC gap exceeds this
+ML_MAX_BIN = 512  # XGBoost max_bin when using monotonic constraints
+
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = 'DENY'
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
+
+# HSTS (HTTP Strict Transport Security) — production only
+if not DEBUG:
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_SSL_REDIRECT = True
 
 # Password hashing — prefer Argon2, fall back to PBKDF2
 PASSWORD_HASHERS = [
@@ -225,3 +251,21 @@ BIAS_THRESHOLD_REVIEW = 80     # 61-80: high bias, AI review then human escalati
 MARKETING_BIAS_THRESHOLD_PASS = 50    # 0-50: compliant marketing email
 MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior review (Opus)
 # 71+: blocked, marketing email not sent
+
+# API Documentation (drf-spectacular)
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'AussieLoanAI API',
+    'DESCRIPTION': 'AI-powered loan approval system with ML prediction, email generation, and bias detection for Australian lending.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SCHEMA_PATH_PREFIX': '/api/v1/',
+    'COMPONENT_SPLIT_REQUEST': True,
+    'TAGS': [
+        {'name': 'Auth', 'description': 'Authentication and user management'},
+        {'name': 'Loans', 'description': 'Loan application CRUD'},
+        {'name': 'ML Engine', 'description': 'Model training, prediction, metrics, drift'},
+        {'name': 'Email Engine', 'description': 'Email generation with guardrails'},
+        {'name': 'Agents', 'description': 'Bias detection, NBO, orchestration pipeline'},
+        {'name': 'System', 'description': 'Health checks and monitoring'},
+    ],
+}
