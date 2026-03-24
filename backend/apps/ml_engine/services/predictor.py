@@ -13,6 +13,23 @@ from django.conf import settings
 
 from apps.ml_engine.models import ModelVersion
 from apps.ml_engine.services.consistency import DataConsistencyChecker
+from prometheus_client import Counter, Histogram
+
+ml_predictions_total = Counter(
+    'ml_predictions_total', 'Total ML predictions',
+    ['decision', 'model_version'],
+)
+ml_prediction_latency_seconds = Histogram(
+    'ml_prediction_latency_seconds', 'ML prediction computation time',
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+)
+ml_prediction_confidence = Histogram(
+    'ml_prediction_confidence', 'Prediction confidence distribution',
+    buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+ml_drift_warnings_total = Counter(
+    'ml_drift_warnings_total', 'Predictions with drift warnings',
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +45,64 @@ _cache_lock = threading.Lock()
 FEATURE_BOUNDS = {
     'annual_income': (0, 10_000_000),
     'credit_score': (0, 1200),  # Equifax Australia scale
-    'loan_amount': (0, 50_000_000),
+    'loan_amount': (0, 5_000_000),  # Aligned with LoanApplication.loan_amount MaxValueValidator
     'loan_term_months': (1, 600),
     'debt_to_income': (0.0, 100.0),
     'employment_length': (0, 60),
     'has_cosigner': (0, 1),
     'property_value': (0, 100_000_000),
-    'deposit_amount': (0, 50_000_000),
+    'deposit_amount': (0, 5_000_000),  # Cannot exceed loan amount
     'monthly_expenses': (0, 1_000_000),
     'existing_credit_card_limit': (0, 10_000_000),
-    'number_of_dependants': (0, 20),
+    'number_of_dependants': (0, 10),  # Aligned with LoanApplication.number_of_dependants MaxValueValidator
     'has_hecs': (0, 1),
     'has_bankruptcy': (0, 1),
+    'num_credit_enquiries_6m': (0, 50),
+    'worst_arrears_months': (0, 36),
+    'num_defaults_5yr': (0, 20),
+    'credit_history_months': (0, 600),
+    'total_open_accounts': (0, 50),
+    'num_bnpl_accounts': (0, 20),
+    'savings_balance': (0, 10_000_000),
+    'salary_credit_regularity': (0, 1),
+    'num_dishonours_12m': (0, 100),
+    'avg_monthly_savings_rate': (-1, 1),
+    'days_in_overdraft_12m': (0, 365),
+    'rba_cash_rate': (0, 20),
+    'unemployment_rate': (0, 30),
+    'property_growth_12m': (-50, 100),
+    'consumer_confidence': (0, 200),
+    'income_verification_gap': (0, 10),
+    'document_consistency_score': (0, 1),
+    # CCR features
+    'num_late_payments_24m': (0, 50),
+    'worst_late_payment_days': (0, 90),
+    'total_credit_limit': (0, 5_000_000),
+    'credit_utilization_pct': (0, 1),
+    'num_hardship_flags': (0, 10),
+    'months_since_last_default': (0, 999),
+    'num_credit_providers': (0, 30),
+    # BNPL-specific
+    'bnpl_total_limit': (0, 100_000),
+    'bnpl_utilization_pct': (0, 1),
+    'bnpl_late_payments_12m': (0, 50),
+    'bnpl_monthly_commitment': (0, 10_000),
+    # CDR/Open Banking transaction features
+    'income_source_count': (0, 20),
+    'rent_payment_regularity': (0, 1),
+    'utility_payment_regularity': (0, 1),
+    'essential_to_total_spend': (0, 1),
+    'subscription_burden': (0, 1),
+    'balance_before_payday': (-10_000, 1_000_000),
+    'min_balance_30d': (-10_000, 1_000_000),
+    'days_negative_balance_90d': (0, 90),
+    # Geographic risk
+    'postcode_default_rate': (0, 1),
+    # Behavioral features
+    'financial_literacy_score': (0.0, 1.0),
+    'prepayment_buffer_months': (0, 60),
+    'optimism_bias_flag': (0, 1),
+    'negative_equity_flag': (0, 1),
 }
 
 
@@ -109,9 +172,13 @@ def clear_model_cache():
 
 
 def compute_risk_grade(probability):
-    """Map approval probability to APS 220 standardized risk grade.
+    """Map approval probability to internal risk grade.
 
     Grades reflect probability of default (1 - approval probability).
+    These are INTERNAL grades for portfolio segmentation, not comparable
+    to external agency ratings (S&P, Moody's). External AAA implies PD
+    ~0.01%; our Grade 1 (best) covers PD < 0.5% — a much wider band
+    appropriate for consumer lending risk stratification per APS 220.
     """
     pd = 1.0 - probability  # probability of default
     if pd < 0.005:
@@ -133,12 +200,14 @@ def compute_risk_grade(probability):
 class ModelPredictor:
     """Loads the active model and runs predictions."""
 
-    CATEGORICAL_COLS = ['purpose', 'home_ownership', 'employment_type', 'applicant_type', 'state']
+    CATEGORICAL_COLS = ['purpose', 'home_ownership', 'employment_type', 'applicant_type', 'state', 'savings_trend_3m', 'industry_risk_tier']
 
-    def __init__(self):
-        self.model_version = ModelVersion.objects.filter(is_active=True).first()
-        if not self.model_version:
-            raise ValueError("No active model version found. Train a model first.")
+    def __init__(self, model_version=None):
+        if model_version is not None:
+            self.model_version = model_version
+        else:
+            from apps.ml_engine.services.model_selector import select_model_version
+            self.model_version = select_model_version()
 
         bundle = _load_bundle(self.model_version)
         self.model = bundle['model']
@@ -149,60 +218,22 @@ class ModelPredictor:
         self.categorical_cols = bundle.get('categorical_cols', self.CATEGORICAL_COLS)
         self.numeric_cols = bundle.get('numeric_cols', [])
         self.reference_distribution = bundle.get('reference_distribution', {})
-        self.imputation_values = bundle.get('imputation_values', {
-            'monthly_expenses': 2500.0,
-            'existing_credit_card_limit': 0.0,
-            'property_value': 0.0,
-            'deposit_amount': 0.0,
-        })
+        from apps.ml_engine.services.feature_engineering import DEFAULT_IMPUTATION_VALUES
+        self.imputation_values = bundle.get('imputation_values', DEFAULT_IMPUTATION_VALUES)
+        self.feature_bounds = bundle.get('feature_bounds', {})
+        self.group_thresholds = bundle.get('group_thresholds', {})
         self.conformal_scores = bundle.get('conformal_scores', np.array([]))
         self.consistency_checker = DataConsistencyChecker()
 
     @staticmethod
     def _add_derived_features(df):
-        """Add engineered features matching those computed during training."""
-        df = df.copy()
-        df['lvr'] = np.where(
-            df['property_value'] > 0,
-            df['loan_amount'] / df['property_value'],
-            0.0,
-        )
-        df['loan_to_income'] = df['loan_amount'] / df['annual_income']
-        monthly_income = df['annual_income'] / 12.0
-        df['credit_card_burden'] = np.where(
-            monthly_income > 0,
-            df['existing_credit_card_limit'] * 0.03 / monthly_income,
-            0.0,
-        )
-        df['expense_to_income'] = np.where(
-            df['annual_income'] > 0,
-            df['monthly_expenses'] * 12 / df['annual_income'],
-            0.0,
-        )
+        """Add engineered features matching those computed during training.
 
-        # Feature interactions (must match trainer.add_derived_features exactly)
-        df['lvr_x_dti'] = df['lvr'] * df['debt_to_income']
-        df['income_credit_interaction'] = (
-            np.log1p(df['annual_income']) * df['credit_score'] / 1200
-        )
-        monthly_commitments = (
-            df['existing_credit_card_limit'] * 0.03
-            + df['monthly_expenses']
-        )
-        df['serviceability_ratio'] = np.where(
-            monthly_income > 0,
-            np.clip(1.0 - monthly_commitments / monthly_income, -1.0, 1.0),
-            0.0,
-        )
-        emp_type_weight = df.get('employment_type', pd.Series(dtype=str)).map({
-            'payg_permanent': 1.0,
-            'contract': 0.7,
-            'self_employed': 0.6,
-            'payg_casual': 0.4,
-        }).fillna(0.5)
-        df['employment_stability'] = emp_type_weight * np.log1p(df['employment_length'])
-
-        return df
+        Delegates to the shared feature_engineering module (single source
+        of truth) to eliminate training/serving skew.
+        """
+        from apps.ml_engine.services.feature_engineering import compute_derived_features
+        return compute_derived_features(df)
 
     @staticmethod
     def _safe_get_state(application):
@@ -220,8 +251,11 @@ class ModelPredictor:
 
         Raises ValueError with details on any out-of-bounds values.
         """
+        bounds = {**FEATURE_BOUNDS}
+        bounds.update(self.feature_bounds)  # data-driven bounds override hardcoded
+
         errors = []
-        for col, (lo, hi) in FEATURE_BOUNDS.items():
+        for col, (lo, hi) in bounds.items():
             val = features.get(col)
             if val is None:
                 continue
@@ -306,6 +340,60 @@ class ModelPredictor:
             'has_hecs': int(getattr(application, 'has_hecs', 0)),
             'has_bankruptcy': int(getattr(application, 'has_bankruptcy', 0)),
             'state': self._safe_get_state(application),
+            # Bureau features
+            'num_credit_enquiries_6m': int(application.num_credit_enquiries_6m) if application.num_credit_enquiries_6m is not None else self.imputation_values.get('num_credit_enquiries_6m', 1),
+            'worst_arrears_months': int(application.worst_arrears_months) if application.worst_arrears_months is not None else self.imputation_values.get('worst_arrears_months', 0),
+            'num_defaults_5yr': int(application.num_defaults_5yr) if application.num_defaults_5yr is not None else self.imputation_values.get('num_defaults_5yr', 0),
+            'credit_history_months': int(application.credit_history_months) if application.credit_history_months is not None else self.imputation_values.get('credit_history_months', 120),
+            'total_open_accounts': int(application.total_open_accounts) if application.total_open_accounts is not None else self.imputation_values.get('total_open_accounts', 3),
+            'num_bnpl_accounts': int(application.num_bnpl_accounts) if application.num_bnpl_accounts is not None else self.imputation_values.get('num_bnpl_accounts', 0),
+            # Behavioural features
+            'is_existing_customer': int(getattr(application, 'is_existing_customer', False)),
+            'savings_balance': float(application.savings_balance) if application.savings_balance is not None else self.imputation_values.get('savings_balance', 10000),
+            'salary_credit_regularity': float(application.salary_credit_regularity) if application.salary_credit_regularity is not None else self.imputation_values.get('salary_credit_regularity', 0.8),
+            'num_dishonours_12m': int(application.num_dishonours_12m) if application.num_dishonours_12m is not None else self.imputation_values.get('num_dishonours_12m', 0),
+            'avg_monthly_savings_rate': float(application.avg_monthly_savings_rate) if application.avg_monthly_savings_rate is not None else self.imputation_values.get('avg_monthly_savings_rate', 0.10),
+            'days_in_overdraft_12m': int(application.days_in_overdraft_12m) if application.days_in_overdraft_12m is not None else self.imputation_values.get('days_in_overdraft_12m', 0),
+            # Macroeconomic context
+            'rba_cash_rate': float(application.rba_cash_rate) if application.rba_cash_rate is not None else self.imputation_values.get('rba_cash_rate', 4.10),
+            'unemployment_rate': float(application.unemployment_rate) if application.unemployment_rate is not None else self.imputation_values.get('unemployment_rate', 3.8),
+            'property_growth_12m': float(application.property_growth_12m) if application.property_growth_12m is not None else self.imputation_values.get('property_growth_12m', 5.0),
+            'consumer_confidence': float(application.consumer_confidence) if application.consumer_confidence is not None else self.imputation_values.get('consumer_confidence', 95.0),
+            # Application integrity
+            'income_verification_gap': float(application.income_verification_gap) if application.income_verification_gap is not None else self.imputation_values.get('income_verification_gap', 1.0),
+            'document_consistency_score': float(application.document_consistency_score) if application.document_consistency_score is not None else self.imputation_values.get('document_consistency_score', 0.9),
+            # Open Banking features (Plaid/Basiq-inspired)
+            'savings_trend_3m': getattr(application, 'savings_trend_3m', None) or 'flat',
+            'discretionary_spend_ratio': float(application.discretionary_spend_ratio) if getattr(application, 'discretionary_spend_ratio', None) is not None else self.imputation_values.get('discretionary_spend_ratio', 0.35),
+            'gambling_transaction_flag': int(getattr(application, 'gambling_transaction_flag', False)),
+            'bnpl_active_count': int(application.bnpl_active_count) if getattr(application, 'bnpl_active_count', None) is not None else self.imputation_values.get('bnpl_active_count', 0),
+            'overdraft_frequency_90d': int(application.overdraft_frequency_90d) if getattr(application, 'overdraft_frequency_90d', None) is not None else self.imputation_values.get('overdraft_frequency_90d', 0),
+            'income_verification_score': float(application.income_verification_score) if getattr(application, 'income_verification_score', None) is not None else self.imputation_values.get('income_verification_score', 0.85),
+            # CCR features
+            'num_late_payments_24m': int(application.num_late_payments_24m) if getattr(application, 'num_late_payments_24m', None) is not None else 0,
+            'worst_late_payment_days': int(application.worst_late_payment_days) if getattr(application, 'worst_late_payment_days', None) is not None else 0,
+            'total_credit_limit': float(application.total_credit_limit) if getattr(application, 'total_credit_limit', None) is not None else self.imputation_values.get('total_credit_limit', 20000.0),
+            'credit_utilization_pct': float(application.credit_utilization_pct) if getattr(application, 'credit_utilization_pct', None) is not None else self.imputation_values.get('credit_utilization_pct', 0.30),
+            'num_hardship_flags': int(application.num_hardship_flags) if getattr(application, 'num_hardship_flags', None) is not None else 0,
+            'months_since_last_default': float(application.months_since_last_default) if getattr(application, 'months_since_last_default', None) is not None else self.imputation_values.get('months_since_last_default', 999),
+            'num_credit_providers': int(application.num_credit_providers) if getattr(application, 'num_credit_providers', None) is not None else self.imputation_values.get('num_credit_providers', 2),
+            # BNPL-specific
+            'bnpl_total_limit': float(application.bnpl_total_limit) if getattr(application, 'bnpl_total_limit', None) is not None else 0.0,
+            'bnpl_utilization_pct': float(application.bnpl_utilization_pct) if getattr(application, 'bnpl_utilization_pct', None) is not None else 0.0,
+            'bnpl_late_payments_12m': int(application.bnpl_late_payments_12m) if getattr(application, 'bnpl_late_payments_12m', None) is not None else 0,
+            'bnpl_monthly_commitment': float(application.bnpl_monthly_commitment) if getattr(application, 'bnpl_monthly_commitment', None) is not None else 0.0,
+            # CDR/Open Banking transaction features
+            'income_source_count': int(application.income_source_count) if getattr(application, 'income_source_count', None) is not None else 1,
+            'rent_payment_regularity': float(application.rent_payment_regularity) if getattr(application, 'rent_payment_regularity', None) is not None else self.imputation_values.get('rent_payment_regularity', 0.85),
+            'utility_payment_regularity': float(application.utility_payment_regularity) if getattr(application, 'utility_payment_regularity', None) is not None else self.imputation_values.get('utility_payment_regularity', 0.90),
+            'essential_to_total_spend': float(application.essential_to_total_spend) if getattr(application, 'essential_to_total_spend', None) is not None else self.imputation_values.get('essential_to_total_spend', 0.50),
+            'subscription_burden': float(application.subscription_burden) if getattr(application, 'subscription_burden', None) is not None else self.imputation_values.get('subscription_burden', 0.05),
+            'balance_before_payday': float(application.balance_before_payday) if getattr(application, 'balance_before_payday', None) is not None else self.imputation_values.get('balance_before_payday', 2000.0),
+            'min_balance_30d': float(application.min_balance_30d) if getattr(application, 'min_balance_30d', None) is not None else self.imputation_values.get('min_balance_30d', 500.0),
+            'days_negative_balance_90d': int(application.days_negative_balance_90d) if getattr(application, 'days_negative_balance_90d', None) is not None else 0,
+            # Geographic risk
+            'postcode_default_rate': float(application.postcode_default_rate) if getattr(application, 'postcode_default_rate', None) is not None else self.imputation_values.get('postcode_default_rate', 0.015),
+            'industry_risk_tier': getattr(application, 'industry_risk_tier', None) or 'medium',
         }
 
         # Validate inputs
@@ -342,13 +430,7 @@ class ModelPredictor:
             # For calibrated models, extract the underlying estimator for TreeExplainer.
             # _CalibratedModel wraps the fitted tree model with isotonic calibration;
             # SHAP needs the raw tree model, not the wrapper.
-            underlying = self.model
-            if hasattr(underlying, '_calibrator') and hasattr(underlying, 'estimator'):
-                # Custom _CalibratedModel from trainer.py
-                underlying = underlying.estimator
-            elif hasattr(underlying, 'calibrated_classifiers_'):
-                cc = underlying.calibrated_classifiers_[0]
-                underlying = cc.estimator if hasattr(cc, 'estimator') else cc.base_estimator
+            underlying = self.model.get_underlying_estimator() if hasattr(self.model, 'get_underlying_estimator') else self.model
             explainer = shap.TreeExplainer(underlying)
             sv = explainer.shap_values(df[self.feature_cols])
             # For binary classification shap_values may return a list of two arrays
@@ -357,6 +439,10 @@ class ModelPredictor:
             for name, val in zip(self.feature_cols, sv[0]):
                 shap_values_dict[name] = round(float(val), 4)
             shap_available = True
+
+            calibrated_prob = float(probabilities[1])
+            if abs(float(np.array(explainer.expected_value).flat[0]) - calibrated_prob) > 0.05:
+                logger.warning('SHAP expected value (%.3f) diverges from calibrated probability (%.3f) — values are from uncalibrated base model', float(np.array(explainer.expected_value).flat[0]), calibrated_prob)
         except Exception:
             logger.warning("SHAP computation failed, returning empty shap_values", exc_info=True)
 
@@ -369,7 +455,14 @@ class ModelPredictor:
         # Use optimal threshold from model version if available
         threshold = self.model_version.optimal_threshold or 0.5
         probability = round(float(probabilities[1]), 4)
-        prediction_label = 'approved' if probability >= threshold else 'denied'
+
+        # Per-group fairness threshold (EEOC 80% rule compliance)
+        effective_threshold = threshold
+        employment_type = features.get('employment_type', '')
+        if self.group_thresholds and employment_type in self.group_thresholds:
+            effective_threshold = self.group_thresholds[employment_type]
+
+        prediction_label = 'approved' if probability >= effective_threshold else 'denied'
 
         # Flag borderline cases for human review
         requires_human_review = abs(probability - threshold) <= 0.10
@@ -381,8 +474,8 @@ class ModelPredictor:
         # Expected Loss (EL = PD x LGD x EAD) — Basel III / APRA APS 113
         from .metrics import MetricsService
         _ms = MetricsService()
-        lvr = (float(features.get('loan_amount', 0)) / float(features.get('property_value', 1))
-               if features.get('property_value', 0) > 0 else 0.0)
+        property_val = float(features.get('property_value') or 0)
+        lvr = (float(features.get('loan_amount', 0)) / property_val) if property_val > 0 else 0.0
         expected_loss = _ms.compute_expected_loss(
             pd_value=1.0 - probability,  # PD = probability of denial/default
             loan_amount=features.get('loan_amount', 0),
@@ -401,10 +494,12 @@ class ModelPredictor:
             'prediction': prediction_label,
             'probability': probability,
             'threshold_used': threshold,
+            'effective_threshold': effective_threshold,
             'requires_human_review': requires_human_review,
             'feature_importances': importances,
             'shap_values': shap_values_dict,
             'shap_available': shap_available,
+            'shap_model_note': 'Feature attributions computed on base model before probability calibration',
             'processing_time_ms': processing_time,
             'model_version': str(self.model_version.id),
             'consistency_warnings': consistency['warnings'],
@@ -429,6 +524,65 @@ class ModelPredictor:
                 result['counterfactuals'] = []
         else:
             result['counterfactuals'] = []
+
+        # Emit Prometheus metrics for ML observability
+        try:
+            ml_predictions_total.labels(
+                decision=result['prediction'],
+                model_version=str(self.model_version.id)[:8],
+            ).inc()
+            ml_prediction_latency_seconds.observe(result['processing_time_ms'] / 1000.0)
+            ml_prediction_confidence.observe(result['probability'])
+            if result.get('drift_warnings'):
+                ml_drift_warnings_total.inc()
+        except Exception:
+            pass  # Never let metrics emission break predictions
+
+        # === Champion/Challenger Shadow Scoring ===
+        # If challenger models exist, score with them too (shadow mode)
+        try:
+            from apps.ml_engine.models import ModelVersion as MV
+            from apps.ml_engine.models import PredictionLog
+
+            challengers = MV.objects.filter(
+                is_active=False,
+                traffic_percentage__gt=0,
+                traffic_percentage__lt=100,
+            ).exclude(pk=self.model_version.pk)
+
+            for challenger in challengers[:2]:  # Max 2 challengers
+                try:
+                    challenger_predictor = ModelPredictor(model_version=challenger)
+                    features_transformed_c = challenger_predictor._transform(features_df.copy())  # Use raw features, not already-transformed df
+                    challenger_prob = float(
+                        challenger_predictor.model.predict_proba(
+                            features_transformed_c[challenger_predictor.feature_cols]
+                        )[:, 1][0]
+                    )
+                    challenger_pred = (
+                        'approved'
+                        if challenger_prob >= (challenger.optimal_threshold or 0.5)
+                        else 'denied'
+                    )
+
+                    # Log shadow prediction (not used for decision)
+                    PredictionLog.objects.create(
+                        model_version=challenger,
+                        application=application,
+                        prediction=challenger_pred,
+                        probability=challenger_prob,
+                        feature_importances={},
+                        processing_time_ms=0,
+                    )
+                    logger.info(
+                        'Shadow score: challenger %s predicted %s (%.3f) vs champion %s (%.3f)',
+                        challenger.version, challenger_pred, challenger_prob,
+                        prediction_label, probability,
+                    )
+                except Exception as e:
+                    logger.warning('Shadow scoring failed for challenger %s: %s', challenger.version, e)
+        except Exception as e:
+            logger.debug('Shadow scoring check skipped: %s', e)
 
         return result
 
@@ -459,7 +613,7 @@ class ModelPredictor:
             std = ref.get('std', 1)
             percentiles = ref.get('percentiles', [])
 
-            if std <= 0:
+            if std < 0.001:
                 continue
 
             # Flag values beyond 3 standard deviations from training mean
@@ -599,9 +753,40 @@ class ModelPredictor:
 
         # Quantile of nonconformity scores at (1 - alpha) level
         n = len(self.conformal_scores)
+        sorted_scores = np.sort(self.conformal_scores)
+
+        # Small Sample Beta Correction (SSBC) for calibration sets < 500
+        # Reference: arxiv.org/abs/2509.15349
+        ssbc_applied = False
+        if n < 500:
+            try:
+                from scipy.stats import beta as beta_dist
+
+                # Adjust alpha for finite-sample coverage guarantee
+                # Target: P(coverage >= 1-alpha) >= 0.9
+                adjusted_alpha = alpha
+                for candidate_alpha in np.arange(alpha * 0.5, alpha, 0.001):
+                    k = int(np.ceil((1 - candidate_alpha) * (n + 1))) - 1
+                    k = min(k, n - 1)
+                    # Beta distribution for order statistic coverage
+                    coverage_prob = 1 - beta_dist.cdf(1 - alpha, n - k, k + 1)
+                    if coverage_prob >= 0.9:
+                        adjusted_alpha = candidate_alpha
+                        break
+
+                if adjusted_alpha != alpha:
+                    logger.info(
+                        'SSBC: adjusted alpha from %.3f to %.3f (n=%d, target coverage=0.9)',
+                        alpha, adjusted_alpha, n,
+                    )
+                    alpha = adjusted_alpha
+                    ssbc_applied = True
+            except ImportError:
+                logger.debug('scipy not available for SSBC correction')
+
         q_idx = int(np.ceil((1 - alpha) * (n + 1))) - 1
-        q_idx = min(q_idx, n - 1)
-        q = float(self.conformal_scores[q_idx])
+        q_idx = min(max(q_idx, 0), n - 1)
+        q = float(sorted_scores[q_idx])
 
         lower = max(0.0, probability - q)
         upper = min(1.0, probability + q)
@@ -611,6 +796,7 @@ class ModelPredictor:
             'upper': round(upper, 4),
             'width': round(upper - lower, 4),
             'confidence_level': 1 - alpha,
+            'ssbc_applied': ssbc_applied,
             'available': True,
         }
 
@@ -639,12 +825,12 @@ class ModelPredictor:
             # Define search bounds based on feature type
             feature_bounds = {
                 'credit_score': (300, 1200),
-                'annual_income': (30000, 600000),
+                'annual_income': (20000, 2000000),
                 'debt_to_income': (0, 10),
-                'employment_length': (0, 40),
-                'loan_amount': (5000, 3500000),
-                'monthly_expenses': (800, 10000),
-                'existing_credit_card_limit': (0, 50000),
+                'employment_length': (0, 50),
+                'loan_amount': (5000, 5000000),
+                'monthly_expenses': (500, 50000),
+                'existing_credit_card_limit': (0, 200000),
             }
 
             bounds = feature_bounds.get(feature_name)

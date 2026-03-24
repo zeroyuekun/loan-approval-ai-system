@@ -268,10 +268,15 @@ BIAS_THRESHOLD_PASS = 60       # 0-60: compliant, email can be sent
 BIAS_THRESHOLD_REVIEW = 80     # 61-80: high bias, AI review then human escalation
 # 81+: severe bias, direct human escalation
 
-# Marketing-specific bias thresholds (tighter — declined customers are vulnerable)
+# Marketing-specific bias thresholds (intentionally tighter than decision thresholds)
+# Rationale: marketing emails target declined customers who are in a vulnerable position.
+# ASIC REP 798 flagged insufficient consumer fairness policies — stricter marketing
+# bias controls demonstrate responsible AI governance for vulnerable consumers.
+# Decision emails: human review at 61-80, escalation at 81+
+# Marketing emails: AI review at 51-70, blocked at 71+ (no human override — conservative)
 MARKETING_BIAS_THRESHOLD_PASS = 50    # 0-50: compliant marketing email
-MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior review (Opus)
-# 71+: blocked, marketing email not sent
+MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior AI review
+# 71+: blocked entirely — marketing to vulnerable declined customers requires zero bias risk
 
 # API Documentation (drf-spectacular)
 SPECTACULAR_SETTINGS = {

@@ -47,7 +47,7 @@ class GuardrailChecker:
         re.compile(r'\brest assured\b', re.IGNORECASE),
         # re.compile(r'\bdon[\u2019\']t hesitate\b', re.IGNORECASE),  # Removed: legitimate in formal approval/customer-service correspondence
         # re.compile(r'\bwe are here to help\b', re.IGNORECASE),  # Removed: legitimate in hardship/customer-service sections
-        re.compile(r'\bwalk you through\b', re.IGNORECASE),
+        # re.compile(r'\bwalk you through\b', re.IGNORECASE),  # Removed: legitimate in formal banking ("walk you through the loan terms")
         re.compile(r'\bevery step of the way\b', re.IGNORECASE),
         re.compile(r'\bwe understand how important\b', re.IGNORECASE),
         re.compile(r'\bwe understand this (?:may be|is) disappointing\b', re.IGNORECASE),
