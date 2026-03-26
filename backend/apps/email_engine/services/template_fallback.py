@@ -63,6 +63,36 @@ _REASON_EXPLANATIONS = {
         'assessment determined to be a manageable repayment level based '
         'on your current financial position.'
     ),
+    'Debt service coverage outside acceptable range': (
+        'Debt servicing capacity: Based on your income, existing debts, and '
+        'living expenses, the total repayments required would exceed what we '
+        'consider manageable for your current financial position.'
+    ),
+    'Employment stability outside acceptable range': (
+        'Employment stability: Your current employment type or length of time '
+        'in your role fell outside the requirements for a loan of this size. '
+        'We look for a demonstrated period of stable income.'
+    ),
+    'Monthly repayment ratio outside acceptable range': (
+        'Repayment affordability: The estimated monthly repayments for this '
+        'loan would represent a higher share of your income than our '
+        'lending criteria allow.'
+    ),
+    'Stress index outside acceptable range': (
+        'Financial resilience: Our assessment considers how your repayments '
+        'would be affected if interest rates were to rise. Under a stressed '
+        'scenario, the repayments may not be sustainable.'
+    ),
+    'Bureau risk score outside acceptable range': (
+        'Credit history: The information in your credit file, including '
+        'enquiries, repayment history, and existing accounts, did not meet '
+        'our requirements for a loan of this type.'
+    ),
+    'Savings to loan ratio outside acceptable range': (
+        'Savings position: The level of genuine savings relative to the '
+        'loan amount was below what we require, as savings demonstrate '
+        'capacity to manage repayments.'
+    ),
 }
 
 # Improvement steps matched to denial reasons
@@ -89,6 +119,34 @@ _IMPROVEMENT_STEPS = {
     'Requested loan amount exceeds serviceable limit': (
         'Considering a reduced loan amount that sits within a sustainable '
         'repayment range relative to your income.'
+    ),
+    'Debt service coverage outside acceptable range': (
+        'Reducing your existing debt obligations before reapplying. '
+        'Paying down credit cards, personal loans, or BNPL balances will '
+        'improve your debt servicing capacity.'
+    ),
+    'Employment stability outside acceptable range': (
+        'Establishing a longer period in your current role. For permanent '
+        'employees, we typically look for at least 6 months of continuous '
+        'employment; for self-employed applicants, at least 2 years of trading.'
+    ),
+    'Monthly repayment ratio outside acceptable range': (
+        'Considering a smaller loan amount or a longer loan term to reduce '
+        'the monthly repayment, or increasing your income through additional '
+        'employment before reapplying.'
+    ),
+    'Stress index outside acceptable range': (
+        'Reducing your overall debt position so that your repayments remain '
+        'manageable even if interest rates were to rise by 2\u20133 percentage points.'
+    ),
+    'Bureau risk score outside acceptable range': (
+        'Reviewing your credit report for accuracy and taking steps to '
+        'strengthen your credit profile. Paying all bills on time and '
+        'limiting new credit applications for 6\u201312 months will help.'
+    ),
+    'Savings to loan ratio outside acceptable range': (
+        'Building your savings over time to demonstrate a pattern of regular '
+        'saving. A higher deposit or savings balance strengthens your application.'
     ),
 }
 
@@ -155,21 +213,21 @@ Please provide the required documentation to your lending officer at your earlie
 
     # Purpose-specific next steps
     if purpose.lower() == 'home':
-        next_steps = """Next Steps:
+        next_steps = f"""Next Steps:
 
 Please review the attached loan agreement, which outlines all terms and conditions:
 
   1. Sign and return your documents by {sign_by} \u2013 you can sign electronically via our secure portal, or return them by email or in person.
   2. Arrange settlement with your solicitor or conveyancer.
-  3. Ensure your building and contents insurance is in place before settlement.""".format(sign_by=sign_by)
+  3. Ensure your building and contents insurance is in place before settlement."""
     else:
-        next_steps = """Next Steps:
+        next_steps = f"""Next Steps:
 
 Please review the attached loan agreement, which outlines all terms and conditions:
 
   1. Sign and return your documents by {sign_by} \u2013 you can sign electronically via our secure portal, or return them by email or in person.
   2. Confirm your nominated bank account (BSB and account number) for the funds to be deposited into.
-  3. Once received, funds are typically in your account within 1\u20132 business days.""".format(sign_by=sign_by)
+  3. Once received, funds are typically in your account within 1\u20132 business days."""
 
     opening = (
         f'We are pleased to advise that your application for a '
@@ -283,9 +341,7 @@ def generate_denial_template(applicant_name, loan_amount, purpose, denial_reason
 
 Thank you for giving us the opportunity to review your application for a ${loan_amount:,.2f} {loan_type} Loan with AussieLoanAI.
 
-We have carefully reviewed your application and are unable to approve it at this time. Here is what we looked at and what you can do from here.
-
-This decision was based on a thorough review of your financial profile, specifically:
+After assessing your application against our lending criteria and responsible lending obligations, we are unable to offer you credit at this time. The key factors in our decision were:
 
 {factors_text}
 

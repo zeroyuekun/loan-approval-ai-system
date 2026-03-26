@@ -41,6 +41,7 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(settings, 'ORCHESTRATOR_STEP_TIMEOUTS', {
     'human_escalation_severe_bias': 5_000,
     'human_escalation_low_confidence': 5_000,
     'human_review_approved': 5_000,
+    'human_review_required': 5_000,
     'marketing_email_blocked': 5_000,
 })
 
@@ -317,6 +318,7 @@ class PipelineOrchestrator:
                     'confidence': prediction_result['probability'],
                     'feature_importances': prediction_result['feature_importances'],
                     'shap_values': prediction_result.get('shap_values', {}),
+                    'decision_waterfall': [],
                     'model_version': prediction_result['model_version'],
                 },
             )
@@ -550,6 +552,14 @@ class PipelineOrchestrator:
             steps.append(step)
             logger.warning('Application %s: severe bias (score=%s), escalating', application_id, bias_score)
 
+            step = self._start_step('human_review_required')
+            step = self._complete_step(step, result_summary={
+                'ml_recommendation': decision,
+                'review_category': 'bias_escalation',
+                'reason': f'Severe bias detected (score {bias_score})',
+            })
+            steps.append(step)
+
             with transaction.atomic():
                 LoanApplication.objects.filter(pk=application.pk).update(status='review')
             agent_run.status = 'escalated'
@@ -604,6 +614,14 @@ class PipelineOrchestrator:
                 steps.append(step)
                 logger.warning('Application %s: AI reviewer confirmed bias, escalating', application_id)
 
+                step = self._start_step('human_review_required')
+                step = self._complete_step(step, result_summary={
+                    'ml_recommendation': decision,
+                    'review_category': 'ai_reviewer_escalation',
+                    'reason': 'AI reviewer confirmed bias',
+                })
+                steps.append(step)
+
                 with transaction.atomic():
                     LoanApplication.objects.filter(pk=application.pk).update(status='review')
                 agent_run.status = 'escalated'
@@ -628,6 +646,14 @@ class PipelineOrchestrator:
                 logger.warning('Application %s: low-confidence AI approval (%.2f), escalating',
                                application_id, ai_confidence)
 
+                step = self._start_step('human_review_required')
+                step = self._complete_step(step, result_summary={
+                    'ml_recommendation': decision,
+                    'review_category': 'ai_reviewer_escalation',
+                    'reason': f'Low-confidence AI approval ({ai_confidence:.2f})',
+                })
+                steps.append(step)
+
                 with transaction.atomic():
                     LoanApplication.objects.filter(pk=application.pk).update(status='review')
                 agent_run.status = 'escalated'
@@ -647,7 +673,6 @@ class PipelineOrchestrator:
                 'final_decision', 'fail', 'ESCALATED_GUARDRAIL_FAILURE',
                 f'Email guardrails failed ({", ".join(failed_checks)}), escalated to human review',
             ))
-            self._save_waterfall(application, waterfall)
 
             logger.warning(
                 'Application %s: guardrails failed after %d attempts — escalating to human review. '
@@ -659,6 +684,21 @@ class PipelineOrchestrator:
                 'sent': False,
                 'reason': 'Guardrails failed — escalated to human review',
                 'failed_guardrails': failed_checks,
+            })
+            steps.append(step)
+
+            # Add ML recommendation for human review visibility
+            waterfall.append(self._waterfall_entry(
+                'human_review_required', 'pending', 'HUMAN_REVIEW_REQUIRED',
+                f'ML recommendation: {decision}. Guardrails failed — routed to human review.',
+            ))
+            self._save_waterfall(application, waterfall)
+
+            step = self._start_step('human_review_required')
+            step = self._complete_step(step, result_summary={
+                'ml_recommendation': decision,
+                'review_category': 'guardrail_failure',
+                'reason': f'Email guardrails failed: {", ".join(failed_checks)}',
             })
             steps.append(step)
 
@@ -722,17 +762,56 @@ class PipelineOrchestrator:
             final_reason,
             f'Pipeline completed with decision: {decision}',
         ))
+
+        # All decisions route to human review queue for manual observation.
+        # The ML recommendation is preserved in the LoanDecision record;
+        # a loan officer must approve/deny/regenerate via the Human Review page.
+        waterfall.append(self._waterfall_entry(
+            'human_review_required', 'pending', 'HUMAN_REVIEW_REQUIRED',
+            f'ML recommendation: {decision}. Routed to human review for manual observation.',
+        ))
         self._save_waterfall(application, waterfall)
 
-        # Finalize — update application status to final decision
+        # Determine review category based on application completeness
+        review_category = 'standard_review'
+        review_reason = 'All decisions require human review before finalisation'
+
+        # Check for incomplete application (missing critical fields)
+        missing_fields = []
+        if not application.annual_income or float(application.annual_income) <= 0:
+            missing_fields.append('annual_income')
+        if not application.credit_score:
+            missing_fields.append('credit_score')
+        if not application.employment_type:
+            missing_fields.append('employment_type')
+        if application.purpose == 'home' and not application.property_value:
+            missing_fields.append('property_value')
+        if not application.loan_amount or float(application.loan_amount) <= 0:
+            missing_fields.append('loan_amount')
+
+        if missing_fields:
+            review_category = 'incomplete_application'
+            review_reason = f'Incomplete application — missing: {", ".join(missing_fields)}'
+        elif conditions:
+            review_category = 'conditional_approval'
+            review_reason = f'Conditional approval — {len(conditions)} condition(s) require verification'
+
+        step = self._start_step('human_review_required')
+        step = self._complete_step(step, result_summary={
+            'ml_recommendation': decision,
+            'review_category': review_category,
+            'reason': review_reason,
+        })
+        steps.append(step)
+
         with transaction.atomic():
-            rows = LoanApplication.objects.filter(pk=application.pk).update(status=decision)
-            if rows == 0:
-                logger.error('Application %s: status update to %s affected 0 rows', application_id, decision)
-            else:
-                logger.info('Application %s: status updated to %s', application_id, decision)
+            LoanApplication.objects.filter(pk=application.pk).update(status='review')
+        agent_run.status = 'escalated'
         self._finalize_run(agent_run, steps, start_time)
-        logger.info('Application %s: pipeline completed with decision=%s', application_id, decision)
+        logger.info(
+            'Application %s: pipeline completed — ML recommendation=%s, routed to human review',
+            application_id, decision,
+        )
 
         return agent_run
 
@@ -766,6 +845,10 @@ class PipelineOrchestrator:
                 raise ValueError(f'No decision found for application {application.id}')
 
             decision = application.decision.decision
+
+            # Mark as running inside the lock to prevent duplicate resume
+            agent_run.status = 'running'
+            agent_run.save(update_fields=['status'])
 
         # Refetch with profile outside the lock (nullable relation can't be in select_for_update)
         application = (
@@ -867,12 +950,13 @@ class PipelineOrchestrator:
         elif decision == 'denied':
             # Extract denial reasons from stored feature importances
             denial_reasons = ''
-            if hasattr(application, 'decision') and application.decision.feature_importances:
-                top_factors = sorted(
-                    application.decision.feature_importances.items(),
-                    key=lambda x: x[1], reverse=True
-                )[:3]
-                denial_reasons = ', '.join(f'{k}: {v:.3f}' for k, v in top_factors)
+            try:
+                fi = application.decision.feature_importances
+                if fi:
+                    top_factors = sorted(fi.items(), key=lambda x: x[1], reverse=True)[:3]
+                    denial_reasons = ', '.join(f'{k}: {v:.3f}' for k, v in top_factors)
+            except (LoanDecision.DoesNotExist, AttributeError):
+                pass
 
             steps = self._run_nbo_and_marketing_pipeline(
                 application, agent_run, steps, denial_reasons, profile_context,
@@ -1011,7 +1095,7 @@ class PipelineOrchestrator:
                     marketing_email__isnull=True,
                 ).update(marketing_email=marketing_email_obj)
 
-                # Send if approved
+                # Send if approved, otherwise record why it was blocked
                 if send_approved:
                     step = self._start_step('marketing_email_delivery')
                     try:
@@ -1024,25 +1108,42 @@ class PipelineOrchestrator:
                                 email_result_marketing['body'],
                             )
                             if send_result['sent']:
+                                from django.utils import timezone as tz
+                                marketing_email_obj.sent = True
+                                marketing_email_obj.sent_at = tz.now()
+                                marketing_email_obj.save(update_fields=['sent', 'sent_at'])
                                 step = self._complete_step(step, result_summary={
                                     'sent': True,
                                     'recipient': recipient,
                                 })
                             else:
+                                marketing_email_obj.delivery_error = send_result.get('error', 'Send failed')
+                                marketing_email_obj.save(update_fields=['delivery_error'])
                                 step = self._fail_step(step, send_result.get('error', 'Send failed'))
                         else:
+                            marketing_email_obj.blocked_reason = 'no_recipient_email'
+                            marketing_email_obj.save(update_fields=['blocked_reason'])
                             step = self._complete_step(step, result_summary={
                                 'sent': False,
                                 'reason': 'No recipient email',
                             })
                     except (ConnectionError, TimeoutError, OSError) as e:
                         logger.error('Application %s: marketing email delivery failed: %s', application.pk, e)
+                        marketing_email_obj.delivery_error = str(e)
+                        marketing_email_obj.save(update_fields=['delivery_error'])
                         step = self._fail_step(step, str(e), failure_category='transient')
                     except Exception as e:
                         logger.critical('Application %s: UNEXPECTED failure at marketing_email_delivery: %s', application.pk, e, exc_info=True)
+                        marketing_email_obj.delivery_error = str(e)
+                        marketing_email_obj.save(update_fields=['delivery_error'])
                         step = self._fail_step(step, str(e), failure_category=None)
 
                     steps.append(step)
+                else:
+                    # Record why it was blocked
+                    reason = 'bias_check_failed' if email_result_marketing.get('passed_guardrails') else 'guardrails_failed'
+                    marketing_email_obj.blocked_reason = reason
+                    marketing_email_obj.save(update_fields=['blocked_reason'])
 
         return steps
 

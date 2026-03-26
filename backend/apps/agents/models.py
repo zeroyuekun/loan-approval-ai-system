@@ -118,10 +118,21 @@ class MarketingEmail(models.Model):
     attempt_number = models.IntegerField(default=1)
     passed_guardrails = models.BooleanField(default=False)
     guardrail_results = models.JSONField(default=list)
+
+    # Delivery tracking
+    sent = models.BooleanField(default=False, help_text='Whether the email was actually delivered via SMTP')
+    sent_at = models.DateTimeField(null=True, blank=True)
+    delivery_error = models.TextField(blank=True, default='', help_text='SMTP error message if delivery failed')
+    blocked_reason = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text='Why email was not sent (e.g. bias_check_failed, no_recipient)',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"MarketingEmail for {self.application_id}: {self.subject}"
+        status = 'sent' if self.sent else ('blocked' if self.blocked_reason else 'unsent')
+        return f"MarketingEmail for {self.application_id}: {self.subject} ({status})"
