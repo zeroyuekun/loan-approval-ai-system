@@ -48,13 +48,19 @@ LOGGING = {
         },
         'json': {
             '()': 'pythonjsonlogger.jsonlogger.JsonFormatter',
-            'format': '%(asctime)s %(name)s %(levelname)s %(message)s',
+            'format': '%(asctime)s %(name)s %(levelname)s %(correlation_id)s %(message)s',
+        },
+    },
+    'filters': {
+        'mask_pii': {
+            '()': 'config.logging_filters.PiiMaskingFilter',
         },
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'json',
+            'filters': ['mask_pii'],
         },
     },
     'root': {

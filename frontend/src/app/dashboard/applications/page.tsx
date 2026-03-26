@@ -7,9 +7,10 @@ import { ApplicationTable } from '@/components/applications/ApplicationTable'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem } from '@/components/ui/select'
-import { Search, Loader2 } from 'lucide-react'
+import { Search, Loader2, FileX } from 'lucide-react'
 import { agentsApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
 export default function ApplicationsPage() {
   const [page, setPage] = useState(1)
@@ -41,7 +42,7 @@ export default function ApplicationsPage() {
     setCheckAllState('loading')
     setCheckAllResult(null)
     try {
-      const { data } = await agentsApi.orchestrateAll()
+      const { data } = await agentsApi.orchestrateAll(true)
       setCheckAllResult({ queued: data.queued })
       setCheckAllState('done')
       // Refresh the applications list after a short delay
@@ -54,12 +55,11 @@ export default function ApplicationsPage() {
         setCheckAllResult(null)
       }, 5000)
     } catch {
+      toast.error('Failed to process applications. Please try again.')
       setCheckAllState('idle')
       setCheckAllResult(null)
     }
   }
-
-  const pendingCount = data?.results?.filter((a) => a.status === 'pending').length ?? 0
 
   return (
     <div className="space-y-6">
@@ -131,6 +131,14 @@ export default function ApplicationsPage() {
         page={page}
         onPageChange={setPage}
       />
+
+      {!isLoading && data && data.results?.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+          <FileX className="h-10 w-10 mb-3" />
+          <p className="text-sm font-medium">No applications found</p>
+          <p className="text-xs mt-1">Try adjusting your search or filters.</p>
+        </div>
+      )}
     </div>
   )
 }

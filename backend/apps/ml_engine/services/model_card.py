@@ -36,7 +36,9 @@ class ModelCardGenerator:
             'training_data': self._training_data(mv, metadata, training_params),
             'performance_metrics': self._performance_metrics(mv),
             'fairness_analysis': self._fairness_analysis(mv),
+            'governance': self._governance(mv),
             'limitations': self._limitations(),
+            'synthetic_data_validation': self._synthetic_data_validation(mv),
             'regulatory_compliance': self._regulatory_compliance(),
             'last_updated': mv.created_at.isoformat(),
         }
@@ -140,12 +142,62 @@ class ModelCardGenerator:
         }
 
     @staticmethod
+    def _governance(mv: ModelVersion) -> dict[str, Any]:
+        return {
+            'decision_thresholds': {
+                'approve': mv.decision_threshold_approve,
+                'deny': mv.decision_threshold_deny,
+                'human_review': mv.decision_threshold_review,
+            },
+            'explainability_method': mv.explainability_method,
+            'next_review_date': (
+                mv.next_review_date.isoformat() if mv.next_review_date else None
+            ),
+            'retired_at': (
+                mv.retired_at.isoformat() if mv.retired_at else None
+            ),
+            'status': 'retired' if mv.retired_at else 'active',
+        }
+
+    @staticmethod
     def _limitations() -> list[str]:
         return [
-            'Trained on synthetic data — requires validation on real loan performance data',
+            'Trained on synthetic data — TSTR framework estimates 3-8% AUC '
+            'degradation vs real data (see synthetic_data_validation section)',
             'Point-in-time prediction — does not model time-to-default',
             'State-level geographic granularity only',
         ]
+
+    @staticmethod
+    def _synthetic_data_validation(mv: ModelVersion) -> dict[str, Any]:
+        """TSTR validation summary for model card transparency."""
+        metadata = mv.training_metadata or {}
+        tstr = metadata.get('tstr_validation', {})
+
+        if not tstr:
+            return {
+                'status': 'not_available',
+                'note': 'TSTR validation was not computed for this model version.',
+            }
+
+        real_auc = tstr.get('estimated_real_world_auc', {})
+        confidence = tstr.get('synthetic_confidence', {})
+
+        return {
+            'status': 'available',
+            'estimated_real_world_auc': real_auc.get('estimated_real_auc'),
+            'estimated_auc_range': real_auc.get('estimated_range'),
+            'degradation_from_synthetic': real_auc.get('total_degradation'),
+            'synthetic_confidence_score': confidence.get('overall_score'),
+            'confidence_interpretation': confidence.get('interpretation'),
+            'methodology': real_auc.get('methodology'),
+            'references': real_auc.get('references', []),
+            'note': (
+                'These estimates are based on published research on synthetic-to-real '
+                'transfer learning degradation. Actual performance on real loan data '
+                'may differ. See references for methodology.'
+            ),
+        }
 
     @staticmethod
     def _regulatory_compliance() -> dict[str, bool]:

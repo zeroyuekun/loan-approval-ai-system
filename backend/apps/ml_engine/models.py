@@ -44,6 +44,32 @@ class ModelVersion(models.Model):
     fairness_metrics = models.JSONField(default=dict)
     training_metadata = models.JSONField(default=dict)
 
+    # Model governance (SR 11-7 / APRA CPG 235 alignment)
+    decision_threshold_approve = models.FloatField(
+        null=True, blank=True,
+        help_text='Confidence >= this threshold → approve',
+    )
+    decision_threshold_deny = models.FloatField(
+        null=True, blank=True,
+        help_text='Confidence <= this threshold → deny',
+    )
+    decision_threshold_review = models.FloatField(
+        null=True, blank=True,
+        help_text='Between deny and approve → human review',
+    )
+    next_review_date = models.DateField(
+        null=True, blank=True,
+        help_text='Scheduled performance review / revalidation date',
+    )
+    explainability_method = models.CharField(
+        max_length=50, default='shap_tree',
+        help_text='Explainability framework used (e.g. shap_tree, lime)',
+    )
+    retired_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='When this model version was retired from production',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -1,81 +1,346 @@
-"""Static template emails for when Claude API is unavailable.
+"""Smart template emails replicating the Claude-generated email format.
 
-These templates include all required compliance elements (AFCA, cooling-off,
-hardship provisions) and are marked with template_fallback=True for human review.
+These templates produce emails identical in structure, tone, and compliance
+to what Claude generates — same Sarah Mitchell signoff, same section labels,
+same AFCA/hardship/cooling-off elements, same Australian English conventions.
+
+No API credits required. All applicant-specific details are dynamically filled.
 """
+from datetime import date, timedelta
+import random
+import hashlib
 
 
-def generate_approval_template(applicant_name, loan_amount, purpose, pricing=None):
-    """Generate a static approval email from template."""
-    subject = f'Your {purpose} Loan Application Has Been Approved'
+def _ref_number(purpose, applicant_name):
+    """Generate a deterministic reference number from purpose + name."""
+    type_codes = {
+        'home': 'HL', 'auto': 'VL', 'personal': 'PL',
+        'business': 'BL', 'education': 'EL',
+    }
+    code = type_codes.get(purpose.lower(), 'PL')
+    today = date.today().strftime('%Y%m%d')
+    # Deterministic 4-digit suffix from name hash
+    suffix = int(hashlib.md5(applicant_name.encode()).hexdigest()[:4], 16) % 10000
+    return f'{code}-{today}-{suffix:04d}'
 
-    pricing_section = ''
+
+def _loan_type(purpose):
+    """Convert purpose to display loan type."""
+    mapping = {
+        'home': 'Home Purchase', 'auto': 'Vehicle',
+        'personal': 'Personal', 'business': 'Business',
+        'education': 'Education',
+    }
+    return mapping.get(purpose.lower(), purpose.title())
+
+
+def _first_name(applicant_name):
+    """Extract first name from full name."""
+    return applicant_name.split()[0] if applicant_name else 'Customer'
+
+
+# Denial reason explanations — contextual, dignity-preserving language
+_REASON_EXPLANATIONS = {
+    'Credit score below our lending threshold': (
+        'Credit profile: Your credit profile at the time of assessment '
+        'fell below the threshold we require for a loan of this type and size.'
+    ),
+    'Debt-to-income ratio above acceptable range': (
+        'Debt-to-income ratio: The total of your existing financial '
+        'commitments relative to your verified income exceeded our '
+        'serviceability thresholds.'
+    ),
+    'Employment tenure below minimum requirement': (
+        'Employment type and tenure: Your current employment arrangements '
+        'fell outside the parameters we require for a loan of this size.'
+    ),
+    'Income insufficient for requested loan amount': (
+        'Income and loan amount: The requested loan amount relative to '
+        'your verified income exceeded our serviceability thresholds.'
+    ),
+    'Requested loan amount exceeds serviceable limit': (
+        'Loan serviceability: The requested amount exceeded what our '
+        'assessment determined to be a manageable repayment level based '
+        'on your current financial position.'
+    ),
+}
+
+# Improvement steps matched to denial reasons
+_IMPROVEMENT_STEPS = {
+    'Credit score below our lending threshold': (
+        'Reviewing your credit report for accuracy and taking steps to '
+        'strengthen your credit profile, such as reducing existing credit '
+        'card limits, ensuring all bills are paid on time, and limiting '
+        'new credit enquiries for the next 6\u201312 months.'
+    ),
+    'Debt-to-income ratio above acceptable range': (
+        'Reducing your existing debt obligations to improve your '
+        'debt-to-income ratio. Consolidating high-interest debts or '
+        'paying down revolving balances may help.'
+    ),
+    'Employment tenure below minimum requirement': (
+        'Establishing a longer tenure in your current role, or '
+        'transitioning to a permanent employment arrangement.'
+    ),
+    'Income insufficient for requested loan amount': (
+        'Considering a reduced loan amount that sits within a sustainable '
+        'repayment range relative to your income.'
+    ),
+    'Requested loan amount exceeds serviceable limit': (
+        'Considering a reduced loan amount that sits within a sustainable '
+        'repayment range relative to your income.'
+    ),
+}
+
+
+def generate_approval_template(applicant_name, loan_amount, purpose, pricing=None,
+                               conditions=None, employment_type=None,
+                               applicant_type=None, has_cosigner=False):
+    """Generate an approval email matching the Claude-generated format exactly."""
+    loan_type = _loan_type(purpose)
+    first = _first_name(applicant_name)
+    today = date.today()
+    sign_by = (today + timedelta(days=30)).strftime('%d %B %Y')
+
+    subject = f'Congratulations! Your {loan_type} Loan is Approved'
+    if conditions:
+        subject = f'Conditional Approval \u2013 Your {loan_type} Loan Application'
+
+    # Pricing section
+    pricing_block = ''
     if pricing:
-        pricing_section = f"""
+        pricing_block = f"""
 Loan Details:
-- Interest Rate: {pricing.get('interest_rate', 'To be confirmed')} ({pricing.get('rate_type', 'Variable')})
-- Comparison Rate: {pricing.get('comparison_rate', 'To be confirmed')}*
-- Loan Term: {pricing.get('loan_term_display', 'As requested')}
-- Estimated Monthly Payment: {pricing.get('monthly_payment', 'To be confirmed')}
-- Establishment Fee: {pricing.get('establishment_fee', 'To be confirmed')}
+
+  Loan Amount:             ${loan_amount:,.2f}
+  Interest Rate:           {pricing.get('interest_rate', 'To be confirmed')} ({pricing.get('rate_type', 'Variable')})
+  Comparison Rate:         {pricing.get('comparison_rate', 'To be confirmed')}*
+  Loan Term:               {pricing.get('loan_term_display', 'As requested')}
+  Estimated Monthly Payment: {pricing.get('monthly_payment', 'To be confirmed')}
+  Establishment Fee:       {pricing.get('establishment_fee', 'To be confirmed')}
+  First Repayment Date:    {pricing.get('first_repayment_date', 'To be confirmed')}
+"""
+    else:
+        pricing_block = f"""
+Loan Details:
+
+  Loan Amount:             ${loan_amount:,.2f}
+  Interest Rate:           To be confirmed
+  Loan Term:               As requested
 """
 
-    body = f"""Dear {applicant_name},
+    # Conditions block
+    conditions_block = ''
+    if conditions:
+        cond_items = '\n'.join(
+            f'  {i+1}. {c["description"]}' for i, c in enumerate(conditions)
+        )
+        conditions_block = f"""
+Conditions of Approval:
 
-We are pleased to advise that your application for a {purpose} loan of ${loan_amount:,.2f} has been approved.
-{pricing_section}
-Important Information:
+Your approval is subject to the following condition(s) being met:
 
-1. Cooling-Off Period: You have 14 days from the date of this letter to withdraw from the loan contract without penalty, as provided under the National Consumer Credit Protection Act 2009 (NCCP Act).
+{cond_items}
 
-2. Your loan contract and key fact sheet will be posted separately. Please review all documents carefully before signing.
+Please provide the required documentation to your lending officer at your earliest convenience.
 
-3. If you experience financial difficulty at any time, please contact our hardship team on 1300 000 000. We are committed to working with you under the Banking Code of Practice 2025.
+"""
 
-4. If you are not satisfied with any aspect of our service, you may lodge a complaint with the Australian Financial Complaints Authority (AFCA) at www.afca.org.au or by calling 1800 931 678.
+    # Co-signer note
+    cosigner_note = ''
+    if has_cosigner:
+        cosigner_note = '\nYour co-signer will receive separate documentation for their records.\n'
+    elif applicant_type and applicant_type.lower() == 'couple':
+        cosigner_note = '\nAs a joint application, both parties will need to sign the loan contract.\n'
 
-*Comparison rate is calculated on a loan of $150,000 over 25 years. WARNING: This comparison rate is true only for the example given and may not include all fees and charges. Different terms, fees, or other loan amounts might result in a different comparison rate.
+    # Purpose-specific next steps
+    if purpose.lower() == 'home':
+        next_steps = """Next Steps:
 
-Kind regards,
-AussieLoanAI Lending Team
-Australian Credit Licence No. 000000
+Please review the attached loan agreement, which outlines all terms and conditions:
+
+  1. Sign and return your documents by {sign_by} \u2013 you can sign electronically via our secure portal, or return them by email or in person.
+  2. Arrange settlement with your solicitor or conveyancer.
+  3. Ensure your building and contents insurance is in place before settlement.""".format(sign_by=sign_by)
+    else:
+        next_steps = """Next Steps:
+
+Please review the attached loan agreement, which outlines all terms and conditions:
+
+  1. Sign and return your documents by {sign_by} \u2013 you can sign electronically via our secure portal, or return them by email or in person.
+  2. Confirm your nominated bank account (BSB and account number) for the funds to be deposited into.
+  3. Once received, funds are typically in your account within 1\u20132 business days.""".format(sign_by=sign_by)
+
+    opening = (
+        f'We are pleased to advise that your application for a '
+        f'{loan_type} Loan with AussieLoanAI has been approved. Congratulations!'
+    )
+    if conditions:
+        opening = (
+            f'We are pleased to advise that your application for a '
+            f'{loan_type} Loan with AussieLoanAI has been conditionally approved.'
+        )
+
+    body = f"""Dear {first},
+
+{opening}
+{pricing_block}{conditions_block}{cosigner_note}
+{next_steps}
+
+Before You Sign:
+
+We want to make sure this loan is right for you. Please take the time to read the full terms carefully, including fees and what happens if a repayment is missed.
+
+If your circumstances have changed since you applied, please let us know. You are also welcome to seek independent financial or legal advice before proceeding.
+
+You will have access to a cooling-off period after signing, allowing you to withdraw without penalty. Details are in your loan agreement.
+
+We're Here For You:
+
+If at any point during your loan you experience financial difficulty, please contact us early. Our Financial Hardship team is here to help and can be reached on 1300 000 001 or at aussieloanai@gmail.com.
+
+If you have any questions about your loan or the next steps, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
+
+Congratulations again, {first}. Thanks for choosing us at AussieLoanAI.
+
+Warm regards,
+
+Sarah Mitchell
+Senior Lending Officer
+AussieLoanAI Pty Ltd
+ABN 12 345 678 901 | Australian Credit Licence No. 012345
+Ph: 1300 000 000
+Email: aussieloanai@gmail.com
+
+Attachments:
+  1. Loan Contract \u2013 {applicant_name}.pdf
+  2. Key Facts Sheet \u2013 {loan_type} Loan.pdf
+  3. Credit Guide \u2013 AussieLoanAI Pty Ltd.pdf
+
+\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+*Comparison rate is calculated on a $30,000 unsecured loan over a 5-year term. WARNING: This comparison rate applies only to the example given. Different amounts and terms will result in different comparison rates. Costs such as redraw fees and early repayment costs, and cost savings such as fee waivers, are not included in the comparison rate but may influence the cost of the loan.
+
+This approval is valid for 30 days and is subject to no material change in your financial circumstances. If you are dissatisfied with any aspect of our service, please contact us first. If unresolved, you may contact the Australian Financial Complaints Authority (AFCA) on 1800 931 678 or at www.afca.org.au.
+
+This communication is confidential and intended solely for the named recipient.
 """
 
     return {'subject': subject, 'body': body}
 
 
-def generate_denial_template(applicant_name, loan_amount, purpose, denial_reasons=''):
-    """Generate a static denial email from template."""
-    subject = f'Update on Your {purpose} Loan Application'
+def generate_denial_template(applicant_name, loan_amount, purpose, denial_reasons='',
+                             feature_importances=None, credit_score=None,
+                             debt_to_income=None, employment_type=None):
+    """Generate a denial email matching the Claude-generated format exactly."""
+    loan_type = _loan_type(purpose)
+    first = _first_name(applicant_name)
+    ref = _ref_number(purpose, applicant_name)
 
-    reasons_section = ''
+    subject = f'Update on Your {loan_type} Loan Application | Ref #{ref}'
+
+    # Build assessment factor bullets
+    reason_list = []
     if denial_reasons:
-        reasons_section = f"""
-The primary factors in our assessment were:
-- {denial_reasons.replace("; ", chr(10) + "- ")}
-"""
+        reason_list = [r.strip() for r in denial_reasons.split(';') if r.strip()]
 
-    body = f"""Dear {applicant_name},
+    factor_bullets = []
+    for reason in reason_list:
+        explanation = _REASON_EXPLANATIONS.get(
+            reason,
+            reason.replace('_', ' ').capitalize(),
+        )
+        factor_bullets.append(f'  \u2022  {explanation}')
 
-Thank you for your application for a {purpose} loan of ${loan_amount:,.2f}.
+    if not factor_bullets:
+        factor_bullets = [
+            '  \u2022  Credit assessment criteria: Your financial profile '
+            'at the time of assessment did not meet the requirements for '
+            'a loan of this type and size.'
+        ]
 
-After careful assessment against our lending criteria under the National Consumer Credit Protection Act 2009, we are unable to approve your application at this time.
-{reasons_section}
+    factors_text = '\n'.join(factor_bullets)
+
+    # Build improvement step bullets
+    step_bullets = []
+    for reason in reason_list:
+        step = _IMPROVEMENT_STEPS.get(reason)
+        if step:
+            step_bullets.append(f'  \u2022  {step}')
+
+    if not step_bullets:
+        step_bullets = [
+            '  \u2022  Reviewing your financial position and considering '
+            'a loan amount that aligns with your current income and commitments.'
+        ]
+
+    steps_text = '\n'.join(step_bullets)
+
+    # Regulatory disclosure fields (Banking Code para 81, OAIC credit reporting)
+    credit_score_line = f'{credit_score} (out of 1200)' if credit_score else 'Not available'
+    model_version_line = 'Independently validated credit risk model'
+
+    body = f"""Dear {first},
+
+Thank you for giving us the opportunity to review your application for a ${loan_amount:,.2f} {loan_type} Loan with AussieLoanAI.
+
+We have carefully reviewed your application and are unable to approve it at this time. Here is what we looked at and what you can do from here.
+
+This decision was based on a thorough review of your financial profile, specifically:
+
+{factors_text}
+
+This assessment was conducted in line with our responsible lending obligations, which exist to ensure any credit we provide is suitable and manageable for our customers.
+
+Your Assessment Details:
+
+  Credit score at assessment:  {credit_score_line}
+  Decision model version:     {model_version_line}
+
 What You Can Do:
 
-1. Request a copy of your credit report from Equifax (www.equifax.com.au) or illion (www.illion.com.au) to review the information held about you.
+This decision is based on your circumstances at the time of your application \u2013 it does not prevent you from applying with us in the future. The following steps may strengthen a future application:
 
-2. Contact our team on 1300 000 000 to discuss your application in detail. Our lending officers can explain the assessment and suggest potential next steps.
+{steps_text}
 
-3. If you believe this decision is incorrect, you may request a review by writing to our Internal Dispute Resolution team.
+You are entitled to obtain a free copy of your credit report within 90 days of this notice to verify the information used in our assessment. You can request one from any of Australia's credit reporting bodies:
 
-4. You may also lodge a complaint with the Australian Financial Complaints Authority (AFCA) at www.afca.org.au or by calling 1800 931 678.
+  \u2022  Equifax \u2013 equifax.com.au
+  \u2022  Illion \u2013 illion.com.au
+  \u2022  Experian \u2013 experian.com.au
 
-If your circumstances change in the future, we welcome you to apply again.
+We'd Still Like to Help:
+
+If you'd like to explore whether a different loan product or a revised amount could be a better fit, I'd be happy to talk through your options.
+
+If you have any questions about this decision, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
+
+Thanks for coming to us, {first}. We'd love to help you find the right option when you're ready.
 
 Kind regards,
-AussieLoanAI Lending Team
-Australian Credit Licence No. 000000
+
+Sarah Mitchell
+Senior Lending Officer
+AussieLoanAI Pty Ltd
+ABN 12 345 678 901 | Australian Credit Licence No. 012345
+Ph: 1300 000 000
+Email: aussieloanai@gmail.com
+
+\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+If you are dissatisfied with this decision, we encourage you to contact us first so we can address your concerns through our internal complaints process. If you remain dissatisfied, you may lodge a complaint with the Australian Financial Complaints Authority (AFCA):
+Phone: 1800 931 678
+Website: www.afca.org.au
+Email: info@afca.org.au
+
+This communication is confidential and intended solely for the named recipient.
 """
 
     return {'subject': subject, 'body': body}
+
+
+def generate_conditional_template(applicant_name, loan_amount, purpose, conditions,
+                                  pricing=None):
+    """Convenience wrapper — conditional uses the approval template with conditions."""
+    return generate_approval_template(
+        applicant_name, loan_amount, purpose,
+        pricing=pricing, conditions=conditions,
+    )

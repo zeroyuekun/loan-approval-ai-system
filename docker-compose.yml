@@ -2,6 +2,14 @@ services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -23,6 +31,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -40,6 +56,14 @@ services:
     build: ./backend
     image: loan-approval-backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
     ports:
       - "8500:8000"
     depends_on:
@@ -68,6 +92,15 @@ services:
   celery_worker_ml:
     image: loan-approval-backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    entrypoint: []
     depends_on:
       db:
         condition: service_healthy
@@ -96,6 +129,15 @@ services:
   celery_worker_io:
     image: loan-approval-backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    entrypoint: []
     depends_on:
       db:
         condition: service_healthy
@@ -124,6 +166,15 @@ services:
   celery_beat:
     image: loan-approval-backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    entrypoint: []
     depends_on:
       db:
         condition: service_healthy
@@ -148,6 +199,14 @@ services:
       context: ./frontend
       target: builder
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     ports:
       - "3000:3000"
     depends_on:
