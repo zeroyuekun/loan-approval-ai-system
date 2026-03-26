@@ -3,6 +3,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.http import JsonResponse
 
 from . import views
+from .views_2fa import TOTPSetupView, TOTPVerifyView, TOTPStatusView, TOTPDisableView
 
 
 @ensure_csrf_cookie
@@ -23,4 +24,9 @@ urlpatterns = [
     path('customers/', views.StaffCustomerListView.as_view(), name='staff-customer-list'),
     path('customers/<int:user_id>/profile/', views.StaffCustomerProfileView.as_view(), name='staff-customer-profile'),
     path('customers/<int:user_id>/activity/', views.StaffCustomerActivityView.as_view(), name='staff-customer-activity'),
+    # Two-Factor Authentication (TOTP)
+    path('2fa/setup/', TOTPSetupView.as_view(), name='2fa-setup'),
+    path('2fa/verify/', TOTPVerifyView.as_view(), name='2fa-verify'),
+    path('2fa/status/', TOTPStatusView.as_view(), name='2fa-status'),
+    path('2fa/disable/', TOTPDisableView.as_view(), name='2fa-disable'),
 ]

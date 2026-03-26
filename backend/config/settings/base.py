@@ -36,6 +36,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_filters',
     'django_celery_results',
+    'django_otp',
+    'django_otp.plugins.otp_totp',
     # Local apps
     'apps.accounts',
     'apps.loans',
@@ -48,12 +50,14 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django_prometheus.middleware.PrometheusBeforeMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'config.middleware.CorrelationIdMiddleware',
     'csp.middleware.CSPMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django_otp.middleware.OTPMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'django_prometheus.middleware.PrometheusAfterMiddleware',
@@ -254,7 +258,7 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'aussieloanai@gmail.co
 
 # AI Budget Controls
 AI_DAILY_CALL_LIMIT = int(os.environ.get('AI_DAILY_CALL_LIMIT', '500'))
-AI_DAILY_BUDGET_LIMIT_USD = float(os.environ.get('AI_DAILY_BUDGET_LIMIT_USD', '50.0'))
+AI_DAILY_BUDGET_LIMIT_USD = float(os.environ.get('AI_DAILY_BUDGET_LIMIT_USD', '5.0'))
 AI_CIRCUIT_BREAKER_THRESHOLD = 3   # consecutive failures before circuit opens
 AI_CIRCUIT_BREAKER_COOLDOWN = 600  # seconds to keep circuit open (10 min)
 

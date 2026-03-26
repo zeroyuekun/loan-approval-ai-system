@@ -3,6 +3,8 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 import uuid
 
+from apps.common.models import SoftDeleteModel
+
 
 class AuditLog(models.Model):
     """Immutable audit trail for all significant actions in the system."""
@@ -34,7 +36,7 @@ class AuditLog(models.Model):
         return f"[{self.timestamp}] {self.action} on {self.resource_type}({self.resource_id})"
 
 
-class LoanApplication(models.Model):
+class LoanApplication(SoftDeleteModel):
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'
         PROCESSING = 'processing', 'Processing'

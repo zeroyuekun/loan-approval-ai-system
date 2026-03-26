@@ -62,4 +62,8 @@ app.conf.beat_schedule = {
         'task': 'apps.agents.tasks.compute_pipeline_sla',
         'schedule': crontab(hour=4, minute=0, day_of_week='monday'),
     },
+    'weekly-fairness-check': {
+        'task': 'apps.ml_engine.tasks.check_fairness_violations',
+        'schedule': crontab(hour=5, minute=0, day_of_week='monday'),
+    },
 }

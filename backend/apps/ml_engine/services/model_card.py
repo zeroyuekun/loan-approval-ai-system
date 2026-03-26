@@ -157,6 +157,7 @@ class ModelCardGenerator:
                 mv.retired_at.isoformat() if mv.retired_at else None
             ),
             'status': 'retired' if mv.retired_at else 'active',
+            'retraining_policy': mv.retraining_policy or {},
         }
 
     @staticmethod

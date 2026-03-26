@@ -66,17 +66,19 @@ export default function ApplicationsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-1 gap-2">
           <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <Input
               placeholder="Search applications..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
+              aria-label="Search applications by name or reference"
             />
           </div>
           <Select
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+            aria-label="Filter by application status"
           >
             <SelectItem value="">All Statuses</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
@@ -88,6 +90,7 @@ export default function ApplicationsPage() {
           <Select
             value={purposeFilter}
             onChange={(e) => { setPurposeFilter(e.target.value); setPage(1) }}
+            aria-label="Filter by loan purpose"
           >
             <SelectItem value="">All Purposes</SelectItem>
             <SelectItem value="home">Home</SelectItem>
@@ -134,7 +137,7 @@ export default function ApplicationsPage() {
 
       {!isLoading && data && data.results?.length === 0 && (
         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-          <FileX className="h-10 w-10 mb-3" />
+          <FileX className="h-10 w-10 mb-3" aria-hidden="true" />
           <p className="text-sm font-medium">No applications found</p>
           <p className="text-xs mt-1">Try adjusting your search or filters.</p>
         </div>

@@ -67,6 +67,15 @@ def train_model_task(self, algorithm='xgb', data_path=None):
         decile_analysis=metrics.get('decile_analysis', {}),
         fairness_metrics=metrics.get('fairness', {}),
         training_metadata=metrics.get('training_metadata', {}),
+        retraining_policy={
+            'cadence_days': 90,
+            'min_samples': 10000,
+            'auc_improvement_threshold': 0.005,
+            'max_psi_before_retrain': 0.25,
+            'requires_fairness_audit': True,
+            'validation': 'New model AUC must exceed current model by 0.5% on holdout set',
+        },
+        next_review_date=(timezone.now() + timedelta(days=90)).date(),
     )
 
     # Invalidate cached models so workers pick up the new version
@@ -119,6 +128,7 @@ def run_prediction_task(self, application_id):
             'confidence': result['probability'],
             'feature_importances': result['feature_importances'],
             'shap_values': result.get('shap_values', {}),
+            'decision_waterfall': [],
             'model_version': result['model_version'],
         },
     )
@@ -134,6 +144,59 @@ def run_prediction_task(self, application_id):
         'application_id': str(application_id),
         'prediction': result['prediction'],
         'probability': result['probability'],
+    }
+
+
+@shared_task(bind=True, name='apps.ml_engine.tasks.check_fairness_violations', time_limit=300)
+def check_fairness_violations(self):
+    """Weekly check of disparate impact ratios against the EEOC 80% rule.
+
+    Creates an AuditLog entry for any active model whose fairness metrics
+    show a disparate impact ratio below the configured threshold.
+    """
+    from apps.loans.models import AuditLog
+
+    threshold = getattr(settings, 'ML_FAIRNESS_TARGET_DI', 0.80)
+    active_models = ModelVersion.objects.filter(is_active=True)
+
+    violations = []
+    for mv in active_models:
+        fairness = mv.fairness_metrics or {}
+        for attr, data in fairness.items():
+            if not isinstance(data, dict):
+                continue
+            di_ratio = data.get('disparate_impact_ratio')
+            if di_ratio is not None and di_ratio < threshold:
+                violations.append({
+                    'model_version': str(mv.id),
+                    'algorithm': mv.algorithm,
+                    'attribute': attr,
+                    'disparate_impact_ratio': round(di_ratio, 4),
+                    'threshold': threshold,
+                })
+
+    if violations:
+        logger.warning(
+            'Fairness violations detected: %d attribute(s) below %.0f%% DI threshold',
+            len(violations), threshold * 100,
+        )
+        AuditLog.objects.create(
+            action='fairness_violation_detected',
+            resource_type='ModelVersion',
+            resource_id=','.join(set(v['model_version'] for v in violations)),
+            details={
+                'violations': violations,
+                'threshold': threshold,
+                'checked_at': timezone.now().isoformat(),
+            },
+        )
+    else:
+        logger.info('Fairness check passed: all active models above %.0f%% DI threshold', threshold * 100)
+
+    return {
+        'status': 'violations_found' if violations else 'all_clear',
+        'violation_count': len(violations),
+        'violations': violations,
     }
 
 

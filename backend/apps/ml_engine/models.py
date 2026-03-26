@@ -69,6 +69,10 @@ class ModelVersion(models.Model):
         null=True, blank=True,
         help_text='When this model version was retired from production',
     )
+    retraining_policy = models.JSONField(
+        default=dict, blank=True,
+        help_text='Retraining cadence, validation criteria, and data requirements (SR 11-7)',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from apps.accounts.fields import EncryptedCharField  # noqa: F401 — used by this module and migrations
 from apps.accounts.utils.encryption import get_fernet
+from apps.common.models import SoftDeleteModel
 
 # Backward-compatible alias — existing tests and commands import _get_fernet from here.
 _get_fernet = get_fernet
@@ -110,13 +111,13 @@ class Industry(models.TextChoices):
     OTHER_SERVICES = 'other_services', 'Other Services'
 
 
-class CustomerProfile(models.Model):
+class CustomerProfile(SoftDeleteModel):
     """Tracks a customer's personal details, compliance documents, and banking history."""
 
     # PII ENCRYPTION NOTE: primary_id_number and secondary_id_number use
-    # EncryptedCharField (Fernet AES-128-CBC). Other PII fields (DOB, income,
-    # address) stored in plaintext for ORM query/filter compatibility.
-    # Full PII-at-rest: use PostgreSQL pgcrypto or RDS encrypted storage.
+    # EncryptedCharField (Fernet AES-128-CBC). Address fields use EncryptedCharField
+    # for at-rest protection. Income/DOB remain in plaintext for ORM query/filter
+    # compatibility. Full PII-at-rest: use PostgreSQL pgcrypto or RDS encrypted storage.
 
     class Tier(models.TextChoices):
         STANDARD = 'standard', 'Standard'
@@ -148,9 +149,9 @@ class CustomerProfile(models.Model):
 
     # ── Personal details (NCCP Act 2009 responsible lending) ──
     date_of_birth = models.DateField(null=True, blank=True)
-    phone = models.CharField(max_length=20, blank=True, help_text="Australian mobile or landline")
-    address_line_1 = models.CharField(max_length=255, blank=True)
-    address_line_2 = models.CharField(max_length=255, blank=True)
+    phone = EncryptedCharField(max_length=500, blank=True, help_text="Australian mobile or landline")
+    address_line_1 = EncryptedCharField(max_length=500, blank=True)
+    address_line_2 = EncryptedCharField(max_length=500, blank=True)
     suburb = models.CharField(max_length=100, blank=True)
     state = models.CharField(max_length=3, blank=True, help_text="e.g. NSW, VIC, QLD")
     postcode = models.CharField(max_length=10, blank=True)
@@ -166,7 +167,7 @@ class CustomerProfile(models.Model):
     is_politically_exposed = models.BooleanField(default=False, help_text="PEP status under AML/CTF rules")
 
     # ── Employment ──
-    employer_name = models.CharField(max_length=255, blank=True, default='')
+    employer_name = EncryptedCharField(max_length=500, blank=True, default='')
     occupation = models.CharField(max_length=100, blank=True, default='')
     industry = models.CharField(max_length=30, choices=Industry.choices, blank=True, default='')
     employment_status = models.CharField(max_length=20, choices=EmploymentStatus.choices, blank=True, default='')
