@@ -11,7 +11,7 @@ from typing import Any
 
 from django.utils import timezone
 
-from apps.ml_engine.models import ModelVersion
+from apps.ml_engine.models import ModelValidationReport, ModelVersion
 
 
 class ModelCardGenerator:
@@ -37,6 +37,7 @@ class ModelCardGenerator:
             'performance_metrics': self._performance_metrics(mv),
             'fairness_analysis': self._fairness_analysis(mv),
             'governance': self._governance(mv),
+            'independent_validation': self._independent_validation(mv),
             'limitations': self._limitations(),
             'synthetic_data_validation': self._synthetic_data_validation(mv),
             'regulatory_compliance': self._regulatory_compliance(),
@@ -158,6 +159,34 @@ class ModelCardGenerator:
             ),
             'status': 'retired' if mv.retired_at else 'active',
             'retraining_policy': mv.retraining_policy or {},
+        }
+
+    @staticmethod
+    def _independent_validation(mv: ModelVersion) -> dict[str, Any]:
+        latest = (
+            ModelValidationReport.objects
+            .filter(model_version=mv)
+            .order_by('-validation_date')
+            .first()
+        )
+        if not latest:
+            return {
+                'status': 'not_validated',
+                'note': 'No independent validation report exists for this model version.',
+            }
+        return {
+            'status': 'validated',
+            'outcome': latest.get_outcome_display(),
+            'validator': latest.validator_name,
+            'validator_role': latest.validator_role,
+            'validation_date': latest.validation_date.isoformat(),
+            'methodology': latest.methodology,
+            'findings_summary': latest.findings[:500],
+            'signed_off': latest.signed_off,
+            'next_validation_due': (
+                latest.next_validation_due.isoformat()
+                if latest.next_validation_due else None
+            ),
         }
 
     @staticmethod

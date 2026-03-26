@@ -66,4 +66,8 @@ app.conf.beat_schedule = {
         'task': 'apps.ml_engine.tasks.check_fairness_violations',
         'schedule': crontab(hour=5, minute=0, day_of_week='monday'),
     },
+    'weekly-data-retention': {
+        'task': 'apps.loans.tasks.enforce_data_retention',
+        'schedule': crontab(hour=6, minute=0, day_of_week='sunday'),
+    },
 }

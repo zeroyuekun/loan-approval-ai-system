@@ -113,6 +113,75 @@ class ModelVersion(models.Model):
             super().save(*args, **kwargs)
 
 
+class ModelValidationReport(models.Model):
+    """Independent validation report for SR 11-7 compliance.
+
+    Tracks who validated a model, when, what they tested, and whether
+    the model was approved for production use. The validator must be
+    someone not involved in model development.
+    """
+
+    class Outcome(models.TextChoices):
+        APPROVED = 'approved', 'Approved for Production'
+        CONDITIONAL = 'conditional', 'Approved with Conditions'
+        REJECTED = 'rejected', 'Rejected'
+        PENDING = 'pending', 'Pending Review'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    model_version = models.ForeignKey(
+        ModelVersion, on_delete=models.CASCADE, related_name='validation_reports',
+    )
+
+    # Validator identity (must not be the model developer)
+    validator_name = models.CharField(max_length=255, help_text='Name of the independent validator')
+    validator_role = models.CharField(max_length=100, help_text='e.g. Risk Manager, External Auditor')
+    validation_date = models.DateField()
+
+    # Validation scope and findings
+    outcome = models.CharField(max_length=20, choices=Outcome.choices, default=Outcome.PENDING)
+    methodology = models.TextField(
+        help_text='Description of validation methodology (holdout test, challenger comparison, etc.)',
+    )
+    findings = models.TextField(help_text='Key findings from the validation')
+    conditions = models.TextField(
+        blank=True,
+        help_text='Conditions for approval (if outcome is conditional)',
+    )
+
+    # Quantitative results
+    challenger_comparison = models.JSONField(
+        default=dict, blank=True,
+        help_text='Metrics comparison between champion and challenger model(s)',
+    )
+    holdout_metrics = models.JSONField(
+        default=dict, blank=True,
+        help_text='Performance metrics on holdout/out-of-time sample',
+    )
+    fairness_review = models.JSONField(
+        default=dict, blank=True,
+        help_text='Fairness assessment results from validation',
+    )
+
+    # Sign-off
+    signed_off = models.BooleanField(default=False)
+    signed_off_at = models.DateTimeField(null=True, blank=True)
+    next_validation_due = models.DateField(
+        null=True, blank=True,
+        help_text='When the next validation is required (typically annual for high-risk models)',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-validation_date']
+
+    def __str__(self):
+        return (
+            f"Validation {self.validation_date}: {self.model_version} "
+            f"— {self.get_outcome_display()} by {self.validator_name}"
+        )
+
+
 class PredictionLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     model_version = models.ForeignKey(ModelVersion, on_delete=models.SET_NULL, null=True)
