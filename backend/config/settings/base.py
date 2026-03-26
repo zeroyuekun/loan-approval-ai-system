@@ -8,6 +8,9 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+# Application version (synced with CHANGELOG.md)
+APP_VERSION = '1.4.0'
+
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
 
 _secret_key = os.environ.get('DJANGO_SECRET_KEY', '')

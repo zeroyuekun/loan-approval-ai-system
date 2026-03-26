@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-03-27
+
+### Added
+- k6 load test suite with SLA assertions (P95 thresholds for health, login, list, pipeline)
+- `ModelValidationReport` model for SR 11-7 independent validation sign-off
+- `validate_model` management command: champion vs challenger evaluation with fairness analysis
+- Data retention lifecycle: weekly `enforce_retention` task per AML/CTF Act and APRA CPG 235
+- Frontend component tests for BiasScoreBadge (7 tests) and stepLabels (17 tests)
+
+## [1.3.0] - 2026-03-27
+
+### Added
+- TOTP-based 2FA for officer/admin roles (django-otp)
+- `SoftDeleteModel` mixin on CustomerProfile and LoanApplication
+- Encrypted address, phone, and employer fields at rest (Fernet AES)
+- `retraining_policy` JSON field on ModelVersion (SR 11-7)
+- Weekly fairness violation alerting Celery task (80% disparate impact rule)
+- Schemathesis contract test scaffold
+- `SECURE_PROXY_SSL_HEADER` for reverse proxy deployments
+- `/health/ready` readiness probe alias
+- aria-labels for WCAG accessibility on applications page
+
+## [1.2.0] - 2026-03-26
+
+### Added
+- Docker CPU/memory resource limits on all services
+- PII masking log filter (TFN, Medicare, phone, income redaction in production logs)
+- Model governance fields: decision thresholds, review dates, explainability method
+- Credit score disclosure and 90-day free report right in denial emails
+- Celery pipeline rate limit (60 tasks/min)
+- Frontend error toast and empty state on applications page
+
+## [1.1.0] - 2026-03-24
+
+### Added
+- Fraud detection service with velocity checks and risk scoring
+- Decision waterfall (ML prediction + fraud check + business rules)
+- Conditional approval support with conditions tracking
+- Model card generator (APRA CPG 235 compliance)
+- Field-level encryption for identity document numbers (Fernet AES-128-CBC)
+- Encryption key rotation management command
+
+## [1.0.0] - 2026-03-24
+
+### Added
+- Production-ready deployment configuration (multi-stage Docker, gunicorn)
+- Monitoring stack (Prometheus, Grafana, AlertManager) as opt-in profile
+- 5 provisioned Grafana dashboards (AI Ops, Celery, System, ML Metrics, SLO)
+- OWASP ZAP DAST scanning in CI pipeline
+- E2E tests with Playwright (auth, application, pipeline flows)
+
 ## [0.5.0] - 2026-03-24
 
 ### Performance
