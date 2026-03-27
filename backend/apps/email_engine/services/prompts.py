@@ -93,8 +93,7 @@ TONE:
 
 10. Sign-off (after a blank line):
 
-Warm regards,
-
+Kind regards,
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
@@ -138,7 +137,7 @@ These are the most frequent reasons emails fail quality checks. Avoid them:
 1. HALLUCINATED NUMBERS: Do NOT invent rates, fees, or amounts. If a LOAN PRICING section is provided, use ONLY those exact figures. If no pricing is provided, use placeholder format [X.XX]%. Never round or estimate.
 2. AI LANGUAGE: Never write "Additionally", "Furthermore", "Moreover", "rest assured", "every step of the way", "navigate", "leverage", "empower". These are immediate AI tells.
 3. CORPORATE STIFFNESS: Never write "We appreciate your trust in [company]", "We truly value your business", "It is our pleasure to", "We are truly delighted to share the wonderful news that..." These sound like press releases. Note: "We are pleased to advise" IS acceptable — it is industry-standard Australian banking language. Just don't pad it with extra adjectives.
-4. DOUBLE SIGN-OFF: Write only ONE closing (e.g., "Warm regards,"). Do not add "Best," or "Sincerely," elsewhere.
+4. DOUBLE SIGN-OFF: Write only ONE closing (e.g., "Kind regards,"). Do not add "Best," or "Sincerely," elsewhere.
 5. MARKDOWN: No **bold**, no # headers, no - bullet lists. Use plain text, numbered lists, and the Unicode bullet character only where specified.
 6. EM DASHES: Use en dashes (\u2013) only. Never use em dashes (\u2014).
 7. MISSING ELEMENTS: Approval emails MUST include: next steps, cooling-off period, hardship team contact, AFCA reference. Omitting any will fail compliance.
@@ -202,8 +201,7 @@ If you have any questions about your loan or the next steps, please don't hesita
 
 Congratulations again, Neville. Thanks for choosing us at AussieLoanAI.
 
-Warm regards,
-
+Kind regards,
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
@@ -309,7 +307,7 @@ Denial letters are the most psychologically sensitive communication a bank sends
 
 3. OPENING (1\u20132 sentences): Thank them for giving AussieLoanAI the opportunity to review their application. Reference the specific loan amount and type. Follow with a blank line.
 
-4. DECISION + TRANSITION (2 sentences): State the decline clearly ("we have carefully reviewed your application and are unable to approve it at this time"). Transition immediately to what comes next: "Below is a summary of our assessment and some steps that may help going forward." Do NOT tell the customer how they feel or perform empathy. Respect them by getting straight to useful information. Follow with a blank line.
+4. DECISION + TRANSITION (2 sentences): State the decline clearly ("we have carefully reviewed your application and are unable to approve it at this time"). Transition immediately to what comes next: "Here is what we looked at and what you can do from here." Do NOT tell the customer how they feel or perform empathy. Respect them by getting straight to useful information. Follow with a blank line.
 
 5. ASSESSMENT FACTORS: Introduce with "This decision was based on a thorough review of your financial profile, specifically:" then leave a blank line, then list each denial reason as a bulleted item (\u2022) with a short label (e.g., "Employment type and tenure:") followed by a contextual explanation. Follow with a blank line.
 
@@ -335,7 +333,6 @@ Denial letters are the most psychologically sensitive communication a bank sends
 11. Sign-off (after a blank line):
 
 Kind regards,
-
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
@@ -384,7 +381,7 @@ Dear Neville,
 
 Thank you for giving us the opportunity to review your application for a $500,000 Personal Loan with AussieLoanAI.
 
-We have carefully reviewed your application and are unable to approve it at this time. Below is a summary of our assessment and some steps that may help going forward.
+We have carefully reviewed your application and are unable to approve it at this time. Here is what we looked at and what you can do from here.
 
 This decision was based on a thorough review of your financial profile, specifically:
 
@@ -415,7 +412,6 @@ If you have any questions about this decision, please don't hesitate to contact 
 Thanks for coming to us, Neville. We'd love to help you find the right option when you're ready.
 
 Kind regards,
-
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd

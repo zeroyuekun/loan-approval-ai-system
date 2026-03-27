@@ -19,7 +19,6 @@ const SECTION_LABELS = [
 ]
 
 const CLOSINGS = [
-  'Sincerely,',
   'Kind regards,',
   'Warm regards,',
 ]

@@ -234,7 +234,8 @@ Please review the attached loan agreement, which outlines all terms and conditio
     if conditions:
         opening = (
             f'We are pleased to advise that your application for a '
-            f'{loan_type} Loan with AussieLoanAI has been conditionally approved.'
+            f'{loan_type} Loan with AussieLoanAI has been conditionally approved. '
+            f'Congratulations!'
         )
 
     body = f"""Dear {first},
@@ -259,8 +260,7 @@ If you have any questions about your loan or the next steps, please don't hesita
 
 Congratulations again, {first}. Thanks for choosing us at AussieLoanAI.
 
-Warm regards,
-
+Kind regards,
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
@@ -364,7 +364,6 @@ If you have any questions about this decision, please don't hesitate to contact 
 Thanks for coming to us, {first}. We'd love to help you find the right option when you're ready.
 
 Kind regards,
-
 Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
