@@ -3,7 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { NextBestOffer } from '@/types'
 import { formatCurrency } from '@/lib/utils'
-import { Lightbulb, Mail, TrendingUp, ArrowRight } from 'lucide-react'
+import { Lightbulb, TrendingUp } from 'lucide-react'
 
 interface NextBestOfferCardProps {
   offer: NextBestOffer
@@ -94,18 +94,6 @@ export function NextBestOfferCard({ offer }: NextBestOfferCardProps) {
           ))}
         </div>
 
-        {offer.marketing_message && (
-          <div className="mt-6 rounded-xl border border-blue-200/60 bg-gradient-to-br from-blue-50/80 to-indigo-50/40 p-5">
-            <div className="flex items-center gap-2.5 mb-3">
-              <div className="flex items-center justify-center h-7 w-7 rounded-lg bg-blue-100 ring-1 ring-blue-200/60">
-                <Mail className="h-3.5 w-3.5 text-blue-600" />
-              </div>
-              <h4 className="text-sm font-semibold text-blue-900">Customer Marketing Message</h4>
-              <ArrowRight className="h-3.5 w-3.5 text-blue-400 ml-auto" />
-            </div>
-            <div className="text-sm text-blue-900/75 leading-relaxed whitespace-pre-line">{offer.marketing_message}</div>
-          </div>
-        )}
       </CardContent>
     </Card>
   )

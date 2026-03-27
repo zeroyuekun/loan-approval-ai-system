@@ -146,7 +146,7 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
       {/* Marketing Follow-up Email */}
       {agentRun?.marketing_emails && agentRun.marketing_emails.length > 0 && (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Marketing Agent</h3>
+          <h3 className="text-lg font-semibold">Marketing Email</h3>
           {agentRun.marketing_emails.map((me) => (
             <MarketingEmailCard key={me.id} email={me} />
           ))}

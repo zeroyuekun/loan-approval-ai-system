@@ -17,7 +17,7 @@ export function MarketingEmailCard({ email }: MarketingEmailCardProps) {
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <Mail className="h-4 w-4 text-purple-600" />
-          Marketing Follow-up Email
+          Marketing Email
           {email.passed_guardrails ? (
             <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 ml-2">
               <ShieldCheck className="h-3 w-3 mr-1" />
