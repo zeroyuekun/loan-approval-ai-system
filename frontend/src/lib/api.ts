@@ -120,7 +120,7 @@ export const emailApi = {
 
 // Agents
 export const agentsApi = {
-  orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/`),
+  orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/?force=true`),
   orchestrateAll: (recheck?: boolean) => api.post(`/agents/orchestrate-all/${recheck ? '?recheck=true' : ''}`),
   getRuns: (params?: any) => api.get('/agents/runs/', { params }),
   getRun: (loanId: string) => api.get(`/agents/runs/${loanId}/`),
