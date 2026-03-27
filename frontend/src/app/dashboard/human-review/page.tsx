@@ -203,7 +203,7 @@ export default function HumanReviewPage() {
               {totalCount} application{totalCount !== 1 ? 's' : ''} awaiting human review
             </p>
             <p className="text-xs text-amber-700">
-              All applications are routed here for manual review. The ML recommendation is shown &mdash; approve, deny, or regenerate.
+              Applications flagged by bias analysis, guardrail failures, or AI escalation appear here for manual review.
             </p>
           </div>
         </CardContent>

@@ -114,8 +114,7 @@ class PipelineOrchestrator:
             conditions.append({
                 'type': 'income_verification',
                 'description': (
-                    f'Income verification gap of {gap:.0%} exceeds 15% threshold. '
-                    'Please provide additional income documentation.'
+                    'We need additional documentation to verify your income before we can finalise your loan.'
                 ),
                 'required': True,
                 'satisfied': False,
@@ -130,8 +129,7 @@ class PipelineOrchestrator:
             conditions.append({
                 'type': 'employment_verification',
                 'description': (
-                    'Self-employed applicant with less than 2 years tenure. '
-                    'Please provide business financials and tax returns.'
+                    'As you are self-employed, we need your most recent business financials and tax returns to finalise your loan.'
                 ),
                 'required': True,
                 'satisfied': False,
@@ -162,9 +160,7 @@ class PipelineOrchestrator:
             conditions.append({
                 'type': 'guarantor_needed',
                 'description': (
-                    f'Loan amount ${loan_amount:,.0f} exceeds $500,000 without a '
-                    f'co-signer and annual income ${annual_income:,.0f} is below $100,000. '
-                    'A guarantor is required.'
+                    'Based on the loan amount and your current income, a guarantor or co-signer is required to proceed.'
                 ),
                 'required': True,
                 'satisfied': False,
@@ -796,22 +792,40 @@ class PipelineOrchestrator:
             review_category = 'conditional_approval'
             review_reason = f'Conditional approval — {len(conditions)} condition(s) require verification'
 
-        step = self._start_step('human_review_required')
-        step = self._complete_step(step, result_summary={
-            'ml_recommendation': decision,
-            'review_category': review_category,
-            'reason': review_reason,
-        })
-        steps.append(step)
+        # Only escalate to human review if there's an actual issue.
+        # Clean applications complete with the ML decision as final status.
+        needs_escalation = review_category != 'standard_review'
 
-        with transaction.atomic():
-            LoanApplication.objects.filter(pk=application.pk).update(status='review')
-        agent_run.status = 'escalated'
-        self._finalize_run(agent_run, steps, start_time)
-        logger.info(
-            'Application %s: pipeline completed — ML recommendation=%s, routed to human review',
-            application_id, decision,
-        )
+        if needs_escalation:
+            step = self._start_step('human_review_required')
+            step = self._complete_step(step, result_summary={
+                'ml_recommendation': decision,
+                'review_category': review_category,
+                'reason': review_reason,
+            })
+            steps.append(step)
+
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(status='review')
+            agent_run.status = 'escalated'
+            self._finalize_run(agent_run, steps, start_time)
+            logger.info(
+                'Application %s: pipeline escalated — ML recommendation=%s, reason=%s',
+                application_id, decision, review_category,
+            )
+        else:
+            # Clean pipeline — apply ML decision directly
+            final_status = decision  # 'approved' or 'denied'
+            if conditions:
+                final_status = 'conditional'
+            with transaction.atomic():
+                LoanApplication.objects.filter(pk=application.pk).update(status=final_status)
+            agent_run.status = 'completed'
+            self._finalize_run(agent_run, steps, start_time)
+            logger.info(
+                'Application %s: pipeline completed — decision=%s',
+                application_id, final_status,
+            )
 
         return agent_run
 

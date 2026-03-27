@@ -70,7 +70,7 @@ Subject: Next steps for your AussieLoanAI loan application
 
 Dear {applicant_first_name},
 
-We appreciate your interest in banking with AussieLoanAI. Based on your financial profile, we have identified the following products that may suit your needs:
+We appreciate your interest in banking with AussieLoanAI and we've put together some options that might work better for you:
 
 [FOR EACH OFFER in the OFFER DATA above, output one block in this exact format. Output up to 3 offers.]
 
