@@ -200,8 +200,6 @@ Your approval is subject to the following condition(s) being met:
 
 {cond_items}
 
-Please provide the required documentation to your lending officer at your earliest convenience.
-
 """
 
     # Co-signer note
@@ -333,24 +331,17 @@ def generate_denial_template(applicant_name, loan_amount, purpose, denial_reason
 
     steps_text = '\n'.join(step_bullets)
 
-    # Regulatory disclosure fields (Banking Code para 81, OAIC credit reporting)
-    credit_score_line = f'{credit_score} (out of 1200)' if credit_score else 'Not available'
-    model_version_line = 'Independently validated credit risk model'
-
     body = f"""Dear {first},
 
 Thank you for giving us the opportunity to review your application for a ${loan_amount:,.2f} {loan_type} Loan with AussieLoanAI.
 
-After assessing your application against our lending criteria and responsible lending obligations, we are unable to offer you credit at this time. The key factors in our decision were:
+We have carefully reviewed your application and are unable to approve it at this time. Here is what we looked at and what you can do from here.
+
+This decision was based on a thorough review of your financial profile, specifically:
 
 {factors_text}
 
 This assessment was conducted in line with our responsible lending obligations, which exist to ensure any credit we provide is suitable and manageable for our customers.
-
-Your Assessment Details:
-
-  Credit score at assessment:  {credit_score_line}
-  Decision model version:     {model_version_line}
 
 What You Can Do:
 

@@ -4,6 +4,7 @@ import os
 import anthropic
 import httpx
 
+from .api_budget import BudgetExhausted, guarded_api_call
 from .recommendation_engine import RecommendationEngine
 
 
@@ -34,12 +35,13 @@ class NextBestOfferGenerator:
 
     def __init__(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        if not api_key:
-            raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        if api_key:
+            self.client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+        else:
+            self.client = None
         self.engine = RecommendationEngine()
 
     def generate(self, application, denial_reasons=''):
@@ -143,7 +145,7 @@ RULES:
                 },
             }
 
-            response = self.client.messages.create(
+            response = guarded_api_call(self.client,
                 model='claude-sonnet-4-20250514',
                 max_tokens=1024,
                 temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
@@ -250,19 +252,53 @@ RULES:
 Respond with the marketing message text only, no JSON wrapping."""
 
         from django.conf import settings as django_settings
-        response = self.client.messages.create(
-            model='claude-sonnet-4-20250514',
-            max_tokens=1024,
-            temperature=getattr(django_settings, 'AI_TEMPERATURE_MARKETING', 0.2),
-            messages=[{'role': 'user', 'content': prompt}],
-        )
-
-        generation_time_ms = int((time.time() - start) * 1000)
-
-        return {
-            'marketing_message': response.content[0].text.strip(),
-            'generation_time_ms': generation_time_ms,
-        }
+        try:
+            response = guarded_api_call(self.client,
+                model='claude-sonnet-4-20250514',
+                max_tokens=1024,
+                temperature=getattr(django_settings, 'AI_TEMPERATURE_MARKETING', 0.2),
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            generation_time_ms = int((time.time() - start) * 1000)
+            return {
+                'marketing_message': response.content[0].text.strip(),
+                'generation_time_ms': generation_time_ms,
+            }
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger('agents.next_best_offer').warning(
+                'Marketing message LLM call failed: %s — using template fallback', e,
+            )
+            generation_time_ms = int((time.time() - start) * 1000)
+            # Build a deterministic fallback message from the offers
+            offer_lines = []
+            for o in offers:
+                name = o.get('name', o.get('type', 'Product'))
+                amt = o.get('amount')
+                benefit = o.get('benefit', '')
+                line = f'{name}'
+                if amt:
+                    line += f' (${amt:,.2f})'
+                if benefit:
+                    line += f' \u2013 {benefit}'
+                offer_lines.append(line)
+            offers_text = '\n'.join(f'  - {l}' for l in offer_lines)
+            applicant_name = f'{application.applicant.first_name} {application.applicant.last_name}'.strip()
+            message = (
+                f'Dear {applicant_name},\n\n'
+                f'We appreciate your interest in banking with AussieLoanAI. '
+                f'Based on your financial profile, we have identified the following '
+                f'products that may suit your needs:\n\n'
+                f'{offers_text}\n\n'
+                f'To discuss these options, please contact our team on 1300 000 000 '
+                f'or visit your nearest branch.\n\n'
+                f'Kind regards,\n'
+                f'The AussieLoanAI Team'
+            )
+            return {
+                'marketing_message': message,
+                'generation_time_ms': generation_time_ms,
+            }
 
     def _get_customer_context(self, application):
         """Pull banking profile into a string for the prompt."""

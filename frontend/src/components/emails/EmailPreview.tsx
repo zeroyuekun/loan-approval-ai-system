@@ -15,7 +15,16 @@ const SECTION_LABELS = [
   'What You Can Do:',
   "We'd Still Like to Help:",
   'Attachments:',
+  'Conditions of Approval:',
 ]
+
+const CLOSINGS = [
+  'Sincerely,',
+  'Kind regards,',
+  'Warm regards,',
+]
+
+const OPTION_PATTERN = /^Option \d+:/
 
 export function FormattedEmailBody({ body }: { body: string }) {
   const lines = body.split('\n')
@@ -28,8 +37,10 @@ export function FormattedEmailBody({ body }: { body: string }) {
         const isSignName = trimmed === 'Sarah Mitchell'
         const isSignTitle = trimmed === 'Senior Lending Officer'
         const isSubject = trimmed.startsWith('Subject:')
+        const isOption = OPTION_PATTERN.test(trimmed)
+        const isClosing = CLOSINGS.includes(trimmed)
 
-        if (isSection || isDear || isSignName || isSignTitle || isSubject) {
+        if (isSection || isDear || isSignName || isSignTitle || isSubject || isOption || isClosing) {
           return (
             <span key={i}>
               <strong>{line}</strong>{'\n'}

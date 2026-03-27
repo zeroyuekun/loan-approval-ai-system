@@ -742,7 +742,7 @@ class RecommendationEngine:
         annual_interest = suggested_monthly * 12 * catalog['bonus_rate'] / 100
 
         benefit = (
-            f"Goal Saver account at {catalog['bonus_rate']:.2f}% p.a. bonus rate — "
+            f"Goal Saver account at {catalog['bonus_rate']:.2f}% p.a. bonus rate \u2013 "
             f"save ${suggested_monthly:,.0f}/month to strengthen your next application "
             f"(~${annual_interest:,.0f} interest in 12 months)"
         )

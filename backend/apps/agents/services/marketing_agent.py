@@ -2,10 +2,12 @@ import json
 import os
 import re
 import time
+from datetime import date
 
 import anthropic
 import httpx
 
+from apps.agents.services.api_budget import BudgetExhausted, guarded_api_call
 from apps.email_engine.services.guardrails import GuardrailChecker
 
 
@@ -54,7 +56,7 @@ YOUR JOB: Fill in ONLY the bracketed placeholders below. Do NOT rewrite, rephras
 === BANKING RELATIONSHIP ===
 {banking_context}
 
-=== OFFER DATA (from product engine — use these exact figures) ===
+=== OFFER DATA (from product engine \u2013 use these exact figures) ===
 {offers_detail}
 
 === RETENTION INTELLIGENCE ===
@@ -76,9 +78,9 @@ Option [N]: [Offer Name]
 
 \u2022  [Benefit headline 1]: [One sentence explaining the benefit, 10\u201320 words.]
 \u2022  [Benefit headline 2]: [One sentence explaining the benefit, 10\u201320 words.]
-\u2022  [Benefit headline 3 — only if the offer data provides a third distinct benefit]: [One sentence, 10\u201320 words.]
+\u2022  [Benefit headline 3 \u2013 only if the offer data provides a third distinct benefit]: [One sentence, 10\u201320 words.]
 
-[One sentence connecting this offer to the customer's actual numbers from the data above. Use a specific figure — e.g. their savings balance, income, or payment history. Keep to 15\u201325 words.]
+[One sentence connecting this offer to the customer's actual numbers from the data above. Use a specific figure \u2013 e.g. their savings balance, income, or payment history. Keep to 15\u201325 words.]
 
 [END FOR EACH]
 
@@ -104,7 +106,7 @@ Email: aussieloanai@gmail.com
 **The [X.XX]% p.a. bonus rate applies when you deposit a minimum of $[XXX] per month and make no withdrawals. If conditions are not met in a given month, the base rate of [X.XX]% p.a. will apply. Rate is variable and subject to change.
 {{END IF}}
 
-Interest rates are current as at [DD/MM/YYYY — use today's date] and are subject to change without notice. This email contains general information only and does not take into account your personal financial situation, objectives, or needs. Before making a decision, please consider whether the product is appropriate for you. Full terms and conditions, including the Target Market Determination and Product Disclosure Statement, are available at www.aussieloanai.com.au.
+Interest rates are current as at [DD/MM/YYYY \u2013 use today's date] and are subject to change without notice. This email contains general information only and does not take into account your personal financial situation, objectives, or needs. Before making a decision, please consider whether the product is appropriate for you. Full terms and conditions, including the Target Market Determination and Product Disclosure Statement, are available at www.aussieloanai.com.au.
 
 You are receiving this email because you are an existing AussieLoanAI customer. If you no longer wish to receive marketing communications from us, you can unsubscribe here or manage your communication preferences in your account settings. AussieLoanAI Pty Ltd, Sydney NSW 2000.
 
@@ -117,9 +119,10 @@ You are receiving this email because you are an existing AussieLoanAI customer. 
 6. For term deposit benefits you may use "Guaranteed returns*" and "Government protected*".
 7. No filler words: "additionally", "furthermore", "moreover", "in addition", "we value you".
 8. BANNED words/phrases: "leverage", "risk-free", "empower", "navigate", "journey", "rest assured", "comprehensive", "holistic". Use plain alternatives (e.g. "use" not "leverage", "no-risk" or "guaranteed" not "risk-free").
-11. The customer-fit sentence must state a FACT from their data, not judge the customer's character. NEVER write "you've proven", "you've demonstrated", "you've shown", "your track record proves", or any phrasing that grades the customer's behaviour. Instead, cite the number directly: "With $12,000 in savings, this account could start earning from day one." The customer is not being evaluated — they are being offered a product.
+12. NEVER use em dashes (\u2014). Use en dashes (\u2013) or commas instead.
+11. The customer-fit sentence must state a FACT from their data, not judge the customer's character. NEVER write "you've proven", "you've demonstrated", "you've shown", "your track record proves", or any phrasing that grades the customer's behaviour. Instead, cite the number directly: "With $12,000 in savings, this account could start earning from day one." The customer is not being evaluated \u2013 they are being offered a product.
 9. Use contractions naturally: "you're", "we've", "it's". No slang.
-10. Remove any {{IF ...}} / {{END IF}} markers from the output — they are instructions, not content.
+10. Remove any {{IF ...}} / {{END IF}} markers from the output \u2013 they are instructions, not content.
 """
 
 
@@ -130,12 +133,13 @@ class MarketingAgent:
 
     def __init__(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        if not api_key:
-            raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        if api_key:
+            self.client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+        else:
+            self.client = None
         self.guardrail_checker = GuardrailChecker()
 
     def generate(self, application, nbo_result, denial_reasons=''):
@@ -184,9 +188,9 @@ class MarketingAgent:
             if offer.get('fortnightly_repayment'):
                 nbo_amounts.append(float(offer['fortnightly_repayment']))
 
-        return self._generate_with_retries(application, prompt, start_time, nbo_amounts=nbo_amounts)
+        return self._generate_with_retries(application, prompt, start_time, nbo_amounts=nbo_amounts, nbo_result=nbo_result)
 
-    def _generate_with_retries(self, application, prompt, start_time, attempt=1, nbo_amounts=None):
+    def _generate_with_retries(self, application, prompt, start_time, attempt=1, nbo_amounts=None, nbo_result=None):
         """Generate the email with guardrail retry logic."""
         from django.conf import settings as django_settings
         current_prompt = prompt
@@ -201,16 +205,19 @@ class MarketingAgent:
         response = None
         for api_attempt in range(3):
             try:
-                response = self.client.messages.create(
+                response = guarded_api_call(self.client,
                     model='claude-sonnet-4-20250514',
                     max_tokens=1500,
                     temperature=getattr(django_settings, 'AI_TEMPERATURE_MARKETING', 0.2),
                     messages=[{'role': 'user', 'content': current_prompt}],
                 )
                 break
+            except BudgetExhausted:
+                _logger.info('Marketing email API budget exhausted or no API key — using template')
+                return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
             except anthropic.AuthenticationError as api_err:
                 _logger.error('Marketing email API auth error (not retryable): %s', api_err)
-                raise
+                return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
             except anthropic.RateLimitError as api_err:
                 _logger.warning('Marketing email API attempt %d rate limited: %s', api_attempt + 1, api_err)
                 if api_attempt < 2:
@@ -230,6 +237,9 @@ class MarketingAgent:
                         time.sleep(2 ** api_attempt)
                     else:
                         raise
+                elif 'credit' in str(api_err).lower() or 'balance' in str(api_err).lower():
+                    _logger.warning('Marketing email API credit insufficient — using template')
+                    return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
                 else:
                     _logger.error('Marketing email API client error (%d, not retryable): %s', api_err.status_code, api_err)
                     raise
@@ -263,7 +273,7 @@ class MarketingAgent:
         if not all_passed and attempt < self.MAX_RETRIES:
             failed_checks = [r for r in guardrail_results if not r['passed']]
             self._last_feedback = "; ".join(f"{r['check_name']}: {r['details']}" for r in failed_checks)
-            return self._generate_with_retries(application, prompt, start_time, attempt + 1, nbo_amounts=nbo_amounts)
+            return self._generate_with_retries(application, prompt, start_time, attempt + 1, nbo_amounts=nbo_amounts, nbo_result=nbo_result)
 
         return {
             'subject': subject,
@@ -274,45 +284,6 @@ class MarketingAgent:
             'generation_time_ms': generation_time_ms,
             'attempt_number': attempt,
         }
-
-    def _run_marketing_guardrails(self, body, application):
-        """Run compliance checks appropriate for marketing emails."""
-        results = []
-
-        # Prohibited language check (same as denial/approval emails)
-        results.append(self.guardrail_checker.check_prohibited_language(body))
-
-        # Tone check
-        results.append(self.guardrail_checker.check_tone(body))
-
-        # AI-giveaway language check (marketing-specific: allows "comprehensive" and "tailored")
-        results.append(self._check_marketing_ai_giveaway_language(body))
-
-        # Professional financial language check (no misleading claims)
-        results.append(self.guardrail_checker.check_professional_financial_language(body))
-
-        # Marketing format check (allows Unicode dividers and emoji but blocks markdown/HTML)
-        results.append(self._check_marketing_format(body))
-
-        # Marketing-specific: must NOT reference the decline
-        results.append(self._check_no_decline_language(body))
-
-        # Marketing-specific: must include a call to action
-        results.append(self._check_has_call_to_action(body))
-
-        # Marketing-specific: no patronising language toward declined customers
-        results.append(self._check_patronising_language(body))
-
-        # Marketing-specific: no false urgency to pressure vulnerable customers
-        results.append(self._check_no_false_urgency(body))
-
-        # Marketing-specific: no guaranteed approval language
-        results.append(self._check_no_guaranteed_approval(body))
-
-        # Sentence rhythm check (warning severity — feedback only, does not block)
-        results.append(self.guardrail_checker.check_sentence_rhythm(body))
-
-        return results
 
     def _check_no_decline_language(self, text):
         """Marketing emails must not restate the decline decision.
@@ -586,6 +557,146 @@ class MarketingAgent:
             'check_name': 'Call to Action',
             'passed': has_cta,
             'details': 'Clear call to action present' if has_cta else 'Missing call to action (phone, branch visit, or reply)',
+        }
+
+    def _marketing_template_fallback(self, application, nbo_amounts, start_time, nbo_result=None):
+        """Generate a template marketing email with actual customer-specific offers."""
+        import time as _time
+        from apps.email_engine.services.guardrails import GuardrailChecker
+
+        first_name = (
+            application.applicant.first_name
+            or application.applicant.username
+        )
+        applicant_name = (
+            f"{application.applicant.first_name} {application.applicant.last_name}".strip()
+            or application.applicant.username
+        )
+        purpose = application.get_purpose_display().lower()
+
+        # Build offer details from NBO result
+        offers = (nbo_result or {}).get('offers', [])
+        if offers:
+            offer_blocks = []
+            for i, offer in enumerate(offers, 1):
+                name = offer.get('name', offer.get('type', 'Product'))
+                bullets = []
+                if offer.get('amount'):
+                    bullets.append(f'  \u2022  Amount: ${offer["amount"]:,.2f}')
+                if offer.get('estimated_rate'):
+                    bullets.append(f'  \u2022  Rate: {offer["estimated_rate"]:.2f}% p.a.')
+                if offer.get('term_months'):
+                    bullets.append(f'  \u2022  Term: {offer["term_months"]} months')
+                if offer.get('monthly_repayment'):
+                    bullets.append(f'  \u2022  Estimated repayment: ${offer["monthly_repayment"]:,.2f}/month')
+                if offer.get('fortnightly_repayment'):
+                    bullets.append(f'  \u2022  Estimated repayment: ${offer["fortnightly_repayment"]:,.2f}/fortnight')
+
+                block = f'Option {i}: {name}\n\n' + '\n'.join(bullets)
+                if offer.get('benefit'):
+                    block += f'\n\n{offer["benefit"]}'
+                if offer.get('reasoning') and offer['reasoning'] != offer.get('benefit', ''):
+                    block += f'\n\n{offer["reasoning"]}'
+                offer_blocks.append(block)
+            offers_text = '\n\n'.join(offer_blocks)
+
+            subject = f'Next steps for your AussieLoanAI loan application'
+
+            # Check if any offer is a term deposit (for Financial Claims Scheme disclaimer)
+            has_term_deposit = any(
+                'term deposit' in (o.get('name', '') + o.get('type', '')).lower()
+                for o in offers
+            )
+
+            today_str = date.today().strftime('%d/%m/%Y')
+
+            footer_parts = []
+            if has_term_deposit:
+                footer_parts.append(
+                    '*Deposits up to $250,000 per account holder per authorised '
+                    'deposit-taking institution are protected under the Australian '
+                    "Government's Financial Claims Scheme."
+                )
+            footer_parts.append(
+                f'Interest rates are current as at {today_str} and are subject to '
+                'change without notice. This email contains general information only '
+                'and does not take into account your personal financial situation, '
+                'objectives, or needs. Before making a decision, please consider '
+                'whether the product is appropriate for you. Full terms and conditions, '
+                'including the Target Market Determination and Product Disclosure '
+                'Statement, are available at www.aussieloanai.com.au.'
+            )
+            footer_parts.append(
+                'You are receiving this email because you are an existing AussieLoanAI '
+                'customer. If you no longer wish to receive marketing communications '
+                'from us, you can unsubscribe here or manage your communication '
+                'preferences in your account settings. AussieLoanAI Pty Ltd, '
+                'Sydney NSW 2000.'
+            )
+            footer_text = '\n\n'.join(footer_parts)
+
+            body = (
+                f'Dear {first_name},\n\n'
+                f'Following your recent loan application with us, we\'ve looked at your '
+                f'profile and there are a few options worth considering.\n\n'
+                f'{offers_text}\n\n'
+                f'If any of these options interest you, I\'d be happy to talk them through '
+                f'with you. You can contact me directly at 1300 000 000 '
+                f'(Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.\n\n'
+                f'Thanks for coming to us, {first_name}. We\'d love to help you find the '
+                f'right option when you\'re ready.\n\n'
+                f'Sincerely,\n\n'
+                f'Sarah Mitchell\n'
+                f'Senior Lending Officer\n'
+                f'AussieLoanAI Pty Ltd\n'
+                f'ABN 12 345 678 901 | Australian Credit Licence No. 012345\n'
+                f'Ph: 1300 000 000\n'
+                f'Email: aussieloanai@gmail.com\n\n'
+                f'\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
+                f'{footer_text}'
+            )
+        else:
+            subject = f'Next Steps for Your Banking Needs'
+            body = (
+                f'Dear {first_name},\n\n'
+                f'Thank you for your recent {purpose} loan enquiry with AussieLoanAI. '
+                f'We value your relationship with us and wanted to let you know that '
+                f'our lending team is available to discuss alternative options that may '
+                f'suit your current needs.\n\n'
+                f'To arrange a time to talk through your options, please contact me '
+                f'directly on 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply '
+                f'to this email.\n\n'
+                f'Kind regards,\n\n'
+                f'Sarah Mitchell\n'
+                f'Senior Lending Officer\n'
+                f'AussieLoanAI Pty Ltd\n'
+                f'ABN 12 345 678 901 | Australian Credit Licence No. 012345\n'
+                f'Ph: 1300 000 000\n'
+                f'Email: aussieloanai@gmail.com'
+            )
+
+        generation_time_ms = int((_time.time() - start_time) * 1000)
+        checker = GuardrailChecker()
+        context = {
+            'decision': 'denied',
+            'loan_amount': float(application.loan_amount) if application.loan_amount else None,
+            'nbo_amounts': nbo_amounts or [],
+        }
+        guardrail_results = checker.run_all_checks(body, context, email_type='marketing')
+        all_passed = all(r['passed'] for r in guardrail_results if r.get('severity') != 'warning')
+
+        return {
+            'subject': subject,
+            'body': body,
+            'prompt_used': '[TEMPLATE FALLBACK — Claude API unavailable]',
+            'passed_guardrails': all_passed,
+            'guardrail_results': guardrail_results,
+            'quality_score': checker.compute_quality_score(guardrail_results),
+            'generation_time_ms': generation_time_ms,
+            'attempt_number': 1,
+            'template_fallback': True,
+            'input_tokens': 0,
+            'output_tokens': 0,
         }
 
     def _parse_response(self, text):

@@ -119,10 +119,14 @@ class AgentRunListView(APIView):
                 'updated_at': agent_run.updated_at.isoformat(),
             })
 
-        # Build next/previous URLs
+        # Build next/previous URLs preserving all filter params
         base_url = request.build_absolute_uri(request.path)
-        next_url = f'{base_url}?page={page + 1}&page_size={page_size}' if offset + page_size < total else None
-        prev_url = f'{base_url}?page={page - 1}&page_size={page_size}' if page > 1 else None
+        extra_params = ''.join(
+            f'&{k}={v}' for k, v in request.query_params.items()
+            if k not in ('page', 'page_size')
+        )
+        next_url = f'{base_url}?page={page + 1}&page_size={page_size}{extra_params}' if offset + page_size < total else None
+        prev_url = f'{base_url}?page={page - 1}&page_size={page_size}{extra_params}' if page > 1 else None
 
         return Response({
             'count': total,
@@ -140,7 +144,8 @@ class OrchestrateView(APIView):
         """Trigger the full pipeline orchestration for a loan application."""
         application = check_loan_access(request, loan_id)
 
-        task = orchestrate_pipeline_task.delay(str(loan_id), force=True)
+        force = request.query_params.get('force', '').lower() == 'true'
+        task = orchestrate_pipeline_task.delay(str(loan_id), force=force)
 
         AuditLog.objects.create(
             user=request.user,
@@ -163,9 +168,21 @@ class BatchOrchestrateView(APIView):
     throttle_classes = [OrchestrationThrottle]
 
     def post(self, request):
-        pending_apps = LoanApplication.objects.filter(
-            status='pending',
-        ).values_list('id', flat=True)
+        recheck = request.query_params.get('recheck', '').lower() == 'true'
+        max_batch = 100  # Safety cap to prevent accidental mass re-processing
+        if recheck:
+            # Reset non-processing apps to pending so they run fresh (capped)
+            app_ids = list(
+                LoanApplication.objects.exclude(status='processing')
+                .values_list('id', flat=True)[:max_batch]
+            )
+            LoanApplication.objects.filter(id__in=app_ids).update(status='pending')
+            pending_apps = app_ids
+        else:
+            pending_apps = list(
+                LoanApplication.objects.filter(status='pending')
+                .values_list('id', flat=True)
+            )
 
         if not pending_apps:
             return Response(
@@ -175,7 +192,7 @@ class BatchOrchestrateView(APIView):
 
         tasks = []
         for app_id in pending_apps:
-            task = orchestrate_pipeline_task.delay(str(app_id))
+            task = orchestrate_pipeline_task.delay(str(app_id), force=recheck)
             tasks.append({'application_id': str(app_id), 'task_id': task.id})
 
         AuditLog.objects.create(
@@ -200,13 +217,30 @@ class AgentRunView(APIView):
         """Return the latest AgentRun with all related data for a loan application."""
         check_loan_access(request, loan_id)
 
+        # Prefer the most complete run: one with marketing emails first,
+        # then by most recent. This avoids showing a latest run where
+        # the marketing email step failed due to a transient error.
         agent_run = AgentRun.objects.filter(
             application_id=loan_id
         ).select_related(
             'application__applicant'
         ).prefetch_related(
             'bias_reports', 'next_best_offers', 'marketing_emails'
-        ).first()
+        ).order_by('-created_at').first()
+
+        # If the latest run is missing marketing emails, check if an older
+        # run has them (e.g. the latest run's marketing step hit circuit breaker).
+        if agent_run and agent_run.marketing_emails.count() == 0:
+            better_run = AgentRun.objects.filter(
+                application_id=loan_id,
+                marketing_emails__isnull=False,
+            ).select_related(
+                'application__applicant'
+            ).prefetch_related(
+                'bias_reports', 'next_best_offers', 'marketing_emails'
+            ).order_by('-created_at').first()
+            if better_run:
+                agent_run = better_run
 
         if not agent_run:
             return Response(
@@ -240,6 +274,7 @@ class AgentRunView(APIView):
                 'customer_retention_score': nbo.customer_retention_score,
                 'loyalty_factors': nbo.loyalty_factors,
                 'personalized_message': nbo.personalized_message,
+                'marketing_message': nbo.marketing_message,
                 'created_at': nbo.created_at.isoformat(),
             }
             for nbo in agent_run.next_best_offers.all()
