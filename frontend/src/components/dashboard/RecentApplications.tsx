@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { LoanApplication } from '@/types'
-import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils'
+import { formatCurrency, formatDate, getDisplayStatus } from '@/lib/utils'
 
 interface RecentApplicationsProps {
   applications: LoanApplication[]
@@ -37,9 +37,9 @@ export function RecentApplications({ applications }: RecentApplicationsProps) {
                 </TableCell>
                 <TableCell>{formatCurrency(app.loan_amount)}</TableCell>
                 <TableCell>
-                  <Badge className={getStatusColor(app.status)} variant="outline">
-                    {app.status.toUpperCase()}
-                  </Badge>
+                  {(() => { const s = getDisplayStatus(app.status, app.decision); return (
+                    <Badge className={s.color} variant="outline">{s.label}</Badge>
+                  ) })()}
                 </TableCell>
                 <TableCell className="text-muted-foreground">{formatDate(app.created_at)}</TableCell>
               </TableRow>

@@ -18,7 +18,7 @@ import { WorkflowTimeline } from '@/components/agents/WorkflowTimeline'
 import { AgentStepCard } from '@/components/agents/AgentStepCard'
 import { NextBestOfferCard } from '@/components/agents/NextBestOfferCard'
 import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
-import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils'
+import { formatCurrency, formatDate, getStatusColor, getDisplayStatus } from '@/lib/utils'
 import {
   ArrowLeft,
   UserCircle,
@@ -838,9 +838,9 @@ export default function CustomerProfilePage() {
                     <TableCell className="capitalize">{loan.purpose}</TableCell>
                     <TableCell>{loan.credit_score}</TableCell>
                     <TableCell>
-                      <Badge className={getStatusColor(loan.status)} variant="outline">
-                        {loan.status.toUpperCase()}
-                      </Badge>
+                      {(() => { const s = getDisplayStatus(loan.status, loan.decision); return (
+                        <Badge className={s.color} variant="outline">{s.label}</Badge>
+                      ) })()}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(loan.created_at)}</TableCell>
                   </TableRow>

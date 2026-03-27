@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle, Loader2 } from 'lucide-react'
-import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils'
+import { formatCurrency, formatDate, getDisplayStatus } from '@/lib/utils'
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,
@@ -75,9 +75,9 @@ export default function CustomerApplicationStatusPage() {
           <div>
             <div className="flex items-center gap-3 mb-1">
               <h2 className="text-xl font-bold capitalize">{application.purpose} Loan</h2>
-              <Badge className={getStatusColor(application.status)} variant="outline">
-                {application.status.toUpperCase()}
-              </Badge>
+              {(() => { const s = getDisplayStatus(application.status, application.decision); return (
+                <Badge className={s.color} variant="outline">{s.label}</Badge>
+              ) })()}
             </div>
             <p className="text-muted-foreground">
               {statusMessages[application.status] || 'Status unknown.'}

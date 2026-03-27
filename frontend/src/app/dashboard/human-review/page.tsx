@@ -47,16 +47,38 @@ function ReviewActionModal({
   }
 
   const biasReport = run.bias_reports?.find((br) => br.flagged || br.requires_human_review)
+  const reviewStep = run.steps?.find(
+    (s) => s.step_name === 'human_review_required'
+  )
+  const mlRecommendation = (reviewStep?.result_summary as Record<string, unknown>)?.ml_recommendation as string | undefined
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !submitReview.isPending) onClose() }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Review Escalated Application</DialogTitle>
+          <DialogTitle>Review Application</DialogTitle>
           <DialogDescription>
             Application {run.application_id.slice(0, 8)} &mdash; {run.applicant_name ?? 'Unknown Applicant'}
           </DialogDescription>
         </DialogHeader>
+
+        {mlRecommendation && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3">
+            <p className="text-sm text-slate-700">
+              ML Recommendation: <Badge
+                variant="outline"
+                className={
+                  mlRecommendation === 'approved' ? 'bg-green-100 text-green-800'
+                    : mlRecommendation === 'conditional' ? 'bg-blue-100 text-blue-800'
+                    : mlRecommendation === 'denied' ? 'bg-red-100 text-red-800'
+                    : 'bg-amber-100 text-amber-800'
+                }
+              >
+                {mlRecommendation.toUpperCase()}
+              </Badge>
+            </p>
+          </div>
+        )}
 
         {biasReport && (
           <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3">
@@ -181,7 +203,7 @@ export default function HumanReviewPage() {
               {totalCount} application{totalCount !== 1 ? 's' : ''} awaiting human review
             </p>
             <p className="text-xs text-amber-700">
-              These applications were flagged by the bias detection system or have borderline ML predictions.
+              All applications are routed here for manual review. The ML recommendation is shown &mdash; approve, deny, or regenerate.
             </p>
           </div>
         </CardContent>
@@ -206,9 +228,10 @@ export default function HumanReviewPage() {
               <TableRow>
                 <TableHead>Application</TableHead>
                 <TableHead>Applicant</TableHead>
+                <TableHead>ML Recommendation</TableHead>
+                <TableHead>Reason</TableHead>
                 <TableHead>Bias Score</TableHead>
-                <TableHead>Categories</TableHead>
-                <TableHead>Escalated</TableHead>
+                <TableHead>Submitted</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -217,6 +240,16 @@ export default function HumanReviewPage() {
                 const biasReport = run.bias_reports?.find(
                   (br) => br.flagged || br.requires_human_review
                 )
+                // Extract ML recommendation from the human_review_required step
+                const reviewStep = run.steps?.find(
+                  (s) => s.step_name === 'human_review_required'
+                )
+                const mlRecommendation = (reviewStep?.result_summary as Record<string, unknown>)?.ml_recommendation as string | undefined
+                  // Fallback: check older escalation steps for backward compat
+                  ?? (run.steps?.find((s) => s.step_name === 'human_escalation_severe_bias')
+                    ? 'review' : undefined)
+                const reviewReason = (reviewStep?.result_summary as Record<string, unknown>)?.reason as string | undefined
+                const reviewCategory = (reviewStep?.result_summary as Record<string, unknown>)?.review_category as string | undefined
                 return (
                   <TableRow key={run.id}>
                     <TableCell
@@ -227,6 +260,50 @@ export default function HumanReviewPage() {
                     </TableCell>
                     <TableCell className="font-medium">
                       {run.applicant_name ?? 'Unknown'}
+                    </TableCell>
+                    <TableCell>
+                      {mlRecommendation ? (
+                        <Badge
+                          variant="outline"
+                          className={
+                            mlRecommendation === 'approved'
+                              ? 'bg-green-100 text-green-800'
+                              : mlRecommendation === 'conditional'
+                              ? 'bg-blue-100 text-blue-800'
+                              : mlRecommendation === 'denied'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }
+                        >
+                          {mlRecommendation.toUpperCase()}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">N/A</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="max-w-[280px]">
+                      <div className="space-y-1">
+                        {reviewCategory && (
+                          <Badge
+                            variant="outline"
+                            className={
+                              reviewCategory === 'guardrail_failure'
+                                ? 'bg-red-100 text-red-800'
+                                : reviewCategory === 'bias_escalation' || reviewCategory === 'ai_reviewer_escalation'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-slate-100 text-slate-800'
+                            }
+                          >
+                            {reviewCategory === 'guardrail_failure' ? 'GUARDRAIL FAIL'
+                              : reviewCategory === 'bias_escalation' ? 'BIAS FLAG'
+                              : reviewCategory === 'ai_reviewer_escalation' ? 'AI ESCALATION'
+                              : 'REVIEW'}
+                          </Badge>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          {reviewReason || 'Manual review required'}
+                        </p>
+                      </div>
                     </TableCell>
                     <TableCell>
                       {biasReport ? (
@@ -246,19 +323,6 @@ export default function HumanReviewPage() {
                         <span className="text-muted-foreground text-xs">N/A</span>
                       )}
                     </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1 flex-wrap">
-                        {biasReport?.categories.length ? (
-                          biasReport.categories.map((cat) => (
-                            <Badge key={cat} variant="outline" className="text-xs bg-slate-100">
-                              {cat}
-                            </Badge>
-                          ))
-                        ) : (
-                          <span className="text-muted-foreground text-xs">&mdash;</span>
-                        )}
-                      </div>
-                    </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {formatDate(run.created_at)}
                     </TableCell>
@@ -272,7 +336,7 @@ export default function HumanReviewPage() {
               })}
               {runs.length === 0 && !isError && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
                     <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
                     <p className="font-medium">All clear</p>
                     <p className="text-sm">No applications require human review at this time.</p>

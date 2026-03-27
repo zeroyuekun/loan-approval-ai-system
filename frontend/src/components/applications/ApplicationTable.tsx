@@ -6,7 +6,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { LoanApplication } from '@/types'
-import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils'
+import { formatCurrency, formatDate, getDisplayStatus } from '@/lib/utils'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface ApplicationTableProps {
@@ -66,9 +66,9 @@ export function ApplicationTable({
               <TableCell>{formatCurrency(app.loan_amount)}</TableCell>
               <TableCell>{app.credit_score}</TableCell>
               <TableCell>
-                <Badge className={getStatusColor(app.status)} variant="outline">
-                  {app.status.toUpperCase()}
-                </Badge>
+                {(() => { const s = getDisplayStatus(app.status, app.decision); return (
+                  <Badge className={s.color} variant="outline">{s.label}</Badge>
+                ) })()}
               </TableCell>
               <TableCell className="text-muted-foreground">{formatDate(app.created_at)}</TableCell>
             </TableRow>
