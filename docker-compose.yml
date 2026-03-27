@@ -79,7 +79,7 @@ services:
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     volumes:
       - ./backend:/app
-    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 120 --access-logfile -
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120 --max-requests 1000 --max-requests-jitter 100 --access-logfile -
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready/')\""]
       interval: 30s
@@ -202,11 +202,11 @@ services:
     deploy:
       resources:
         limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
           cpus: '0.5'
           memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
     ports:
       - "3000:3000"
     depends_on:

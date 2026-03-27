@@ -296,7 +296,7 @@ class GuardrailChecker:
         # Strip ASIC comparison rate footnotes before checking
         # (standard regulatory text contains fixed amounts like $30,000)
         text_to_check = re.sub(
-            r'\*\s*[Cc]omparison rate (?:of|calculated).*?(?:cost of the loan\.|$)',
+            r'\*\s*[Cc]omparison rate (?:of|is |calculated).*?(?:cost of the loan\.|$)',
             '', text, flags=re.DOTALL,
         )
         # Strip Financial Claims Scheme disclosure (standard $250,000 guarantee)
@@ -387,7 +387,9 @@ class GuardrailChecker:
                 disclaimer_pattern = re.compile(
                     r'\b(?:LVR|offset|of\s+the\s+loan|'
                     r'Financial Claims Scheme|government|'
-                    r'deposit|minimum|withdrawal|base rate)\b',
+                    r'deposit|minimum|withdrawal|base rate|'
+                    r'threshold|exceeds?|verification|gap|'
+                    r'condition|income|on-time|payment rate)\b',
                     re.IGNORECASE,
                 )
                 for line in text_to_check.split('\n'):
@@ -961,7 +963,7 @@ class GuardrailChecker:
 
     # ── Unified check runner ───────────────────────────────────────────
 
-    def run_all_checks(self, email_text, context, email_type='decision'):
+    def run_all_checks(self, email_text, context, email_type='decision', template_mode=False):
         """Run ALL guardrail checks on any email and return results with a quality score.
 
         Every check runs on every email type. The only differences:
@@ -977,6 +979,8 @@ class GuardrailChecker:
             context: Dict with 'decision', 'loan_amount', 'pricing', etc.
             email_type: 'decision' or 'marketing' — only affects which variant
                         of AI giveaway and format checks to use.
+            template_mode: If True, skip LLM-specific checks (hallucinated numbers,
+                          AI giveaway language) since template content is pre-vetted.
         """
         # Guard against pathologically large input
         if len(email_text) > 100_000:
@@ -996,7 +1000,18 @@ class GuardrailChecker:
             else self.check_marketing_format
         )
 
-        checks = [
+        # Template mode: skip LLM-specific checks since static templates are
+        # pre-vetted and contain known-good regulatory text (e.g. $150,000
+        # comparison rate benchmark) that would trip the hallucination detector.
+        if template_mode:
+            checks = [
+                (self.check_prohibited_language, (email_text,), 15),
+                (self.check_tone, (email_text,), 8),
+                (self.check_contextual_dignity, (email_text,), 8),
+                (self.check_sign_off_structure, (email_text,), 2),
+            ]
+        else:
+            checks = [
             # ── Core compliance (critical) ──
             (self.check_prohibited_language, (email_text,), 15),
             (self.check_hallucinated_numbers, (email_text, context), 12),

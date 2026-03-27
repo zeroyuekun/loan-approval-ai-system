@@ -50,7 +50,21 @@ def orchestrate_pipeline_task(self, application_id, force=False):
             status='completed'
         ).exists()
         if existing:
-            logger.info('Pipeline already completed for application %s, skipping (idempotent)', application_id)
+            # Restore application status from its decision if it was reset to pending
+            from apps.loans.models import LoanApplication, LoanDecision
+            try:
+                app = LoanApplication.objects.get(pk=application_id)
+                if app.status == 'pending':
+                    decision = LoanDecision.objects.filter(application_id=application_id).first()
+                    if decision:
+                        new_status = decision.decision  # 'approved' or 'denied'
+                        if app.conditions and not app.conditions_met:
+                            new_status = 'conditional'
+                        app.status = new_status
+                        app.save(update_fields=['status'])
+                        logger.info('Application %s: restored status to %s from completed run', application_id, new_status)
+            except Exception as e:
+                logger.warning('Application %s: failed to restore status: %s', application_id, e)
             return {'status': 'already_completed', 'application_id': str(application_id)}
 
     # Redis dedup lock: prevent concurrent runs for the same application
@@ -138,7 +152,8 @@ def resume_pipeline_task(self, agent_run_id, reviewer='', note=''):
     }
 
 
-@shared_task(name='apps.agents.tasks.compute_pipeline_sla')
+@shared_task(name='apps.agents.tasks.compute_pipeline_sla',
+             time_limit=300, soft_time_limit=270)
 def compute_pipeline_sla():
     """Weekly P50/P95/P99 computation from AgentRun step timing data."""
     import numpy as np
@@ -166,7 +181,7 @@ def compute_pipeline_sla():
 
     # Per-step timing
     step_timings = {}
-    for run in runs.iterator():
+    for run in runs.only('steps').iterator(chunk_size=500):
         for step in (run.steps or []):
             name = step.get('step_name', 'unknown')
             if step.get('started_at') and step.get('completed_at'):

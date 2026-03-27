@@ -38,45 +38,47 @@ def train_model_task(self, algorithm='xgb', data_path=None):
             sha256.update(chunk)
     file_hash = sha256.hexdigest()
 
-    # Deactivate all existing active models before activating the new one
-    ModelVersion.objects.filter(is_active=True).update(is_active=False, traffic_percentage=0)
-
-    mv = ModelVersion.objects.create(
-        algorithm=algorithm,
-        version=version_str,
-        file_path=model_path,
-        file_hash=file_hash,
-        is_active=True,
-        accuracy=metrics['accuracy'],
-        precision=metrics['precision'],
-        recall=metrics['recall'],
-        f1_score=metrics['f1_score'],
-        auc_roc=metrics['auc_roc'],
-        brier_score=metrics.get('brier_score'),
-        gini_coefficient=metrics.get('gini_coefficient'),
-        ks_statistic=metrics.get('ks_statistic'),
-        log_loss_value=metrics.get('log_loss'),
-        ece=metrics.get('calibration_data', {}).get('ece'),
-        optimal_threshold=metrics.get('threshold_analysis', {}).get('youden_j_threshold'),
-        confusion_matrix=metrics['confusion_matrix'],
-        feature_importances=metrics['feature_importances'],
-        roc_curve_data=metrics['roc_curve'],
-        training_params=metrics['training_params'],
-        calibration_data=metrics.get('calibration_data', {}),
-        threshold_analysis=metrics.get('threshold_analysis', {}),
-        decile_analysis=metrics.get('decile_analysis', {}),
-        fairness_metrics=metrics.get('fairness', {}),
-        training_metadata=metrics.get('training_metadata', {}),
-        retraining_policy={
-            'cadence_days': 90,
-            'min_samples': 10000,
-            'auc_improvement_threshold': 0.005,
-            'max_psi_before_retrain': 0.25,
-            'requires_fairness_audit': True,
-            'validation': 'New model AUC must exceed current model by 0.5% on holdout set',
-        },
-        next_review_date=(timezone.now() + timedelta(days=90)).date(),
-    )
+    # Deactivate old models and activate new one atomically — if create()
+    # fails, the old active model remains active (no zero-model gap).
+    from django.db import transaction
+    with transaction.atomic():
+        ModelVersion.objects.filter(is_active=True).update(is_active=False, traffic_percentage=0)
+        mv = ModelVersion.objects.create(
+            algorithm=algorithm,
+            version=version_str,
+            file_path=model_path,
+            file_hash=file_hash,
+            is_active=True,
+            accuracy=metrics['accuracy'],
+            precision=metrics['precision'],
+            recall=metrics['recall'],
+            f1_score=metrics['f1_score'],
+            auc_roc=metrics['auc_roc'],
+            brier_score=metrics.get('brier_score'),
+            gini_coefficient=metrics.get('gini_coefficient'),
+            ks_statistic=metrics.get('ks_statistic'),
+            log_loss_value=metrics.get('log_loss'),
+            ece=metrics.get('calibration_data', {}).get('ece'),
+            optimal_threshold=metrics.get('threshold_analysis', {}).get('youden_j_threshold'),
+            confusion_matrix=metrics['confusion_matrix'],
+            feature_importances=metrics['feature_importances'],
+            roc_curve_data=metrics['roc_curve'],
+            training_params=metrics['training_params'],
+            calibration_data=metrics.get('calibration_data', {}),
+            threshold_analysis=metrics.get('threshold_analysis', {}),
+            decile_analysis=metrics.get('decile_analysis', {}),
+            fairness_metrics=metrics.get('fairness', {}),
+            training_metadata=metrics.get('training_metadata', {}),
+            retraining_policy={
+                'cadence_days': 90,
+                'min_samples': 10000,
+                'auc_improvement_threshold': 0.005,
+                'max_psi_before_retrain': 0.25,
+                'requires_fairness_audit': True,
+                'validation': 'New model AUC must exceed current model by 0.5% on holdout set',
+            },
+            next_review_date=(timezone.now() + timedelta(days=90)).date(),
+        )
 
     # Invalidate cached models so workers pick up the new version
     clear_model_cache()

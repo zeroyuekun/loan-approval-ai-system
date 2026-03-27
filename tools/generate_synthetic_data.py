@@ -21,7 +21,8 @@ import numpy as np
 import pandas as pd
 
 
-def generate_synthetic_data(num_records: int = 10000, seed: int = 42) -> pd.DataFrame:
+def generate_synthetic_data(num_records: int = 10000, seed: int = 42,
+                            use_live_data: bool = False) -> pd.DataFrame:
     """Generate synthetic loan application records using Australian lending standards.
 
     Uses the same DataGenerator service as the Django backend to ensure
@@ -30,6 +31,8 @@ def generate_synthetic_data(num_records: int = 10000, seed: int = 42) -> pd.Data
     Args:
         num_records: Number of records to generate.
         seed: Random seed for reproducibility.
+        use_live_data: If True, fetch live ABS/APRA/RBA benchmarks to
+            calibrate distributions against current real-world data.
 
     Returns:
         DataFrame with loan application features and approval target.
@@ -38,7 +41,16 @@ def generate_synthetic_data(num_records: int = 10000, seed: int = 42) -> pd.Data
 
     try:
         from apps.ml_engine.services.data_generator import DataGenerator
-        generator = DataGenerator()
+
+        benchmarks = None
+        if use_live_data:
+            print("Fetching live Australian benchmarks (ABS, APRA, RBA)...")
+            from apps.ml_engine.services.real_world_benchmarks import RealWorldBenchmarks
+            svc = RealWorldBenchmarks()
+            benchmarks = svc.get_calibration_snapshot()
+            print(f"Calibration snapshot assembled at {benchmarks['fetched_at']}")
+
+        generator = DataGenerator(benchmarks=benchmarks, use_live_macro=use_live_data)
         return generator.generate(num_records=num_records, random_seed=seed)
     except ImportError:
         print("Could not import Django DataGenerator, using standalone implementation...")
@@ -198,12 +210,18 @@ def main():
         "--seed", type=int, default=42,
         help="Random seed for reproducibility (default: 42)",
     )
+    parser.add_argument(
+        "--use-live-data", action="store_true",
+        help="Fetch live Australian benchmarks (ABS, APRA, RBA) to calibrate distributions",
+    )
     args = parser.parse_args()
 
     if args.num_records > 1000000:
         print(f"WARNING: Generating {args.num_records:,} records. This may use significant disk space.")
 
-    df = generate_synthetic_data(num_records=args.num_records, seed=args.seed)
+    df = generate_synthetic_data(
+        num_records=args.num_records, seed=args.seed, use_live_data=args.use_live_data,
+    )
     validate_data(df)
 
     output_dir = os.path.dirname(args.output_path)

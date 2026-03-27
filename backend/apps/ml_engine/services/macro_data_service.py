@@ -37,7 +37,8 @@ _FALLBACKS = {
     'gdp_growth': 2.1,
 }
 
-# ABS state codes for SDMX key construction
+# ABS state/region codes for SDMX key construction.
+# Verified against ABS Data API dimension values (March 2026).
 _ABS_STATE_CODES = {
     'NSW': '1',
     'VIC': '2',
@@ -47,7 +48,20 @@ _ABS_STATE_CODES = {
     'TAS': '6',
     'NT': '7',
     'ACT': '8',
-    'national': '0',
+    'national': 'AUS',
+}
+
+# RPPI uses capital-city region codes (not state numbers)
+_ABS_RPPI_REGION_CODES = {
+    'NSW': '1GSYD',
+    'VIC': '2GMEL',
+    'QLD': '3GBRI',
+    'SA': '4GADE',
+    'WA': '5GPER',
+    'TAS': '6GHOB',
+    'NT': '7GDAR',
+    'ACT': '8ACTE',
+    'national': '100',  # Weighted average of eight capital cities
 }
 
 
@@ -201,14 +215,18 @@ class MacroDataService:
         return _FALLBACKS['rba_cash_rate']
 
     def _fetch_unemployment(self, state: str) -> float:
-        """Fetch unemployment rate from ABS Labour Force Survey (cat 6202.0)."""
-        state_code = _ABS_STATE_CODES.get(state, '0')
-        # ABS LF dataflow: ABS,LF_M — monthly labour force
-        # Key structure: measure.sex.age.state.frequency
-        # 14 = unemployment rate, 3 = persons, 1599 = 15+, state_code, M = monthly
-        sdmx_key = f'14.3.1599.{state_code}.M'
+        """Fetch unemployment rate from ABS Labour Force Survey (cat 6202.0).
+
+        Verified key structure (March 2026):
+          Dataflow: LF (short ID, NOT "ABS,LF_M")
+          Key: MEASURE.SEX.AGE.TSEST.REGION.FREQ
+          M13 = Unemployment rate, 3 = Persons, 1599 = 15+,
+          20 = Seasonally adjusted, region code, M = Monthly
+        """
+        state_code = _ABS_STATE_CODES.get(state, 'AUS')
+        sdmx_key = f'M13.3.1599.20.{state_code}.M'
         try:
-            data = self._fetch_abs_data('ABS,LF_M', sdmx_key)
+            data = self._fetch_abs_data('LF', sdmx_key)
             value = self._parse_abs_latest_value(data)
             if value is not None:
                 return self._clip('unemployment_rate', value)
@@ -219,14 +237,19 @@ class MacroDataService:
         return _FALLBACKS['unemployment_rate']
 
     def _fetch_property_growth(self, state: str) -> float:
-        """Fetch property price growth from ABS RPPI (cat 6416.0)."""
-        state_code = _ABS_STATE_CODES.get(state, '0')
-        # ABS RPPI dataflow: ABS,RPPI — Residential Property Price Indexes
-        # Key: measure.region.frequency — 1 = index number, state_code, Q = quarterly
-        sdmx_key = f'1.{state_code}.Q'
+        """Fetch property price growth from ABS RPPI (cat 6416.0).
+
+        Verified key structure (March 2026):
+          Dataflow: RPPI (short ID)
+          Key: MEASURE.PROPERTY_TYPE.REGION.FREQ
+          3 = % change from corresponding quarter, 3 = Residential property,
+          region code (capital city codes), Q = Quarterly
+        """
+        region_code = _ABS_RPPI_REGION_CODES.get(state, '100')
+        sdmx_key = f'3.3.{region_code}.Q'
         try:
-            data = self._fetch_abs_data('ABS,RPPI', sdmx_key)
-            value = self._parse_abs_property_growth(data)
+            data = self._fetch_abs_data('RPPI', sdmx_key)
+            value = self._parse_abs_latest_value(data)
             if value is not None:
                 return self._clip('property_growth_12m', value)
         except Exception as exc:

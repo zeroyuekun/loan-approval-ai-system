@@ -761,3 +761,160 @@ class MetricsService:
             'exceeds_40pct': max_share > 0.40,
             'segments': {str(k): round(float(v), 4) for k, v in shares.items()},
         }
+
+
+class VintageAnalyser:
+    """Vintage cohort analysis for loan performance data.
+
+    Provides APRA CPG 235-compliant vintage tracking including
+    cumulative default curves, survival analysis, and temporal PSI.
+    """
+
+    @staticmethod
+    def compute_vintage_curves(df: pd.DataFrame) -> dict:
+        """Compute cumulative default rates by origination quarter.
+
+        Expects columns: origination_quarter, months_on_book, default_flag
+        Returns dict with vintage curves and summary statistics.
+        """
+        if not all(c in df.columns for c in ['origination_quarter', 'months_on_book', 'default_flag']):
+            return {'error': 'Missing required columns: origination_quarter, months_on_book, default_flag'}
+
+        vintages = {}
+        for quarter, group in df.groupby('origination_quarter'):
+            n_total = len(group)
+            n_defaults = group['default_flag'].sum()
+
+            # Build cumulative default curve at 3-month intervals
+            curve = {}
+            for mob in range(3, int(group['months_on_book'].max()) + 1, 3):
+                eligible = group[group['months_on_book'] >= mob]
+                if len(eligible) > 0:
+                    curve[mob] = eligible['default_flag'].mean()
+
+            vintages[quarter] = {
+                'n_loans': n_total,
+                'n_defaults': int(n_defaults),
+                'default_rate': n_defaults / n_total if n_total > 0 else 0,
+                'cumulative_curve': curve,
+            }
+
+        return {
+            'vintages': vintages,
+            'n_vintages': len(vintages),
+            'overall_default_rate': df['default_flag'].mean() if len(df) > 0 else 0,
+        }
+
+    @staticmethod
+    def compute_survival_metrics(df: pd.DataFrame) -> dict:
+        """Kaplan-Meier-style survival analysis for loan portfolio.
+
+        Expects columns: months_on_book, default_flag, current_status
+        Returns survival curve and median survival time.
+        """
+        if not all(c in df.columns for c in ['months_on_book', 'default_flag']):
+            return {'error': 'Missing required columns'}
+
+        max_mob = int(df['months_on_book'].max()) if len(df) > 0 else 0
+        survival_curve = {}
+        n_at_risk = len(df)
+        survival_prob = 1.0
+
+        for t in range(1, max_mob + 1):
+            # Number who defaulted at exactly time t
+            events = len(df[(df['months_on_book'] >= t) & (df['default_flag'] == 1) &
+                          (df['months_on_book'] < t + 1)])
+            # Number at risk (still performing at start of period t)
+            at_risk = len(df[df['months_on_book'] >= t])
+
+            if at_risk > 0:
+                hazard = events / at_risk
+                survival_prob *= (1 - hazard)
+
+            if t % 3 == 0:  # Record at 3-month intervals
+                survival_curve[t] = round(survival_prob, 6)
+
+        # Median survival (time at which 50% have defaulted) — often infinite for good portfolios
+        median_survival = None
+        for t, s in sorted(survival_curve.items()):
+            if s <= 0.5:
+                median_survival = t
+                break
+
+        return {
+            'survival_curve': survival_curve,
+            'median_survival_months': median_survival,
+            'final_survival_rate': survival_prob,
+            'n_loans': len(df),
+            'n_events': int(df['default_flag'].sum()),
+        }
+
+    @staticmethod
+    def compute_temporal_psi(df: pd.DataFrame, score_col: str = 'prediction_probability',
+                              period_col: str = 'origination_quarter',
+                              n_bins: int = 10) -> dict:
+        """Population Stability Index across time periods.
+
+        Compares score distribution of each period against the earliest period (base).
+        PSI < 0.10 = stable, 0.10-0.25 = moderate shift, > 0.25 = significant shift.
+        """
+        if not all(c in df.columns for c in [score_col, period_col]):
+            return {'error': f'Missing required columns: {score_col}, {period_col}'}
+
+        periods = sorted(df[period_col].unique())
+        if len(periods) < 2:
+            return {'error': 'Need at least 2 periods for PSI comparison'}
+
+        base_period = periods[0]
+        base_scores = df[df[period_col] == base_period][score_col].dropna()
+
+        # Create bins from base distribution
+        _, bin_edges = np.histogram(base_scores, bins=n_bins)
+        base_counts = np.histogram(base_scores, bins=bin_edges)[0]
+        base_pcts = (base_counts + 1) / (base_counts.sum() + n_bins)  # Laplace smoothing
+
+        psi_by_period = {}
+        for period in periods[1:]:
+            period_scores = df[df[period_col] == period][score_col].dropna()
+            period_counts = np.histogram(period_scores, bins=bin_edges)[0]
+            period_pcts = (period_counts + 1) / (period_counts.sum() + n_bins)
+
+            psi = np.sum((period_pcts - base_pcts) * np.log(period_pcts / base_pcts))
+            psi_by_period[period] = {
+                'psi': round(float(psi), 4),
+                'status': 'stable' if psi < 0.10 else 'moderate_shift' if psi < 0.25 else 'significant_shift',
+                'n_scores': len(period_scores),
+            }
+
+        return {
+            'base_period': base_period,
+            'base_n': len(base_scores),
+            'psi_by_period': psi_by_period,
+            'max_psi': max(v['psi'] for v in psi_by_period.values()) if psi_by_period else 0,
+        }
+
+    @staticmethod
+    def compute_concentration_by_vintage(df: pd.DataFrame) -> dict:
+        """Analyse portfolio concentration risk across vintages.
+
+        Reports exposure distribution by origination quarter.
+        """
+        if 'origination_quarter' not in df.columns:
+            return {'error': 'Missing origination_quarter column'}
+
+        loan_amount_col = 'loan_amount' if 'loan_amount' in df.columns else None
+        result = {}
+
+        for quarter, group in df.groupby('origination_quarter'):
+            entry = {
+                'n_loans': len(group),
+                'pct_of_portfolio': round(len(group) / len(df) * 100, 1),
+            }
+            if loan_amount_col:
+                entry['total_exposure'] = float(group[loan_amount_col].sum())
+                entry['avg_loan_size'] = float(group[loan_amount_col].mean())
+            if 'default_flag' in group.columns:
+                entry['default_rate'] = round(float(group['default_flag'].mean()) * 100, 2)
+            result[quarter] = entry
+
+        return result

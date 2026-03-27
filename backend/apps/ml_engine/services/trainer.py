@@ -210,11 +210,12 @@ class ModelTrainer:
         # One-hot encode categorical columns
         df = pd.get_dummies(df, columns=self.CATEGORICAL_COLS, dtype=float)
 
-        # Align columns: add missing columns as 0, drop extra columns
+        # Align columns: add missing columns as 0, drop extra columns from new categories
         for col in self.ohe_columns:
             if col not in df.columns:
                 df[col] = 0.0
-        df = df[self.ohe_columns + [c for c in df.columns if c not in self.ohe_columns]]
+        extra_cols = [c for c in df.columns if c not in self.ohe_columns]
+        df = df[self.ohe_columns + extra_cols]
 
         # Scale using already-fit scaler
         df[self.ohe_columns] = self.scaler.transform(df[self.ohe_columns])
@@ -688,6 +689,36 @@ class ModelTrainer:
                     )
         except Exception:
             logger.warning("Concentration risk computation failed", exc_info=True)
+
+        # Vintage analysis (if temporal data present)
+        if all(c in df_test_raw.columns for c in ['origination_quarter', 'months_on_book']):
+            from .metrics import VintageAnalyser
+            test_with_temporal = df_test_raw.copy()
+            test_with_temporal['default_flag'] = y_test
+            test_with_temporal['prediction_probability'] = y_prob
+
+            vintage_curves = VintageAnalyser.compute_vintage_curves(test_with_temporal)
+            survival = VintageAnalyser.compute_survival_metrics(test_with_temporal)
+            temporal_psi = VintageAnalyser.compute_temporal_psi(test_with_temporal)
+            concentration = VintageAnalyser.compute_concentration_by_vintage(test_with_temporal)
+
+            metrics['vintage_analysis'] = {
+                'vintage_curves': vintage_curves,
+                'survival_metrics': survival,
+                'temporal_psi': temporal_psi,
+                'concentration_by_vintage': concentration,
+            }
+
+        # TSTR validation: estimate real-world performance degradation
+        try:
+            from .tstr_validator import TSTRValidator
+            tstr = TSTRValidator()
+            tstr_result = tstr.validate(metrics)
+            metrics['tstr_validation'] = tstr_result
+            metrics['training_metadata']['tstr_validation'] = tstr_result
+            logger.info("TSTR validation: %s", tstr_result.get('summary', ''))
+        except Exception:
+            logger.warning("TSTR validation failed", exc_info=True)
 
         return model, metrics
 

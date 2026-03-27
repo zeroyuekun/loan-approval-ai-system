@@ -9,6 +9,7 @@ from django.conf import settings as django_settings
 
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
+from .api_budget import BudgetExhausted, guarded_api_call
 from .deterministic_prescreen import DeterministicBiasPreScreen
 
 logger = logging.getLogger('agents.bias_detector')
@@ -132,12 +133,13 @@ class BiasDetector:
 
     def __init__(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        if not api_key:
-            raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        if api_key:
+            self.client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+        else:
+            self.client = None
         self.prescreener = DeterministicBiasPreScreen()
 
     def analyze(self, email_text, application_context):
@@ -270,7 +272,7 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
         result = fallback
         for attempt in range(3):
             try:
-                response = self.client.messages.create(
+                response = guarded_api_call(self.client,
                     model='claude-sonnet-4-20250514',
                     max_tokens=1024,
                     temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
@@ -391,12 +393,13 @@ class AIEmailReviewer:
 
     def __init__(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        if not api_key:
-            raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        if api_key:
+            self.client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+        else:
+            self.client = None
 
     def review(self, email_text, bias_result, application_context):
         """Review a flagged email as the senior compliance authority.
@@ -483,7 +486,7 @@ Use the record_review_decision tool to submit your decision."""
         result = fallback
         for attempt in range(3):
             try:
-                response = self.client.messages.create(
+                response = guarded_api_call(self.client,
                     model=self.MODEL,
                     max_tokens=1024,
                     temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
@@ -564,12 +567,13 @@ class MarketingBiasDetector:
 
     def __init__(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        if not api_key:
-            raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        if api_key:
+            self.client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+        else:
+            self.client = None
         self.prescreener = DeterministicBiasPreScreen()
 
     def analyze(self, email_text, application_context):
@@ -680,7 +684,7 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
         result = fallback
         for attempt in range(3):
             try:
-                response = self.client.messages.create(
+                response = guarded_api_call(self.client,
                     model='claude-sonnet-4-20250514',
                     max_tokens=1024,
                     temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
@@ -799,12 +803,13 @@ class MarketingEmailReviewer:
 
     def __init__(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        if not api_key:
-            raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        if api_key:
+            self.client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+        else:
+            self.client = None
 
     def review(self, email_text, bias_result, application_context):
         """Senior review of a flagged marketing email.
@@ -874,7 +879,7 @@ Use the record_marketing_review_decision tool to submit your decision."""
         result = fallback
         for attempt in range(3):
             try:
-                response = self.client.messages.create(
+                response = guarded_api_call(self.client,
                     model=self.MODEL,
                     max_tokens=1024,
                     temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),

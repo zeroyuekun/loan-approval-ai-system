@@ -61,6 +61,10 @@ class DataGenerator:
     BASE_RATE = 0.065  # ~6.5% average variable rate (2025/2026)
     FLOOR_RATE = 0.0575  # Big 4 floor rate (~5.75%)
 
+    # Temporal rate modelling — product rate = cash rate + spread
+    RATE_SPREAD_OVER_CASH = 2.15  # Big 4 avg spread over RBA cash rate (%)
+    STRESS_TEST_BUFFER = 3.0     # APRA buffer above product rate (%)
+
     # HEM monthly benchmarks (Melbourne Institute 2025/2026, CPI-indexed)
     # Expanded to 5 income brackets and 0-4+ dependants (real HEM has 6+ brackets)
     HEM_TABLE = {
@@ -384,6 +388,124 @@ class DataGenerator:
     }
     _RATE_CUT_BOOST_QUARTERS = {'2025Q1', '2025Q3', '2026Q1'}
 
+    def __init__(self, benchmarks: dict = None, use_live_macro: bool = False):
+        """Initialise DataGenerator with optional real-world calibration.
+
+        Args:
+            benchmarks: Optional calibration snapshot from
+                RealWorldBenchmarks.get_calibration_snapshot(). When None
+                (the default), all class-level constants are used as-is,
+                producing identical output to the original implementation.
+            use_live_macro: If True, fetch current-quarter macro indicators
+                from MacroDataService instead of using RBA_RATE_HISTORY etc.
+                Only affects the LATEST quarter in the temporal window;
+                historical quarters always use hardcoded tables.
+        """
+        self._benchmarks = benchmarks
+        self._use_live_macro = use_live_macro
+        self._macro_cache: dict = {}
+        self.reject_inference_labels = None
+
+    # ------------------------------------------------------------------
+    # Benchmark resolution methods
+    # ------------------------------------------------------------------
+
+    def _resolve_income_params(self, pop_name, is_couple, state_mult):
+        """Return (mean_array, sigma_array) for income lognormal."""
+        pop = self.SUB_POPULATIONS[pop_name]
+        inc_mean = np.where(is_couple, pop['income_couple_mean'], pop['income_single_mean'])
+        inc_mean = inc_mean * state_mult
+        inc_sigma = np.where(is_couple, 0.50, 0.55)
+
+        if self._benchmarks and 'income_percentiles' in self._benchmarks:
+            live_p50 = self._benchmarks['income_percentiles'].get('P50')
+            assumed_p50 = 74_100
+            if live_p50 and live_p50 != assumed_p50:
+                inc_mean = inc_mean * (live_p50 / assumed_p50)
+
+        return inc_mean, inc_sigma
+
+    def _resolve_loan_multiplier(self, pop_name):
+        """Return (mean, std) for loan-to-income multiplier."""
+        pop = self.SUB_POPULATIONS[pop_name]
+        mult_mean = pop['loan_mult_mean']
+        mult_std = pop['loan_mult_std']
+
+        if self._benchmarks and 'avg_loan_sizes' in self._benchmarks:
+            live_oo = self._benchmarks['avg_loan_sizes'].get('owner_occupier')
+            assumed_oo = 693_801
+            if live_oo and live_oo != assumed_oo and pop.get('purpose_override') == 'home':
+                mult_mean = mult_mean * (live_oo / assumed_oo)
+
+        return mult_mean, mult_std
+
+    def _resolve_credit_score_params(self, pop_name, state_credit_adj):
+        """Return (mean, std, state_adj) for credit score normal."""
+        pop = self.SUB_POPULATIONS[pop_name]
+        cs_mean = pop['credit_score_mean']
+        cs_std = pop['credit_score_std']
+
+        if self._benchmarks and 'credit_score_distributions' in self._benchmarks:
+            cs_dist = self._benchmarks['credit_score_distributions']
+            age_bracket_map = {
+                'first_home_buyer': '31_40', 'upgrader': '41_50',
+                'refinancer': '41_50', 'personal_borrower': '31_40',
+                'business_borrower': '41_50', 'investor': '41_50',
+            }
+            bracket = age_bracket_map.get(pop_name)
+            if bracket and bracket in cs_dist:
+                live_mean = cs_dist[bracket].get('mean')
+                live_std = cs_dist[bracket].get('std')
+                if live_mean:
+                    cs_mean = live_mean
+                if live_std:
+                    cs_std = live_std
+
+        return cs_mean, cs_std, state_credit_adj
+
+    def _resolve_default_base_rate(self):
+        """Return base PD for _calibrate_default_probability."""
+        if self._benchmarks and 'apra_arrears' in self._benchmarks:
+            live_npl = self._benchmarks['apra_arrears'].get('npl_rate')
+            if live_npl:
+                return live_npl
+        return 0.0104
+
+    def _resolve_macro_for_quarter(self, quarter, state):
+        """Return macro indicators for a specific quarter+state.
+
+        Results are cached per (quarter, state) to avoid repeated API calls.
+        """
+        cache_key = (quarter, state)
+        if cache_key in self._macro_cache:
+            return self._macro_cache[cache_key]
+
+        latest_quarter = max(self.RBA_RATE_HISTORY.keys())
+        if self._use_live_macro and quarter == latest_quarter:
+            try:
+                from .macro_data_service import MacroDataService
+                if not hasattr(self, '_macro_svc'):
+                    self._macro_svc = MacroDataService()
+                result = {
+                    'rba_cash_rate': self._macro_svc.get_rba_cash_rate(),
+                    'unemployment_rate': self._macro_svc.get_unemployment_rate(state),
+                    'property_growth_12m': self._macro_svc.get_property_growth(state),
+                    'consumer_confidence': self._macro_svc.get_consumer_confidence(),
+                }
+                self._macro_cache[cache_key] = result
+                return result
+            except Exception:
+                pass
+
+        result = {
+            'rba_cash_rate': self.RBA_RATE_HISTORY[quarter],
+            'unemployment_rate': self.UNEMPLOYMENT_RATES[quarter][state],
+            'property_growth_12m': self.PROPERTY_GROWTH[quarter][state],
+            'consumer_confidence': self.CONSUMER_CONFIDENCE[quarter],
+        }
+        self._macro_cache[cache_key] = result
+        return result
+
     def _generate_copula_samples(self, n, rng):
         """Generate correlated uniform samples using a Gaussian copula.
 
@@ -650,6 +772,7 @@ class DataGenerator:
         rng = np.random.default_rng(random_seed)
         n = num_records
         self.reject_inference_labels = None  # populated at end of generate()
+        self._macro_cache = {}  # reset per-generate to ensure reproducibility
 
         # =============================================================
         # STEP 0: Generate correlated uniform samples via Gaussian copula
@@ -706,15 +829,16 @@ class DataGenerator:
         # Derive application_quarter from the month entries (backward compat)
         application_quarter = np.array([_month_entries[i][2] for i in month_idx])
 
-        # Macro lookups from quarter
-        rba_cash_rate = np.array([self.RBA_RATE_HISTORY[q] for q in application_quarter])
-        unemployment_rate = np.array([
-            self.UNEMPLOYMENT_RATES[q][s] for q, s in zip(application_quarter, state)
-        ])
-        property_growth_12m = np.array([
-            self.PROPERTY_GROWTH[q][s] for q, s in zip(application_quarter, state)
-        ])
-        consumer_confidence = np.array([self.CONSUMER_CONFIDENCE[q] for q in application_quarter])
+        # Macro lookups from quarter (uses live data for latest quarter
+        # when use_live_macro=True, hardcoded tables for all others)
+        _macro = [
+            self._resolve_macro_for_quarter(q, s)
+            for q, s in zip(application_quarter, state)
+        ]
+        rba_cash_rate = np.array([m['rba_cash_rate'] for m in _macro])
+        unemployment_rate = np.array([m['unemployment_rate'] for m in _macro])
+        property_growth_12m = np.array([m['property_growth_12m'] for m in _macro])
+        consumer_confidence = np.array([m['consumer_confidence'] for m in _macro])
 
         # --- Demographics ---
         employment_type = rng.choice(
@@ -749,15 +873,10 @@ class DataGenerator:
         annual_income = np.zeros(n)
         for pop_name in pop_names:
             mask = sub_pop == pop_name
-            pop = self.SUB_POPULATIONS[pop_name]
             is_couple = applicant_type[mask] == 'couple'
-            # Transform copula uniform → lognormal income, then apply state multiplier
-            inc_mean = np.where(is_couple, pop['income_couple_mean'], pop['income_single_mean'])
-            inc_mean = inc_mean * state_income_mult[mask]  # state adjustment
-            # Lognormal sigma: higher = more spread. Couples have wider spread
-            # because partner incomes vary (full-time + part-time, parental leave,
-            # single-income households applying as couple for guarantee purposes).
-            inc_sigma = np.where(is_couple, 0.50, 0.55)
+            inc_mean, inc_sigma = self._resolve_income_params(
+                pop_name, is_couple, state_income_mult[mask],
+            )
             annual_income[mask] = np.exp(
                 stats.norm.ppf(copula['income'][mask], loc=np.log(inc_mean), scale=inc_sigma)
             )
@@ -799,12 +918,14 @@ class DataGenerator:
         credit_score = np.zeros(n, dtype=int)
         for pop_name in pop_names:
             mask = sub_pop == pop_name
-            pop = self.SUB_POPULATIONS[pop_name]
+            cs_mean, cs_std, _ = self._resolve_credit_score_params(
+                pop_name, state_credit_adj[mask],
+            )
             credit_score[mask] = np.clip(
                 stats.norm.ppf(
                     copula['credit_score'][mask],
-                    loc=pop['credit_score_mean'] + state_credit_adj[mask],
-                    scale=pop['credit_score_std'],
+                    loc=cs_mean + state_credit_adj[mask],
+                    scale=cs_std,
                 ).astype(int),
                 300, 1200,
             )
@@ -839,14 +960,15 @@ class DataGenerator:
         for pop_name in pop_names:
             mask = sub_pop == pop_name
             pop = self.SUB_POPULATIONS[pop_name]
+            mult_mean, mult_std = self._resolve_loan_multiplier(pop_name)
             if pop['purpose_override'] == 'home':
                 loan_multiplier[mask] = np.clip(
-                    rng.normal(pop['loan_mult_mean'], pop['loan_mult_std'], size=mask.sum()),
+                    rng.normal(mult_mean, mult_std, size=mask.sum()),
                     1.0, 6.5,
                 )
             else:
                 loan_multiplier[mask] = np.clip(
-                    rng.lognormal(mean=np.log(pop['loan_mult_mean']), sigma=pop['loan_mult_std'], size=mask.sum()),
+                    rng.lognormal(mean=np.log(mult_mean), sigma=mult_std, size=mask.sum()),
                     0.05, 2.0,
                 )
         loan_amount = (annual_income * loan_multiplier).round(2)
@@ -1342,7 +1464,12 @@ class DataGenerator:
             'existing_property_count': existing_property_count,
             'state': state,
             # Temporal dimension
+            'application_date': application_date,
             'application_quarter': application_quarter,
+            'origination_quarter': pd.to_datetime(application_date).to_period('Q').astype(str),
+            'cash_rate': rba_cash_rate,
+            'product_rate': rba_cash_rate + self.RATE_SPREAD_OVER_CASH,
+            'stress_test_rate': rba_cash_rate + self.RATE_SPREAD_OVER_CASH + self.STRESS_TEST_BUFFER,
             'rba_cash_rate': rba_cash_rate,
             'unemployment_rate': unemployment_rate,
             'property_growth_12m': property_growth_12m,
@@ -1414,7 +1541,9 @@ class DataGenerator:
 
         # --- Derived ratios (APRA stress test + Australian regulatory) ---
         _monthly_income = df['annual_income'] / 12.0
-        _stressed_rate = (self.BASE_RATE + self.ASSESSMENT_BUFFER) / 12
+        # Use per-row stress_test_rate (temporally dynamic) — rates are in
+        # percentage points (e.g. 9.5%), convert to monthly decimal.
+        _stressed_rate = df['stress_test_rate'].values / 100 / 12
         _term = df['loan_term_months'].clip(lower=1)
         df['stressed_repayment'] = np.where(
             _term > 0,
@@ -1465,7 +1594,12 @@ class DataGenerator:
         df['log_loan_amount'] = np.log1p(df['loan_amount'])
 
         # Compute approval using TRUE values (banks verify documents)
-        df['approved'] = self._compute_approval(df, rng)
+        approved, approval_type, conditions_list = self._compute_approval(df, rng)
+        df['approved'] = approved
+        df['approval_type'] = approval_type
+        df['conditions'] = conditions_list
+        df['requires_human_review'] = np.isin(approval_type, ['human_review', 'review'])
+        df['n_conditions'] = [len(c) for c in conditions_list]
 
         # 2E. Prepayment buffer + negative equity (computed after approval)
         buffer_months, neg_equity = self._compute_prepayment_buffer(df, behavioral_rngs[4])
@@ -1613,6 +1747,10 @@ class DataGenerator:
             flip_mask = rng.random(n_approved) < flip_weights
             flip_indices = df.index[approved_mask][flip_mask]
             df.loc[flip_indices, 'approved'] = 0
+            # Keep approval_type/conditions consistent with flipped label
+            df.loc[flip_indices, 'approval_type'] = 'denied'
+            df.loc[flip_indices, 'conditions'] = df.loc[flip_indices, 'conditions'].apply(lambda _: [])
+            df.loc[flip_indices, 'n_conditions'] = 0
 
         # =========================================================
         # REJECT INFERENCE (parcelling method)
@@ -1740,6 +1878,11 @@ class DataGenerator:
                     np.where(approved_mask, 12, np.nan)))
         )
 
+        # Simulate detailed loan performance with month-by-month
+        # state transitions (performing → 30dpd → 60dpd → 90dpd → default)
+        # using Moody's AU RMBS calibrated transition matrix
+        df = self._simulate_loan_performance(df)
+
         return df
 
     def _get_hem(self, applicant_type, dependants, annual_income, state='NSW'):
@@ -1785,6 +1928,7 @@ class DataGenerator:
         """
         n = len(df)
         approved = np.ones(n, dtype=int)
+        hard_denied = np.zeros(n, dtype=bool)  # Track hard vs soft denials
 
         gross_monthly_income = df['annual_income'] / 12
         total_dti = df['debt_to_income']
@@ -1854,36 +1998,50 @@ class DataGenerator:
 
         # Bankruptcy: hard deny (undischarged or within 7 years)
         approved[df['has_bankruptcy'] == 1] = 0
+        hard_denied[df['has_bankruptcy'] == 1] = True
 
         # Cash advance users with 3+ in 12 months: hard deny
-        approved[(df.get('cash_advance_count_12m', pd.Series(0, index=df.index)) >= 3)] = 0
+        cash_adv_mask = df.get('cash_advance_count_12m', pd.Series(0, index=df.index)) >= 3
+        approved[cash_adv_mask] = 0
+        hard_denied[cash_adv_mask] = True
 
-        # APRA DTI cap: total DTI >= 6x is a macro-prudential boundary.
-        # APRA Sep Q 2025: 6.1% of new lending has DTI >= 6, meaning some
-        # pass through with compensating factors (excellent credit, high income,
-        # strong documentation). ~15% pass-through rate for qualified applicants.
-        high_dti_mask = total_dti >= 6.0
-        high_dti_pass = high_dti_mask & (credit >= 850) & (df['annual_income'] > 150000)
+        # APRA DTI cap: hard deny at DTI >= 8.0x (no exceptions).
+        # DTI 6.0-8.0x: deny UNLESS credit >= 850 AND income > $120k
+        # (compensating factors — APRA Sep Q 2025: 6.1% pass-through)
+        extreme_dti_mask = total_dti >= 8.0
+        approved[extreme_dti_mask] = 0
+        hard_denied[extreme_dti_mask] = True
+
+        high_dti_mask = (total_dti >= 6.0) & (total_dti < 8.0)
+        high_dti_pass = high_dti_mask & (credit >= 850) & (df['annual_income'] > 120000)
         approved[high_dti_mask & ~high_dti_pass] = 0
 
-        # Credit score floor: Big 4 banks require 650+
-        approved[credit < 650] = 0
-        # Borderline 650-700 with high DTI: deterministic deny
-        borderline_credit = (credit >= 650) & (credit < 700)
+        # Credit score floor: lowered from 650 to 580 — non-major lenders
+        # (Pepper, Liberty, Bluestone) accept 580+ for near-prime
+        approved[credit < 580] = 0
+        hard_denied[credit < 580] = True
+        # Borderline 580-700 with high DTI: deterministic deny
+        borderline_credit = (credit >= 580) & (credit < 700)
         approved[borderline_credit & (total_dti > 4.0)] = 0
 
         # Self-employed < 1 year ABN history (Big 4 policy change 2025:
         # CBA, Westpac, ANZ, NAB all accept 1yr+ financials)
         approved[(df['employment_type'] == 'self_employed') & (df['employment_length'] < 1)] = 0
 
-        # Casual < 1 year continuous
-        approved[(df['employment_type'] == 'payg_casual') & (df['employment_length'] < 1)] = 0
+        # Casual: deny if < 6 months; 6-12 months only with credit >= 700
+        casual_mask = df['employment_type'] == 'payg_casual'
+        approved[casual_mask & (df['employment_length'] < 0.5)] = 0
+        casual_borderline = casual_mask & (df['employment_length'] >= 0.5) & (df['employment_length'] < 1)
+        approved[casual_borderline & (credit < 700)] = 0
 
-        # Contract < 1 year
-        approved[(df['employment_type'] == 'contract') & (df['employment_length'] < 1)] = 0
+        # Contract: deny if < 6 months (was <1yr)
+        approved[(df['employment_type'] == 'contract') & (df['employment_length'] < 0.5)] = 0
 
-        # PAYG permanent < 6 months (modeled as < 1 year in integer years)
-        approved[(df['employment_type'] == 'payg_permanent') & (df['employment_length'] < 1)] = 0
+        # PAYG permanent: deny if < 6 months; allow 6-12mo with credit >= 700
+        payg_perm_mask = df['employment_type'] == 'payg_permanent'
+        approved[payg_perm_mask & (df['employment_length'] < 0.5)] = 0
+        payg_perm_borderline = payg_perm_mask & (df['employment_length'] >= 0.5) & (df['employment_length'] < 1)
+        approved[payg_perm_borderline & (credit < 700)] = 0
 
         # =========================================================
         # STEP 3: LVR check (home loans only)
@@ -2266,7 +2424,264 @@ class DataGenerator:
         override_approve = override_approve & (df['has_bankruptcy'] == 0) & (total_dti < 5.5)
         approved[override_approve] = 1
 
-        return approved
+        # =========================================================
+        # STEP 12: Manual review + conditional approvals
+        # Mirrors the orchestrator's _evaluate_conditions() logic
+        # (orchestrator.py:102-173) for synthetic data realism.
+        #
+        # approval_type tracks HOW the loan was approved:
+        #   - 'auto_approved': passed all rules automatically
+        #   - 'conditional': approved with conditions attached
+        #   - 'human_review': soft-denied but approved on manual review
+        #   - 'denied': not approved
+        #
+        # conditions tracks WHAT conditions were attached, matching
+        # the orchestrator's condition types:
+        #   - income_verification, employment_verification,
+        #     valuation_required, guarantor_needed, lmi_required
+        # =========================================================
+
+        # Initialize tracking arrays
+        approval_type = np.where(approved == 1, 'auto_approved', 'denied')
+        conditions_list = [[] for _ in range(n)]  # per-row condition lists
+
+        # --- Conditional approvals (applied to auto-approved loans) ---
+        # These mirror _evaluate_conditions() in the orchestrator
+
+        for i in range(n):
+            if approved[i] != 1:
+                continue
+
+            row_conditions = []
+
+            # 1. Income verification gap > 15% (declared vs verified)
+            #    The noise layer creates gaps — use income_noise as proxy
+            if 'income_noise' in df.columns:
+                gap = abs(1.0 - df.iloc[i].get('income_noise', 1.0))
+            else:
+                # Approximate: high-income self-employed often have gaps
+                gap = 0.20 if (df.iloc[i]['employment_type'] == 'self_employed'
+                               and df.iloc[i]['annual_income'] > 80000) else 0.05
+            if gap > 0.15:
+                row_conditions.append({
+                    'type': 'income_verification',
+                    'description': f'Income verification gap of {gap:.0%} exceeds 15% threshold.',
+                    'required': True, 'satisfied': False, 'satisfied_at': None,
+                })
+
+            # 2. Self-employed < 2yr tenure
+            if (df.iloc[i]['employment_type'] == 'self_employed'
+                    and df.iloc[i]['employment_length'] < 2):
+                row_conditions.append({
+                    'type': 'employment_verification',
+                    'description': 'Self-employed with less than 2 years tenure.',
+                    'required': True, 'satisfied': False, 'satisfied_at': None,
+                })
+
+            # 3. Home loan with high LVR (>85%) — valuation required
+            row_purpose = df.iloc[i].get('purpose', '')
+            row_prop_val = df.iloc[i].get('property_value', 0)
+            row_loan = df.iloc[i]['loan_amount']
+            row_lvr = row_loan / row_prop_val if row_prop_val > 0 else 0
+
+            if row_purpose == 'home' and row_lvr > 0.85:
+                row_conditions.append({
+                    'type': 'valuation_required',
+                    'description': f'High-LVR ({row_lvr:.0%}) home loan requires independent property valuation.',
+                    'required': True, 'satisfied': False, 'satisfied_at': None,
+                })
+
+            # 4. Large loan without strong income backing
+            row_income = df.iloc[i]['annual_income']
+            if row_loan > 500000 and row_income < 100000:
+                row_conditions.append({
+                    'type': 'guarantor_needed',
+                    'description': (
+                        f'Loan ${row_loan:,.0f} exceeds $500k '
+                        f'with income ${row_income:,.0f} < $100k.'
+                    ),
+                    'required': True, 'satisfied': False, 'satisfied_at': None,
+                })
+
+            # 5. LMI required (LVR 80-85%) — condition, not denial
+            if row_purpose == 'home' and 0.80 < row_lvr <= 0.85:
+                row_conditions.append({
+                    'type': 'lmi_required',
+                    'description': f'LVR {row_lvr:.0%} exceeds 80% — lenders mortgage insurance required.',
+                    'required': True, 'satisfied': False, 'satisfied_at': None,
+                })
+
+            if row_conditions:
+                approval_type[i] = 'conditional'
+                conditions_list[i] = row_conditions
+
+        # --- Manual review path — borderline soft denials ---
+        # ~20% of soft-denied applications approved by senior credit officers
+        soft_denied_mask = (approved == 0) & (~hard_denied)
+        manual_review_roll = rng.random(n)
+        manual_approved = soft_denied_mask & (manual_review_roll < 0.20)
+        approved[manual_approved] = 1
+        approval_type[manual_approved] = 'human_review'
+
+        # Human-reviewed loans also get conditions based on WHY they were denied
+        for i in np.where(manual_approved)[0]:
+            review_conditions = []
+
+            # Borderline credit → require additional documentation
+            if credit[i] < 700:
+                review_conditions.append({
+                    'type': 'income_verification',
+                    'description': 'Manual review override — additional income verification required.',
+                    'required': True, 'satisfied': False, 'satisfied_at': None,
+                })
+
+            # Borderline DTI → require expense verification
+            if total_dti[i] > 4.5:
+                review_conditions.append({
+                    'type': 'expense_verification',
+                    'description': 'Manual review override — detailed expense verification required.',
+                    'required': True, 'satisfied': False, 'satisfied_at': None,
+                })
+
+            # Short employment → require employment letter
+            if df.iloc[i]['employment_length'] < 1:
+                review_conditions.append({
+                    'type': 'employment_verification',
+                    'description': 'Manual review override — employer letter required.',
+                    'required': True, 'satisfied': False, 'satisfied_at': None,
+                })
+
+            # All human reviews get at least one condition
+            if not review_conditions:
+                review_conditions.append({
+                    'type': 'senior_review_noted',
+                    'description': 'Approved on senior credit officer discretion.',
+                    'required': False, 'satisfied': True, 'satisfied_at': None,
+                })
+
+            conditions_list[i] = review_conditions
+
+        # Flag remaining soft-denied as 'review' (sent to human queue, not approved)
+        still_denied_soft = (approved == 0) & (~hard_denied)
+        approval_type[still_denied_soft] = 'review'
+
+        return approved, approval_type, conditions_list
+
+    def _simulate_loan_performance(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Simulate loan performance outcomes for approved loans.
+
+        For each approved loan, runs month-by-month Markov chain simulation
+        using risk-adjusted transition probabilities from RealWorldBenchmarks.
+        Produces: months_on_book, ever_30dpd, ever_90dpd, default_flag,
+        prepaid_flag, current_status.
+
+        Calibrated to:
+        - APRA NPL 1.04% (via transition matrix)
+        - Moody's AU RMBS CPR 15-22% annually
+        - S&P APAC cure rates (30dpd: 40-60%, 60dpd: 10-20%)
+        """
+        from .real_world_benchmarks import RealWorldBenchmarks
+
+        reference_date = pd.Timestamp('2025-12-31')
+        approved_mask = df['approved'] == 1
+
+        # Initialize performance columns for ALL rows
+        df['months_on_book'] = 0
+        df['ever_30dpd'] = 0
+        df['ever_90dpd'] = 0
+        df['default_flag'] = 0
+        df['prepaid_flag'] = 0
+        df['current_status'] = 'denied'
+
+        approved_indices = df[approved_mask].index
+
+        for idx in approved_indices:
+            row = df.loc[idx]
+            app_date = pd.Timestamp(row['application_date'])
+            mob = max(0, (reference_date.year - app_date.year) * 12 +
+                      (reference_date.month - app_date.month))
+            df.at[idx, 'months_on_book'] = mob
+
+            if mob == 0:
+                df.at[idx, 'current_status'] = 'performing'
+                continue
+
+            # Risk multiplier based on borrower characteristics.
+            # Base multiplier of 1.8 calibrates terminal default rate to
+            # ~1.0-1.5% given the corrected Moody's transition matrix
+            # (performing→30dpd 0.3%/mo) and avg MOB of ~12-18 months.
+            risk_multiplier = 1.8
+
+            # DTI effect (baseline at 4.0, higher = riskier)
+            dti = row.get('debt_to_income', 4.0)
+            risk_multiplier *= max(0.5, min(3.0, dti / 4.0))
+
+            # Credit score effect (baseline at 800, lower = riskier)
+            credit = row.get('credit_score', 800)
+            risk_multiplier *= max(0.3, min(3.0, 800 / max(credit, 300)))
+
+            # LVR effect (baseline at 0.70, higher = riskier)
+            lvr = row.get('lvr', 0.70) if 'lvr' in df.columns else 0.70
+            if pd.notna(lvr) and lvr > 0:
+                risk_multiplier *= max(0.5, min(2.5, lvr / 0.70))
+
+            # Rate stress (higher cash rate at origination = more stress)
+            cash_rate = row.get('cash_rate', 4.35)
+            if cash_rate > 3.0:
+                risk_multiplier *= 1.0 + (cash_rate - 3.0) * 0.15
+
+            # Employment type
+            emp_type = row.get('employment_type', 'payg_permanent')
+            if emp_type in ('payg_casual', 'contract'):
+                risk_multiplier *= 1.5
+            elif emp_type == 'self_employed':
+                risk_multiplier *= 1.2
+
+            # Month-by-month simulation using transition matrix
+            state = 'performing'
+            ever_30 = False
+            ever_90 = False
+
+            for month in range(1, mob + 1):
+                base_probs = RealWorldBenchmarks.get_transition_probs(state)
+
+                # Adjust for risk
+                adjusted_probs = {}
+                for next_state, prob in base_probs.items():
+                    if next_state in ('30dpd', '60dpd', '90dpd', 'default'):
+                        adjusted_probs[next_state] = min(prob * risk_multiplier, 0.95)
+                    elif next_state == 'performing' and state != 'performing':
+                        adjusted_probs[next_state] = max(prob / risk_multiplier, 0.01)
+                    else:
+                        adjusted_probs[next_state] = prob
+
+                # Normalize
+                total = sum(adjusted_probs.values())
+                adjusted_probs = {k: v / total for k, v in adjusted_probs.items()}
+
+                # Transition
+                states = list(adjusted_probs.keys())
+                probs = list(adjusted_probs.values())
+                state = np.random.choice(states, p=probs)
+
+                if state in ('30dpd', '60dpd', '90dpd'):
+                    ever_30 = True
+                if state == '90dpd':
+                    ever_90 = True
+                if state == 'default':
+                    ever_30 = True
+                    ever_90 = True
+                    break
+                if state == 'prepaid':
+                    break
+
+            df.at[idx, 'ever_30dpd'] = int(ever_30)
+            df.at[idx, 'ever_90dpd'] = int(ever_90)
+            df.at[idx, 'default_flag'] = int(state == 'default')
+            df.at[idx, 'prepaid_flag'] = int(state == 'prepaid')
+            df.at[idx, 'current_status'] = state
+
+        return df
 
     def _calibrate_default_probability(self, df, rng):
         """Assign realistic default probabilities calibrated to APRA/RBA data.
@@ -2296,8 +2711,9 @@ class DataGenerator:
         """
         n = len(df)
 
-        # Base PD: 1.04% (APRA aggregate NPL rate Sep Q 2025)
-        base_pd = 0.0104
+        # Base PD: uses latest APRA NPL rate when benchmarks available,
+        # otherwise 1.04% (APRA Sep Q 2025)
+        base_pd = self._resolve_default_base_rate()
 
         # --- LVR risk multiplier (continuous, exponential curve) ---
         # Calibrated so: LVR 0.5→0.5x, 0.7→1.0x, 0.85→2.2x, 0.95→4.3x

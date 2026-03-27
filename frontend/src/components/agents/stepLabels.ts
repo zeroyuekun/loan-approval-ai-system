@@ -1,4 +1,5 @@
 export const STEP_LABELS: Record<string, string> = {
+  fraud_check: 'Fraud Check',
   ml_prediction: 'ML Prediction',
   email_generation: 'Email Generation',
   email_delivery: 'Email Delivery',
@@ -8,6 +9,9 @@ export const STEP_LABELS: Record<string, string> = {
   human_escalation_severe_bias: 'Human Escalation (Severe Bias)',
   human_escalation_after_retries: 'Human Escalation (After Retries)',
   human_escalation_low_confidence: 'Human Escalation (Low Confidence)',
+  human_review_required: 'Human Review Required',
+  human_review_approved: 'Human Review Approved',
+  human_review_decision: 'Human Review Decision',
   next_best_offers: 'Next Best Offers',
   marketing_message_generation: 'Marketing Message Generation',
   marketing_email_generation: 'Marketing Email Generation',
@@ -15,8 +19,6 @@ export const STEP_LABELS: Record<string, string> = {
   marketing_bias_check: 'Marketing Bias Check',
   marketing_ai_review: 'Marketing AI Review',
   marketing_email_blocked: 'Marketing Email Blocked',
-  human_review_approved: 'Human Review Approved',
-  human_review_decision: 'Human Review Decision',
 }
 
 // Words that should stay uppercase when auto-capitalising snake_case
@@ -27,7 +29,8 @@ function capitaliseWord(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1)
 }
 
-export function formatStepName(name: string): string {
+export function formatStepName(name: string | undefined | null): string {
+  if (!name) return 'Unknown Step'
   if (STEP_LABELS[name]) return STEP_LABELS[name]
   return name.split('_').map(capitaliseWord).join(' ')
 }
@@ -58,6 +61,11 @@ export function formatResultSummary(
     error: 'Error',
     action: 'Action',
     note: 'Note',
+    ml_recommendation: 'ML Recommendation',
+    review_category: 'Review Category',
+    passed: 'Passed',
+    risk_score: 'Risk Score',
+    flagged_reasons: 'Flagged Reasons',
   }
 
   return Object.entries(summary)

@@ -194,16 +194,31 @@ class Command(BaseCommand):
             '--label-noise-rate', type=float, default=0.05,
             help='Fraction of approved loans flipped to denied as label noise (default: 0.05)',
         )
+        parser.add_argument(
+            '--use-live-data', action='store_true',
+            help='Fetch live Australian benchmarks (ABS, APRA, RBA) to calibrate distributions',
+        )
 
     def handle(self, *args, **options):
         num_records = options['num_records']
         output_path = options['output']
         db_count = options['create_db_records']
         label_noise_rate = options['label_noise_rate']
+        use_live_data = options['use_live_data']
 
         self.stdout.write(f'Generating {num_records} synthetic loan records...')
 
-        generator = DataGenerator()
+        benchmarks = None
+        if use_live_data:
+            self.stdout.write('Fetching live Australian benchmarks...')
+            from apps.ml_engine.services.real_world_benchmarks import RealWorldBenchmarks
+            svc = RealWorldBenchmarks()
+            benchmarks = svc.get_calibration_snapshot()
+            self.stdout.write(self.style.SUCCESS(
+                f'Calibration snapshot assembled at {benchmarks["fetched_at"]}'
+            ))
+
+        generator = DataGenerator(benchmarks=benchmarks, use_live_macro=use_live_data)
         df = generator.generate(num_records=num_records, label_noise_rate=label_noise_rate)
         generator.save_to_csv(df, output_path)
 

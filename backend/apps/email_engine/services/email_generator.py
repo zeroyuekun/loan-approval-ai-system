@@ -40,12 +40,13 @@ class EmailGenerator:
 
     def __init__(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        if not api_key:
-            raise ValueError('ANTHROPIC_API_KEY environment variable is not set')
-        self.client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        if api_key:
+            self.client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+        else:
+            self.client = None
         self.guardrail_checker = GuardrailChecker()
         self._consecutive_failures = 0
         self._circuit_open_until = 0
@@ -218,11 +219,20 @@ class EmailGenerator:
         if self._consecutive_failures >= 3 and time.time() < self._circuit_open_until:
             return self._generate_fallback(application, decision, context, start_time)
 
+        # Pre-flight: detect billing/auth errors immediately so the pipeline
+        # completes end-to-end using templates rather than failing at this step.
+        if attempt == 1 and not self._api_available():
+            return self._generate_fallback(application, decision, context, start_time)
+
         # Call Claude API with tool_use for structured output (with budget check)
         from django.conf import settings as django_settings
-        from apps.agents.services.api_budget import ApiBudgetGuard
+        from apps.agents.services.api_budget import ApiBudgetGuard, BudgetExhausted, guarded_api_call
+
         budget = ApiBudgetGuard()
-        budget.check_budget()
+        try:
+            budget.check_budget()
+        except (BudgetExhausted,):
+            return self._generate_fallback(application, decision, context, start_time)
 
         # Approval emails are much longer (loan details, next steps, documentation,
         # before-you-sign, hardship, attachments, comparison rate footnote, AFCA).
@@ -232,25 +242,47 @@ class EmailGenerator:
         input_tokens = 0
         output_tokens = 0
         try:
-            response = self.client.messages.create(
-                model='claude-sonnet-4-20250514',
-                max_tokens=token_limit,
-                temperature=getattr(django_settings, 'AI_TEMPERATURE_DECISION_EMAIL', 0.0),
-                messages=[{'role': 'user', 'content': prompt}],
-                tools=[EMAIL_SUBMIT_TOOL],
-                tool_choice={'type': 'tool', 'name': 'submit_email'},
-            )
+            # Retry with exponential backoff on rate limit (429) errors.
+            # The org-level limit is 30k input tokens/min — with prompts
+            # ~5k tokens each, rapid sequential calls will hit this.
+            max_api_retries = 3
+            response = None
+            _model = 'claude-sonnet-4-20250514'
+            for api_attempt in range(max_api_retries):
+                try:
+                    response = guarded_api_call(
+                        self.client,
+                        model=_model,
+                        max_tokens=token_limit,
+                        temperature=getattr(django_settings, 'AI_TEMPERATURE_DECISION_EMAIL', 0.0),
+                        messages=[{'role': 'user', 'content': prompt}],
+                        tools=[EMAIL_SUBMIT_TOOL],
+                        tool_choice={'type': 'tool', 'name': 'submit_email'},
+                    )
+                    break  # Success — exit retry loop
+                except BudgetExhausted:
+                    return self._generate_fallback(application, decision, context, start_time)
+                except anthropic.RateLimitError:
+                    if api_attempt < max_api_retries - 1:
+                        wait = 2 ** api_attempt * 30  # 30s, 60s, 120s
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            'Rate limited (429), retrying in %ds (attempt %d/%d)',
+                            wait, api_attempt + 1, max_api_retries,
+                        )
+                        time.sleep(wait)
+                    else:
+                        raise  # Final attempt — propagate to outer handler
 
-            # Track budget usage
+            self._consecutive_failures = 0
+            # Read actual token usage from the response
             usage = getattr(response, 'usage', None)
             if usage:
                 input_tokens = getattr(usage, 'input_tokens', 0)
                 output_tokens = getattr(usage, 'output_tokens', 0)
-                budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens)
-            budget.record_success()
-            self._consecutive_failures = 0
+        except BudgetExhausted:
+            return self._generate_fallback(application, decision, context, start_time)
         except Exception as e:
-            budget.record_failure()
             self._consecutive_failures += 1
             if self._consecutive_failures >= 3:
                 self._circuit_open_until = time.time() + 600  # 10 min cooldown
@@ -361,39 +393,112 @@ class EmailGenerator:
 
         return subject, body
 
+    def _api_available(self):
+        """Quick check if the Claude API is reachable and has credits.
+
+        Sends a minimal 1-token request. Returns False on billing, auth,
+        or connection errors so the caller can fall back to templates.
+        """
+        import logging
+        logger = logging.getLogger('email_engine.generator')
+        if self.client is None:
+            logger.info('No API client configured — using template fallback')
+            return False
+        try:
+            self.client.messages.create(
+                model='claude-sonnet-4-20250514',
+                max_tokens=1,
+                messages=[{'role': 'user', 'content': 'hi'}],
+            )
+            return True
+        except anthropic.AuthenticationError:
+            logger.warning('Claude API auth failed — using template fallback')
+            return False
+        except anthropic.BadRequestError as e:
+            if 'credit' in str(e).lower() or 'balance' in str(e).lower():
+                logger.warning('Claude API credit insufficient — using template fallback')
+                return False
+            return True  # other bad request errors may be prompt-specific
+        except (anthropic.APIConnectionError, anthropic.APITimeoutError):
+            logger.warning('Claude API unreachable — using template fallback')
+            return False
+        except Exception:
+            return True  # let the main flow handle unexpected errors
+
     def _generate_fallback(self, application, decision, context, start_time):
-        """Generate email from static template when Claude API is unavailable."""
+        """Generate email from smart template when Claude API is unavailable.
+
+        Fills in applicant-specific details: pricing, denial reasons, conditions,
+        employment context, and tailored guidance.
+        """
         from .template_fallback import generate_approval_template, generate_denial_template
+        from .pricing import calculate_loan_pricing
 
         applicant_name = _sanitize_prompt_input(
             f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
             max_length=200,
         ) or application.applicant.username
 
-        if decision == 'approved':
+        pricing = None
+        if decision in ('approved', 'conditional'):
+            # Calculate real pricing even in fallback mode
+            pricing = context.get('pricing')
+            if not pricing:
+                try:
+                    pricing = calculate_loan_pricing(application)
+                except Exception:
+                    pricing = None
+
+            # Get conditions for conditional approvals
+            conditions = None
+            if hasattr(application, 'conditions') and application.conditions:
+                conditions = application.conditions
+
             result = generate_approval_template(
                 applicant_name,
                 float(application.loan_amount),
                 application.get_purpose_display(),
-                pricing=context.get('pricing'),
+                pricing=pricing,
+                conditions=conditions,
+                employment_type=application.get_employment_type_display(),
+                applicant_type=application.get_applicant_type_display(),
+                has_cosigner=application.has_cosigner,
             )
         else:
-            denial_reasons = self._format_denial_reasons(
-                application.decision.feature_importances
-                if hasattr(application, 'decision') and application.decision
-                else None
-            )
+            # Gather rich denial context
+            feature_importances = None
+            if hasattr(application, 'decision') and application.decision:
+                feature_importances = application.decision.feature_importances
+
+            denial_reasons = self._format_denial_reasons(feature_importances)
+
+            credit_score = getattr(application, 'credit_score', None)
+            debt_to_income = getattr(application, 'debt_to_income', None)
+
             result = generate_denial_template(
                 applicant_name,
                 float(application.loan_amount),
                 application.get_purpose_display(),
                 denial_reasons=denial_reasons,
+                feature_importances=feature_importances,
+                credit_score=int(credit_score) if credit_score else None,
+                debt_to_income=float(debt_to_income) if debt_to_income else None,
+                employment_type=application.get_employment_type_display(),
             )
 
         generation_time = int((time.time() - start_time) * 1000)
 
-        # Run guardrails on template output too
-        guardrail_results = self.guardrail_checker.run_all_checks(result['body'], context)
+        # Ensure pricing is in context for guardrail validation
+        # (the main generate() path adds pricing to context at line 176,
+        # but the pre-flight fallback path skips that)
+        if 'pricing' not in context and decision in ('approved', 'conditional') and pricing:
+            context['pricing'] = pricing
+
+        # Run full guardrails on template emails — templates are designed
+        # to pass all 18 checks including hallucinated numbers and required elements.
+        guardrail_results = self.guardrail_checker.run_all_checks(
+            result['body'], context,
+        )
         all_passed = all(r['passed'] for r in guardrail_results if r.get('severity') != 'warning')
 
         return {

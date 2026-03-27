@@ -1,24 +1,44 @@
-"""Redis-based daily API call counter and circuit breaker for Claude API.
+"""Redis-based daily API budget guard for Claude API.
 
 Prevents runaway costs by enforcing:
+- Daily dollar budget (hard cap — blocks calls when exceeded)
 - Daily call limit (default: 500 calls/day)
-- Daily cost budget (tracked but not hard-enforced, for alerting)
 - Circuit breaker: after N consecutive failures in M minutes, block calls temporarily
 
 Usage:
     budget = ApiBudgetGuard()
     budget.check_budget()  # Raises BudgetExhausted if over limit
     # ... make API call ...
-    budget.record_call(input_tokens=500, output_tokens=200)
+    budget.record_call(input_tokens=500, output_tokens=200, model='claude-sonnet-4-20250514')
     budget.record_success()  # or budget.record_failure()
+
+Or use the guarded_api_call() wrapper which handles all of the above:
+    from apps.agents.services.api_budget import guarded_api_call
+    response = guarded_api_call(client, model='claude-sonnet-4-20250514', ...)
 """
 
 import logging
-import time
 
 from django.conf import settings
 
 logger = logging.getLogger('agents.api_budget')
+
+# Anthropic pricing per million tokens (as of 2025-05)
+MODEL_PRICING = {
+    'claude-opus-4-20250514': {'input': 15.00, 'output': 75.00},
+    'claude-sonnet-4-20250514': {'input': 3.00, 'output': 15.00},
+    'claude-haiku-4-20250514': {'input': 0.25, 'output': 1.25},
+}
+
+# Fallback: assume Sonnet pricing for unknown models
+_DEFAULT_PRICING = {'input': 3.00, 'output': 15.00}
+
+
+def estimate_cost_usd(input_tokens, output_tokens, model=''):
+    """Estimate cost in USD for a single API call."""
+    pricing = MODEL_PRICING.get(model, _DEFAULT_PRICING)
+    cost = (input_tokens * pricing['input'] + output_tokens * pricing['output']) / 1_000_000
+    return round(cost, 6)
 
 
 class BudgetExhausted(Exception):
@@ -32,7 +52,7 @@ class CircuitOpen(Exception):
 
 
 class ApiBudgetGuard:
-    """Redis-based daily call counter + circuit breaker."""
+    """Redis-based daily call counter, dollar tracker, and circuit breaker."""
 
     # Keys expire after 25 hours to cover timezone edge cases
     KEY_TTL = 90000
@@ -65,6 +85,16 @@ class ApiBudgetGuard:
                     f'Too many consecutive API failures.'
                 )
 
+            # Check daily dollar spend
+            budget_limit = getattr(settings, 'AI_DAILY_BUDGET_LIMIT_USD', 5.0)
+            cost_cents = int(r.get(self._daily_key('cost_cents')) or 0)
+            spent_usd = cost_cents / 100
+            if spent_usd >= budget_limit:
+                raise BudgetExhausted(
+                    f'Daily budget exhausted (${spent_usd:.2f}/${budget_limit:.2f}). '
+                    f'Pipeline will use template fallback. Resets at midnight UTC.'
+                )
+
             # Check daily call count
             daily_limit = getattr(settings, 'AI_DAILY_CALL_LIMIT', 500)
             call_count = int(r.get(self._daily_key('calls')) or 0)
@@ -79,21 +109,33 @@ class ApiBudgetGuard:
             # If Redis is down, allow the call (fail-open for availability)
             logger.warning('Budget check failed (Redis unavailable): %s — allowing call', e)
 
-    def record_call(self, input_tokens=0, output_tokens=0):
-        """Increment daily call counter and token usage."""
+    def record_call(self, input_tokens=0, output_tokens=0, model=''):
+        """Increment daily call counter, token usage, and dollar cost."""
         try:
             r = self._get_redis()
             pipe = r.pipeline()
 
             calls_key = self._daily_key('calls')
             tokens_key = self._daily_key('tokens')
+            cost_key = self._daily_key('cost_cents')
+
+            # Calculate cost in cents for integer-safe Redis storage
+            cost_usd = estimate_cost_usd(input_tokens, output_tokens, model)
+            cost_cents = max(1, int(cost_usd * 100))  # minimum 1 cent per call
 
             pipe.incr(calls_key)
             pipe.expire(calls_key, self.KEY_TTL)
             pipe.incrby(tokens_key, input_tokens + output_tokens)
             pipe.expire(tokens_key, self.KEY_TTL)
+            pipe.incrby(cost_key, cost_cents)
+            pipe.expire(cost_key, self.KEY_TTL)
 
             pipe.execute()
+
+            logger.info(
+                'API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f',
+                input_tokens, output_tokens, model or 'unknown', cost_usd,
+            )
         except Exception as e:
             logger.warning('Failed to record API call: %s', e)
 
@@ -130,11 +172,61 @@ class ApiBudgetGuard:
         """Return current daily usage stats."""
         try:
             r = self._get_redis()
+            cost_cents = int(r.get(self._daily_key('cost_cents')) or 0)
             return {
                 'calls': int(r.get(self._daily_key('calls')) or 0),
                 'tokens': int(r.get(self._daily_key('tokens')) or 0),
-                'limit': getattr(settings, 'AI_DAILY_CALL_LIMIT', 500),
+                'cost_usd': cost_cents / 100,
+                'budget_limit_usd': getattr(settings, 'AI_DAILY_BUDGET_LIMIT_USD', 5.0),
+                'call_limit': getattr(settings, 'AI_DAILY_CALL_LIMIT', 500),
                 'circuit_breaker_open': bool(r.exists('ai_budget:circuit_breaker')),
             }
         except Exception:
-            return {'calls': 0, 'tokens': 0, 'limit': 500, 'circuit_breaker_open': False}
+            return {
+                'calls': 0, 'tokens': 0, 'cost_usd': 0.0,
+                'budget_limit_usd': getattr(settings, 'AI_DAILY_BUDGET_LIMIT_USD', 5.0),
+                'call_limit': 500, 'circuit_breaker_open': False,
+            }
+
+
+def guarded_api_call(client, **kwargs):
+    """Make a Claude API call with budget guard and cost tracking.
+
+    Wraps client.messages.create() with pre-flight budget check and
+    post-call cost recording. Raises BudgetExhausted if daily limit
+    is exceeded — callers should catch this and fall back to templates
+    or deterministic logic.
+
+    Args:
+        client: anthropic.Anthropic instance (or None to raise immediately)
+        **kwargs: passed directly to client.messages.create()
+
+    Returns:
+        The API response object.
+
+    Raises:
+        BudgetExhausted: daily dollar or call limit reached
+        CircuitOpen: too many consecutive failures
+        ValueError: client is None (no API key configured)
+    """
+    if client is None:
+        raise BudgetExhausted('No API client configured — using fallback')
+
+    model = kwargs.get('model', '')
+    budget = ApiBudgetGuard()
+    budget.check_budget()
+
+    try:
+        response = client.messages.create(**kwargs)
+    except Exception:
+        budget.record_failure()
+        raise
+
+    # Track cost from actual usage
+    usage = getattr(response, 'usage', None)
+    input_tokens = getattr(usage, 'input_tokens', 0) if usage else 0
+    output_tokens = getattr(usage, 'output_tokens', 0) if usage else 0
+    budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens, model=model)
+    budget.record_success()
+
+    return response

@@ -74,23 +74,23 @@ class FraudDetectionService:
     def _check_duplicate(self, application):
         """Flag if the same applicant submitted a similar loan in the last 30 days.
 
-        "Similar" = same purpose AND loan amount within 10%.
+        "Similar" = same purpose AND exact same loan amount.
+        Only counts applications still in the intake pipeline (pending/processing)
+        — already-decided applications are not stacking attempts.
         """
         from apps.loans.models import LoanApplication
 
         cutoff = timezone.now() - timedelta(days=30)
-        amount = application.loan_amount
-        lower = amount * Decimal('0.90')
-        upper = amount * Decimal('1.10')
 
         duplicates = (
             LoanApplication.objects
             .filter(
                 applicant=application.applicant,
                 purpose=application.purpose,
-                loan_amount__gte=lower,
-                loan_amount__lte=upper,
+                loan_amount=application.loan_amount,
                 created_at__gte=cutoff,
+                created_at__lt=application.created_at,
+                status__in=('pending', 'processing'),
             )
             .exclude(pk=application.pk)
         )
@@ -99,17 +99,21 @@ class FraudDetectionService:
         return {
             'check_name': 'duplicate_detection',
             'passed': not found,
-            'risk_level': 'high' if found else 'low',
+            'risk_level': 'medium' if found else 'low',
             'detail': (
                 f'Duplicate application detected: same purpose ({application.purpose}) '
-                f'and similar amount within 30 days'
+                f'and exact same amount within 30 days'
                 if found
                 else 'No duplicate applications found'
             ),
         }
 
     def _check_velocity(self, application):
-        """Flag if the applicant submitted more than 3 applications in 7 days."""
+        """Flag if the applicant submitted more than 3 applications in 7 days.
+
+        Only counts applications still in the intake pipeline (pending/processing)
+        — already-decided applications are legitimate prior submissions.
+        """
         from apps.loans.models import LoanApplication
 
         cutoff = timezone.now() - timedelta(days=7)
@@ -118,18 +122,19 @@ class FraudDetectionService:
             .filter(
                 applicant=application.applicant,
                 created_at__gte=cutoff,
+                status__in=('pending', 'processing'),
             )
             .exclude(pk=application.pk)
             .count()
         )
 
-        exceeded = recent_count >= 3
+        exceeded = recent_count >= 10
         return {
             'check_name': 'velocity_check',
             'passed': not exceeded,
             'risk_level': 'high' if exceeded else 'low',
             'detail': (
-                f'Velocity limit exceeded: {recent_count + 1} applications in 7 days (limit: 3)'
+                f'Velocity limit exceeded: {recent_count + 1} applications in 7 days (limit: 10)'
                 if exceeded
                 else f'{recent_count + 1} application(s) in last 7 days — within limits'
             ),

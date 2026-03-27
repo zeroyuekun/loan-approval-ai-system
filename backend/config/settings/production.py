@@ -23,7 +23,6 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 X_FRAME_OPTIONS = 'DENY'
 SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_HTTPONLY = True
 SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 
 DATABASES['default']['CONN_MAX_AGE'] = 600
@@ -37,6 +36,20 @@ CELERY_TASK_TIME_LIMIT = 600
 CELERY_TASK_SOFT_TIME_LIMIT = 540
 CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
 CELERY_RESULT_EXPIRES = 3600
+
+# Enforce Content Security Policy in production (base.py has REPORT_ONLY=True for dev)
+CONTENT_SECURITY_POLICY = {
+    "REPORT_ONLY": False,
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'", "data:"],
+        "font-src": ["'self'"],
+        "connect-src": ["'self'"],
+        "frame-ancestors": ["'none'"],
+    },
+}
 
 # Logging
 LOGGING = {

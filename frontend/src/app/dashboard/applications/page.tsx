@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useApplications } from '@/hooks/useApplications'
 import { ApplicationTable } from '@/components/applications/ApplicationTable'
@@ -21,6 +21,12 @@ export default function ApplicationsPage() {
   const [checkAllState, setCheckAllState] = useState<'idle' | 'loading' | 'done'>('idle')
   const [checkAllResult, setCheckAllResult] = useState<{ queued: number } | null>(null)
   const queryClient = useQueryClient()
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => timersRef.current.forEach(clearTimeout)
+  }, [])
 
   // Debounce search input by 300ms
   useEffect(() => {
@@ -46,14 +52,14 @@ export default function ApplicationsPage() {
       setCheckAllResult({ queued: data.queued })
       setCheckAllState('done')
       // Refresh the applications list after a short delay
-      setTimeout(() => {
+      timersRef.current.push(setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ['applications'] })
-      }, 2000)
+      }, 2000))
       // Reset the button after 5 seconds
-      setTimeout(() => {
+      timersRef.current.push(setTimeout(() => {
         setCheckAllState('idle')
         setCheckAllResult(null)
-      }, 5000)
+      }, 5000))
     } catch {
       toast.error('Failed to process applications. Please try again.')
       setCheckAllState('idle')

@@ -47,7 +47,7 @@ Contact me at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to
 
 Congratulations again, John. Thanks for choosing us at AussieLoanAI.
 
-Warm regards,
+Kind regards,
 
 Sarah Mitchell
 Senior Lending Officer

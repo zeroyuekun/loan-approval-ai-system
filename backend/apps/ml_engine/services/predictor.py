@@ -472,8 +472,9 @@ class ModelPredictor:
 
         prediction_label = 'approved' if probability >= effective_threshold else 'denied'
 
-        # Flag borderline cases for human review
-        requires_human_review = abs(probability - threshold) <= 0.10
+        # Flag borderline cases for human review (use effective_threshold
+        # so group-adjusted decisions are consistent with the borderline flag)
+        requires_human_review = abs(probability - effective_threshold) <= 0.10
 
         # Also flag for review if significant feature drift detected
         if any(w.get('severity') == 'drift' for w in drift_warnings):

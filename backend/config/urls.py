@@ -106,15 +106,17 @@ def deep_health_check(request):
     except Exception as e:
         checks['redis'] = f'error: {e}'
 
-    # Active ML model
+    # Active ML model (non-blocking — ML can be trained after startup)
     try:
         from apps.ml_engine.models import ModelVersion
         active = ModelVersion.objects.filter(is_active=True).exists()
-        checks['ml_model'] = 'ok' if active else 'no active model'
+        checks['ml_model'] = 'ok' if active else 'no active model (non-blocking)'
     except Exception as e:
         checks['ml_model'] = f'error: {e}'
 
-    all_ok = all(v == 'ok' for v in checks.values())
+    # Only database and Redis are required for startup; ML model is optional
+    core_checks = {k: v for k, v in checks.items() if k in ('database', 'redis')}
+    all_ok = all(v == 'ok' for v in core_checks.values())
     status_code = 200 if all_ok else 503
     checks['status'] = 'healthy' if all_ok else 'degraded'
 
