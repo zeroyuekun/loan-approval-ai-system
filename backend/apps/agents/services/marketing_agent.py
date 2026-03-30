@@ -85,7 +85,6 @@ Option [N]: [Offer Name]
 [END FOR EACH]
 
 If any of these options interest you, I'd be happy to talk them through with you. You can contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-
 Thanks for coming to us, {applicant_first_name}. We'd love to help you find the right option when you're ready.
 
 Kind regards,
@@ -641,7 +640,7 @@ class MarketingAgent:
                 f'{offers_text}\n\n'
                 f'If any of these options interest you, I\'d be happy to talk them through '
                 f'with you. You can contact me directly at 1300 000 000 '
-                f'(Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.\n\n'
+                f'(Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.\n'
                 f'Thanks for coming to us, {first_name}. We\'d love to help you find the '
                 f'right option when you\'re ready.\n\n'
                 f'Kind regards,\n'

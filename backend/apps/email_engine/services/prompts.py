@@ -55,7 +55,7 @@ TONE:
 
 2. "Dear [First Name],"
 
-3. OPENING PARAGRAPH (2 sentences): State the approval with professional warmth. Either "We are pleased to advise that your application for a [Loan Type] loan with AussieLoanAI has been approved" or "Your application for a [Loan Type] loan with AussieLoanAI has been approved" — both are appropriate. Follow with "Congratulations!" The opener should feel like a senior banker delivering good news: composed, warm, authoritative.
+3. OPENING PARAGRAPH (2 sentences): State the approval with professional warmth. Use "We are pleased to advise that your application for a [Loan Type] with AussieLoanAI has been approved." Follow with "Congratulations!" The opener should feel like a senior banker delivering good news: composed, warm, authoritative.
 
 4. "Loan Details:" section label, then an indented table of key-value pairs:
    - Loan Amount: ${loan_amount:,.2f}
@@ -81,7 +81,7 @@ TONE:
    - Mention they are welcome to seek independent financial or legal advice before proceeding.
    - Mention the cooling-off period after signing, with reference to the loan agreement for details.
 
-   Leave a blank line between each paragraph in this section.
+   Do NOT leave blank lines between the paragraphs in this section — they should flow as consecutive lines with no gap.
 
 8. "We're Here For You:" section label on its own line, then leave a blank line and write:
    - Mention that if they experience financial difficulty at any point during their loan, they should contact early.
@@ -89,7 +89,7 @@ TONE:
 
 9. CLOSING PARAGRAPH (separate from the above sections, after a blank line):
    - First sentence: Offer to answer questions about the loan or next steps. Provide direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to this email. State you are here to make sure everything runs smoothly.
-   - Second sentence (after a blank line): Close with congratulations again using the customer's first name. Express appreciation naturally — "Thanks for choosing us at AussieLoanAI, [First Name]" not "We appreciate your trust in AussieLoanAI" (which sounds like a press release).
+   - Second sentence (on the NEXT LINE, no blank line between): Close with congratulations again using the customer's first name. Express appreciation naturally — "Thanks for choosing us at AussieLoanAI, [First Name]" not "We appreciate your trust in AussieLoanAI" (which sounds like a press release).
 
 10. Sign-off (after a blank line):
 
@@ -98,7 +98,7 @@ Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
 ABN 12 345 678 901 | Australian Credit Licence No. 012345
-Ph: 1300 000 000
+Phone: 1300 000 000
 Email: aussieloanai@gmail.com
 
 11. Attachments list (after a blank line):
@@ -150,11 +150,11 @@ These are the most frequent reasons emails fail quality checks. Avoid them:
 === TEMPLATE (USE AS-IS) ===
 This is your TEMPLATE. Copy it VERBATIM. Only substitute the bracketed placeholders and customer-specific details (name, loan type, loan amount, loan term, purpose, documentation checklist). Every sentence, paragraph, and section that is not a placeholder must appear EXACTLY as written below — same wording, same order, same punctuation. Do NOT rephrase, reword, add, or remove any generic text.
 
-Subject: Congratulations! Your Personal Loan is Approved
+Subject: Congratulations! Your Home Purchase Loan is Approved
 
 Dear Neville,
 
-We are pleased to advise that your application for a Personal Loan with AussieLoanAI has been approved. Congratulations!
+We are pleased to advise that your application for a Home Purchase Loan with AussieLoanAI has been approved. Congratulations!
 
 Loan Details:
 
@@ -178,19 +178,32 @@ Required Documentation:
 
 To finalise your loan, please provide the following documents:
 
+  Identity and Residency:
   1. Current photo identification (Australian driver licence or passport)
   2. Proof of current residential address (utility bill, council rates notice, or bank statement dated within the last 3 months)
-  3. Two most recent payslips (no older than 45 days)
-  4. Most recent PAYG payment summary or ATO Notice of Assessment
-  5. Bank statements for all transaction and savings accounts (last 3 months)
-  6. Recent statements for any existing loans, credit cards, or buy-now-pay-later accounts
+
+  Income Verification:
+  3. Two most recent payslips (no older than 45 days) showing year-to-date earnings
+  4. Most recent PAYG payment summary or ATO Notice of Assessment (less than 12 months old)
+  5. If self-employed: two most recent personal and business tax returns, ATO Notice of Assessment, and business financial statements
+  6. If receiving rental income: current lease agreement or real estate agent statement, plus bank statements showing rental deposits (last 3 months)
+
+  Financial Position:
+  7. Bank statements for all transaction and savings accounts (last 3 months)
+  8. Evidence of the deposit or savings history (e.g., term deposit or savings account statements)
+  9. Recent statements for any existing loans, credit cards, or buy-now-pay-later accounts
+  10. Details of any other financial commitments (e.g., child support, HECS-HELP)
+
+  Property Documents:
+  11. Signed contract of sale (or draft if exchange has not yet occurred)
+  12. Council rates notice or Notice of Valuation for the property being purchased
+  13. Solicitor or conveyancer contact details
 
 Before You Sign:
 
 We want to make sure this loan is right for you. Please take the time to read the full terms carefully, including fees and what happens if a repayment is missed.
 
 If your circumstances have changed since you applied, please let us know. You are also welcome to seek independent financial or legal advice before proceeding.
-
 You will have access to a cooling-off period after signing, allowing you to withdraw without penalty. Details are in your loan agreement.
 
 We're Here For You:
@@ -198,7 +211,6 @@ We're Here For You:
 If at any point during your loan you experience financial difficulty, please contact us early. Our Financial Hardship team is here to help and can be reached on 1300 000 001 or at aussieloanai@gmail.com.
 
 If you have any questions about your loan or the next steps, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-
 Congratulations again, Neville. Thanks for choosing us at AussieLoanAI.
 
 Kind regards,
@@ -206,12 +218,12 @@ Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
 ABN 12 345 678 901 | Australian Credit Licence No. 012345
-Ph: 1300 000 000
+Phone: 1300 000 000
 Email: aussieloanai@gmail.com
 
 Attachments:
   1. Loan Contract \u2013 Neville Thompson.pdf
-  2. Key Facts Sheet \u2013 Personal Loan.pdf
+  2. Key Facts Sheet \u2013 Home Purchase Loan.pdf
   3. Credit Guide \u2013 AussieLoanAI Pty Ltd.pdf
 
 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -326,9 +338,9 @@ Denial letters are the most psychologically sensitive communication a bank sends
 
 9. "We'd Still Like to Help:" section label on its own line, then a blank line, then 1\u20132 sentences offering to explore alternative products or a revised amount. Use first person ("I'd be happy to talk through your options"). Do NOT preface this with a summary of the customer's banking history or payment behaviour — just make the offer directly. Follow with a blank line.
 
-10. CLOSING (2\u20133 sentences, split across two paragraphs):
-   - First paragraph: Offer direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to the email. Do NOT apologise or mention disappointment.
-   - Second paragraph (after a blank line): Close with this exact line (substituting the customer's first name): "Thanks for coming to us, [First Name]. We'd love to help you find the right option when you're ready." Do NOT rephrase or reword this line.
+10. CLOSING (2\u20133 sentences, flowing together with no blank line between them):
+   - First sentence: Offer direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to the email. Do NOT apologise or mention disappointment.
+   - Second sentence (on the NEXT LINE, no blank line): Close with this exact line (substituting the customer's first name): "Thanks for coming to us, [First Name]. We'd love to help you find the right option when you're ready." Do NOT rephrase or reword this line.
 
 11. Sign-off (after a blank line):
 
@@ -337,7 +349,7 @@ Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
 ABN 12 345 678 901 | Australian Credit Licence No. 012345
-Ph: 1300 000 000
+Phone: 1300 000 000
 Email: aussieloanai@gmail.com
 
 12. Separator line (after a blank line), then AFCA/complaints footer and confidentiality notice:
@@ -408,7 +420,6 @@ We'd Still Like to Help:
 If you'd like to explore whether a different loan product or a revised amount could be a better fit, I'd be happy to talk through your options.
 
 If you have any questions about this decision, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-
 Thanks for coming to us, Neville. We'd love to help you find the right option when you're ready.
 
 Kind regards,
@@ -416,7 +427,7 @@ Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
 ABN 12 345 678 901 | Australian Credit Licence No. 012345
-Ph: 1300 000 000
+Phone: 1300 000 000
 Email: aussieloanai@gmail.com
 
 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500

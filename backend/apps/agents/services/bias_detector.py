@@ -164,8 +164,8 @@ class BiasDetector:
         prescreen = self.prescreener.prescreen_decision_email(email_text, application_context)
         det_score = prescreen['deterministic_score']
 
-        bias_threshold_pass = getattr(django_settings, 'BIAS_THRESHOLD_PASS', 60)
-        bias_threshold_review = getattr(django_settings, 'BIAS_THRESHOLD_REVIEW', 80)
+        bias_threshold_pass = getattr(django_settings, 'BIAS_THRESHOLD_PASS', 30)
+        bias_threshold_review = getattr(django_settings, 'BIAS_THRESHOLD_REVIEW', 60)
 
         # ── Clean email: all deterministic checks passed ──
         # Real banks don't ask a second reviewer to "score" a clean email.

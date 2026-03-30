@@ -479,8 +479,8 @@ class ModelTrainer:
         # Runs BEFORE the final model training to get an unbiased estimate
         # of generalisation performance across multiple data splits.
         # ------------------------------------------------------------------
-        logger.info('Running 5-fold stratified cross-validation...')
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        logger.info('Running 3-fold stratified cross-validation...')
+        cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
         neg_count_cv = int((y_train == 0).sum())
         pos_count_cv = int((y_train == 1).sum())
         from xgboost import XGBClassifier as _CVXGBClassifier
@@ -492,7 +492,7 @@ class ModelTrainer:
         cv_scores = cross_val_score(cv_model, X_train, y_train, cv=cv, scoring='roc_auc')
         cv_mean = float(cv_scores.mean())
         cv_std = float(cv_scores.std())
-        logger.info('5-fold CV AUC-ROC: %.4f +/- %.4f', cv_mean, cv_std)
+        logger.info('3-fold CV AUC-ROC: %.4f +/- %.4f', cv_mean, cv_std)
         # Flag instability if any fold deviates >3% from mean (range > 6%)
         cv_unstable = bool(cv_scores.max() - cv_scores.min() > 0.06)
         if cv_unstable:
@@ -502,7 +502,7 @@ class ModelTrainer:
             )
 
         cv_report = {
-            'n_splits': 5,
+            'n_splits': 3,
             'strategy': 'StratifiedKFold',
             'scoring': 'roc_auc',
             'fold_scores': cv_scores.tolist(),
@@ -732,7 +732,7 @@ class ModelTrainer:
         rf = RandomForestClassifier(random_state=42, class_weight='balanced')
         grid = GridSearchCV(
             rf, param_grid,
-            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+            cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
             scoring='f1', n_jobs=-1, verbose=0,
         )
         fit_params = {}
@@ -807,14 +807,12 @@ class ModelTrainer:
 
         param_grid = {
             'n_estimators': [200, 300],
-            'max_depth': [4, 5, 6],
-            'learning_rate': [0.01, 0.1],
+            'max_depth': [4, 6],
+            'learning_rate': [0.05, 0.1],
             'subsample': [0.8, 1.0],
             'min_child_weight': [1, 5],
             'colsample_bytree': [0.8, 1.0],
-            'reg_alpha': [0, 0.1],
             'reg_lambda': [1, 5],
-            'gamma': [0, 0.1],
         }
         # n_jobs=1 here so XGBoost does NOT spawn its own thread pool
         # inside each RandomizedSearchCV worker (n_jobs=-1 below).
@@ -829,8 +827,8 @@ class ModelTrainer:
             n_jobs=1,
         )
         search = RandomizedSearchCV(
-            xgb, param_grid, n_iter=30,
-            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+            xgb, param_grid, n_iter=12,
+            cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
             scoring='f1', n_jobs=-1, verbose=0, random_state=42,
         )
         fit_params = {}

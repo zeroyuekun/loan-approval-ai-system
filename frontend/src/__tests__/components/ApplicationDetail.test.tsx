@@ -130,7 +130,7 @@ describe('ApplicationDetail', () => {
   it('renders financial details card', () => {
     renderComponent()
     expect(screen.getByText('Financial Details')).toBeInTheDocument()
-    expect(screen.getByText('36 months')).toBeInTheDocument()
+    expect(screen.getByText('Loan Term')).toBeInTheDocument()
   })
 
   it('renders ML decision when present', () => {

@@ -57,7 +57,7 @@ class PortfolioStressTester:
         scenarios = {scenario_name: self.SCENARIOS[scenario_name]} if scenario_name else self.SCENARIOS
 
         approved_apps = LoanApplication.objects.filter(
-            status='approved',
+            status=LoanApplication.Status.APPROVED,
         ).select_related('decision')
 
         total_approved = approved_apps.count()

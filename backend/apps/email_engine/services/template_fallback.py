@@ -161,8 +161,6 @@ def generate_approval_template(applicant_name, loan_amount, purpose, pricing=Non
     sign_by = (today + timedelta(days=30)).strftime('%d %B %Y')
 
     subject = f'Congratulations! Your {loan_type} Loan is Approved'
-    if conditions:
-        subject = f'Conditional Approval \u2013 Your {loan_type} Loan Application'
 
     # Pricing section
     pricing_block = ''
@@ -187,20 +185,7 @@ Loan Details:
   Loan Term:               As requested
 """
 
-    # Conditions block
     conditions_block = ''
-    if conditions:
-        cond_items = '\n'.join(
-            f'  {i+1}. {c["description"]}' for i, c in enumerate(conditions)
-        )
-        conditions_block = f"""
-Conditions of Approval:
-
-Your approval is subject to the following condition(s) being met:
-
-{cond_items}
-
-"""
 
     # Co-signer note
     cosigner_note = ''
@@ -247,9 +232,7 @@ Please review the attached loan agreement, which outlines all terms and conditio
 Before You Sign:
 
 We want to make sure this loan is right for you. Please take the time to read the full terms carefully, including fees and what happens if a repayment is missed.
-
 If your circumstances have changed since you applied, please let us know. You are also welcome to seek independent financial or legal advice before proceeding.
-
 You will have access to a cooling-off period after signing, allowing you to withdraw without penalty. Details are in your loan agreement.
 
 We're Here For You:
@@ -257,7 +240,6 @@ We're Here For You:
 If at any point during your loan you experience financial difficulty, please contact us early. Our Financial Hardship team is here to help and can be reached on 1300 000 001 or at aussieloanai@gmail.com.
 
 If you have any questions about your loan or the next steps, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-
 Congratulations again, {first}. Thanks for choosing us at AussieLoanAI.
 
 Kind regards,
@@ -265,7 +247,7 @@ Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
 ABN 12 345 678 901 | Australian Credit Licence No. 012345
-Ph: 1300 000 000
+Phone: 1300 000 000
 Email: aussieloanai@gmail.com
 
 Attachments:
@@ -360,7 +342,6 @@ We'd Still Like to Help:
 If you'd like to explore whether a different loan product or a revised amount could be a better fit, I'd be happy to talk through your options.
 
 If you have any questions about this decision, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-
 Thanks for coming to us, {first}. We'd love to help you find the right option when you're ready.
 
 Kind regards,
@@ -368,7 +349,7 @@ Sarah Mitchell
 Senior Lending Officer
 AussieLoanAI Pty Ltd
 ABN 12 345 678 901 | Australian Credit Licence No. 012345
-Ph: 1300 000 000
+Phone: 1300 000 000
 Email: aussieloanai@gmail.com
 
 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500

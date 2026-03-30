@@ -148,6 +148,12 @@ export default function CustomerApplyPage() {
           </div>
         </div>
       )}
+
+      <div className="pt-4 border-t text-center">
+        <Link href="/rights" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          Your rights as a borrower
+        </Link>
+      </div>
     </div>
   )
 }

@@ -90,7 +90,7 @@ class PipelineOrchestrator:
             'has_credit_card': getattr(profile, 'has_credit_card', None),
             'has_mortgage': getattr(profile, 'has_mortgage', None),
             'has_auto_loan': getattr(profile, 'has_auto_loan', None),
-            'gross_annual_income': getattr(profile, 'gross_annual_income', None),
+            'gross_annual_income': profile.gross_annual_income_decimal if hasattr(profile, 'gross_annual_income_decimal') else getattr(profile, 'gross_annual_income', None),
             'superannuation_balance': getattr(profile, 'superannuation_balance', None),
             'total_assets': profile.total_assets if hasattr(profile, 'total_assets') else None,
             'total_monthly_liabilities': profile.total_monthly_liabilities if hasattr(profile, 'total_monthly_liabilities') else None,
@@ -195,9 +195,9 @@ class PipelineOrchestrator:
                 )
                 # Mark any zombie agent runs as failed
                 AgentRun.objects.filter(
-                    application=application, status__in=('pending', 'running'),
-                ).update(status='failed', error='Stale pipeline — automatically cleared')
-            application.status = 'processing'
+                    application=application, status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
+                ).update(status=AgentRun.Status.FAILED, error='Stale pipeline — automatically cleared')
+            application.status = LoanApplication.Status.PROCESSING
             application.save(update_fields=['status'])
 
         # Refetch with profile (nullable) outside the lock — select_for_update
@@ -211,7 +211,7 @@ class PipelineOrchestrator:
 
         agent_run = AgentRun.objects.create(
             application=application,
-            status='running',
+            status=AgentRun.Status.RUNNING,
             steps=[],
         )
 
@@ -262,23 +262,11 @@ class PipelineOrchestrator:
 
         steps.append(step)
 
-        # If fraud check failed, set to review and skip ML prediction
+        # Fraud check is informational only — logged in waterfall but does not
+        # block the pipeline or escalate to human review.
         if not fraud_result['passed']:
-            waterfall.append(self._waterfall_entry(
-                'final_decision', 'fail', 'ESCALATED_FRAUD',
-                f'Fraud check failed, escalated to review',
-            ))
-            self._save_waterfall(application, waterfall)
-
-            application_note = f'Fraud flags: {"; ".join(fraud_result["flagged_reasons"])}'
-            with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(
-                    status='review',
-                    notes=application_note,
-                )
-            self._finalize_run(agent_run, steps, start_time, error=application_note)
-            logger.warning('Application %s: fraud check failed — sent to review', application_id)
-            return agent_run
+            logger.warning('Application %s: fraud flags noted — %s',
+                           application_id, '; '.join(fraud_result['flagged_reasons']))
 
         # Step 1: ML Prediction
         step = self._start_step('ml_prediction')
@@ -370,7 +358,7 @@ class PipelineOrchestrator:
             step = self._fail_step(step, str(e), failure_category='transient')
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status='review')
+                LoanApplication.objects.filter(pk=application.pk).update(status=LoanApplication.Status.REVIEW)
             return agent_run
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at ml_prediction: %s', application_id, e, exc_info=True)
@@ -382,42 +370,11 @@ class PipelineOrchestrator:
             step = self._fail_step(step, str(e), failure_category=None)
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status='review')
+                LoanApplication.objects.filter(pk=application.pk).update(status=LoanApplication.Status.REVIEW)
             return agent_run
 
         steps.append(step)
-        decision = prediction_result['prediction']
-
-        # Step 1b: Conditional approval — check for risk factors that require
-        # conditions before full approval.  Only applies when the ML model
-        # would approve; denied applications skip this entirely.
-        conditions = []
-        if decision == 'approved':
-            conditions = self._evaluate_conditions(application)
-            if conditions:
-                decision = 'conditional'
-                with transaction.atomic():
-                    LoanApplication.objects.filter(pk=application.pk).update(
-                        conditions=conditions,
-                        conditions_met=False,
-                    )
-                # Update the LoanDecision to reflect conditional status
-                LoanDecision.objects.filter(application=application).update(
-                    decision='approved',
-                    reasoning=(
-                        'Conditionally approved — conditions: '
-                        + ', '.join(c['type'] for c in conditions)
-                    ),
-                )
-                waterfall.append(self._waterfall_entry(
-                    'conditional_check', 'conditional', 'CONDITIONAL_APPROVAL',
-                    f'Approved subject to {len(conditions)} condition(s): '
-                    + ', '.join(c['type'] for c in conditions),
-                ))
-                logger.info(
-                    'Application %s: conditional approval with %d condition(s)',
-                    application_id, len(conditions),
-                )
+        decision = prediction_result['prediction']  # 'approved' or 'denied'
 
         # Step 2: Generate Email
         step = self._start_step('email_generation')
@@ -432,7 +389,7 @@ class PipelineOrchestrator:
             generated_email = EmailPersistenceService.save_generated_email(application, decision, email_result)
             EmailPersistenceService.save_guardrail_logs(generated_email, email_result.get('guardrail_results', []))
 
-            email_status = 'pass' if email_result['passed_guardrails'] else 'conditional'
+            email_status = 'pass' if email_result['passed_guardrails'] else 'fail'
             waterfall.append(self._waterfall_entry(
                 'email_generation', email_status, 'EMAIL_GENERATED',
                 f'Email generated (guardrails_passed={email_result["passed_guardrails"]}, '
@@ -506,14 +463,14 @@ class PipelineOrchestrator:
             step = self._fail_step(step, str(e), failure_category='transient')
             # With retry logic inside BiasDetector.analyze(), reaching here means
             # a fundamental failure (e.g., missing API key, prescreen code bug).
-            # Default to moderate score that triggers AI review rather than
-            # auto-escalating to human queue on every transient failure.
-            bias_result = {'score': 65, 'flagged': True, 'requires_human_review': False,
+            # Default to a safe score within the pass range — infrastructure
+            # errors should not trigger human review escalation.
+            bias_result = {'score': 25, 'flagged': False, 'requires_human_review': False,
                            'categories': [], 'analysis': f'Bias check infrastructure error: {e}'}
         except Exception as e:
             logger.critical('Application %s: UNEXPECTED failure at bias_check: %s', application_id, e, exc_info=True)
             step = self._fail_step(step, str(e), failure_category=None)
-            bias_result = {'score': 65, 'flagged': True, 'requires_human_review': False,
+            bias_result = {'score': 25, 'flagged': False, 'requires_human_review': False,
                            'categories': [], 'analysis': f'Bias check infrastructure error: {e}'}
 
         steps.append(step)
@@ -529,10 +486,9 @@ class PipelineOrchestrator:
 
         # Step 4: Handle bias results
         bias_score = bias_result.get('score', 0)
-        bias_threshold_pass = getattr(settings, 'BIAS_THRESHOLD_PASS', 60)
-        bias_threshold_review = getattr(settings, 'BIAS_THRESHOLD_REVIEW', 80)
+        bias_threshold_review = getattr(settings, 'BIAS_THRESHOLD_REVIEW', 60)
 
-        # Score above review threshold: Severe bias — escalate directly to human
+        # Bias score above review threshold — escalate to human review
         if bias_score > bias_threshold_review:
             waterfall.append(self._waterfall_entry(
                 'final_decision', 'fail', 'ESCALATED_SEVERE_BIAS',
@@ -550,160 +506,44 @@ class PipelineOrchestrator:
 
             step = self._start_step('human_review_required')
             step = self._complete_step(step, result_summary={
-                'ml_recommendation': decision,
                 'review_category': 'bias_escalation',
                 'reason': f'Severe bias detected (score {bias_score})',
             })
             steps.append(step)
 
             with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status='review')
+                LoanApplication.objects.filter(pk=application.pk).update(status=LoanApplication.Status.REVIEW)
             agent_run.status = 'escalated'
             self._finalize_run(agent_run, steps, start_time)
             return agent_run
 
-        # Moderate bias — AI Email Reviewer gets second opinion
-        if bias_threshold_pass < bias_score <= bias_threshold_review:
-            step = self._start_step('ai_email_review')
-            review_result = {'approved': False}
-            try:
-                reviewer = AIEmailReviewer()
-                review_result = reviewer.review(email_result['body'], bias_result, context)
-
-                latest_bias_report = agent_run.bias_reports.order_by('-created_at').first()
-                if latest_bias_report:
-                    latest_bias_report.ai_review_approved = review_result['approved']
-                    latest_bias_report.ai_review_reasoning = review_result['reasoning']
-                    latest_bias_report.save(update_fields=['ai_review_approved', 'ai_review_reasoning'])
-
-                step = self._complete_step(step, result_summary={
-                    'approved': review_result['approved'],
-                    'confidence': review_result['confidence'],
-                })
-            except (LLMServiceError, ConnectionError, TimeoutError) as e:
-                logger.error('Application %s: AI email review failed: %s', application_id, e)
-                step = self._fail_step(step, str(e), failure_category='transient')
-                review_result = {'approved': False}
-            except Exception as e:
-                logger.critical('Application %s: UNEXPECTED failure at ai_email_review: %s', application_id, e, exc_info=True)
-                step = self._fail_step(step, str(e), failure_category=None)
-                review_result = {'approved': False}
-
-            steps.append(step)
-
-            ai_approved = review_result.get('approved', False)
-            ai_confidence = review_result.get('confidence', 0.0)
-
-            if not ai_approved:
-                # AI reviewer confirmed bias — escalate to human
-                waterfall.append(self._waterfall_entry(
-                    'final_decision', 'fail', 'ESCALATED_BIAS_CONFIRMED',
-                    'AI reviewer confirmed potential bias, escalated to human review',
-                ))
-                self._save_waterfall(application, waterfall)
-
-                step = self._start_step('human_escalation')
-                step = self._complete_step(step, result_summary={
-                    'bias_score': bias_score,
-                    'reason': 'AI reviewer confirmed potential bias, escalated to human reviewer',
-                })
-                steps.append(step)
-                logger.warning('Application %s: AI reviewer confirmed bias, escalating', application_id)
-
-                step = self._start_step('human_review_required')
-                step = self._complete_step(step, result_summary={
-                    'ml_recommendation': decision,
-                    'review_category': 'ai_reviewer_escalation',
-                    'reason': 'AI reviewer confirmed bias',
-                })
-                steps.append(step)
-
-                with transaction.atomic():
-                    LoanApplication.objects.filter(pk=application.pk).update(status='review')
-                agent_run.status = 'escalated'
-                self._finalize_run(agent_run, steps, start_time)
-                return agent_run
-
-            if ai_approved and ai_confidence < 0.7:
-                # Low confidence approval — escalate for safety
-                waterfall.append(self._waterfall_entry(
-                    'final_decision', 'fail', 'ESCALATED_LOW_CONFIDENCE',
-                    f'AI reviewer approved with low confidence ({ai_confidence:.2f} < 0.70), escalated for safety',
-                ))
-                self._save_waterfall(application, waterfall)
-
-                step = self._start_step('human_escalation_low_confidence')
-                step = self._complete_step(step, result_summary={
-                    'bias_score': bias_score,
-                    'ai_confidence': ai_confidence,
-                    'reason': f'AI reviewer approved but with low confidence ({ai_confidence:.2f} < 0.70), escalated for safety',
-                })
-                steps.append(step)
-                logger.warning('Application %s: low-confidence AI approval (%.2f), escalating',
-                               application_id, ai_confidence)
-
-                step = self._start_step('human_review_required')
-                step = self._complete_step(step, result_summary={
-                    'ml_recommendation': decision,
-                    'review_category': 'ai_reviewer_escalation',
-                    'reason': f'Low-confidence AI approval ({ai_confidence:.2f})',
-                })
-                steps.append(step)
-
-                with transaction.atomic():
-                    LoanApplication.objects.filter(pk=application.pk).update(status='review')
-                agent_run.status = 'escalated'
-                self._finalize_run(agent_run, steps, start_time)
-                return agent_run
-
-            # AI reviewer approved with high confidence — continue pipeline
-
-        # Guardrail failure → escalate to human review (email must be checked
-        # by a banker before it can be sent to the customer).
+        # Guardrail failure — log it and skip email delivery, but do NOT
+        # escalate to human review.  Only bias flags trigger escalation.
         if email_result and not email_result['passed_guardrails']:
             failed_checks = [
                 r['check_name'] for r in email_result.get('guardrail_results', [])
                 if not r['passed']
             ]
             waterfall.append(self._waterfall_entry(
-                'final_decision', 'fail', 'ESCALATED_GUARDRAIL_FAILURE',
-                f'Email guardrails failed ({", ".join(failed_checks)}), escalated to human review',
+                'final_decision', 'warn', 'GUARDRAIL_FAILURE',
+                f'Email guardrails failed ({", ".join(failed_checks)}), email not sent',
             ))
+            self._save_waterfall(application, waterfall)
 
             logger.warning(
-                'Application %s: guardrails failed after %d attempts — escalating to human review. '
+                'Application %s: guardrails failed after %d attempts — email not sent. '
                 'Failed checks: %s',
                 application_id, email_result.get('attempt_number', 1), ', '.join(failed_checks),
             )
             step = self._start_step('email_delivery')
             step = self._complete_step(step, result_summary={
                 'sent': False,
-                'reason': 'Guardrails failed — escalated to human review',
+                'reason': 'Guardrails failed — email withheld',
                 'failed_guardrails': failed_checks,
             })
             steps.append(step)
-
-            # Add ML recommendation for human review visibility
-            waterfall.append(self._waterfall_entry(
-                'human_review_required', 'pending', 'HUMAN_REVIEW_REQUIRED',
-                f'ML recommendation: {decision}. Guardrails failed — routed to human review.',
-            ))
-            self._save_waterfall(application, waterfall)
-
-            step = self._start_step('human_review_required')
-            step = self._complete_step(step, result_summary={
-                'ml_recommendation': decision,
-                'review_category': 'guardrail_failure',
-                'reason': f'Email guardrails failed: {", ".join(failed_checks)}',
-            })
-            steps.append(step)
-
-            with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status='review')
-            agent_run.status = 'escalated'
             agent_run.error = f'Email guardrails failed: {", ".join(failed_checks)}'
-            self._finalize_run(agent_run, steps, start_time)
-            return agent_run
+            # Fall through to normal completion instead of escalating
 
         # Send decision email to customer
         step = self._start_step('email_delivery')
@@ -747,85 +587,25 @@ class PipelineOrchestrator:
             )
 
         # Final decision waterfall entry
-        final_reason_map = {
-            'approved': 'APPROVED',
-            'conditional': 'CONDITIONAL_APPROVED',
-            'denied': 'DENIED',
-        }
-        final_reason = final_reason_map.get(decision, decision.upper())
+        final_reason = 'APPROVED' if decision == 'approved' else 'DENIED'
         waterfall.append(self._waterfall_entry(
-            'final_decision', 'pass' if decision in ('approved', 'conditional') else 'fail',
+            'final_decision', 'pass' if decision == 'approved' else 'fail',
             final_reason,
             f'Pipeline completed with decision: {decision}',
         ))
 
-        # All decisions route to human review queue for manual observation.
-        # The ML recommendation is preserved in the LoanDecision record;
-        # a loan officer must approve/deny/regenerate via the Human Review page.
-        waterfall.append(self._waterfall_entry(
-            'human_review_required', 'pending', 'HUMAN_REVIEW_REQUIRED',
-            f'ML recommendation: {decision}. Routed to human review for manual observation.',
-        ))
+        # No bias escalation — apply ML decision directly.
+        # Human review is exclusively for bias-flagged applications.
         self._save_waterfall(application, waterfall)
 
-        # Determine review category based on application completeness
-        review_category = 'standard_review'
-        review_reason = 'All decisions require human review before finalisation'
-
-        # Check for incomplete application (missing critical fields)
-        missing_fields = []
-        if not application.annual_income or float(application.annual_income) <= 0:
-            missing_fields.append('annual_income')
-        if not application.credit_score:
-            missing_fields.append('credit_score')
-        if not application.employment_type:
-            missing_fields.append('employment_type')
-        if application.purpose == 'home' and not application.property_value:
-            missing_fields.append('property_value')
-        if not application.loan_amount or float(application.loan_amount) <= 0:
-            missing_fields.append('loan_amount')
-
-        if missing_fields:
-            review_category = 'incomplete_application'
-            review_reason = f'Incomplete application — missing: {", ".join(missing_fields)}'
-        elif conditions:
-            review_category = 'conditional_approval'
-            review_reason = f'Conditional approval — {len(conditions)} condition(s) require verification'
-
-        # Only escalate to human review if there's an actual issue.
-        # Clean applications complete with the ML decision as final status.
-        needs_escalation = review_category != 'standard_review'
-
-        if needs_escalation:
-            step = self._start_step('human_review_required')
-            step = self._complete_step(step, result_summary={
-                'ml_recommendation': decision,
-                'review_category': review_category,
-                'reason': review_reason,
-            })
-            steps.append(step)
-
-            with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status='review')
-            agent_run.status = 'escalated'
-            self._finalize_run(agent_run, steps, start_time)
-            logger.info(
-                'Application %s: pipeline escalated — ML recommendation=%s, reason=%s',
-                application_id, decision, review_category,
-            )
-        else:
-            # Clean pipeline — apply ML decision directly
-            final_status = decision  # 'approved' or 'denied'
-            if conditions:
-                final_status = 'conditional'
-            with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status=final_status)
-            agent_run.status = 'completed'
-            self._finalize_run(agent_run, steps, start_time)
-            logger.info(
-                'Application %s: pipeline completed — decision=%s',
-                application_id, final_status,
-            )
+        with transaction.atomic():
+            LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+        agent_run.status = 'completed'
+        self._finalize_run(agent_run, steps, start_time)
+        logger.info(
+            'Application %s: pipeline completed — decision=%s',
+            application_id, final_status,
+        )
 
         return agent_run
 

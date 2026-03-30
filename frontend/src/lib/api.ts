@@ -1,6 +1,61 @@
 import axios from 'axios'
 import { toast } from 'sonner'
 
+// API parameter and payload types
+interface PaginationParams {
+  page?: number
+  page_size?: number
+  status?: string
+  search?: string
+  ordering?: string
+  [key: string]: string | number | boolean | undefined
+}
+
+interface RegisterPayload {
+  username: string
+  email: string
+  password: string
+  first_name: string
+  last_name: string
+  role?: string
+}
+
+interface CustomerProfilePayload {
+  date_of_birth?: string | null
+  phone?: string
+  address_line_1?: string
+  address_line_2?: string
+  suburb?: string
+  state?: string
+  postcode?: string
+  employer_name?: string
+  occupation?: string
+  industry?: string
+  employment_status?: string
+  gross_annual_income?: number | null
+  [key: string]: string | number | boolean | string[] | null | undefined
+}
+
+interface LoanPayload {
+  annual_income?: number
+  credit_score?: number
+  loan_amount?: number
+  loan_term_months?: number
+  debt_to_income?: number
+  employment_length?: number
+  purpose?: string
+  home_ownership?: string
+  has_cosigner?: boolean
+  property_value?: number | null
+  deposit_amount?: number | null
+  monthly_expenses?: number | null
+  number_of_dependants?: number
+  employment_type?: string
+  applicant_type?: string
+  notes?: string
+  [key: string]: string | number | boolean | null | undefined
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500/api/v1'
 
 const api = axios.create({
@@ -84,24 +139,26 @@ export default api
 // Auth
 export const authApi = {
   login: (data: { username: string; password: string }) => api.post('/auth/login/', data),
-  register: (data: any) => api.post('/auth/register/', data),
+  register: (data: RegisterPayload) => api.post('/auth/register/', data),
   getProfile: () => api.get('/auth/me/'),
   getCustomerProfile: () => api.get('/auth/me/profile/'),
-  updateCustomerProfile: (data: any) => api.patch('/auth/me/profile/', data),
+  updateCustomerProfile: (data: CustomerProfilePayload) => api.patch('/auth/me/profile/', data),
   getCustomerDetail: (userId: number) => api.get(`/auth/customers/${userId}/profile/`),
-  updateCustomerDetail: (userId: number, data: any) => api.patch(`/auth/customers/${userId}/profile/`, data),
-  listCustomers: (params?: any) => api.get('/auth/customers/', { params }),
+  updateCustomerDetail: (userId: number, data: CustomerProfilePayload) => api.patch(`/auth/customers/${userId}/profile/`, data),
+  listCustomers: (params?: PaginationParams) => api.get('/auth/customers/', { params }),
   getCustomerActivity: (userId: number) => api.get(`/auth/customers/${userId}/activity/`),
   getCsrfToken: () => api.get('/auth/csrf/'),
 }
 
 // Loans
 export const loansApi = {
-  list: (params?: any) => api.get('/loans/', { params }),
+  list: (params?: PaginationParams) => api.get('/loans/', { params }),
   get: (id: string) => api.get(`/loans/${id}/`),
-  create: (data: any) => api.post('/loans/', data),
-  update: (id: string, data: any) => api.patch(`/loans/${id}/`, data),
+  create: (data: LoanPayload) => api.post('/loans/', data),
+  update: (id: string, data: Partial<LoanPayload>) => api.patch(`/loans/${id}/`, data),
   delete: (id: string) => api.delete(`/loans/${id}/`),
+  downloadDecisionLetter: (id: string) =>
+    api.get(`/loans/${id}/decision-letter/`, { responseType: 'blob' }),
 }
 
 // ML
@@ -113,7 +170,7 @@ export const mlApi = {
 
 // Email
 export const emailApi = {
-  list: (params?: any) => api.get('/emails/', { params }),
+  list: (params?: PaginationParams) => api.get('/emails/', { params }),
   generate: (loanId: string) => api.post(`/emails/generate/${loanId}/`),
   get: (loanId: string) => api.get(`/emails/${loanId}/`),
 }
@@ -122,7 +179,7 @@ export const emailApi = {
 export const agentsApi = {
   orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/?force=true`),
   orchestrateAll: (recheck?: boolean) => api.post(`/agents/orchestrate-all/${recheck ? '?recheck=true' : ''}`),
-  getRuns: (params?: any) => api.get('/agents/runs/', { params }),
+  getRuns: (params?: PaginationParams) => api.get('/agents/runs/', { params }),
   getRun: (loanId: string) => api.get(`/agents/runs/${loanId}/`),
   submitReview: (runId: string, data: { action: 'approve' | 'deny' | 'regenerate'; note?: string }) =>
     api.post(`/agents/review/${runId}/`, data),
@@ -130,7 +187,7 @@ export const agentsApi = {
 
 // Audit
 export const auditApi = {
-  list: (params?: any) => api.get('/loans/audit-logs/', { params }),
+  list: (params?: PaginationParams) => api.get('/loans/audit-logs/', { params }),
 }
 
 // Tasks

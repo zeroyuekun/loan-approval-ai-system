@@ -109,7 +109,7 @@ class EmailDetailView(APIView):
 
         email = GeneratedEmail.objects.filter(
             application_id=loan_id
-        ).select_related('application__applicant').prefetch_related('guardrail_checks').first()
+        ).select_related('application__applicant').prefetch_related('guardrail_checks').order_by('-created_at').first()
 
         if not email:
             return Response(

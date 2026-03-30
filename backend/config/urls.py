@@ -5,7 +5,7 @@ URL configuration for loan approval AI system.
 import json
 
 from django.contrib import admin
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework import status as http_status
@@ -77,6 +77,18 @@ class TaskStatusView(APIView):
         })
 
 
+def security_txt(request):
+    """RFC 9116 security.txt — vulnerability disclosure policy."""
+    content = (
+        "Contact: mailto:security@aussieloanai.com.au\n"
+        "Preferred-Languages: en\n"
+        "Canonical: https://aussieloanai.com.au/.well-known/security.txt\n"
+        "Policy: https://aussieloanai.com.au/security-policy\n"
+        "Expires: 2027-03-31T00:00:00.000Z\n"
+    )
+    return HttpResponse(content, content_type='text/plain')
+
+
 def health_check(request):
     """Simple health check endpoint."""
     return JsonResponse({'status': 'ok'})
@@ -109,10 +121,56 @@ def deep_health_check(request):
     # Active ML model (non-blocking — ML can be trained after startup)
     try:
         from apps.ml_engine.models import ModelVersion
-        active = ModelVersion.objects.filter(is_active=True).exists()
-        checks['ml_model'] = 'ok' if active else 'no active model (non-blocking)'
+        active_model = ModelVersion.objects.filter(is_active=True).first()
+        if active_model:
+            checks['ml_model'] = 'ok'
+            checks['ml_model_version'] = active_model.version
+            checks['ml_algorithm'] = active_model.algorithm
+            checks['ml_trained_at'] = active_model.created_at.isoformat() if active_model.created_at else None
+        else:
+            checks['ml_model'] = 'no active model (non-blocking)'
     except Exception as e:
         checks['ml_model'] = f'error: {e}'
+
+    # Celery queue depth (non-blocking)
+    try:
+        import redis
+        from django.conf import settings as django_settings
+        r = redis.from_url(django_settings.CELERY_BROKER_URL, socket_connect_timeout=2)
+        queue_depths = {}
+        for queue_name in ('celery', 'ml', 'email', 'agents'):
+            queue_depths[queue_name] = r.llen(queue_name)
+        checks['celery_queue_depth'] = queue_depths
+        total_queued = sum(queue_depths.values())
+        if total_queued > 500:
+            checks['celery_queue_status'] = 'critical'
+        elif total_queued > 100:
+            checks['celery_queue_status'] = 'warning'
+        else:
+            checks['celery_queue_status'] = 'ok'
+    except Exception:
+        checks['celery_queue_depth'] = 'unavailable'
+
+    # API budget remaining (non-blocking)
+    try:
+        from datetime import date
+        from django.conf import settings as django_settings
+        import redis
+        r = redis.from_url(django_settings.CELERY_BROKER_URL, socket_connect_timeout=2)
+        today = date.today().isoformat()
+        cost_cents = int(r.get(f'ai_budget:{today}:cost_cents') or 0)
+        call_count = int(r.get(f'ai_budget:{today}:calls') or 0)
+        budget_limit = getattr(django_settings, 'AI_DAILY_BUDGET_LIMIT_USD', 5.0)
+        call_limit = getattr(django_settings, 'AI_DAILY_CALL_LIMIT', 500)
+        checks['api_budget'] = {
+            'spent_usd': round(cost_cents / 100, 2),
+            'limit_usd': budget_limit,
+            'calls_today': call_count,
+            'call_limit': call_limit,
+            'circuit_breaker': 'open' if r.exists('ai_budget:circuit_breaker') else 'closed',
+        }
+    except Exception:
+        checks['api_budget'] = 'unavailable'
 
     # Only database and Redis are required for startup; ML model is optional
     core_checks = {k: v for k, v in checks.items() if k in ('database', 'redis')}
@@ -125,6 +183,7 @@ def deep_health_check(request):
 
 urlpatterns = [
     path('', include('django_prometheus.urls')),
+    path('.well-known/security.txt', security_txt, name='security-txt'),
     path('api/v1/health/', health_check, name='health-check'),
     path('api/v1/health/deep/', deep_health_check, name='deep-health-check'),
     path('api/v1/health/ready/', deep_health_check, name='readiness-probe'),

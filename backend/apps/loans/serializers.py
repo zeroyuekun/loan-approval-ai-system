@@ -38,11 +38,11 @@ class LoanApplicationSerializer(serializers.ModelSerializer):
             'existing_credit_card_limit', 'number_of_dependants',
             'employment_type', 'applicant_type', 'purpose', 'home_ownership',
             'has_cosigner', 'has_hecs', 'has_bankruptcy', 'state',
-            'status', 'notes', 'conditions', 'conditions_met',
+            'status', 'notes',
             'created_at', 'updated_at', 'decision',
             'latest_fraud_check',
         )
-        read_only_fields = ('id', 'status', 'conditions', 'conditions_met', 'created_at', 'updated_at', 'applicant')
+        read_only_fields = ('id', 'status', 'created_at', 'updated_at', 'applicant')
 
     def get_latest_fraud_check(self, obj):
         fraud_check = obj.fraud_checks.first() if hasattr(obj, 'fraud_checks') else None

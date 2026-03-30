@@ -1,5 +1,6 @@
 import django_filters
 
+from apps.agents.models import AgentRun
 from .models import AuditLog, LoanApplication
 
 
@@ -23,10 +24,10 @@ class LoanApplicationFilter(django_filters.FilterSet):
         """Filter applications that have escalated agent runs or bias reports requiring human review."""
         if value:
             return queryset.filter(
-                agent_runs__status='escalated',
+                agent_runs__status=AgentRun.Status.ESCALATED,
             ).distinct()
         return queryset.exclude(
-            agent_runs__status='escalated',
+            agent_runs__status=AgentRun.Status.ESCALATED,
         )
 
 

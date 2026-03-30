@@ -18,7 +18,7 @@ export function TopNav({ title, onMenuClick }: TopNavProps) {
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/[0.06] gradient-sidebar lg:border-slate-200/60 lg:bg-white/95 lg:bg-none lg:backdrop-blur-xl px-4 lg:px-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="lg:hidden text-white" onClick={onMenuClick}>
+        <Button variant="ghost" size="icon" className="lg:hidden text-white" onClick={onMenuClick} aria-label="Open navigation menu">
           <Menu className="h-5 w-5" />
         </Button>
         <h2 className="text-lg font-semibold tracking-tight text-white lg:text-foreground">{title}</h2>

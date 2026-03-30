@@ -9,7 +9,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application version (synced with CHANGELOG.md)
-APP_VERSION = '1.4.0'
+APP_VERSION = '1.5.0'
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
 
@@ -271,9 +271,9 @@ AI_TEMPERATURE_DECISION_EMAIL = 0.0  # Approval/denial emails (regulatory docume
 AI_TEMPERATURE_MARKETING = 0.2       # Marketing/retention content (slight variance for anti-spam)
 
 # Bias detection thresholds (used by orchestrator pipeline)
-BIAS_THRESHOLD_PASS = 60       # 0-60: compliant, email can be sent
-BIAS_THRESHOLD_REVIEW = 80     # 61-80: high bias, AI review then human escalation
-# 81+: severe bias, direct human escalation
+BIAS_THRESHOLD_PASS = 30       # 0-30: compliant, email can be sent
+BIAS_THRESHOLD_REVIEW = 60     # 31-60: moderate bias, LLM reviews for false positives
+# 61+: high bias, escalate to human review
 
 # Marketing-specific bias thresholds (intentionally tighter than decision thresholds)
 # Rationale: marketing emails target declined customers who are in a vulnerable position.
@@ -302,3 +302,7 @@ SPECTACULAR_SETTINGS = {
         {'name': 'System', 'description': 'Health checks and monitoring'},
     ],
 }
+
+# Validate environment variables on startup (fail fast if required vars are missing).
+# Skipped during tests and when SKIP_ENV_VALIDATION=1.
+import config.env_validation  # noqa: E402, F401

@@ -16,6 +16,7 @@ const SECTION_LABELS = [
   "We'd Still Like to Help:",
   'Attachments:',
   'Conditions of Approval:',
+  'This decision was based on a thorough review of your financial profile, specifically:',
 ]
 
 const CLOSINGS = [
@@ -23,10 +24,33 @@ const CLOSINGS = [
   'Warm regards,',
 ]
 
-const OPTION_PATTERN = /^Option \d+:/
+const OPTION_PATTERN = /^Option\s+\d+[\s:.\-–—]/
+
+// Inline patterns for key figures: interest rates and percentage figures
+const INLINE_BOLD_PATTERN = /(\d+\.\d+%\s*p\.a\.|\d+\.\d+%)/g
+
+function renderLineWithInlineBold(line: string, key: number) {
+  const parts = line.split(INLINE_BOLD_PATTERN)
+  if (parts.length === 1) {
+    return <span key={key}>{line}{'\n'}</span>
+  }
+  return (
+    <span key={key}>
+      {parts.map((part, j) =>
+        INLINE_BOLD_PATTERN.test(part)
+          ? <strong key={j}>{part}</strong>
+          : part
+      )}
+      {'\n'}
+    </span>
+  )
+}
 
 export function FormattedEmailBody({ body }: { body: string }) {
   const lines = body.split('\n')
+  // Reset regex lastIndex between renders
+  INLINE_BOLD_PATTERN.lastIndex = 0
+
   return (
     <>
       {lines.map((line, i) => {
@@ -39,14 +63,23 @@ export function FormattedEmailBody({ body }: { body: string }) {
         const isOption = OPTION_PATTERN.test(trimmed)
         const isClosing = CLOSINGS.includes(trimmed)
 
-        if (isSection || isDear || isSignName || isSignTitle || isSubject || isOption || isClosing) {
+        // Full-line bold: section headers, greeting, options
+        if (isSection || isDear || isSubject || isOption) {
           return (
             <span key={i}>
               <strong>{line}</strong>{'\n'}
             </span>
           )
         }
-        return <span key={i}>{line}{'\n'}</span>
+
+
+        // Bullet-point lines: render plain (no bold)
+        if (trimmed.startsWith('•') || trimmed.startsWith('\u2022')) {
+          return <span key={i}>{line}{'\n'}</span>
+        }
+
+        // Body text: inline-bold key figures (rates, percentages)
+        return renderLineWithInlineBold(line, i)
       })}
     </>
   )

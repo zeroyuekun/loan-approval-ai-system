@@ -1,9 +1,49 @@
+import datetime
 import re
+from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth import authenticate
 from rest_framework import serializers
 
 from .models import CustomerProfile, CustomUser
+
+
+class EncryptedDateField(serializers.DateField):
+    """Accepts date input, stores as ISO string in EncryptedCharField."""
+
+    def to_internal_value(self, data):
+        # Validate via parent, then convert to ISO string for storage
+        date_obj = super().to_internal_value(data)
+        return date_obj.isoformat()
+
+    def to_representation(self, value):
+        if not value:
+            return None
+        if isinstance(value, str):
+            try:
+                return datetime.date.fromisoformat(value).isoformat()
+            except (ValueError, TypeError):
+                return value
+        return super().to_representation(value)
+
+
+class EncryptedDecimalField(serializers.DecimalField):
+    """Accepts decimal input, stores as string in EncryptedCharField."""
+
+    def to_internal_value(self, data):
+        # Validate via parent, then convert to string for storage
+        decimal_val = super().to_internal_value(data)
+        return str(decimal_val)
+
+    def to_representation(self, value):
+        if value is None or value == '':
+            return None
+        if isinstance(value, str):
+            try:
+                value = Decimal(value)
+            except (InvalidOperation, TypeError):
+                return value
+        return super().to_representation(value)
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -81,6 +121,11 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
     secondary_id_number_masked = serializers.SerializerMethodField()
     total_assets = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     total_monthly_liabilities = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    # Encrypted PII fields — accept native types, store as encrypted strings
+    date_of_birth = EncryptedDateField(required=False, allow_null=True)
+    gross_annual_income = EncryptedDecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    other_income = EncryptedDecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    partner_annual_income = EncryptedDecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
 
     class Meta:
         model = CustomerProfile
@@ -181,6 +226,11 @@ class StaffCustomerDetailSerializer(serializers.ModelSerializer):
     secondary_id_number = serializers.SerializerMethodField()
     total_assets = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     total_monthly_liabilities = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    # Encrypted PII fields — present as native types in API responses
+    date_of_birth = EncryptedDateField(read_only=True)
+    gross_annual_income = EncryptedDecimalField(max_digits=12, decimal_places=2, read_only=True)
+    other_income = EncryptedDecimalField(max_digits=12, decimal_places=2, read_only=True)
+    partner_annual_income = EncryptedDecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = CustomerProfile
@@ -238,6 +288,11 @@ class AdminCustomerProfileUpdateSerializer(serializers.ModelSerializer):
     secondary_id_number_masked = serializers.SerializerMethodField()
     total_assets = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     total_monthly_liabilities = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    # Encrypted PII fields — accept native types, store as encrypted strings
+    date_of_birth = EncryptedDateField(required=False, allow_null=True)
+    gross_annual_income = EncryptedDecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    other_income = EncryptedDecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    partner_annual_income = EncryptedDecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
 
     class Meta:
         model = CustomerProfile

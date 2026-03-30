@@ -26,15 +26,33 @@ def _plain_text_to_html(body: str) -> str:
             and not stripped.startswith('\u2022')
             and not stripped.startswith('•')
             and not stripped[0].isdigit()
-            and re.match(r'^[A-Za-z\s\u2019\u2018\'&,\-]+:$', stripped)
+            and re.match(r'^[A-Za-z0-9\s\u2019\u2018\'&,\-]+:$', stripped)
         ):
             indent = line[:len(line) - len(line.lstrip())]
             html_lines.append(f'{indent}<strong>{stripped}</strong>')
         else:
             html_lines.append(line)
 
-    html_body = '<br>\n'.join(
-        ln.replace('  ', '&nbsp;&nbsp;') for ln in html_lines
+    # Group lines into paragraphs (split on blank lines) so we can use
+    # tight <p> margins instead of double <br> gaps.
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for ln in html_lines:
+        if ln.strip() == '':
+            if current:
+                paragraphs.append('<br>\n'.join(
+                    l.replace('  ', '&nbsp;&nbsp;') for l in current
+                ))
+                current = []
+        else:
+            current.append(ln)
+    if current:
+        paragraphs.append('<br>\n'.join(
+            l.replace('  ', '&nbsp;&nbsp;') for l in current
+        ))
+
+    html_body = '\n'.join(
+        f'<p style="margin: 0 0 6px 0;">{p}</p>' for p in paragraphs
     )
 
     return (

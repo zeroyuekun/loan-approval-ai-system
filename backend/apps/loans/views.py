@@ -1,6 +1,9 @@
 import logging
 
+from django.db import transaction
+from django.http import HttpResponse
 from rest_framework import viewsets, permissions
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.viewsets import GenericViewSet
@@ -58,31 +61,33 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        instance = serializer.save(applicant=user)
-        # Ensure customer has a profile and seed it from the application
-        if user.role == 'customer':
-            profile, created = CustomerProfile.objects.get_or_create(user=user)
-            if created or profile.num_products <= 1:
-                # Seed profile banking fields from the loan application data
-                profile.has_mortgage = instance.home_ownership == 'mortgage'
-                profile.has_credit_card = (instance.existing_credit_card_limit or 0) > 0
-                profile.num_products = max(
-                    profile.num_products,
-                    1 + int(profile.has_credit_card) + int(profile.has_mortgage),
-                )
-                profile.save(update_fields=[
-                    'has_mortgage', 'has_credit_card', 'num_products',
-                ])
-        AuditLog.objects.create(
-            user=user,
-            action='loan_created',
-            resource_type='LoanApplication',
-            resource_id=str(instance.id),
-            details={'loan_amount': str(instance.loan_amount), 'purpose': instance.purpose},
-            ip_address=self.request.META.get('REMOTE_ADDR'),
-        )
+        with transaction.atomic():
+            instance = serializer.save(applicant=user)
+            # Ensure customer has a profile and seed it from the application
+            if user.role == 'customer':
+                profile, created = CustomerProfile.objects.get_or_create(user=user)
+                if created or profile.num_products <= 1:
+                    # Seed profile banking fields from the loan application data
+                    profile.has_mortgage = instance.home_ownership == 'mortgage'
+                    profile.has_credit_card = (instance.existing_credit_card_limit or 0) > 0
+                    profile.num_products = max(
+                        profile.num_products,
+                        1 + int(profile.has_credit_card) + int(profile.has_mortgage),
+                    )
+                    profile.save(update_fields=[
+                        'has_mortgage', 'has_credit_card', 'num_products',
+                    ])
+            AuditLog.objects.create(
+                user=user,
+                action='loan_created',
+                resource_type='LoanApplication',
+                resource_id=str(instance.id),
+                details={'loan_amount': str(instance.loan_amount), 'purpose': instance.purpose},
+                ip_address=self.request.META.get('REMOTE_ADDR'),
+            )
 
-        # Auto-trigger AI pipeline for new applications
+        # Auto-trigger AI pipeline for new applications (outside transaction
+        # so the committed data is visible to the Celery worker)
         from apps.agents.tasks import orchestrate_pipeline_task
         try:
             orchestrate_pipeline_task.delay(str(instance.pk))
@@ -112,6 +117,25 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             ip_address=self.request.META.get('REMOTE_ADDR'),
         )
         super().perform_destroy(instance)
+
+    @action(detail=True, methods=['get'], url_path='decision-letter')
+    def decision_letter(self, request, pk=None):
+        """Download a PDF decision letter for a completed application."""
+        application = self.get_object()
+        decision = getattr(application, 'decision', None)
+        if not decision:
+            return HttpResponse('No decision available for this application.', status=404)
+
+        from apps.loans.services.pdf_generator import generate_decision_letter_pdf
+        try:
+            pdf_bytes = generate_decision_letter_pdf(application)
+        except Exception:
+            logger.exception('PDF generation failed for application %s', pk)
+            return HttpResponse('Failed to generate decision letter.', status=500)
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="decision-letter-{application.id}.pdf"'
+        return response
 
 
 class AuditLogViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):

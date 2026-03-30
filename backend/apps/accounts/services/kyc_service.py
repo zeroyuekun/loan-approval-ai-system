@@ -147,8 +147,8 @@ class KYCService:
             'given_name': customer_profile.user.first_name,
             'family_name': customer_profile.user.last_name,
             'date_of_birth': (
-                customer_profile.date_of_birth.isoformat()
-                if customer_profile.date_of_birth
+                customer_profile.date_of_birth_date.isoformat()
+                if customer_profile.date_of_birth_date
                 else None
             ),
             'address': {
@@ -182,7 +182,7 @@ class KYCService:
                     f'{customer_profile.user.first_name} '
                     f'{customer_profile.user.last_name}'
                 ),
-                date_of_birth=customer_profile.date_of_birth,
+                date_of_birth=customer_profile.date_of_birth_date,
             )
 
             return VerificationResult(
@@ -230,8 +230,8 @@ class KYCService:
             'first_name': customer_profile.user.first_name,
             'last_name': customer_profile.user.last_name,
             'date_of_birth': (
-                customer_profile.date_of_birth.isoformat()
-                if customer_profile.date_of_birth
+                customer_profile.date_of_birth_date.isoformat()
+                if customer_profile.date_of_birth_date
                 else None
             ),
             'documents': [
@@ -260,7 +260,7 @@ class KYCService:
                     f'{customer_profile.user.first_name} '
                     f'{customer_profile.user.last_name}'
                 ),
-                date_of_birth=customer_profile.date_of_birth,
+                date_of_birth=customer_profile.date_of_birth_date,
             )
 
             return VerificationResult(

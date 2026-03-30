@@ -41,7 +41,6 @@ class LoanApplication(SoftDeleteModel):
         PENDING = 'pending', 'Pending'
         PROCESSING = 'processing', 'Processing'
         APPROVED = 'approved', 'Approved'
-        CONDITIONAL = 'conditional', 'Conditionally Approved'
         DENIED = 'denied', 'Denied'
         REVIEW = 'review', 'Under Review'
 
@@ -204,14 +203,12 @@ class LoanApplication(SoftDeleteModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
     notes = models.TextField(blank=True)
 
-    # Conditional approval tracking
+    # Legacy fields — kept for migration compatibility
     conditions = models.JSONField(
         default=list, blank=True,
-        help_text='List of condition dicts for conditional approvals',
     )
     conditions_met = models.BooleanField(
         default=False,
-        help_text='Whether all conditions have been satisfied',
     )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

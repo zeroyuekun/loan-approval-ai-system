@@ -21,6 +21,7 @@ class EncryptedCharField(models.CharField):
     def get_prep_value(self, value):
         if value is None or value == '':
             return value
+        value = str(value)  # Support non-string types (date, Decimal, etc.)
         f = get_fernet()
         return f.encrypt(value.encode()).decode()
 
@@ -30,7 +31,7 @@ class EncryptedCharField(models.CharField):
         try:
             f = get_fernet()
             return f.decrypt(value.encode()).decode()
-        except (InvalidToken, Exception):
+        except InvalidToken:
             # Value may be unencrypted (pre-migration data)
             return value
 

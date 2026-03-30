@@ -406,6 +406,79 @@ Data consistency checks (cross-field validation) are also applied before predict
 - **Bounded cache**: at most 3 model bundles are held in memory; older entries are evicted to prevent unbounded memory growth.
 - **Pipeline consistency check**: before saving, the trainer validates that categorical columns, feature columns, imputation values, and reference distributions are all present and consistent between the trainer and predictor.
 
+## Regulatory Compliance Mapping
+
+This section maps existing system capabilities to applicable regulatory frameworks.
+
+### APRA CPG 235 — Data Risk Management
+
+| CPG 235 Requirement | System Implementation |
+|---------------------|----------------------|
+| Data quality assessment (accuracy, completeness) | Cross-field consistency checks, input validation bounds, feature imputation with training-data medians |
+| Data lifecycle management | 7-year retention (AML/CTF Act 2006), weekly `data_retention_cleanup` Celery task, soft-delete on PII tables |
+| Data governance framework | Immutable `AuditLog` model, field-level Fernet encryption for PII, PII log masking filter |
+| Ongoing monitoring | Per-feature PSI drift detection against training reference distribution, Prometheus metrics, AlertManager rules |
+| Model documentation | This model card, ADRs, versioned model bundles with SHA-256 integrity verification |
+
+### APRA CPS 230 — Operational Resilience (effective 1 July 2025)
+
+| CPS 230 Requirement | System Implementation |
+|---------------------|----------------------|
+| AI risk identification and management | Monotonic constraints (33 features), isotonic calibration, conformal prediction intervals |
+| Business continuity | Docker health checks on all services, readiness probe at `/health/ready/`, deep health check at `/health/deep/` |
+| Third-party risk management | Claude API budget guard ($5/day cap, circuit breaker), template fallback when API unavailable |
+| AI observability | Prometheus custom metrics (prediction latency, drift scores), Grafana dashboards (AI Ops, ML Metrics, SLO) |
+| Operational resilience testing | k6 load tests with SLA assertions, Celery queue separation (ML, email, agents) |
+
+### ASIC RG 209 — Responsible Lending Conduct
+
+| RG 209 Requirement | System Implementation |
+|---------------------|----------------------|
+| Reasonable inquiries (financial situation) | 80+ application fields covering income, expenses, debts, dependants, employment, bureau data |
+| Verification obligations | CDR/Open Banking features (transaction-level data), income verification gap scoring, document consistency scoring |
+| "Not unsuitable" assessment | APRA stress testing at +3% buffer rate, serviceability ratio, HEM surplus calculation |
+| Decision transparency | SHAP per-prediction explanations, 70 standardised reason codes (R01-R70), adverse action notices |
+| Audit trail | Decision waterfall (`LoanDecision.decision_waterfall`), ordered list of assessment gate results |
+
+### CFPB Circular 2022-03 — Adverse Action with Complex Algorithms
+
+| CFPB Requirement | System Implementation |
+|---------------------|----------------------|
+| Specific, accurate reasons for denial | SHAP-based reason codes mapped to 70 human-readable explanations, top 4 returned per denial |
+| No broad-bucket reasons | Each reason code maps to a specific feature (e.g., R23 = "Default records found in credit history") |
+| Consumer-facing explanations | Raw SHAP values excluded from consumer notices; plain-language reasons provided |
+| Counterfactual explanations | `generate_reapplication_guidance()` provides specific improvement targets and estimated timelines |
+
+### EU AI Act — Annex III (High-Risk AI: Credit Scoring)
+
+| EU AI Act Requirement | System Implementation |
+|---------------------|----------------------|
+| Data governance (representative, bias-free) | Gaussian copula synthetic data calibrated against ABS/RBA/APRA sources, sub-population mixture model (6 segments) |
+| Bias detection | Two-phase bias detection (regex + LLM), EEOC 80% rule testing, fairness reweighting during training |
+| Explainability | SHAP TreeExplainer, feature importance charts, WOE/IV scorecard |
+| Lifecycle governance | Model versioning (`ModelVersion.is_active`), challenger model comparison, 5-fold stratified CV |
+| Technical documentation | This model card, SECURITY.md, ADRs, SLA.md, runbook |
+
+### Federal Reserve / OCC SR 11-7 — Model Risk Management
+
+| SR 11-7 Requirement | System Implementation |
+|---------------------|----------------------|
+| Model development documentation | Model card with training data sources, feature engineering, calibration methodology |
+| Independent validation | Adversarial validation (train vs test distinguishability), temporal train/val/test split, out-of-time testing |
+| Performance monitoring | AUC, Gini, KS, Brier score, ECE tracked per model version; PSI drift detection per feature |
+| Governance and controls | Model version approval workflow, `is_active` / `is_challenger` flags, optimal threshold management |
+| Change management | Semantic versioning (v1 → v2 → v3), CHANGELOG.md, model bundle hash verification |
+| Calibration and back-testing | Isotonic calibration (ECE 0.0377), conformal prediction with 95% coverage guarantee |
+
+### AML/CTF Act 2006 (Australia)
+
+| Requirement | System Implementation |
+|---------------------|----------------------|
+| Customer identification | `KYCVerification` model with 100-point ID check, identity document tracking |
+| Ongoing customer due diligence | `CustomerProfile` with OCDD fields, soft-delete tracking, encryption key rotation |
+| Record retention (7 years) | Weekly `data_retention_cleanup` task, `deleted_at` timestamps, configurable retention window |
+| Suspicious transaction reporting | `FraudCheck` model with velocity checks, duplicate detection, risk scoring |
+
 ## Update History
 
 | Version | Changes |

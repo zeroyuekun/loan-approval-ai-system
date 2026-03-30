@@ -1,5 +1,6 @@
+import datetime
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -114,10 +115,11 @@ class Industry(models.TextChoices):
 class CustomerProfile(SoftDeleteModel):
     """Tracks a customer's personal details, compliance documents, and banking history."""
 
-    # PII ENCRYPTION NOTE: primary_id_number and secondary_id_number use
-    # EncryptedCharField (Fernet AES-128-CBC). Address fields use EncryptedCharField
-    # for at-rest protection. Income/DOB remain in plaintext for ORM query/filter
-    # compatibility. Full PII-at-rest: use PostgreSQL pgcrypto or RDS encrypted storage.
+    # PII ENCRYPTION NOTE: Sensitive PII fields use EncryptedCharField (Fernet
+    # AES-128-CBC) for at-rest protection. Encrypted fields include: ID numbers,
+    # address, phone, DOB, income figures, and employer name. These fields cannot
+    # be used in ORM filter()/order_by() queries — all filtering must happen in
+    # Python after retrieval. See properties below for native-type accessors.
 
     class Tier(models.TextChoices):
         STANDARD = 'standard', 'Standard'
@@ -148,7 +150,7 @@ class CustomerProfile(SoftDeleteModel):
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='profile')
 
     # ── Personal details (NCCP Act 2009 responsible lending) ──
-    date_of_birth = models.DateField(null=True, blank=True)
+    date_of_birth = EncryptedCharField(max_length=500, blank=True, default='', help_text="ISO-8601 date string, encrypted at rest")
     phone = EncryptedCharField(max_length=500, blank=True, help_text="Australian mobile or landline")
     address_line_1 = EncryptedCharField(max_length=500, blank=True)
     address_line_2 = EncryptedCharField(max_length=500, blank=True)
@@ -174,11 +176,11 @@ class CustomerProfile(SoftDeleteModel):
     years_in_current_role = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
     previous_employer = models.CharField(max_length=255, blank=True, default='', help_text='Required if less than 2 years in current role')
 
-    # ── Income ──
-    gross_annual_income = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    other_income = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # ── Income (encrypted at rest — stored as string representations) ──
+    gross_annual_income = EncryptedCharField(max_length=500, blank=True, default='', help_text="Decimal string, encrypted at rest")
+    other_income = EncryptedCharField(max_length=500, blank=True, default='0', help_text="Decimal string, encrypted at rest")
     other_income_source = models.CharField(max_length=100, blank=True, default='')
-    partner_annual_income = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    partner_annual_income = EncryptedCharField(max_length=500, blank=True, default='', help_text="Decimal string, encrypted at rest")
 
     # ── Assets ──
     estimated_property_value = models.DecimalField(max_digits=14, decimal_places=2, default=0)
@@ -229,6 +231,57 @@ class CustomerProfile(SoftDeleteModel):
 
     def __str__(self):
         return f"Profile: {self.user.username} ({self.loyalty_tier})"
+
+    # ── Native-type accessors for encrypted string fields ──
+    # These properties convert the encrypted string representations back to
+    # their original Python types so that existing service code (KYC, ML,
+    # orchestrator, serializers) continues to work without modification.
+
+    @property
+    def date_of_birth_date(self) -> datetime.date | None:
+        """Return date_of_birth as a datetime.date, or None."""
+        val = self.date_of_birth
+        if not val:
+            return None
+        if isinstance(val, datetime.date):
+            return val
+        try:
+            return datetime.date.fromisoformat(val)
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def gross_annual_income_decimal(self) -> Decimal | None:
+        """Return gross_annual_income as Decimal, or None."""
+        val = self.gross_annual_income
+        if not val or val == '':
+            return None
+        try:
+            return Decimal(val)
+        except (InvalidOperation, TypeError):
+            return None
+
+    @property
+    def other_income_decimal(self) -> Decimal:
+        """Return other_income as Decimal (defaults to 0)."""
+        val = self.other_income
+        if not val or val == '':
+            return Decimal('0')
+        try:
+            return Decimal(val)
+        except (InvalidOperation, TypeError):
+            return Decimal('0')
+
+    @property
+    def partner_annual_income_decimal(self) -> Decimal | None:
+        """Return partner_annual_income as Decimal, or None."""
+        val = self.partner_annual_income
+        if not val or val == '':
+            return None
+        try:
+            return Decimal(val)
+        except (InvalidOperation, TypeError):
+            return None
 
     @property
     def total_deposits(self):

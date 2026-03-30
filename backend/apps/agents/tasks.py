@@ -12,16 +12,16 @@ _DEDUP_LOCK_TTL = 600
 def _cleanup_stuck_application(application_id):
     """Reset application status if it's stuck at 'processing' after a task failure."""
     try:
-        from apps.loans.models import LoanApplication
-        from apps.agents.models import AgentRun
+        from apps.loans.models import LoanApplication  # noqa: local import for Celery
+        from apps.agents.models import AgentRun  # noqa: local import for Celery
 
         LoanApplication.objects.filter(
-            pk=application_id, status='processing',
-        ).update(status='review')
+            pk=application_id, status=LoanApplication.Status.PROCESSING,
+        ).update(status=LoanApplication.Status.REVIEW)
 
         AgentRun.objects.filter(
             application_id=application_id, status__in=('pending', 'running'),
-        ).update(status='failed', error='Task failed unexpectedly — application reset to review')
+        ).update(status=AgentRun.Status.FAILED, error='Task failed unexpectedly — application reset to review')
 
         logger.warning('Application %s: cleaned up stuck processing status', application_id)
     except Exception as e:
@@ -47,19 +47,17 @@ def orchestrate_pipeline_task(self, application_id, force=False):
     if not force:
         existing = AgentRun.objects.filter(
             application_id=application_id,
-            status='completed'
+            status=AgentRun.Status.COMPLETED,
         ).exists()
         if existing:
             # Restore application status from its decision if it was reset to pending
             from apps.loans.models import LoanApplication, LoanDecision
             try:
                 app = LoanApplication.objects.get(pk=application_id)
-                if app.status == 'pending':
+                if app.status == LoanApplication.Status.PENDING:
                     decision = LoanDecision.objects.filter(application_id=application_id).first()
                     if decision:
                         new_status = decision.decision  # 'approved' or 'denied'
-                        if app.conditions and not app.conditions_met:
-                            new_status = 'conditional'
                         app.status = new_status
                         app.save(update_fields=['status'])
                         logger.info('Application %s: restored status to %s from completed run', application_id, new_status)
@@ -164,7 +162,7 @@ def compute_pipeline_sla():
     week_ago = timezone.now() - timedelta(days=7)
     runs = AgentRun.objects.filter(
         created_at__gte=week_ago,
-        status='completed',
+        status=AgentRun.Status.COMPLETED,
         total_time_ms__isnull=False,
     )
 

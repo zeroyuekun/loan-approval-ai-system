@@ -440,7 +440,7 @@ class EmailGenerator:
         ) or application.applicant.username
 
         pricing = None
-        if decision in ('approved', 'conditional'):
+        if decision == 'approved':
             # Calculate real pricing even in fallback mode
             pricing = context.get('pricing')
             if not pricing:
@@ -449,17 +449,11 @@ class EmailGenerator:
                 except Exception:
                     pricing = None
 
-            # Get conditions for conditional approvals
-            conditions = None
-            if hasattr(application, 'conditions') and application.conditions:
-                conditions = application.conditions
-
             result = generate_approval_template(
                 applicant_name,
                 float(application.loan_amount),
                 application.get_purpose_display(),
                 pricing=pricing,
-                conditions=conditions,
                 employment_type=application.get_employment_type_display(),
                 applicant_type=application.get_applicant_type_display(),
                 has_cosigner=application.has_cosigner,
@@ -491,7 +485,7 @@ class EmailGenerator:
         # Ensure pricing is in context for guardrail validation
         # (the main generate() path adds pricing to context at line 176,
         # but the pre-flight fallback path skips that)
-        if 'pricing' not in context and decision in ('approved', 'conditional') and pricing:
+        if 'pricing' not in context and decision == 'approved' and pricing:
             context['pricing'] = pricing
 
         # Run full guardrails on template emails — templates are designed

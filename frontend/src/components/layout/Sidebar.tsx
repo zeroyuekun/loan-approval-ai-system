@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart3, Mail, Bot, UserCircle, Users, ShieldAlert, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart3, Mail, Bot, UserCircle, Users, ShieldAlert, ClipboardList, BookOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
 import { LogoIcon } from '@/components/ui/logo'
@@ -17,6 +17,7 @@ const navItems = [
   { href: '/dashboard/emails', label: 'Emails', icon: Mail },
   { href: '/dashboard/agents', label: 'Agent Workflows', icon: Bot },
   { href: '/dashboard/audit', label: 'Audit Log', icon: ClipboardList, staffOnly: true },
+  { href: '/api/docs/', label: 'API Docs', icon: BookOpen, staffOnly: true, external: true },
 ]
 
 interface SidebarProps {
@@ -31,9 +32,17 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   return (
     <>
       {isOpen && (
-        <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={onClose} />
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={onClose}
+          onKeyDown={(e) => e.key === 'Escape' && onClose()}
+          role="button"
+          tabIndex={-1}
+          aria-label="Close sidebar"
+        />
       )}
       <aside
+        aria-label="Main navigation"
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex w-64 flex-col gradient-sidebar text-white transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 border-r border-white/[0.06]",
           isOpen ? "translate-x-0" : "-translate-x-full"
@@ -52,23 +61,31 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </p>
           {navItems.filter((item) => !('staffOnly' in item && item.staffOnly) || (user?.role === 'admin' || user?.role === 'officer')).map((item) => {
             const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 outline-none focus-visible:outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 active:bg-transparent",
-                  isActive
-                    ? "bg-gradient-to-r from-blue-500/20 to-indigo-500/15 text-white shadow-sm shadow-blue-500/10"
-                    : "text-slate-400 hover:text-white"
-                )}
-              >
+            const linkClass = cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 outline-none focus-visible:outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 active:bg-transparent",
+              isActive
+                ? "bg-gradient-to-r from-blue-500/20 to-indigo-500/15 text-white shadow-sm shadow-blue-500/10"
+                : "text-slate-400 hover:text-white"
+            )
+            const content = (
+              <>
                 <item.icon className={cn("h-[18px] w-[18px]", isActive && "text-blue-400")} />
                 {item.label}
                 {isActive && (
                   <div className="ml-auto h-1.5 w-1.5 rounded-full bg-blue-400" />
                 )}
+              </>
+            )
+            if ('external' in item && item.external) {
+              return (
+                <a key={item.href} href={item.href} target="_blank" rel="noopener noreferrer" className={linkClass}>
+                  {content}
+                </a>
+              )
+            }
+            return (
+              <Link key={item.href} href={item.href} onClick={onClose} className={linkClass}>
+                {content}
               </Link>
             )
           })}

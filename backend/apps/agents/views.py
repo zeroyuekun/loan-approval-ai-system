@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Subquery, OuterRef
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -40,6 +41,24 @@ class AgentRunListView(APIView):
         status_filter = request.query_params.get('status')
         if status_filter and status_filter in dict(AgentRun.Status.choices):
             queryset = queryset.filter(status=status_filter)
+
+            # For escalated runs, only show ones with actual bias flags
+            # and deduplicate by application_id — keep only the most recent
+            # run per application so reviewers see one row each.
+            if status_filter == 'escalated':
+                queryset = queryset.filter(
+                    bias_reports__flagged=True,
+                )
+                latest_per_app = (
+                    AgentRun.objects.filter(
+                        status=AgentRun.Status.ESCALATED,
+                        bias_reports__flagged=True,
+                        application_id=OuterRef('application_id'),
+                    )
+                    .order_by('-created_at')
+                    .values('id')[:1]
+                )
+                queryset = queryset.filter(id=Subquery(latest_per_app)).distinct()
 
         # Simple pagination (clamped to max 100)
         try:
@@ -173,14 +192,14 @@ class BatchOrchestrateView(APIView):
         if recheck:
             # Reset non-processing apps to pending so they run fresh (capped)
             app_ids = list(
-                LoanApplication.objects.exclude(status='processing')
+                LoanApplication.objects.exclude(status=LoanApplication.Status.PROCESSING)
                 .values_list('id', flat=True)[:max_batch]
             )
-            LoanApplication.objects.filter(id__in=app_ids).update(status='pending')
+            LoanApplication.objects.filter(id__in=app_ids).update(status=LoanApplication.Status.PENDING)
             pending_apps = app_ids
         else:
             pending_apps = list(
-                LoanApplication.objects.filter(status='pending')
+                LoanApplication.objects.filter(status=LoanApplication.Status.PENDING)
                 .values_list('id', flat=True)
             )
 
@@ -346,7 +365,7 @@ class HumanReviewView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            if agent_run.status != 'escalated':
+            if agent_run.status != AgentRun.Status.ESCALATED:
                 return Response(
                     {'error': f'Agent run is not escalated (current status: {agent_run.status})'},
                     status=status.HTTP_409_CONFLICT,
@@ -389,7 +408,7 @@ class HumanReviewView(APIView):
                 # Human override: deny the application immediately
                 import time
                 application = agent_run.application
-                application.status = 'denied'
+                application.status = LoanApplication.Status.DENIED
                 application.save(update_fields=['status', 'updated_at'])
 
                 # Update LoanDecision to reflect human override
@@ -402,7 +421,7 @@ class HumanReviewView(APIView):
                     pass  # No decision record yet — acceptable for edge cases
 
                 agent_run.steps = agent_run.steps + [review_step]
-                agent_run.status = 'completed'
+                agent_run.status = AgentRun.Status.COMPLETED
                 agent_run.total_time_ms = agent_run.total_time_ms or 0
                 agent_run.save(update_fields=['steps', 'status', 'total_time_ms', 'updated_at'])
 
@@ -423,13 +442,13 @@ class HumanReviewView(APIView):
             else:  # regenerate
                 # Complete the old run before dispatching a new pipeline
                 agent_run.steps = agent_run.steps + [review_step]
-                agent_run.status = 'completed'
+                agent_run.status = AgentRun.Status.COMPLETED
                 agent_run.total_time_ms = agent_run.total_time_ms or 0
                 agent_run.save(update_fields=['steps', 'status', 'total_time_ms', 'updated_at'])
 
                 # Reset application to pending so the new pipeline can process it
                 application = agent_run.application
-                application.status = 'pending'
+                application.status = LoanApplication.Status.PENDING
                 application.save(update_fields=['status', 'updated_at'])
 
                 AuditLog.objects.create(

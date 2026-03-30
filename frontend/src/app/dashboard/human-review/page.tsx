@@ -50,8 +50,6 @@ function ReviewActionModal({
   const reviewStep = run.steps?.find(
     (s) => s.step_name === 'human_review_required'
   )
-  const mlRecommendation = (reviewStep?.result_summary as Record<string, unknown>)?.ml_recommendation as string | undefined
-
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !submitReview.isPending) onClose() }}>
       <DialogContent className="sm:max-w-lg">
@@ -61,24 +59,6 @@ function ReviewActionModal({
             Application {run.application_id.slice(0, 8)} &mdash; {run.applicant_name ?? 'Unknown Applicant'}
           </DialogDescription>
         </DialogHeader>
-
-        {mlRecommendation && (
-          <div className="rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3">
-            <p className="text-sm text-slate-700">
-              ML Recommendation: <Badge
-                variant="outline"
-                className={
-                  mlRecommendation === 'approved' ? 'bg-green-100 text-green-800'
-                    : mlRecommendation === 'conditional' ? 'bg-blue-100 text-blue-800'
-                    : mlRecommendation === 'denied' ? 'bg-red-100 text-red-800'
-                    : 'bg-amber-100 text-amber-800'
-                }
-              >
-                {mlRecommendation.toUpperCase()}
-              </Badge>
-            </p>
-          </div>
-        )}
 
         {biasReport && (
           <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3">
@@ -228,7 +208,6 @@ export default function HumanReviewPage() {
               <TableRow>
                 <TableHead>Application</TableHead>
                 <TableHead>Applicant</TableHead>
-                <TableHead>ML Recommendation</TableHead>
                 <TableHead>Reason</TableHead>
                 <TableHead>Bias Score</TableHead>
                 <TableHead>Submitted</TableHead>
@@ -244,10 +223,6 @@ export default function HumanReviewPage() {
                 const reviewStep = run.steps?.find(
                   (s) => s.step_name === 'human_review_required'
                 )
-                const mlRecommendation = (reviewStep?.result_summary as Record<string, unknown>)?.ml_recommendation as string | undefined
-                  // Fallback: check older escalation steps for backward compat
-                  ?? (run.steps?.find((s) => s.step_name === 'human_escalation_severe_bias')
-                    ? 'review' : undefined)
                 const reviewReason = (reviewStep?.result_summary as Record<string, unknown>)?.reason as string | undefined
                 const reviewCategory = (reviewStep?.result_summary as Record<string, unknown>)?.review_category as string | undefined
                 return (
@@ -260,26 +235,6 @@ export default function HumanReviewPage() {
                     </TableCell>
                     <TableCell className="font-medium">
                       {run.applicant_name ?? 'Unknown'}
-                    </TableCell>
-                    <TableCell>
-                      {mlRecommendation ? (
-                        <Badge
-                          variant="outline"
-                          className={
-                            mlRecommendation === 'approved'
-                              ? 'bg-green-100 text-green-800'
-                              : mlRecommendation === 'conditional'
-                              ? 'bg-blue-100 text-blue-800'
-                              : mlRecommendation === 'denied'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }
-                        >
-                          {mlRecommendation.toUpperCase()}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">N/A</span>
-                      )}
                     </TableCell>
                     <TableCell className="max-w-[280px]">
                       <div className="space-y-1">
