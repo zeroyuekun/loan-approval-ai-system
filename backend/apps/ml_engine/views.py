@@ -129,9 +129,9 @@ class ModelDriftView(APIView):
     def get(self, request):
         """Compute PSI for recent applications vs training distribution."""
         import numpy as np
-        import pandas as pd
-        from apps.ml_engine.services.predictor import ModelPredictor
+
         from apps.ml_engine.services.metrics import MetricsService
+        from apps.ml_engine.services.predictor import ModelPredictor
 
         try:
             predictor = ModelPredictor()
@@ -146,8 +146,9 @@ class ModelDriftView(APIView):
             )
 
         # Gather recent applications (last 30 days by default)
-        from django.utils import timezone
         from datetime import timedelta
+
+        from django.utils import timezone
         try:
             days = int(request.query_params.get('days', 30))
         except (ValueError, TypeError):

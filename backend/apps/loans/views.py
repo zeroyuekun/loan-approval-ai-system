@@ -2,9 +2,8 @@ import logging
 
 from django.db import models, transaction
 from django.http import HttpResponse
-from rest_framework import viewsets, permissions
+from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -14,9 +13,15 @@ from apps.accounts.models import CustomerProfile
 
 logger = logging.getLogger(__name__)
 from apps.accounts.permissions import IsAdmin
+
 from .filters import AuditLogFilter, LoanApplicationFilter
 from .models import AuditLog, LoanApplication
-from .serializers import AuditLogSerializer, LoanApplicationCreateSerializer, LoanApplicationCustomerUpdateSerializer, LoanApplicationSerializer
+from .serializers import (
+    AuditLogSerializer,
+    LoanApplicationCreateSerializer,
+    LoanApplicationCustomerUpdateSerializer,
+    LoanApplicationSerializer,
+)
 
 
 class IsOwnerOrStaff(permissions.BasePermission):
@@ -156,12 +161,14 @@ class DashboardStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        from django.db.models import Count, Avg
+        from datetime import timedelta
+
+        from django.db.models import Avg, Count
         from django.db.models.functions import TruncDate
         from django.utils import timezone
-        from datetime import timedelta
-        from apps.ml_engine.models import ModelVersion
+
         from apps.agents.models import AgentRun
+        from apps.ml_engine.models import ModelVersion
 
         now = timezone.now()
 
