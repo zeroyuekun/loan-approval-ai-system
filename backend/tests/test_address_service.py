@@ -1,16 +1,15 @@
 """Tests for AddressService — Australian address validation and geocoding."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
 from apps.accounts.services.address_service import (
+    _POSTCODE_RISK_DATA,
     AddressService,
     AddressValidation,
-    _POSTCODE_RISK_DATA,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sample API responses

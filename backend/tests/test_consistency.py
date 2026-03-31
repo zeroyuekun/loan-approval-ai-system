@@ -1,11 +1,8 @@
 """Tests for DataConsistencyChecker and _safe_float — pure Python, no DB."""
 
-import math
-
 import pytest
 
 from apps.ml_engine.services.consistency import DataConsistencyChecker, _safe_float
-
 
 # Base features representing a valid personal loan application (no warnings/errors)
 BASE_FEATURES = {

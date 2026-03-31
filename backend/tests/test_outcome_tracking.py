@@ -9,18 +9,16 @@ Covers:
 - Binary outcome mapping (arrears_90 and default -> bad; performing/prepaid -> good)
 """
 
-import pytest
-from datetime import date
 from decimal import Decimal
 
+import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.services.outcome_tracker import (
+    _is_bad_outcome,
     compute_outcome_analysis,
     compute_vintage_analysis,
-    _is_bad_outcome,
 )
 
 User = get_user_model()
@@ -113,7 +111,7 @@ class TestComputeOutcomeAnalysis:
     def test_confusion_matrix_all_true_positives(self):
         """All denied applications actually defaulted -> all TP."""
         user = _make_user("tp_user")
-        for i in range(3):
+        for _i in range(3):
             app = _make_app(user, actual_outcome="default")
             _make_decision(app, decision="denied", risk_grade="CCC")
 
@@ -125,7 +123,7 @@ class TestComputeOutcomeAnalysis:
     def test_confusion_matrix_all_true_negatives(self):
         """All approved applications are performing -> all TN."""
         user = _make_user("tn_user")
-        for i in range(4):
+        for _i in range(4):
             app = _make_app(user, actual_outcome="performing")
             _make_decision(app, decision="approved", risk_grade="AAA")
 

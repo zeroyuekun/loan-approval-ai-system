@@ -7,7 +7,6 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APIClient
 
-
 # ---------------------------------------------------------------------------
 # API endpoint tests
 # ---------------------------------------------------------------------------
@@ -35,6 +34,7 @@ class TestModelCardEndpoint:
     )
     def test_model_card_returns_correct_structure(self, admin_user):
         from django.conf import settings
+
         from apps.ml_engine.models import ModelVersion
 
         # Create a dummy joblib file in the ML_MODELS_DIR
@@ -45,7 +45,7 @@ class TestModelCardEndpoint:
             f.write(b"dummy")
 
         try:
-            mv = ModelVersion.objects.create(
+            ModelVersion.objects.create(
                 algorithm="xgb",
                 version="test_v1",
                 file_path=dummy_path,
@@ -128,6 +128,7 @@ class TestModelCardGenerator:
     def _create_model_version(self, **overrides):
         """Helper to create a ModelVersion with a dummy joblib file."""
         from django.conf import settings as django_settings
+
         from apps.ml_engine.models import ModelVersion
 
         models_dir = getattr(

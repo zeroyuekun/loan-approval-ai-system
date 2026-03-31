@@ -1,9 +1,7 @@
 """Tests for OpenBankingService — CDR/OBP transaction feature derivation."""
 
 import dataclasses
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 from apps.ml_engine.services.open_banking_service import (
     OpenBankingProfile,
@@ -11,7 +9,6 @@ from apps.ml_engine.services.open_banking_service import (
     _clamp,
 )
 from apps.ml_engine.services.predictor import FEATURE_BOUNDS
-
 
 # ---------------------------------------------------------------------------
 # Sample transaction data (realistic Adatree / OBP format)

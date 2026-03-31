@@ -1,9 +1,8 @@
 """Tests for ML accuracy improvements: WOE/IV, LightGBM, ensemble, threshold, calibration."""
 
-import pytest
 import numpy as np
 import pandas as pd
-from unittest.mock import patch, MagicMock
+import pytest
 
 
 class TestWOEIVFeatureSelection:

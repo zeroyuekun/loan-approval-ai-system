@@ -8,7 +8,6 @@ from django.test import override_settings
 from apps.agents.models import MarketingEmail
 from apps.ml_engine.models import ModelVersion
 
-
 ORCH = "apps.agents.services.orchestrator"
 SENDER = "apps.email_engine.services.sender.send_decision_email"
 

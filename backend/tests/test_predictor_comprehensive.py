@@ -2,8 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
-from unittest.mock import MagicMock
 
 from apps.ml_engine.services.predictor import FEATURE_BOUNDS, ModelPredictor, compute_risk_grade
 

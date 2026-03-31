@@ -6,15 +6,11 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
 from apps.accounts.services.kyc_service import (
-    DOCUMENT_POINTS,
-    MINIMUM_TOTAL_POINTS,
     KYCService,
     VerificationResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

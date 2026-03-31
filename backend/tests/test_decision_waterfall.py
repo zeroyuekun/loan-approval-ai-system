@@ -6,12 +6,11 @@ with the correct ordered entries at each decision gate.
 
 import uuid
 from decimal import Decimal
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, override_settings
 
 from apps.accounts.models import CustomUser
-from apps.agents.models import AgentRun
 from apps.agents.services.orchestrator import PipelineOrchestrator
 from apps.loans.models import LoanApplication, LoanDecision
 

@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "test-encryption-key"
+description = "Allow test encryption keys in test files"
+regex = '''FIELD_ENCRYPTION_KEY="[^"]*"'''
+path = '''tests/'''
+
+[allowlist]
+paths = [
+    '''tests/''',
+    '''\.env\.example''',
+]

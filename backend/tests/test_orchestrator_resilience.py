@@ -1,9 +1,9 @@
 import json
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
-from apps.agents.services.orchestrator import PipelineOrchestrator, STEP_TIMEOUT_BUDGETS_MS
+
 from apps.agents.exceptions import FailureCategory, PipelineStepError
+from apps.agents.services.orchestrator import STEP_TIMEOUT_BUDGETS_MS, PipelineOrchestrator
 
 
 class TestStepHelpers:
@@ -25,7 +25,7 @@ class TestStepHelpers:
     def test_complete_step_computes_duration(self):
         step = self.orchestrator._start_step("ml_prediction")
         # Simulate time passing
-        step["started_at"] = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+        step["started_at"] = (datetime.now(UTC) - timedelta(seconds=2)).isoformat()
         step = self.orchestrator._complete_step(step, result_summary={"test": True})
         assert step["duration_ms"] >= 1900  # ~2 seconds
         assert step["status"] == "completed"
@@ -33,14 +33,14 @@ class TestStepHelpers:
 
     def test_complete_step_warns_on_timeout(self):
         step = self.orchestrator._start_step("ml_prediction")
-        step["started_at"] = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        step["started_at"] = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
         with patch("apps.agents.services.orchestrator.logger") as mock_logger:
             self.orchestrator._complete_step(step)
             mock_logger.warning.assert_called_once()
 
     def test_fail_step_includes_category(self):
         step = self.orchestrator._start_step("email_generation")
-        step["started_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        step["started_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
         step = self.orchestrator._fail_step(step, "Connection timeout", failure_category="transient")
         assert step["failure_category"] == "transient"
         assert step["duration_ms"] >= 900
@@ -48,7 +48,7 @@ class TestStepHelpers:
 
     def test_fail_step_auto_categorizes(self):
         step = self.orchestrator._start_step("bias_check")
-        step["started_at"] = datetime.now(timezone.utc).isoformat()
+        step["started_at"] = datetime.now(UTC).isoformat()
         step = self.orchestrator._fail_step(step, "Redis connection refused")
         assert step["failure_category"] == "infrastructure"
 
@@ -69,14 +69,14 @@ class TestStepHelpers:
 
     def test_step_dict_json_serializable(self):
         step = self.orchestrator._start_step("ml_prediction")
-        step["started_at"] = datetime.now(timezone.utc).isoformat()
+        step["started_at"] = datetime.now(UTC).isoformat()
         step = self.orchestrator._complete_step(step, result_summary={"score": 0.85})
         json_str = json.dumps(step)
         assert json_str  # No TypeError
 
     def test_failed_step_json_serializable(self):
         step = self.orchestrator._start_step("email_generation")
-        step["started_at"] = datetime.now(timezone.utc).isoformat()
+        step["started_at"] = datetime.now(UTC).isoformat()
         step = self.orchestrator._fail_step(step, "timeout", failure_category="transient")
         json_str = json.dumps(step)
         assert json_str

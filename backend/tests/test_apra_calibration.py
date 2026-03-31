@@ -13,7 +13,6 @@ from apps.ml_engine.services.macro_data_service import MacroDataService
 APRA_QUARTERLY_BENCHMARKS = MacroDataService.APRA_QUARTERLY_BENCHMARKS
 from apps.ml_engine.services.calibration_validator import CalibrationValidator
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -157,7 +156,7 @@ class TestValidatePredictionCalibration:
 
     def test_below_apra_benchmark(self, validator):
         # arrears_90 must be more than 0.005 below APRA's ~0.0047 → use 0.0
-        result = validator.validate_prediction_calibration(
+        validator.validate_prediction_calibration(
             system_default_rate=0.0,
             system_arrears_90_rate=0.0,
             predicted_default_rate=0.0,

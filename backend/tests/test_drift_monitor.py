@@ -1,6 +1,5 @@
 """Tests for PSI drift monitoring."""
 
-import pytest
 import numpy as np
 
 
@@ -90,7 +89,7 @@ class TestPSIThresholds:
 
     def test_threshold_values(self):
         """Verify threshold constants match industry standards."""
-        from apps.ml_engine.services.drift_monitor import PSI_STABLE, PSI_INVESTIGATE
+        from apps.ml_engine.services.drift_monitor import PSI_INVESTIGATE, PSI_STABLE
 
         assert PSI_STABLE == 0.10, f"PSI_STABLE should be 0.10, got {PSI_STABLE}"
         assert PSI_INVESTIGATE == 0.25, f"PSI_INVESTIGATE should be 0.25, got {PSI_INVESTIGATE}"
@@ -102,7 +101,6 @@ class TestConformalSSBC:
 
     def test_ssbc_adjusts_alpha_for_small_n(self):
         """SSBC should tighten alpha for small calibration sets."""
-        from scipy.stats import beta as beta_dist
 
         alpha = 0.05
         n = 100  # Small calibration set
@@ -116,7 +114,7 @@ class TestConformalSSBC:
         # With n=100 and alpha=0.05, q_idx = 95 (96th value out of 100)
         # The coverage variance is significant for small n
         assert q_idx < n, f"Quantile index {q_idx} should be < n={n}"
-        assert q_idx >= n * 0.9, f"Quantile index should be near top for small alpha"
+        assert q_idx >= n * 0.9, "Quantile index should be near top for small alpha"
         # Key property: for small n, the gap between q_idx and n is small,
         # meaning a single outlier in calibration could shift coverage significantly
         gap = n - q_idx

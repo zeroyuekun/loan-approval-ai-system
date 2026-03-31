@@ -2,12 +2,7 @@
 Tests for CORS/ALLOWED_HOSTS whitespace stripping and OpenAPI schema endpoints.
 """
 
-import os
-from unittest.mock import patch
-
 import pytest
-from django.test.utils import override_settings
-from rest_framework.test import APIClient
 
 
 def _redis_available():

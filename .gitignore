@@ -67,3 +67,4 @@ celerybeat-schedule*
 
 # Windows artifacts
 nul
+backend/gunicorn.ctl

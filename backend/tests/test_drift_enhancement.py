@@ -4,16 +4,13 @@ Pure computation tests -- no Django DB required.
 """
 
 import numpy as np
-import pytest
 
 from apps.ml_engine.services.drift_monitor import (
     CSI_INVESTIGATE,
     CSI_STABLE,
     compute_csi,
     compute_ks_test,
-    compute_psi,
 )
-
 
 # ---------------------------------------------------------------------------
 # compute_csi tests
@@ -110,7 +107,7 @@ class TestComputeKSTest:
 
         result = compute_ks_test(data, data)
 
-        assert result["significant"] == False
+        assert not result["significant"]
         assert result["p_value"] > 0.05
         assert 0.0 <= result["ks_statistic"] <= 1.0
 
@@ -122,7 +119,7 @@ class TestComputeKSTest:
 
         result = compute_ks_test(expected, actual)
 
-        assert result["significant"] == True
+        assert result["significant"]
         assert result["p_value"] < 0.05
         assert result["ks_statistic"] > 0.5
 

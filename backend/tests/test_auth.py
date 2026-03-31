@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
-from rest_framework.test import APIClient
 from rest_framework import status
+from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 
@@ -88,8 +88,8 @@ class AuthTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_logout_clears_cookies(self):
-        user = CustomUser.objects.create_user(username="testuser", password="TestPass123!", email="test@example.com")
-        login_response = self.client.post(
+        CustomUser.objects.create_user(username="testuser", password="TestPass123!", email="test@example.com")
+        self.client.post(
             "/api/v1/auth/login/",
             {
                 "username": "testuser",
@@ -105,7 +105,7 @@ class AuthTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_profile_with_cookie_auth(self):
-        user = CustomUser.objects.create_user(username="testuser", password="TestPass123!", email="test@example.com")
+        CustomUser.objects.create_user(username="testuser", password="TestPass123!", email="test@example.com")
         self.client.post(
             "/api/v1/auth/login/",
             {

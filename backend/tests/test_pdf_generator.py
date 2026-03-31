@@ -13,7 +13,6 @@ import pytest
 
 from apps.loans.services.pdf_generator import generate_decision_letter_pdf
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -204,14 +203,13 @@ class TestDenialLetterCompliance:
 
     def test_denial_helper_has_no_apology_language(self):
         """Verify _build_denial_content has no prohibited language."""
-        from apps.loans.services.pdf_generator import _build_denial_content
         import inspect
+
+        from apps.loans.services.pdf_generator import _build_denial_content
 
         source = inspect.getsource(_build_denial_content).lower()
         for word in self.PROHIBITED_WORDS:
-            assert word not in source_lower if "source_lower" in dir() else word not in source, (
-                f'Prohibited word "{word}" found in denial content builder'
-            )
+            assert word not in source, f'Prohibited word "{word}" found in denial content builder'
 
 
 # ---------------------------------------------------------------------------

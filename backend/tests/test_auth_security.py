@@ -4,10 +4,9 @@ failed login tracking, and account lockout.
 Uses pytest + Django test client with cookie-based JWT auth.
 """
 
-import pytest
 from unittest.mock import patch
 
-from django.test import override_settings
+import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -70,7 +69,7 @@ class TestCSRFTokenRotation:
         """CSRF token in response cookies should differ from the pre-login token."""
         # Step 1: Get initial CSRF token by hitting any GET endpoint
         # The ensure_csrf_cookie decorator or get_csrf_token call sets csrftoken cookie
-        initial_resp = auth_client.get("/api/v1/health/")
+        auth_client.get("/api/v1/health/")
         initial_csrf = auth_client.cookies.get("csrftoken")
 
         # Step 2: Login

@@ -5,27 +5,24 @@ validation, transformation, and output layers behave correctly for all
 possible inputs — without requiring a trained model.
 """
 
-import math
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
-import pytest
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from apps.ml_engine.services.feature_engineering import (
+    DEFAULT_IMPUTATION_VALUES,
+    DERIVED_FEATURE_NAMES,
+    compute_derived_features,
+    impute_missing_values,
+)
 from apps.ml_engine.services.predictor import (
     FEATURE_BOUNDS,
     ModelPredictor,
     compute_risk_grade,
 )
-from apps.ml_engine.services.feature_engineering import (
-    DERIVED_FEATURE_NAMES,
-    compute_derived_features,
-    impute_missing_values,
-    DEFAULT_IMPUTATION_VALUES,
-)
-
 
 # ---------------------------------------------------------------------------
 # Hypothesis strategies
@@ -239,7 +236,7 @@ class TestFeatureBoundsValidation:
     def test_near_bounds_values_raise_or_pass_cleanly(self, features):
         """Values slightly outside bounds should either pass or raise
         ValueError — never an unexpected exception type."""
-        bundle = _make_fake_bundle()
+        _make_fake_bundle()
         predictor = ModelPredictor.__new__(ModelPredictor)
         predictor.feature_bounds = {}
         try:
@@ -382,7 +379,7 @@ class TestPredictionOutputShape:
 
         # Build importances dict the same way the real predictor does
         imp_dict = {}
-        for name, imp in zip(feature_cols, fake_model.feature_importances_):
+        for name, imp in zip(feature_cols, fake_model.feature_importances_, strict=False):
             imp_dict[name] = round(float(imp), 4)
 
         threshold = 0.5

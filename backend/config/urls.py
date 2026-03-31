@@ -112,8 +112,8 @@ def deep_health_check(request):
 
     # Redis
     try:
-        from django.conf import settings as django_settings
         import redis
+        from django.conf import settings as django_settings
 
         broker_url = django_settings.CELERY_BROKER_URL
         r = redis.from_url(broker_url, socket_connect_timeout=3)
@@ -160,8 +160,9 @@ def deep_health_check(request):
     # API budget remaining (non-blocking)
     try:
         from datetime import date
-        from django.conf import settings as django_settings
+
         import redis
+        from django.conf import settings as django_settings
 
         r = redis.from_url(django_settings.CELERY_BROKER_URL, socket_connect_timeout=2)
         today = date.today().isoformat()

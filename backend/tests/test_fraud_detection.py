@@ -1,11 +1,9 @@
 """Tests for the FraudDetectionService — individual checks and composite result."""
 
-from datetime import timedelta
 from decimal import Decimal
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
-from django.utils import timezone
 
 from apps.accounts.models import CustomUser
 from apps.loans.models import FraudCheck, LoanApplication

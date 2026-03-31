@@ -27,7 +27,6 @@ def _restore_correlation_id(task=None, **kwargs):
     """Restore the correlation ID inside the Celery worker so that all
     log records emitted during task execution carry the originating
     request's ID."""
-    import threading
     from config.middleware import _correlation_id
 
     cid = getattr(task.request, "correlation_id", None)

@@ -1,10 +1,10 @@
 """Tests for champion/challenger model traffic splitting."""
 
 import os
-import pytest
 from collections import Counter
+
+import pytest
 from django.core.exceptions import ValidationError
-from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.ml_engine.services.model_selector import select_model_version
@@ -13,6 +13,7 @@ from apps.ml_engine.services.model_selector import select_model_version
 def _create_model_version(db, **kwargs):
     """Helper to create a ModelVersion with valid file_path."""
     from django.conf import settings
+
     from apps.ml_engine.models import ModelVersion
 
     models_dir = getattr(settings, "ML_MODELS_DIR", os.path.join(settings.BASE_DIR, "ml_models"))
@@ -48,7 +49,7 @@ class TestModelSelector:
 
     def test_weighted_distribution_approximate(self):
         mv1 = _create_model_version(True, version="champ_v1", traffic_percentage=70)
-        mv2 = _create_model_version(True, version="chall_v1", traffic_percentage=30)
+        _create_model_version(True, version="chall_v1", traffic_percentage=30)
 
         counts = Counter()
         for _ in range(1000):

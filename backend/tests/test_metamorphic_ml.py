@@ -8,15 +8,15 @@ WITHOUT loading a trained model.
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from apps.ml_engine.services.predictor import FEATURE_BOUNDS, compute_risk_grade
 from apps.ml_engine.services.feature_engineering import (
+    DERIVED_FEATURE_NAMES,
     compute_derived_features,
     impute_missing_values,
-    DERIVED_FEATURE_NAMES,
 )
+from apps.ml_engine.services.predictor import compute_risk_grade
 
 # ---------------------------------------------------------------------------
 # Helpers

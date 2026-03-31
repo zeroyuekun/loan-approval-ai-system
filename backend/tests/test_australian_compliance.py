@@ -1,7 +1,6 @@
 """Tests for Australian regulatory compliance: APRA, ASIC, NCCP, CCR, Banking Code 2025."""
 
 import pytest
-import numpy as np
 
 
 class TestAPRAServiceabilityBuffer:

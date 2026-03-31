@@ -3,19 +3,18 @@
 All HTTP calls are mocked — no real API calls are made.
 """
 
-import pytest
 from dataclasses import fields
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 
 from apps.ml_engine.services.geocoding_service import (
     DEFAULT_RATE_BY_REMOTENESS,
+    REMOTENESS_FALLBACK,
     GeocodingService,
     GeoRiskProfile,
-    REMOTENESS_FALLBACK,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

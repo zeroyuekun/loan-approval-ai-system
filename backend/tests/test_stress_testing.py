@@ -1,9 +1,9 @@
 """Tests for PortfolioStressTester service."""
 
-import pytest
 from decimal import Decimal
 
-from apps.accounts.models import CustomUser
+import pytest
+
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.services.stress_testing import PortfolioStressTester
 

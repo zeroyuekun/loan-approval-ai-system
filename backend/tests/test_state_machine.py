@@ -5,7 +5,6 @@ not have explicit transition validation yet, so these tests verify the current
 model behavior and document expected constraints.
 """
 
-import pytest
 from decimal import Decimal
 
 from django.test import TestCase

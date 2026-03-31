@@ -1,9 +1,9 @@
 """Security tests: XSS, prompt injection, lockout, PII encryption."""
 
-import pytest
 from unittest.mock import patch
-from django.test import TestCase, RequestFactory, override_settings
+
 from django.contrib.auth import get_user_model
+from django.test import TestCase, override_settings
 
 User = get_user_model()
 
@@ -35,7 +35,7 @@ class TestXSSPrevention(TestCase):
             applicant_type="single",
         )
 
-        email = GeneratedEmail.objects.create(
+        GeneratedEmail.objects.create(
             application=app,
             decision="approved",
             subject="Test",
@@ -119,7 +119,7 @@ class TestAccountLockout(TestCase):
     @patch("apps.accounts.views.LoginRateThrottle.allow_request", return_value=True)
     def test_failed_attempts_tracked(self, mock_throttle):
         """Failed login attempts should be tracked."""
-        for i in range(5):
+        for _i in range(5):
             self.client.post("/api/v1/auth/login/", {"username": "locktest", "password": "wrong_password"})
 
         self.user.refresh_from_db()
@@ -130,7 +130,7 @@ class TestAccountLockout(TestCase):
     @patch("apps.accounts.views.LoginRateThrottle.allow_request", return_value=True)
     def test_lockout_after_failures(self, mock_throttle):
         """Account should lock after threshold failures (lockout starts at 5)."""
-        for i in range(5):
+        for _i in range(5):
             self.client.post("/api/v1/auth/login/", {"username": "locktest", "password": "wrong_password"})
 
         self.user.refresh_from_db()
@@ -141,7 +141,7 @@ class TestAccountLockout(TestCase):
     def test_successful_login_resets_counter(self, mock_throttle):
         """Successful login should reset failed attempt counter."""
         # First, create some failures
-        for i in range(3):
+        for _i in range(3):
             self.client.post("/api/v1/auth/login/", {"username": "locktest", "password": "wrong_password"})
 
         # Then login successfully
@@ -168,8 +168,9 @@ class TestPIIEncryption(TestCase):
 
     def test_encrypted_fields_not_plaintext_in_db(self):
         """Encrypted fields should not be readable as plaintext in raw DB."""
-        from apps.accounts.models import CustomerProfile
         from django.db import connection
+
+        from apps.accounts.models import CustomerProfile
 
         profile, _ = CustomerProfile.objects.get_or_create(user=self.user)
         profile.primary_id_number = "ABC123456"
@@ -190,8 +191,9 @@ class TestPIIEncryption(TestCase):
 
     def test_secondary_id_encrypted(self):
         """secondary_id_number should also be encrypted at rest."""
-        from apps.accounts.models import CustomerProfile
         from django.db import connection
+
+        from apps.accounts.models import CustomerProfile
 
         profile, _ = CustomerProfile.objects.get_or_create(user=self.user)
         profile.secondary_id_number = "XYZ987654"
@@ -210,7 +212,7 @@ class TestPIIEncryption(TestCase):
 
     def test_none_and_empty_passthrough(self):
         """None and empty string should pass through without encryption."""
-        from apps.accounts.utils.encryption import encrypt_field, decrypt_field
+        from apps.accounts.utils.encryption import decrypt_field, encrypt_field
 
         assert encrypt_field(None) is None
         assert encrypt_field("") == ""
@@ -219,7 +221,7 @@ class TestPIIEncryption(TestCase):
 
     def test_encrypt_decrypt_roundtrip(self):
         """encrypt_field and decrypt_field should roundtrip correctly."""
-        from apps.accounts.utils.encryption import encrypt_field, decrypt_field
+        from apps.accounts.utils.encryption import decrypt_field, encrypt_field
 
         plaintext = "SENSITIVE-DATA-12345"
         encrypted = encrypt_field(plaintext)

@@ -1,14 +1,11 @@
 """Tests for loan application CRUD and role-based permissions."""
 
-from decimal import Decimal
-
 from django.core.cache import cache
 from django.test import TestCase, override_settings
-from rest_framework.test import APIClient
 from rest_framework import status
+from rest_framework.test import APIClient
 
-from apps.accounts.models import CustomerProfile, CustomUser
-from apps.loans.models import LoanApplication
+from apps.accounts.models import CustomUser
 
 
 @override_settings(
@@ -91,7 +88,7 @@ class LoanCRUDTestCase(TestCase):
         self.client.post("/api/v1/loans/", self.loan_data)
 
         # Another customer should see no loans
-        customer2 = CustomUser.objects.create_user(
+        CustomUser.objects.create_user(
             username="customer2",
             password="TestPass123!",
             email="c2@example.com",

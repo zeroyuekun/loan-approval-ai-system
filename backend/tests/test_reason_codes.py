@@ -1,13 +1,9 @@
 """Tests for adverse action reason codes and reapplication guidance — pure Python, no DB."""
 
-import pytest
-
 from apps.ml_engine.services.reason_codes import (
-    REASON_CODE_MAP,
     generate_adverse_action_reasons,
     generate_reapplication_guidance,
 )
-
 
 # ------------------------------------------------------------------
 # generate_adverse_action_reasons

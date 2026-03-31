@@ -12,7 +12,6 @@ Improvements over the original per-module implementations:
 import re
 import unicodedata
 
-
 # Zero-width and invisible Unicode characters used for obfuscation
 _INVISIBLE_CHARS = re.compile(
     r"[\u200b\u200c\u200d\u200e\u200f\u2060\u2061\u2062\u2063\u2064\ufeff\u00ad\u034f\u061c\u180e]"

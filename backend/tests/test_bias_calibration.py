@@ -1,9 +1,5 @@
 """Tests for bias detector calibration: weighting, known-biased samples."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-
-
 KNOWN_BIASED_EMAILS = [
     "We cannot approve your loan because of your race and ethnicity.",
     "Due to your gender, this application has been denied.",

@@ -7,10 +7,8 @@ import pytest
 from django.test import override_settings
 from django.utils import timezone
 
-from apps.agents.models import AgentRun
 from apps.loans.models import LoanApplication
 from apps.ml_engine.models import ModelVersion
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers

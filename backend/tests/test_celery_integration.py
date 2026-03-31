@@ -6,8 +6,9 @@ worker -> result backend. They require Redis to be running (available in CI).
 Skipped when Redis is not available (local dev without Docker).
 """
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 # Import the skip marker
 from tests.conftest import skip_without_redis

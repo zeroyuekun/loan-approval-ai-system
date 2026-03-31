@@ -6,13 +6,13 @@ Mocks external services (Claude API, Celery async) to keep tests fast and determ
 
 from datetime import date
 from decimal import Decimal
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, override_settings
-from rest_framework.test import APIClient
 from rest_framework import status
+from rest_framework.test import APIClient
 
-from apps.accounts.models import CustomUser, CustomerProfile
+from apps.accounts.models import CustomerProfile, CustomUser
 
 
 def _no_throttle(self, request, view):
@@ -461,7 +461,7 @@ class TestFullPipeline(TestCase):
         # User 1
         self._register_and_login()
         self._complete_profile()
-        app1 = self._create_application()
+        self._create_application()
 
         # User 2
         reg_resp = self.client.post(
@@ -486,8 +486,9 @@ class TestFullPipeline(TestCase):
         )
 
         user2 = CustomUser.objects.get(username="e2e_user_2")
-        from apps.accounts.models import CustomerProfile
         from datetime import date
+
+        from apps.accounts.models import CustomerProfile
 
         profile, _ = CustomerProfile.objects.get_or_create(user=user2)
         profile.date_of_birth = date(1988, 3, 20)

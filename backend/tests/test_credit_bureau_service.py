@@ -5,14 +5,12 @@ from dataclasses import fields as dataclass_fields
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
 from apps.ml_engine.services.credit_bureau_service import (
     CREDIT_REPORT_BOUNDS,
     CreditBureauService,
     CreditReport,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sample fixtures — realistic sandbox response shapes
@@ -443,7 +441,7 @@ class TestValidateSchemaCompatibility:
     def test_type_info_present(self):
         service = CreditBureauService()
         result = service.validate_schema_compatibility()
-        for field_name, info in result.items():
+        for _field_name, info in result.items():
             assert "our_type" in info
             assert "bureau_type" in info
             assert info["our_type"] in ("int", "float")

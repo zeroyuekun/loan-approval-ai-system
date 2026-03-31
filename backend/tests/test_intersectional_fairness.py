@@ -4,14 +4,11 @@ Pure computation tests — no Django DB required.
 """
 
 import numpy as np
-import pytest
 
 from apps.ml_engine.services.intersectional_fairness import (
-    DISPARATE_IMPACT_THRESHOLD,
-    compute_intersectional_fairness,
     _compute_group_fairness,
+    compute_intersectional_fairness,
 )
-
 
 # ---------------------------------------------------------------
 # Helpers
@@ -68,7 +65,7 @@ def _make_single_axis_compliant_intersectional_violation(n=1200):
 
     y_pred = np.zeros(4 * group_size, dtype=int)
     offset = 0
-    for (e, a), rate in rates.items():
+    for (_e, _a), rate in rates.items():
         approved = int(group_size * rate)
         segment = np.array([1] * approved + [0] * (group_size - approved))
         rng.shuffle(segment)
@@ -93,7 +90,7 @@ class TestUniformApprovalRates:
         y_true, y_pred, y_prob, attrs = _make_uniform_data()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert result["amplification_detected"] == False
+        assert not result["amplification_detected"]
 
     def test_single_axis_keys_present(self):
         y_true, y_pred, y_prob, attrs = _make_uniform_data()
@@ -269,7 +266,7 @@ class TestAmplificationFlag:
         y_true, y_pred, y_prob, attrs = _make_uniform_data()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert result["amplification_detected"] == False
+        assert not result["amplification_detected"]
 
     def test_amplification_when_intersectional_is_worse(self):
         """If intersections are worse than single-axis, amplification detected."""

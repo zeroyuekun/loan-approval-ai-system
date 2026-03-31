@@ -187,7 +187,7 @@ class TestPsychologicalFraming:
             decision="approved",
         )
         # weak_closings category is skipped for approvals
-        weak_closing_issues = [i for i in result.get("details", "") if "weak_closings" in str(i)]
+        [i for i in result.get("details", "") if "weak_closings" in str(i)]
         # Either it passes entirely or the issues are not about weak_closings
         if not result["passed"]:
             assert "weak_closings" not in result["details"]

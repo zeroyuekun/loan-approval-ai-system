@@ -10,12 +10,10 @@ import pandas as pd
 import pytest
 
 from apps.ml_engine.services.feature_engineering import (
-    DEFAULT_IMPUTATION_VALUES,
     DERIVED_FEATURE_NAMES,
     compute_derived_features,
     impute_missing_values,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

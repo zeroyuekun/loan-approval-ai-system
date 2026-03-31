@@ -1,7 +1,8 @@
 """Tests for ML predictor input validation and consistency checks."""
 
-from django.test import TestCase
 from unittest.mock import MagicMock, patch
+
+from django.test import TestCase
 
 
 class PredictorInputValidationTestCase(TestCase):

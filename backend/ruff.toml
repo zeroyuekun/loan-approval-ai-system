@@ -20,9 +20,10 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106", "S107", "S108", "E402", "B017"]
 "*/migrations/**" = ["E501"]
 "*/management/commands/**" = ["S311"]  # random OK for data generation/seeding
+"config/settings/**" = ["F405"]  # star imports from base settings
 
 [lint.isort]
 known-first-party = ["apps", "config"]

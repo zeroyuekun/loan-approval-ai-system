@@ -3,11 +3,8 @@
 All tests use mocks — no Django DB required.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import patch
-
-import pytest
 
 from apps.ml_engine.services.adverse_action import (
     AFCA_COMPLAINT_TEXT,
@@ -15,7 +12,6 @@ from apps.ml_engine.services.adverse_action import (
     generate_adverse_action_notice,
     generate_model_inventory_entry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -55,7 +51,7 @@ def _make_model_version(
         "algorithm": algorithm,
         "version": version,
         "traffic_percentage": traffic_percentage,
-        "created_at": datetime(2025, 6, 15, 10, 0, 0, tzinfo=timezone.utc),
+        "created_at": datetime(2025, 6, 15, 10, 0, 0, tzinfo=UTC),
         "auc_roc": 0.87,
         "gini_coefficient": 0.74,
         "ks_statistic": 0.52,

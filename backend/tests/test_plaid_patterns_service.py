@@ -3,17 +3,17 @@
 All HTTP calls are mocked — no real API calls are made.
 """
 
+from dataclasses import fields
+from unittest.mock import MagicMock, patch
+
 import httpx
 import pytest
-from dataclasses import fields
-from unittest.mock import patch, MagicMock
 
 from apps.ml_engine.services.plaid_patterns_service import (
+    PLAID_TO_AU_FEATURE_MAP,
     PlaidBehavioralPatterns,
     PlaidPatternsService,
-    PLAID_TO_AU_FEATURE_MAP,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -6,9 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apps.email_engine.services.guardrails import GuardrailChecker
-
-
 GOOD_APPROVAL_BODY = """Dear John,
 
 We are pleased to advise that your application for a Personal Loan with AussieLoanAI has been approved. Congratulations!

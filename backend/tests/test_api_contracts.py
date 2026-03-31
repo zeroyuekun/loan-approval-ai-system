@@ -6,10 +6,10 @@ These tests check key PRESENCE and type, NOT exact values.
 They ensure the API contract between backend and frontend is not broken.
 """
 
-import pytest
 from decimal import Decimal
 from unittest.mock import patch
 
+import pytest
 from rest_framework.test import APIClient
 
 
@@ -32,9 +32,8 @@ pytestmark = skip_without_redis
 
 from apps.accounts.models import CustomerProfile, CustomUser
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
-from apps.loans.models import LoanApplication, LoanDecision
+from apps.loans.models import LoanDecision
 from apps.ml_engine.models import ModelVersion
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -50,7 +49,7 @@ def _disable_throttling(api_view_cls):
 def _no_throttling():
     """Globally disable all custom throttle classes for contract tests."""
     from apps.accounts.views import LoginView, RegisterView
-    from apps.agents.views import OrchestrateView, BatchOrchestrateView, HumanReviewView
+    from apps.agents.views import BatchOrchestrateView, HumanReviewView, OrchestrateView
     from apps.ml_engine.views import PredictView
 
     with (

@@ -2,10 +2,7 @@
 
 import re
 
-import pytest
-
 from apps.email_engine.services.guardrails import GuardrailChecker
-
 
 checker = GuardrailChecker()
 

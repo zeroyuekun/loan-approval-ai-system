@@ -1,13 +1,11 @@
 """Tests for PipelineOrchestrator.resume_after_review() -- resuming escalated pipelines."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.test import override_settings
 
 from apps.agents.models import AgentRun
-from apps.loans.models import LoanDecision
-
 
 ORCH = "apps.agents.services.orchestrator"
 SENDER = "apps.email_engine.services.sender.send_decision_email"

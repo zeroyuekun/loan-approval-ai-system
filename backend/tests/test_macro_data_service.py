@@ -8,12 +8,11 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from apps.ml_engine.services.macro_data_service import (
-    MacroDataService,
     _CACHE_TTL_HOURS,
     _FALLBACKS,
     _FEATURE_BOUNDS,
+    MacroDataService,
 )
-
 
 # ---------------------------------------------------------------------------
 # Realistic sample API responses used as test fixtures
@@ -283,7 +282,7 @@ class TestCaching(unittest.TestCase):
         mock_client_cls.return_value = mock_client
 
         svc = MacroDataService()
-        result1 = svc.get_gdp_growth()
+        svc.get_gdp_growth()
 
         # Expire cache, then make API fail
         svc._cache_timestamps["gdp_growth"] = datetime.utcnow() - timedelta(hours=_CACHE_TTL_HOURS + 1)
