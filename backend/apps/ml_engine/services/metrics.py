@@ -24,9 +24,9 @@ class MetricsService:
         """Compute standard classification metrics."""
         return {
             'accuracy': round(float(accuracy_score(y_true, y_pred)), 4),
-            'precision': round(float(precision_score(y_true, y_pred)), 4),
-            'recall': round(float(recall_score(y_true, y_pred)), 4),
-            'f1_score': round(float(f1_score(y_true, y_pred)), 4),
+            'precision': round(float(precision_score(y_true, y_pred, zero_division=0)), 4),
+            'recall': round(float(recall_score(y_true, y_pred, zero_division=0)), 4),
+            'f1_score': round(float(f1_score(y_true, y_pred, zero_division=0)), 4),
             'auc_roc': round(float(roc_auc_score(y_true, y_prob)), 4),
             'brier_score': round(float(brier_score_loss(y_true, y_prob)), 4),
         }
@@ -96,18 +96,10 @@ class MetricsService:
         fraction_of_positives, mean_predicted_value = calibration_curve(
             y_true, y_prob, n_bins=n_bins, strategy='uniform'
         )
-        # ECE: weighted average of |actual - predicted| per bin
-        bin_edges = np.linspace(0, 1, n_bins + 1)
-        bin_indices = np.digitize(y_prob, bin_edges[1:-1])
-        ece = 0.0
-        total = len(y_prob)
-        for i in range(n_bins):
-            mask = bin_indices == i
-            count = mask.sum()
-            if count > 0:
-                bin_acc = float(np.array(y_true)[mask].mean())
-                bin_conf = float(np.array(y_prob)[mask].mean())
-                ece += (count / total) * abs(bin_acc - bin_conf)
+        # ECE: mean absolute difference between actual and predicted calibration
+        ece = round(float(np.mean(np.abs(
+            np.array(fraction_of_positives) - np.array(mean_predicted_value)
+        ))), 4)
 
         return {
             'fraction_of_positives': [round(float(x), 4) for x in fraction_of_positives],
@@ -157,7 +149,9 @@ class MetricsService:
         # heavily; Big 4 banks typically use 3:1 to 10:1 FP:FN cost ratios.
         fp_fn_ratio = getattr(django_settings, 'ML_COST_FP_FN_RATIO', 5)
         def cost(entry):
-            return fp_fn_ratio * entry['fpr'] + 1 * (1 - entry['recall'])
+            # Both FPR and FNR are rates [0,1], so cost weighting is valid
+            fnr = 1 - entry['recall']  # false negative rate
+            return fp_fn_ratio * entry['fpr'] + fnr
 
         cost_optimal = min(sweep, key=cost)['threshold']
 
@@ -252,10 +246,13 @@ class MetricsService:
         expected_counts = np.histogram(expected, bins=bin_edges)[0]
         actual_counts = np.histogram(actual, bins=bin_edges)[0]
 
-        # Convert to proportions; epsilon only for zero-count bins to avoid log(0)
+        # Convert to proportions; epsilon smoothing to avoid log(0)
         eps = 1e-4
-        expected_pct = np.maximum(expected_counts / len(expected), eps)
-        actual_pct = np.maximum(actual_counts / len(actual), eps)
+        expected_pct = (expected_counts + eps) / (len(expected) + eps * len(expected_counts))
+        actual_pct = (actual_counts + eps) / (len(actual) + eps * len(actual_counts))
+        # Re-normalize so proportions sum to 1
+        expected_pct = expected_pct / expected_pct.sum()
+        actual_pct = actual_pct / actual_pct.sum()
 
         # PSI = sum((actual% - expected%) * ln(actual% / expected%))
         psi_components = (actual_pct - expected_pct) * np.log(actual_pct / expected_pct)
@@ -346,7 +343,7 @@ class MetricsService:
         if len(approval_rates) >= 2 and max(approval_rates) > 0:
             disparate_impact = min(approval_rates) / max(approval_rates)
         else:
-            disparate_impact = 1.0
+            disparate_impact = None  # Undefined when all groups have 0% approval
 
         # Equalized odds difference: max gap in TPR or FPR across groups
         tprs = [m['tpr'] for m in group_metrics.values()]
@@ -358,9 +355,9 @@ class MetricsService:
 
         return {
             'groups': group_metrics,
-            'disparate_impact_ratio': round(disparate_impact, 4),
+            'disparate_impact_ratio': round(disparate_impact, 4) if disparate_impact is not None else None,
             'equalized_odds_difference': round(eq_odds_diff, 4),
-            'passes_80_percent_rule': disparate_impact >= 0.80,
+            'passes_80_percent_rule': disparate_impact >= 0.80 if disparate_impact is not None else None,
         }
 
     # ==================================================================
@@ -457,8 +454,8 @@ class MetricsService:
             bin_approved = (y_true[mask] == 1).sum()
             bin_denied = (y_true[mask] == 0).sum()
 
-            pct_approved = (bin_approved / total_approved) + eps
-            pct_denied = (bin_denied / total_denied) + eps
+            pct_approved = (bin_approved + eps) / (total_approved + eps * n_bins)
+            pct_denied = (bin_denied + eps) / (total_denied + eps * n_bins)
 
             woe = float(np.log(pct_approved / pct_denied))
             iv_component = float((pct_approved - pct_denied) * woe)

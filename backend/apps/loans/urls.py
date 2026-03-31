@@ -8,5 +8,6 @@ router.register(r'audit-logs', views.AuditLogViewSet, basename='auditlog')
 router.register(r'', views.LoanApplicationViewSet, basename='loan-application')
 
 urlpatterns = [
+    path('dashboard-stats/', views.DashboardStatsView.as_view(), name='dashboard-stats'),
     path('', include(router.urls)),
 ]

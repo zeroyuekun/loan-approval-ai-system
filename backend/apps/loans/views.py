@@ -1,11 +1,13 @@
 import logging
 
-from django.db import transaction
+from django.db import models, transaction
 from django.http import HttpResponse
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
+from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import CustomerProfile
@@ -148,3 +150,91 @@ class AuditLogViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 
     def get_queryset(self):
         return AuditLog.objects.all().select_related('user')
+
+
+class DashboardStatsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Count, Avg
+        from django.db.models.functions import TruncDate
+        from django.utils import timezone
+        from datetime import timedelta
+        from apps.ml_engine.models import ModelVersion
+        from apps.agents.models import AgentRun
+
+        now = timezone.now()
+
+        # Total applications
+        total = LoanApplication.objects.count()
+
+        # Approval rate
+        decided = LoanApplication.objects.filter(status__in=['approved', 'denied'])
+        approved = decided.filter(status='approved').count()
+        approval_rate = round(approved / decided.count() * 100, 1) if decided.count() > 0 else 0
+
+        # Average processing time from AgentRun
+        avg_time = AgentRun.objects.filter(
+            status='completed', total_time_ms__isnull=False
+        ).aggregate(avg=Avg('total_time_ms'))['avg']
+        avg_processing_seconds = round(avg_time / 1000, 1) if avg_time else None
+
+        # Active model
+        active_model = ModelVersion.objects.filter(is_active=True).first()
+
+        # Daily application volume (last 30 days)
+        thirty_days_ago = now - timedelta(days=30)
+        daily_volume = list(
+            LoanApplication.objects.filter(created_at__gte=thirty_days_ago)
+            .annotate(date=TruncDate('created_at'))
+            .values('date')
+            .annotate(count=Count('id'))
+            .order_by('date')
+        )
+
+        # Daily approval rate (last 30 days)
+        daily_approvals = list(
+            LoanApplication.objects.filter(
+                created_at__gte=thirty_days_ago,
+                status__in=['approved', 'denied']
+            )
+            .annotate(date=TruncDate('created_at'))
+            .values('date')
+            .annotate(
+                total=Count('id'),
+                approved=Count('id', filter=models.Q(status='approved'))
+            )
+            .order_by('date')
+        )
+        approval_trend = [
+            {
+                'date': str(d['date']),
+                'rate': round(d['approved'] / d['total'] * 100, 1) if d['total'] > 0 else 0
+            }
+            for d in daily_approvals
+        ]
+
+        # Pipeline stats
+        pipeline_total = AgentRun.objects.count()
+        pipeline_completed = AgentRun.objects.filter(status='completed').count()
+        pipeline_failed = AgentRun.objects.filter(status='failed').count()
+        pipeline_escalated = AgentRun.objects.filter(status='escalated').count()
+
+        return Response({
+            'total_applications': total,
+            'approval_rate': approval_rate,
+            'avg_processing_seconds': avg_processing_seconds,
+            'active_model': {
+                'name': f"{active_model.algorithm} v{active_model.version}" if active_model else None,
+                'auc': float(active_model.auc_roc) if active_model and active_model.auc_roc else None,
+            } if active_model else None,
+            'daily_volume': [{'date': str(d['date']), 'count': d['count']} for d in daily_volume],
+            'approval_trend': approval_trend,
+            'pipeline': {
+                'total': pipeline_total,
+                'completed': pipeline_completed,
+                'failed': pipeline_failed,
+                'escalated': pipeline_escalated,
+                'success_rate': round(pipeline_completed / pipeline_total * 100, 1) if pipeline_total > 0 else 0,
+            },
+        })

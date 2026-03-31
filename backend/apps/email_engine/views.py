@@ -100,6 +100,52 @@ class GenerateEmailView(APIView):
         )
 
 
+class SendLatestEmailView(APIView):
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [EmailGenerationThrottle]
+
+    def post(self, request, loan_id):
+        """Send the latest generated email for an application to the customer."""
+        check_loan_access(request, loan_id)
+
+        email = GeneratedEmail.objects.filter(
+            application_id=loan_id
+        ).select_related('application__applicant').order_by('-created_at').first()
+
+        if not email:
+            return Response(
+                {'error': 'No email found for this application'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not email.passed_guardrails:
+            return Response(
+                {'error': 'Cannot send email that failed guardrails'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.email_engine.services.sender import send_decision_email
+        recipient = email.application.applicant.email
+        if not recipient:
+            return Response(
+                {'error': 'No recipient email address on file'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = send_decision_email(recipient, email.subject, email.body)
+        if result['sent']:
+            return Response({
+                'sent': True,
+                'recipient': recipient,
+                'email_id': str(email.id),
+            })
+        else:
+            return Response(
+                {'sent': False, 'error': result.get('error', 'Send failed')},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
 class EmailDetailView(APIView):
     permission_classes = [IsAuthenticated]
 

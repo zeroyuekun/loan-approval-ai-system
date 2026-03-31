@@ -16,9 +16,6 @@ import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
 import { EmailPreview } from '@/components/emails/EmailPreview'
 import { BiasScoreBadge } from '@/components/emails/BiasScoreBadge'
 import { RepaymentCalculator } from '@/components/applications/RepaymentCalculator'
-import { Button } from '@/components/ui/button'
-import { loansApi } from '@/lib/api'
-import { Download } from 'lucide-react'
 
 interface ApplicationDetailProps {
   application: LoanApplication
@@ -55,9 +52,6 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
         <FinancialDetails application={application} />
       </div>
 
-      {/* Credit Profile */}
-      <CreditProfile application={application} />
-
       {/* Actions */}
       <PipelineControls
         applicationStatus={application.status}
@@ -73,41 +67,20 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
         onDeleteConfirmToggle={onDeleteConfirmToggle}
       />
 
-      {/* ML Decision */}
-      {decision && <DecisionSection decision={decision} />}
-
-      {/* Decision Letter Download */}
-      {decision && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={async () => {
-            try {
-              const { data } = await loansApi.downloadDecisionLetter(application.id)
-              const url = URL.createObjectURL(data as Blob)
-              const a = document.createElement('a')
-              a.href = url
-              a.download = `decision-letter-${application.id}.pdf`
-              a.click()
-              URL.revokeObjectURL(url)
-            } catch {
-              // error is handled by the API interceptor toast
-            }
-          }}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          Download Decision Letter
-        </Button>
+      {/* Agent Workflow Timeline */}
+      {agentRun && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Agent Workflow Timeline</CardTitle>
+            <CardDescription>
+              Total time: {agentRun.total_time_ms ? `${(agentRun.total_time_ms / 1000).toFixed(1)}s` : 'In progress'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <WorkflowTimeline steps={agentRun.steps} />
+          </CardContent>
+        </Card>
       )}
-
-      {/* Repayment Calculator */}
-      <RepaymentCalculator
-        loanAmount={application.loan_amount}
-        loanTermMonths={application.loan_term_months}
-      />
-
-      {/* Generated Email */}
-      {email && <EmailPreview email={email} />}
 
       {/* Bias Report */}
       {agentRun?.bias_reports && agentRun.bias_reports.length > 0 && (
@@ -167,6 +140,9 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
         </Card>
       )}
 
+      {/* Generated Email */}
+      {email && <EmailPreview email={email} />}
+
       {/* Next Best Offers */}
       {agentRun?.next_best_offers && agentRun.next_best_offers.length > 0 && (
         <div className="space-y-4">
@@ -187,20 +163,17 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
         </div>
       )}
 
-      {/* Agent Timeline */}
-      {agentRun && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Agent Workflow Timeline</CardTitle>
-            <CardDescription>
-              Total time: {agentRun.total_time_ms ? `${(agentRun.total_time_ms / 1000).toFixed(1)}s` : 'In progress'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <WorkflowTimeline steps={agentRun.steps} />
-          </CardContent>
-        </Card>
-      )}
+      {/* Repayment Calculator */}
+      <RepaymentCalculator
+        loanAmount={application.loan_amount}
+        loanTermMonths={application.loan_term_months}
+      />
+
+      {/* ML Decision */}
+      {decision && <DecisionSection decision={decision} loanId={application.id} />}
+
+      {/* Credit Profile */}
+      <CreditProfile application={application} />
 
       {/* Notes */}
       {application.notes && (

@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsAdmin
 from apps.loans.models import AuditLog, LoanApplication
 from apps.loans.permissions import check_loan_access
-from apps.ml_engine.models import ModelVersion, PredictionLog
+from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
 from apps.ml_engine.tasks import run_prediction_task, train_model_task
 
 
@@ -409,3 +409,44 @@ class ModelCompareView(APIView):
             })
 
         return Response({'comparison': comparison})
+
+
+class DriftReportListView(APIView):
+    """List drift reports for the active model."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        active_model = ModelVersion.objects.filter(is_active=True).first()
+        if not active_model:
+            return Response(
+                {'error': 'No active model found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            limit = min(max(int(request.query_params.get('limit', 12)), 1), 100)
+        except (ValueError, TypeError):
+            limit = 12
+
+        reports = DriftReport.objects.filter(
+            model_version=active_model,
+        ).order_by('-report_date')[:limit]
+
+        data = []
+        for r in reports:
+            data.append({
+                'id': str(r.id),
+                'report_date': r.report_date.isoformat(),
+                'psi_score': r.psi_score,
+                'psi_per_feature': r.psi_per_feature,
+                'mean_probability': r.mean_probability,
+                'std_probability': r.std_probability,
+                'approval_rate': r.approval_rate,
+                'drift_detected': r.drift_detected,
+                'alert_level': r.alert_level,
+                'num_predictions': r.num_predictions,
+                'period_start': r.period_start.isoformat(),
+                'period_end': r.period_end.isoformat(),
+            })
+
+        return Response(data)

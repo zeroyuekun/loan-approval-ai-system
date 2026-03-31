@@ -697,7 +697,10 @@ class ModelPredictor:
             # Scenario 1: Income -15%
             stressed = features.copy()
             stressed['annual_income'] = float(stressed['annual_income']) * 0.85
-            stressed['debt_to_income'] = float(stressed.get('loan_amount', 0)) / stressed['annual_income']
+            if stressed['annual_income'] > 0:
+                stressed['debt_to_income'] = float(stressed.get('loan_amount', 0)) / stressed['annual_income']
+            else:
+                stressed['debt_to_income'] = 999.0  # Maximum DTI when income is zero
             df_s = pd.DataFrame([stressed])
             df_s = self._transform(df_s)
             prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
@@ -735,7 +738,10 @@ class ModelPredictor:
             # Scenario 4: Combined stress (all three)
             stressed = features.copy()
             stressed['annual_income'] = float(stressed['annual_income']) * 0.85
-            stressed['debt_to_income'] = float(stressed.get('loan_amount', 0)) / stressed['annual_income']
+            if stressed['annual_income'] > 0:
+                stressed['debt_to_income'] = float(stressed.get('loan_amount', 0)) / stressed['annual_income']
+            else:
+                stressed['debt_to_income'] = 999.0  # Maximum DTI when income is zero
             if float(stressed.get('property_value', 0)) > 0:
                 stressed['property_value'] = float(stressed['property_value']) * 0.80
             stressed['credit_score'] = max(300, int(stressed['credit_score']) - 50)

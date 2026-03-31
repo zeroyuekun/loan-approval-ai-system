@@ -64,31 +64,49 @@ function ResultSummaryDisplay({ summary }: { summary: string | Record<string, an
   )
 }
 
+function getCumulativeElapsed(steps: AgentStep[], index: number): string | null {
+  const first = steps[0]
+  const current = steps[index]
+  if (!first?.started_at || !current?.started_at) return null
+  const pipelineStart = new Date(first.started_at).getTime()
+  const stepStart = new Date(current.completed_at || current.started_at).getTime()
+  const elapsed = stepStart - pipelineStart
+  if (elapsed <= 0) return null
+  if (elapsed < 1000) return `+${elapsed}ms`
+  return `+${(elapsed / 1000).toFixed(1)}s`
+}
+
 export function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
   return (
     <div className="space-y-0">
-      {steps.map((step, index) => (
-        <div key={index} className="flex gap-3">
-          <div className="flex flex-col items-center">
-            {getStepIcon(step.status)}
-            {index < steps.length - 1 && (
-              <div className={`w-0.5 flex-1 min-h-[2rem] ${getLineColor(step.status)}`} />
-            )}
-          </div>
-          <div className="pb-6 flex-1">
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium">{formatStepName(step.step_name)}</p>
-              {getDuration(step) && (
-                <span className="text-xs text-muted-foreground">({getDuration(step)})</span>
+      {steps.map((step, index) => {
+        const elapsed = getCumulativeElapsed(steps, index)
+        return (
+          <div key={index} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              {getStepIcon(step.status)}
+              {index < steps.length - 1 && (
+                <div className={`w-0.5 flex-1 min-h-[2rem] ${getLineColor(step.status)}`} />
               )}
             </div>
-            <ResultSummaryDisplay summary={step.result_summary} />
-            {step.error && (
-              <p className="text-sm text-destructive mt-1">{step.error}</p>
-            )}
+            <div className="pb-6 flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">{formatStepName(step.step_name)}</p>
+                {getDuration(step) && (
+                  <span className="text-xs text-muted-foreground">({getDuration(step)})</span>
+                )}
+                {elapsed && index > 0 && (
+                  <span className="text-[10px] text-muted-foreground/60 tabular-nums">{elapsed}</span>
+                )}
+              </div>
+              <ResultSummaryDisplay summary={step.result_summary} />
+              {step.error && (
+                <p className="text-sm text-destructive mt-1">{step.error}</p>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

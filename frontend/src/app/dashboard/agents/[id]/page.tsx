@@ -12,6 +12,8 @@ import { WorkflowTimeline } from '@/components/agents/WorkflowTimeline'
 import { AgentStepCard } from '@/components/agents/AgentStepCard'
 import { NextBestOfferCard } from '@/components/agents/NextBestOfferCard'
 import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
+import { PipelineSummaryBar } from '@/components/agents/PipelineSummaryBar'
+import { StepLatencyChart } from '@/components/agents/StepLatencyChart'
 import { formatDate, getStatusColor } from '@/lib/utils'
 import { ArrowLeft, Bot, FileText, ChevronRight } from 'lucide-react'
 
@@ -54,14 +56,22 @@ function RunCard({ run }: { run: AgentRun }) {
               {run.total_time_ms && ` · ${(run.total_time_ms / 1000).toFixed(1)}s total`}
             </CardDescription>
           </div>
-          <Badge className={getStatusColor(run.status)} variant="outline">
-            {run.status.toUpperCase()}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {run.total_input_tokens != null && run.total_output_tokens != null && (
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {((run.total_input_tokens + run.total_output_tokens) as number).toLocaleString()} tokens
+              </span>
+            )}
+            <Badge className={getStatusColor(run.status)} variant="outline">
+              {run.status.toUpperCase()}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {run.steps.length > 0 && (
           <div>
+            <PipelineSummaryBar steps={run.steps} />
             <h4 className="text-sm font-medium mb-3">Workflow Steps</h4>
             <WorkflowTimeline steps={run.steps} />
           </div>
@@ -73,6 +83,9 @@ function RunCard({ run }: { run: AgentRun }) {
               <AgentStepCard key={index} step={step} />
             ))}
           </div>
+        )}
+        {run.steps.length >= 3 && (
+          <StepLatencyChart steps={run.steps} />
         )}
         {run.next_best_offers && run.next_best_offers.length > 0 && (
           <div className="space-y-2">

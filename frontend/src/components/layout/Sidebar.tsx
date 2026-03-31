@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart3, Mail, Bot, UserCircle, Users, ShieldAlert, ClipboardList, BookOpen } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart3, Mail, Bot, UserCircle, Users, ShieldAlert, ClipboardList, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
 import { LogoIcon } from '@/components/ui/logo'
@@ -14,10 +14,10 @@ const navItems = [
   { href: '/dashboard/customers', label: 'Customers', icon: Users, staffOnly: true },
   { href: '/dashboard/profile', label: 'My Profile', icon: UserCircle },
   { href: '/dashboard/model-metrics', label: 'Model Metrics', icon: BarChart3 },
+  { href: '/dashboard/model-card', label: 'Model Card', icon: ShieldCheck, staffOnly: true },
   { href: '/dashboard/emails', label: 'Emails', icon: Mail },
   { href: '/dashboard/agents', label: 'Agent Workflows', icon: Bot },
   { href: '/dashboard/audit', label: 'Audit Log', icon: ClipboardList, staffOnly: true },
-  { href: '/api/docs/', label: 'API Docs', icon: BookOpen, staffOnly: true, external: true },
 ]
 
 interface SidebarProps {

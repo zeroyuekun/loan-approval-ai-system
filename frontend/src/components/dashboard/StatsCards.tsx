@@ -43,7 +43,7 @@ export function StatsCards({ totalApplications, approvalRate, avgProcessingTime,
     },
     {
       title: 'Active Model',
-      value: activeModel,
+      value: 'XGBoost',
       icon: Cpu,
       gradient: 'from-violet-500 via-purple-600 to-fuchsia-600',
       shadowColor: 'shadow-violet-500/25',
