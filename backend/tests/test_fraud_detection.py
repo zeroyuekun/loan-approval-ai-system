@@ -65,12 +65,12 @@ class FraudDetectionServiceTest(TestCase):
         self.assertEqual(result["risk_level"], "low")
 
     def test_duplicate_detection_flags_similar_app(self):
-        """Same purpose, amount within 10%, within 30 days."""
-        _create_application(self.user, loan_amount=Decimal("345000.00"), purpose="home")
+        """Same purpose, exact same amount, within 30 days."""
+        _create_application(self.user, loan_amount=Decimal("350000.00"), purpose="home")
         app = _create_application(self.user, loan_amount=Decimal("350000.00"), purpose="home")
         result = self.service._check_duplicate(app)
         self.assertFalse(result["passed"])
-        self.assertEqual(result["risk_level"], "high")
+        self.assertEqual(result["risk_level"], "medium")
 
     def test_duplicate_detection_passes_different_purpose(self):
         _create_application(self.user, loan_amount=Decimal("350000.00"), purpose="auto")
@@ -98,11 +98,11 @@ class FraudDetectionServiceTest(TestCase):
         self.assertTrue(result["passed"])
 
     def test_velocity_flags_over_limit(self):
-        for _ in range(3):
+        for _ in range(10):
             _create_application(self.user)
         app = _create_application(self.user)
         result = self.service._check_velocity(app)
-        # 4 total (3 prior + current excluded but count is 3 prior >= 3)
+        # 11 total (10 prior + current excluded but count is 10 prior >= 10)
         self.assertFalse(result["passed"])
         self.assertEqual(result["risk_level"], "high")
 

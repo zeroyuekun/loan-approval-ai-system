@@ -262,14 +262,13 @@ def test_severe_bias_escalation(sample_application, orch_mocks):
 @CACHE_OVERRIDE
 @pytest.mark.django_db
 def test_moderate_bias_reviewer_rejects(sample_application, orch_mocks):
-    """Moderate bias + AI reviewer rejects -> escalated."""
+    """Bias score above threshold -> direct escalation to human review (no AI reviewer)."""
     orch_mocks["predictor"].return_value.predict.return_value = _prediction(
         "approved", 0.85, orch_mocks["model_version_id"]
     )
     orch_mocks["email_gen"].return_value.generate.return_value = _email()
 
     orch_mocks["bias"].return_value.analyze.return_value = _bias(70, flagged=True)
-    orch_mocks["ai_reviewer"].return_value.review.return_value = _review(approved=False, confidence=0.9)
 
     from apps.agents.services.orchestrator import PipelineOrchestrator
 
@@ -278,28 +277,27 @@ def test_moderate_bias_reviewer_rejects(sample_application, orch_mocks):
     assert run.status == "escalated"
     sample_application.refresh_from_db()
     assert sample_application.status == "review"
-    orch_mocks["ai_reviewer"].return_value.review.assert_called_once()
+    orch_mocks["ai_reviewer"].return_value.review.assert_not_called()
 
 
 @CACHE_OVERRIDE
 @pytest.mark.django_db
 def test_moderate_bias_reviewer_approves(sample_application, orch_mocks):
-    """Moderate bias + AI reviewer approves with high confidence -> continues."""
+    """Bias score above threshold -> direct escalation (no AI reviewer step)."""
     orch_mocks["predictor"].return_value.predict.return_value = _prediction(
         "approved", 0.85, orch_mocks["model_version_id"]
     )
     orch_mocks["email_gen"].return_value.generate.return_value = _email()
 
     orch_mocks["bias"].return_value.analyze.return_value = _bias(65, flagged=True)
-    orch_mocks["ai_reviewer"].return_value.review.return_value = _review(approved=True, confidence=0.85)
 
     from apps.agents.services.orchestrator import PipelineOrchestrator
 
     run = PipelineOrchestrator().orchestrate(sample_application.pk)
 
-    assert run.status == "completed"
+    assert run.status == "escalated"
     sample_application.refresh_from_db()
-    assert sample_application.status == "approved"
+    assert sample_application.status == "review"
 
 
 @CACHE_OVERRIDE

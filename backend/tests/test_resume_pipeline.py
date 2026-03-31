@@ -113,8 +113,7 @@ def test_resume_approved(escalated_agent_run, resume_mocks):
 
     run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
 
-    # _finalize_run preserves 'escalated' status (by design — the run was human-reviewed)
-    assert run.status == "escalated"
+    assert run.status == "completed"
     escalated_agent_run.application.refresh_from_db()
     assert escalated_agent_run.application.status == "approved"
     resume_mocks["email_gen"].return_value.generate.assert_called_once()
@@ -145,8 +144,7 @@ def test_resume_denied(escalated_agent_run, resume_mocks):
 
     run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
 
-    # _finalize_run preserves 'escalated' status (by design — the run was human-reviewed)
-    assert run.status == "escalated"
+    assert run.status == "completed"
     escalated_agent_run.application.refresh_from_db()
     assert escalated_agent_run.application.status == "denied"
     resume_mocks["nbo"].return_value.generate.assert_called_once()

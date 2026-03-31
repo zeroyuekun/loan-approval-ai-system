@@ -251,16 +251,16 @@ class ConditionalApprovalModelTestCase(TestCase):
         self.assertEqual(self.app.conditions[0]["type"], "income_verification")
         self.assertEqual(self.app.conditions[1]["satisfied_at"], "2026-03-25T10:00:00+00:00")
 
-    def test_conditional_status_persists(self):
-        """The 'conditional' status value persists in the database."""
-        self.app.status = "conditional"
+    def test_review_status_persists(self):
+        """The 'review' status value persists in the database."""
+        self.app.status = "review"
         self.app.save()
         self.app.refresh_from_db()
-        self.assertEqual(self.app.status, "conditional")
+        self.assertEqual(self.app.status, "review")
 
-    def test_conditional_status_is_valid_choice(self):
-        """'conditional' should be a valid Status choice."""
+    def test_review_status_is_valid_choice(self):
+        """'review' should be a valid Status choice."""
         self.assertIn(
-            "conditional",
+            "review",
             [choice[0] for choice in LoanApplication.Status.choices],
         )

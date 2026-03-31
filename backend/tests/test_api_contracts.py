@@ -30,6 +30,8 @@ skip_without_redis = pytest.mark.skipif(
 )
 pytestmark = skip_without_redis
 
+from django.conf import settings
+
 from apps.accounts.models import CustomerProfile, CustomUser
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.loans.models import LoanDecision
@@ -81,27 +83,29 @@ def auth_customer_client(db):
         first_name="Contract",
         last_name="Customer",
     )
-    # Create a complete profile so loan creation passes validation
-    CustomerProfile.objects.create(
+    # Update the auto-created profile with complete data for loan creation validation
+    CustomerProfile.objects.update_or_create(
         user=user,
-        date_of_birth="1990-01-15",
-        phone="0412345678",
-        address_line_1="123 Test St",
-        suburb="Sydney",
-        state="NSW",
-        postcode="2000",
-        employer_name="Test Corp",
-        occupation="Engineer",
-        industry="Technology",
-        employment_status="Full-time",
-        years_in_current_role=5,
-        gross_annual_income=Decimal("80000.00"),
-        housing_situation="renting",
-        time_at_current_address_years=3,
-        residency_status="citizen",
-        primary_id_type="drivers_licence",
-        primary_id_number="DL12345678",
-        marital_status="single",
+        defaults={
+            "date_of_birth": "1990-01-15",
+            "phone": "0412345678",
+            "address_line_1": "123 Test St",
+            "suburb": "Sydney",
+            "state": "NSW",
+            "postcode": "2000",
+            "employer_name": "Test Corp",
+            "occupation": "Engineer",
+            "industry": "Technology",
+            "employment_status": "Full-time",
+            "years_in_current_role": 5,
+            "gross_annual_income": Decimal("80000.00"),
+            "housing_situation": "renting",
+            "time_at_current_address_years": 3,
+            "residency_status": "citizen",
+            "primary_id_type": "drivers_licence",
+            "primary_id_number": "DL12345678",
+            "marital_status": "single",
+        },
     )
     client = APIClient()
     client.force_authenticate(user=user)
@@ -313,10 +317,17 @@ class TestMLMetricsContracts:
     @pytest.fixture
     def active_model(self, db):
         """Create an active ModelVersion for metrics tests."""
+        import os
+
+        models_dir = str(settings.ML_MODELS_DIR)
+        os.makedirs(models_dir, exist_ok=True)
+        dummy_path = os.path.join(models_dir, "contract_test_model.joblib")
+        with open(dummy_path, "wb") as f:
+            f.write(b"dummy")
         return ModelVersion.objects.create(
             algorithm="xgb",
             version="contract-test-v1",
-            file_path="/tmp/fake_model.joblib",
+            file_path=dummy_path,
             is_active=True,
             accuracy=0.85,
             precision=0.80,
@@ -573,10 +584,17 @@ class TestModelVersionListContracts:
 
     def test_model_list_shape(self, auth_admin_client, db):
         """GET /api/v1/ml/models/ must return {models: [...]}."""
+        import os
+
+        models_dir = str(settings.ML_MODELS_DIR)
+        os.makedirs(models_dir, exist_ok=True)
+        dummy_path = os.path.join(models_dir, "list_test_model.joblib")
+        with open(dummy_path, "wb") as f:
+            f.write(b"dummy")
         ModelVersion.objects.create(
             algorithm="xgb",
             version="list-test-v1",
-            file_path="/tmp/fake.joblib",
+            file_path=dummy_path,
             is_active=True,
             accuracy=0.85,
             auc_roc=0.90,

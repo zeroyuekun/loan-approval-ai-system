@@ -16,7 +16,7 @@
  *   k6 run --vus 50 --duration 2m tests/load/pipeline_load_test.js
  *
  * Environment variables:
- *   BASE_URL       - Backend URL (default: http://localhost:8500)
+ *   BASE_URL       - Backend URL (default: http://localhost:8000)
  *   TEST_USERNAME  - Admin username (default: admin)
  *   TEST_PASSWORD  - Admin password (default: admin123)
  */
@@ -24,6 +24,7 @@
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
+import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.2/index.js';
 
 // ── Custom metrics ──
 const pipelineQueuedRate = new Rate('pipeline_queued_success');
@@ -33,7 +34,7 @@ const applicationListDuration = new Trend('application_list_duration', true);
 const pipelineTriggerDuration = new Trend('pipeline_trigger_duration', true);
 
 // ── Configuration ──
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8500';
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
 const API = `${BASE_URL}/api/v1`;
 const USERNAME = __ENV.TEST_USERNAME || 'admin';
 const PASSWORD = __ENV.TEST_PASSWORD || 'admin123';
@@ -143,7 +144,7 @@ export default function () {
   let applicationId = null;
 
   group('List applications', () => {
-    const res = http.get(`${API}/loans/applications/?page=1`, { jar });
+    const res = http.get(`${API}/loans/?page=1`, { jar });
     applicationListDuration.add(res.timings.duration);
     check(res, {
       'applications returns 200': (r) => r.status === 200,
@@ -239,5 +240,3 @@ export function handleSummary(data) {
   };
 }
 
-// k6 built-in text summary
-import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.2/index.js';

@@ -75,24 +75,15 @@ class TestLoanStatusTransitions(TestCase):
         self.app.refresh_from_db()
         assert self.app.status == "review"
 
-    def test_processing_to_conditional(self):
-        """Application can move from processing to conditional."""
-        self.app.status = "processing"
-        self.app.save()
-        self.app.status = "conditional"
-        self.app.save()
-        self.app.refresh_from_db()
-        assert self.app.status == "conditional"
-
     def test_valid_status_choices(self):
         """All status values should be from the defined choices."""
         valid_statuses = {choice[0] for choice in LoanApplication.Status.choices}
-        expected = {"pending", "processing", "approved", "conditional", "denied", "review"}
+        expected = {"pending", "processing", "approved", "denied", "review"}
         assert valid_statuses == expected, f"Status choices mismatch: got {valid_statuses}, expected {expected}"
 
     def test_status_persists_after_save(self):
         """Status change should persist after save and refresh."""
-        for target_status in ["processing", "approved", "conditional", "denied", "review"]:
+        for target_status in ["processing", "approved", "denied", "review"]:
             self.app.status = target_status
             self.app.save()
             self.app.refresh_from_db()

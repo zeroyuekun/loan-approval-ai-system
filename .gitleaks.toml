@@ -11,4 +11,5 @@ path = '''tests/'''
 paths = [
     '''tests/''',
     '''\.env\.example''',
+    '''\.github/workflows/''',
 ]

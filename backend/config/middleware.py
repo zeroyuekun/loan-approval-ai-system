@@ -1,13 +1,12 @@
-"""Request correlation ID middleware.
+"""Custom middleware for the loan approval system.
 
-Injects a unique ``request_id`` into every log record produced during a
-request lifecycle.  The ID is also forwarded to Celery tasks via a custom
-header so that the entire Django → Celery → external-API chain can be
-traced in log aggregation systems (ELK, Datadog, CloudWatch).
+Includes:
+* **CorrelationIdMiddleware** — assigns a unique request ID for tracing.
+* **SecurityHeadersMiddleware** — hardens responses for OWASP ZAP compliance.
 
 Usage:
-    Add ``'config.middleware.CorrelationIdMiddleware'`` to MIDDLEWARE
-    **after** SecurityMiddleware and **before** application middleware.
+    Add both to MIDDLEWARE after SecurityMiddleware and before application
+    middleware.
 """
 
 import logging
@@ -57,4 +56,38 @@ class CorrelationIdMiddleware:
 
         response["X-Request-ID"] = cid
         _correlation_id.value = None
+        return response
+
+
+class SecurityHeadersMiddleware:
+    """Add security headers and strip information-leaking headers.
+
+    Addresses OWASP ZAP findings:
+    * 10037 — strips ``X-Powered-By`` and ``Server`` headers
+    * 10015 — adds ``Cache-Control`` to API responses
+    * Adds ``Permissions-Policy`` to restrict browser features
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+
+        # Strip information-leaking headers (ZAP rule 10037)
+        for header in ("X-Powered-By", "Server"):
+            if header in response:
+                del response[header]
+
+        # Cache-Control for API responses (ZAP rule 10015)
+        if request.path.startswith("/api/") and "Cache-Control" not in response:
+            response["Cache-Control"] = "no-store"
+
+        # Permissions-Policy — restrict unused browser features
+        if "Permissions-Policy" not in response:
+            response["Permissions-Policy"] = (
+                "camera=(), microphone=(), geolocation=(), "
+                "payment=(), usb=(), interest-cohort=()"
+            )
+
         return response

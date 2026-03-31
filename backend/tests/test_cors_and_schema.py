@@ -110,12 +110,15 @@ class TestSchemaEndpoints:
         self.client.force_authenticate(user=admin_user)
 
     def test_openapi_schema_returns_200(self):
-        response = self.client.get("/api/schema/", format="json")
+        response = self.client.get("/api/schema/")
         assert response.status_code == 200
 
     def test_openapi_schema_contains_key(self):
-        response = self.client.get("/api/schema/", format="json")
-        data = response.json()
+        response = self.client.get("/api/schema/")
+        # drf-spectacular returns application/vnd.oai.openapi content type
+        import json
+
+        data = json.loads(response.content)
         assert "openapi" in data
 
     def test_swagger_ui_returns_200(self):

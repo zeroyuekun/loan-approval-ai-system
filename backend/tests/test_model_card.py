@@ -188,7 +188,10 @@ class TestModelCardGenerator:
                 "training_data",
                 "performance_metrics",
                 "fairness_analysis",
+                "governance",
+                "independent_validation",
                 "limitations",
+                "synthetic_data_validation",
                 "regulatory_compliance",
                 "last_updated",
             }

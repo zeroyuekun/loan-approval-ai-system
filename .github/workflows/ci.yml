@@ -218,7 +218,10 @@ jobs:
           docker compose up -d --wait
         env:
           DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
-          DJANGO_DEBUG: 'true'
+          DJANGO_DEBUG: 'false'
+          DJANGO_SETTINGS_MODULE: config.settings.production
+          ALLOWED_HOSTS: '*'
+          SECURE_SSL_REDIRECT: 'false'
           POSTGRES_PASSWORD: testpass
           REDIS_PASSWORD: testpass
 
