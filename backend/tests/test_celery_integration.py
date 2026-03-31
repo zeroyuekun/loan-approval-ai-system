@@ -24,7 +24,7 @@ class TestCeleryTaskExecution:
         from apps.ml_engine.tasks import run_prediction_task
 
         # Mock the actual prediction to avoid needing a trained model
-        with patch("apps.ml_engine.tasks.ModelPredictor") as mock_predictor:
+        with patch("apps.ml_engine.services.predictor.ModelPredictor") as mock_predictor:
             mock_predictor.return_value.predict.return_value = {
                 "prediction": "approved",
                 "probability": 0.85,

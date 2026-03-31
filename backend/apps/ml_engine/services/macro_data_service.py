@@ -575,5 +575,5 @@ class MacroDataService:
                     clipped,
                     bounds,
                 )
-            return clipped
+            return float(clipped)
         return value

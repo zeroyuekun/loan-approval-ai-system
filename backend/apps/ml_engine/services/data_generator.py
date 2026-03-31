@@ -898,6 +898,7 @@ class DataGenerator:
         sub-population mixture model for realistic applicant segmentation.
         """
         rng = np.random.default_rng(random_seed)
+        np.random.seed(random_seed)  # also seed legacy RNG for _simulate_loan_performance
         n = num_records
         self.reject_inference_labels = None  # populated at end of generate()
         self._macro_cache = {}  # reset per-generate to ensure reproducibility

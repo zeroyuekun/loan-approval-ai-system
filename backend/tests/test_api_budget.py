@@ -29,7 +29,7 @@ def test_budget_exhausted():
     """At daily limit -> raises BudgetExhausted."""
     r = MagicMock()
     r.exists.return_value = False
-    r.get.return_value = b"500"
+    r.get.side_effect = [b"0", b"500"]  # cost_cents=0 (passes), call_count=500 (triggers)
     with pytest.raises(BudgetExhausted, match="Daily API call limit reached"):
         _guard(r).check_budget()
 

@@ -43,7 +43,7 @@ jobs:
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       CELERY_BROKER_URL: redis://localhost:6379/0
-      FIELD_ENCRYPTION_KEY: ""
+      FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
       ANTHROPIC_API_KEY: sk-ant-test-key
     steps:
       - uses: actions/checkout@v4

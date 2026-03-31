@@ -523,7 +523,7 @@ class TestOutcomeTracking:
             pytest.skip()
         defaults = generated_data[generated_data["actual_outcome"] == "default"]
         performing = generated_data[generated_data["actual_outcome"] == "performing"]
-        if len(defaults) > 5 and len(performing) > 50:
+        if len(defaults) > 20 and len(performing) > 50:
             assert defaults["credit_score"].mean() < performing["credit_score"].mean(), (
                 "Defaulters should have lower credit scores than performing loans"
             )

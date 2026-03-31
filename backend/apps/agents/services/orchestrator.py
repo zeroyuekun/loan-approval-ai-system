@@ -17,7 +17,7 @@ from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.predictor import ModelPredictor
 
-from .bias_detector import BiasDetector, MarketingBiasDetector, MarketingEmailReviewer
+from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector, MarketingEmailReviewer  # noqa: F401
 from .marketing_agent import MarketingAgent
 from .next_best_offer import NextBestOfferGenerator
 
