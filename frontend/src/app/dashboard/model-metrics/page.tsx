@@ -1,19 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { useModelMetrics, useTrainModel } from '@/hooks/useMetrics'
 import { useDriftReports } from '@/hooks/useDriftReports'
 import { useAuth } from '@/lib/auth'
-import { ConfusionMatrix } from '@/components/metrics/ConfusionMatrix'
-import { ROCCurve } from '@/components/metrics/ROCCurve'
-import { FeatureImportance } from '@/components/metrics/FeatureImportance'
-import { CalibrationChart } from '@/components/metrics/CalibrationChart'
-import { ThresholdChart } from '@/components/metrics/ThresholdChart'
-import { FairnessCard } from '@/components/metrics/FairnessCard'
-import { DecileChart } from '@/components/metrics/DecileChart'
-import { DriftOverview } from '@/components/metrics/DriftOverview'
-import { DriftPsiChart } from '@/components/metrics/DriftPsiChart'
-import { DriftFeatureTable } from '@/components/metrics/DriftFeatureTable'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectItem } from '@/components/ui/select'
@@ -22,6 +13,18 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatPercent } from '@/lib/utils'
 import { Cpu, Loader2, CheckCircle, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
+
+const ChartSkeleton = () => <Skeleton className="h-64" />
+const ConfusionMatrix = dynamic(() => import('@/components/metrics/ConfusionMatrix').then(m => ({ default: m.ConfusionMatrix })), { loading: ChartSkeleton, ssr: false })
+const ROCCurve = dynamic(() => import('@/components/metrics/ROCCurve').then(m => ({ default: m.ROCCurve })), { loading: ChartSkeleton, ssr: false })
+const FeatureImportance = dynamic(() => import('@/components/metrics/FeatureImportance').then(m => ({ default: m.FeatureImportance })), { loading: ChartSkeleton, ssr: false })
+const CalibrationChart = dynamic(() => import('@/components/metrics/CalibrationChart').then(m => ({ default: m.CalibrationChart })), { loading: ChartSkeleton, ssr: false })
+const ThresholdChart = dynamic(() => import('@/components/metrics/ThresholdChart').then(m => ({ default: m.ThresholdChart })), { loading: ChartSkeleton, ssr: false })
+const FairnessCard = dynamic(() => import('@/components/metrics/FairnessCard').then(m => ({ default: m.FairnessCard })), { loading: ChartSkeleton, ssr: false })
+const DecileChart = dynamic(() => import('@/components/metrics/DecileChart').then(m => ({ default: m.DecileChart })), { loading: ChartSkeleton, ssr: false })
+const DriftOverview = dynamic(() => import('@/components/metrics/DriftOverview').then(m => ({ default: m.DriftOverview })), { loading: ChartSkeleton, ssr: false })
+const DriftPsiChart = dynamic(() => import('@/components/metrics/DriftPsiChart').then(m => ({ default: m.DriftPsiChart })), { loading: ChartSkeleton, ssr: false })
+const DriftFeatureTable = dynamic(() => import('@/components/metrics/DriftFeatureTable').then(m => ({ default: m.DriftFeatureTable })), { loading: ChartSkeleton, ssr: false })
 
 function ElapsedTimer() {
   const [seconds, setSeconds] = useState(0)

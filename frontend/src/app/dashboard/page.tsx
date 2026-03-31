@@ -1,13 +1,21 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { useApplications } from '@/hooks/useApplications'
 import { StatsCards } from '@/components/dashboard/StatsCards'
-import { ApprovalRateChart } from '@/components/dashboard/ApprovalRateChart'
 import { RecentApplications } from '@/components/dashboard/RecentApplications'
-import { ApprovalTrendChart } from '@/components/dashboard/ApprovalTrendChart'
 import { PipelineStats } from '@/components/dashboard/PipelineStats'
 import { useDashboardStats } from '@/hooks/useDashboardStats'
 import { Skeleton } from '@/components/ui/skeleton'
+
+const ApprovalRateChart = dynamic(() => import('@/components/dashboard/ApprovalRateChart').then(m => ({ default: m.ApprovalRateChart })), {
+  loading: () => <Skeleton className="h-80" />,
+  ssr: false,
+})
+const ApprovalTrendChart = dynamic(() => import('@/components/dashboard/ApprovalTrendChart').then(m => ({ default: m.ApprovalTrendChart })), {
+  loading: () => <Skeleton className="h-80" />,
+  ssr: false,
+})
 
 export default function DashboardPage() {
   const { data: applicationsData, isLoading: appsLoading } = useApplications({ page_size: 5 })

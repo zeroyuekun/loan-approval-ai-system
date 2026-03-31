@@ -38,7 +38,7 @@ export function PipelineSummaryBar({ steps }: PipelineSummaryBarProps) {
 
   const durations = steps.map((step) => getStepDurationMs(step))
   const hasTimings = durations.some((d) => d !== null)
-  const totalMs = durations.reduce((sum, d) => sum + (d ?? 0), 0)
+  const totalMs = durations.reduce<number>((sum, d) => sum + (d ?? 0), 0)
 
   return (
     <div className="mb-4">
