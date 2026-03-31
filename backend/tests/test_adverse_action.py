@@ -21,6 +21,7 @@ from apps.ml_engine.services.adverse_action import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_application(app_id=42, first_name="Jane", last_name="Doe", email="jane@example.com"):
     user = SimpleNamespace(first_name=first_name, last_name=last_name, email=email)
     return SimpleNamespace(id=app_id, user=user)
@@ -71,8 +72,8 @@ def _make_model_version(
 # Adverse Action Notice Tests
 # ---------------------------------------------------------------------------
 
-class TestAdverseActionNotice:
 
+class TestAdverseActionNotice:
     def test_notice_contains_all_required_fields(self):
         app = _make_application()
         pred = _make_prediction_result()
@@ -120,9 +121,7 @@ class TestAdverseActionNotice:
         notice = generate_adverse_action_notice(app, pred)
 
         for reason in notice["principal_reasons"]:
-            assert "contribution" not in reason, (
-                "Raw SHAP contribution must not appear in consumer-facing notice"
-            )
+            assert "contribution" not in reason, "Raw SHAP contribution must not appear in consumer-facing notice"
             # Verify only allowed keys
             assert set(reason.keys()) == {"code", "reason", "feature"}
 
@@ -170,8 +169,8 @@ class TestAdverseActionNotice:
 # Model Inventory Tests
 # ---------------------------------------------------------------------------
 
-class TestModelInventory:
 
+class TestModelInventory:
     def test_inventory_contains_all_sr117_fields(self):
         mv = _make_model_version()
         entry = generate_model_inventory_entry(mv)

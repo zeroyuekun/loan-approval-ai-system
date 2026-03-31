@@ -15,21 +15,21 @@ import unicodedata
 
 # Zero-width and invisible Unicode characters used for obfuscation
 _INVISIBLE_CHARS = re.compile(
-    r'[\u200b\u200c\u200d\u200e\u200f\u2060\u2061\u2062\u2063\u2064\ufeff\u00ad\u034f\u061c\u180e]'
+    r"[\u200b\u200c\u200d\u200e\u200f\u2060\u2061\u2062\u2063\u2064\ufeff\u00ad\u034f\u061c\u180e]"
 )
 
 _INJECTION_BLOCKLIST = re.compile(
-    r'(?:ignore\s+(?:previous|above|all)\s+instructions'
-    r'|disregard\s+(?:previous|above|all)\s+instructions'
-    r'|system\s+prompt'
-    r'|you\s+are\s+now'
-    r'|new\s+instructions'
-    r'|forget\s+(?:previous|your|all)\s+instructions'
-    r'|override\s+(?:previous|your|all)\s+instructions'
-    r'|act\s+as\s+(?:a|an|the)\s+'
-    r'|pretend\s+(?:you|to\s+be)'
-    r'|do\s+not\s+follow\s+(?:previous|above|any)\s+instructions'
-    r'|<\s*/?(?:system|user|assistant|human)\s*>)',
+    r"(?:ignore\s+(?:previous|above|all)\s+instructions"
+    r"|disregard\s+(?:previous|above|all)\s+instructions"
+    r"|system\s+prompt"
+    r"|you\s+are\s+now"
+    r"|new\s+instructions"
+    r"|forget\s+(?:previous|your|all)\s+instructions"
+    r"|override\s+(?:previous|your|all)\s+instructions"
+    r"|act\s+as\s+(?:a|an|the)\s+"
+    r"|pretend\s+(?:you|to\s+be)"
+    r"|do\s+not\s+follow\s+(?:previous|above|any)\s+instructions"
+    r"|<\s*/?(?:system|user|assistant|human)\s*>)",
     re.IGNORECASE,
 )
 
@@ -48,18 +48,18 @@ def sanitize_prompt_input(value, max_length=500):
         return value
 
     # Normalize Unicode (NFKC collapses fullwidth A → A, homoglyphs, etc.)
-    value = unicodedata.normalize('NFKC', value)
+    value = unicodedata.normalize("NFKC", value)
 
     # Strip invisible characters
-    value = _INVISIBLE_CHARS.sub('', value)
+    value = _INVISIBLE_CHARS.sub("", value)
 
     # Remove prompt-structural characters
-    value = re.sub(r'[<>\[\]{}|]', '', value)
+    value = re.sub(r"[<>\[\]{}|]", "", value)
 
     # Collapse all whitespace (newlines, tabs) to single spaces
-    value = re.sub(r'\s+', ' ', value)
+    value = re.sub(r"\s+", " ", value)
 
     # Remove known injection phrases
-    value = _INJECTION_BLOCKLIST.sub('', value)
+    value = _INJECTION_BLOCKLIST.sub("", value)
 
     return value[:max_length].strip()

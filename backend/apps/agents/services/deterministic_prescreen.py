@@ -24,30 +24,30 @@ class DeterministicBiasPreScreen:
         score = 0
 
         result = self.checker.check_prohibited_language(email_text)
-        if not result['passed']:
+        if not result["passed"]:
             score += 50
             findings.append(result)
 
         result = self.checker.check_tone(email_text)
-        if not result['passed']:
+        if not result["passed"]:
             score += 20
             findings.append(result)
 
         result = self.checker.check_professional_financial_language(email_text)
-        if not result['passed']:
+        if not result["passed"]:
             score += 15
             findings.append(result)
 
         result = self.checker.check_ai_giveaway_language(email_text)
-        if not result['passed']:
+        if not result["passed"]:
             score += 5
             findings.append(result)
 
         return {
-            'deterministic_score': min(score, 100),
-            'findings': findings,
-            'all_clean': len(findings) == 0,
-            'max_llm_score': 40 if len(findings) == 0 else 100,
+            "deterministic_score": min(score, 100),
+            "findings": findings,
+            "all_clean": len(findings) == 0,
+            "max_llm_score": 40 if len(findings) == 0 else 100,
         }
 
     def prescreen_marketing_email(self, email_text, context):
@@ -62,17 +62,17 @@ class DeterministicBiasPreScreen:
 
         # Base checks
         result = self.checker.check_prohibited_language(email_text)
-        if not result['passed']:
+        if not result["passed"]:
             score += 50
             findings.append(result)
 
         result = self.checker.check_tone(email_text)
-        if not result['passed']:
+        if not result["passed"]:
             score += 15
             findings.append(result)
 
         result = self.checker.check_professional_financial_language(email_text)
-        if not result['passed']:
+        if not result["passed"]:
             score += 15
             findings.append(result)
 
@@ -81,8 +81,8 @@ class DeterministicBiasPreScreen:
 
         # Decline language in marketing emails
         decline_patterns = [
-            r'\b(declined|denied|rejected|unsuccessful|turned down)\b',
-            r'\b(unable to approve|cannot approve|could not approve)\b',
+            r"\b(declined|denied|rejected|unsuccessful|turned down)\b",
+            r"\b(unable to approve|cannot approve|could not approve)\b",
         ]
         decline_found = []
         for pattern in decline_patterns:
@@ -91,19 +91,21 @@ class DeterministicBiasPreScreen:
                 decline_found.extend(matches)
         if decline_found:
             score += 20
-            findings.append({
-                'check_name': 'decline_language',
-                'passed': False,
-                'details': f"Decline references found: {', '.join(str(d) for d in decline_found)}",
-            })
+            findings.append(
+                {
+                    "check_name": "decline_language",
+                    "passed": False,
+                    "details": f"Decline references found: {', '.join(str(d) for d in decline_found)}",
+                }
+            )
 
         # Patronising language
         patronising_patterns = [
-            r'\bwe know this is hard\b',
+            r"\bwe know this is hard\b",
             r"\bdon't worry\b",
-            r'\bkeep your chin up\b',
+            r"\bkeep your chin up\b",
             r"\bthis isn't the end\b",
-            r'\bwe understand how you feel\b',
+            r"\bwe understand how you feel\b",
         ]
         patronising_found = []
         for pattern in patronising_patterns:
@@ -112,19 +114,21 @@ class DeterministicBiasPreScreen:
                 patronising_found.extend(matches)
         if patronising_found:
             score += 10
-            findings.append({
-                'check_name': 'patronising_language',
-                'passed': False,
-                'details': f"Patronising language found: {', '.join(patronising_found)}",
-            })
+            findings.append(
+                {
+                    "check_name": "patronising_language",
+                    "passed": False,
+                    "details": f"Patronising language found: {', '.join(patronising_found)}",
+                }
+            )
 
         # False urgency
         urgency_patterns = [
-            r'\blimited time\b',
-            r'\bact now\b',
-            r'\boffer expires\b',
-            r'\block in now\b',
-            r'\blast chance\b',
+            r"\blimited time\b",
+            r"\bact now\b",
+            r"\boffer expires\b",
+            r"\block in now\b",
+            r"\blast chance\b",
         ]
         urgency_found = []
         for pattern in urgency_patterns:
@@ -133,18 +137,20 @@ class DeterministicBiasPreScreen:
                 urgency_found.extend(matches)
         if urgency_found:
             score += 15
-            findings.append({
-                'check_name': 'false_urgency',
-                'passed': False,
-                'details': f"False urgency found: {', '.join(urgency_found)}",
-            })
+            findings.append(
+                {
+                    "check_name": "false_urgency",
+                    "passed": False,
+                    "details": f"False urgency found: {', '.join(urgency_found)}",
+                }
+            )
 
         # Guaranteed approval
         guarantee_patterns = [
-            r'\bguaranteed\s+(?:approval|to\s+be\s+approved)\b',
-            r'\b100%\s+(?:approval|chance|certain)\b',
-            r'\bpre[- ]?approved\b',
-            r'\binstant\s+approval\b',
+            r"\bguaranteed\s+(?:approval|to\s+be\s+approved)\b",
+            r"\b100%\s+(?:approval|chance|certain)\b",
+            r"\bpre[- ]?approved\b",
+            r"\binstant\s+approval\b",
         ]
         guarantee_found = []
         for pattern in guarantee_patterns:
@@ -153,15 +159,17 @@ class DeterministicBiasPreScreen:
                 guarantee_found.extend(matches)
         if guarantee_found:
             score += 20
-            findings.append({
-                'check_name': 'guaranteed_approval',
-                'passed': False,
-                'details': f"Guaranteed approval language found: {', '.join(guarantee_found)}",
-            })
+            findings.append(
+                {
+                    "check_name": "guaranteed_approval",
+                    "passed": False,
+                    "details": f"Guaranteed approval language found: {', '.join(guarantee_found)}",
+                }
+            )
 
         return {
-            'deterministic_score': min(score, 100),
-            'findings': findings,
-            'all_clean': len(findings) == 0,
-            'max_llm_score': 40 if len(findings) == 0 else 100,
+            "deterministic_score": min(score, 100),
+            "findings": findings,
+            "all_clean": len(findings) == 0,
+            "max_llm_score": 40 if len(findings) == 0 else 100,
         }

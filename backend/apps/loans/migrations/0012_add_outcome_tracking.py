@@ -4,37 +4,36 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0011_add_ccr_bnpl_cdr_features'),
+        ("loans", "0011_add_ccr_bnpl_cdr_features"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loanapplication',
-            name='actual_outcome',
+            model_name="loanapplication",
+            name="actual_outcome",
             field=models.CharField(
                 blank=True,
                 choices=[
-                    ('performing', 'Performing'),
-                    ('arrears_30', '30-Day Arrears'),
-                    ('arrears_60', '60-Day Arrears'),
-                    ('arrears_90', '90+ Day Arrears'),
-                    ('default', 'Default'),
-                    ('prepaid', 'Prepaid Early'),
+                    ("performing", "Performing"),
+                    ("arrears_30", "30-Day Arrears"),
+                    ("arrears_60", "60-Day Arrears"),
+                    ("arrears_90", "90+ Day Arrears"),
+                    ("default", "Default"),
+                    ("prepaid", "Prepaid Early"),
                 ],
                 max_length=20,
                 null=True,
             ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='outcome_date',
+            model_name="loanapplication",
+            name="outcome_date",
             field=models.DateField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='months_to_outcome',
+            model_name="loanapplication",
+            name="months_to_outcome",
             field=models.IntegerField(blank=True, null=True),
         ),
     ]

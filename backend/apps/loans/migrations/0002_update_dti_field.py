@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0001_initial'),
+        ("loans", "0001_initial"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='loanapplication',
-            name='debt_to_income',
-            field=models.DecimalField(decimal_places=2, help_text='DTI ratio (e.g. 4.5 = 4.5x income)', max_digits=6),
+            model_name="loanapplication",
+            name="debt_to_income",
+            field=models.DecimalField(decimal_places=2, help_text="DTI ratio (e.g. 4.5 = 4.5x income)", max_digits=6),
         ),
     ]

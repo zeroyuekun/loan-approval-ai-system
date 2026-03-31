@@ -4,15 +4,18 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('email_engine', '0003_guardrailanalytics_promptversion_and_more'),
+        ("email_engine", "0003_guardrailanalytics_promptversion_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='guardraillog',
-            name='category',
-            field=models.CharField(choices=[('shared', 'Shared'), ('decision', 'Decision'), ('marketing', 'Marketing')], default='decision', max_length=20),
+            model_name="guardraillog",
+            name="category",
+            field=models.CharField(
+                choices=[("shared", "Shared"), ("decision", "Decision"), ("marketing", "Marketing")],
+                default="decision",
+                max_length=20,
+            ),
         ),
     ]

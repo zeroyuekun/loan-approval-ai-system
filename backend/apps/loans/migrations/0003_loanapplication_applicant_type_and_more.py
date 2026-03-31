@@ -4,45 +4,70 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0002_update_dti_field'),
+        ("loans", "0002_update_dti_field"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loanapplication',
-            name='applicant_type',
-            field=models.CharField(choices=[('single', 'Single'), ('couple', 'Couple')], default='single', max_length=10),
+            model_name="loanapplication",
+            name="applicant_type",
+            field=models.CharField(
+                choices=[("single", "Single"), ("couple", "Couple")], default="single", max_length=10
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='deposit_amount',
-            field=models.DecimalField(blank=True, decimal_places=2, help_text='Deposit/genuine savings amount', max_digits=12, null=True),
+            model_name="loanapplication",
+            name="deposit_amount",
+            field=models.DecimalField(
+                blank=True, decimal_places=2, help_text="Deposit/genuine savings amount", max_digits=12, null=True
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='employment_type',
-            field=models.CharField(choices=[('payg_permanent', 'PAYG Permanent'), ('payg_casual', 'PAYG Casual'), ('self_employed', 'Self-Employed'), ('contract', 'Contract')], default='payg_permanent', max_length=20),
+            model_name="loanapplication",
+            name="employment_type",
+            field=models.CharField(
+                choices=[
+                    ("payg_permanent", "PAYG Permanent"),
+                    ("payg_casual", "PAYG Casual"),
+                    ("self_employed", "Self-Employed"),
+                    ("contract", "Contract"),
+                ],
+                default="payg_permanent",
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='existing_credit_card_limit',
-            field=models.DecimalField(decimal_places=2, default=0, help_text='Total credit card limit (banks assess 3% of limit)', max_digits=10),
+            model_name="loanapplication",
+            name="existing_credit_card_limit",
+            field=models.DecimalField(
+                decimal_places=2,
+                default=0,
+                help_text="Total credit card limit (banks assess 3% of limit)",
+                max_digits=10,
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='monthly_expenses',
-            field=models.DecimalField(blank=True, decimal_places=2, help_text='Self-declared monthly living expenses', max_digits=10, null=True),
+            model_name="loanapplication",
+            name="monthly_expenses",
+            field=models.DecimalField(
+                blank=True,
+                decimal_places=2,
+                help_text="Self-declared monthly living expenses",
+                max_digits=10,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='number_of_dependants',
+            model_name="loanapplication",
+            name="number_of_dependants",
             field=models.IntegerField(default=0),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='property_value',
-            field=models.DecimalField(blank=True, decimal_places=2, help_text='Property value for LVR calculation', max_digits=12, null=True),
+            model_name="loanapplication",
+            name="property_value",
+            field=models.DecimalField(
+                blank=True, decimal_places=2, help_text="Property value for LVR calculation", max_digits=12, null=True
+            ),
         ),
     ]

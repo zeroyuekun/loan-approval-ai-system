@@ -4,25 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('agents', '0002_add_escalated_status'),
+        ("agents", "0002_add_escalated_status"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='nextbestoffer',
-            name='customer_retention_score',
+            model_name="nextbestoffer",
+            name="customer_retention_score",
             field=models.FloatField(default=0),
         ),
         migrations.AddField(
-            model_name='nextbestoffer',
-            name='loyalty_factors',
+            model_name="nextbestoffer",
+            name="loyalty_factors",
             field=models.JSONField(default=list),
         ),
         migrations.AddField(
-            model_name='nextbestoffer',
-            name='personalized_message',
+            model_name="nextbestoffer",
+            name="personalized_message",
             field=models.TextField(blank=True),
         ),
     ]

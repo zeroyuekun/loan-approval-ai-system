@@ -15,18 +15,18 @@ class EncryptedCharField(models.CharField):
     """
 
     def __init__(self, *args, **kwargs):
-        kwargs.setdefault('max_length', 512)
+        kwargs.setdefault("max_length", 512)
         super().__init__(*args, **kwargs)
 
     def get_prep_value(self, value):
-        if value is None or value == '':
+        if value is None or value == "":
             return value
         value = str(value)  # Support non-string types (date, Decimal, etc.)
         f = get_fernet()
         return f.encrypt(value.encode()).decode()
 
     def from_db_value(self, value, expression, connection):
-        if value is None or value == '':
+        if value is None or value == "":
             return value
         try:
             f = get_fernet()
@@ -38,8 +38,8 @@ class EncryptedCharField(models.CharField):
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
         # Always report the canonical import path for migrations
-        path = 'apps.accounts.fields.EncryptedCharField'
+        path = "apps.accounts.fields.EncryptedCharField"
         # Remove max_length from kwargs if it matches the default
-        if kwargs.get('max_length') == 512:
-            del kwargs['max_length']
+        if kwargs.get("max_length") == 512:
+            del kwargs["max_length"]
         return name, path, args, kwargs

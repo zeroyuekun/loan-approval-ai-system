@@ -21,14 +21,14 @@ def get_fernet():
     To rotate: generate a new key, prepend it to the comma-separated list,
     then run ``python manage.py rotate_encryption_key`` to re-encrypt data.
     """
-    raw = getattr(settings, 'FIELD_ENCRYPTION_KEY', '')
+    raw = getattr(settings, "FIELD_ENCRYPTION_KEY", "")
     if not raw:
         raise ValueError(
-            'FIELD_ENCRYPTION_KEY environment variable must be set. '
-            'Generate one with: python -c '
+            "FIELD_ENCRYPTION_KEY environment variable must be set. "
+            "Generate one with: python -c "
             '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
         )
-    keys = [k.strip() for k in raw.split(',') if k.strip()]
+    keys = [k.strip() for k in raw.split(",") if k.strip()]
     fernets = [Fernet(k.encode() if isinstance(k, str) else k) for k in keys]
     if len(fernets) == 1:
         return fernets[0]
@@ -40,7 +40,7 @@ def encrypt_field(value):
 
     Returns *None* / empty string unchanged so callers don't need to guard.
     """
-    if value is None or value == '':
+    if value is None or value == "":
         return value
     f = get_fernet()
     return f.encrypt(str(value).encode()).decode()
@@ -53,7 +53,7 @@ def decrypt_field(value):
     pre-migration plaintext data), returns the original value so the system
     degrades gracefully.
     """
-    if value is None or value == '':
+    if value is None or value == "":
         return value
     try:
         f = get_fernet()

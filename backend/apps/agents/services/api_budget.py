@@ -21,33 +21,35 @@ import logging
 
 from django.conf import settings
 
-logger = logging.getLogger('agents.api_budget')
+logger = logging.getLogger("agents.api_budget")
 
 # Anthropic pricing per million tokens (as of 2025-05)
 MODEL_PRICING = {
-    'claude-opus-4-20250514': {'input': 15.00, 'output': 75.00},
-    'claude-sonnet-4-20250514': {'input': 3.00, 'output': 15.00},
-    'claude-haiku-4-20250514': {'input': 0.25, 'output': 1.25},
+    "claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
+    "claude-haiku-4-20250514": {"input": 0.25, "output": 1.25},
 }
 
 # Fallback: assume Sonnet pricing for unknown models
-_DEFAULT_PRICING = {'input': 3.00, 'output': 15.00}
+_DEFAULT_PRICING = {"input": 3.00, "output": 15.00}
 
 
-def estimate_cost_usd(input_tokens, output_tokens, model=''):
+def estimate_cost_usd(input_tokens, output_tokens, model=""):
     """Estimate cost in USD for a single API call."""
     pricing = MODEL_PRICING.get(model, _DEFAULT_PRICING)
-    cost = (input_tokens * pricing['input'] + output_tokens * pricing['output']) / 1_000_000
+    cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
     return round(cost, 6)
 
 
 class BudgetExhausted(Exception):
     """Raised when the daily API budget is exhausted."""
+
     pass
 
 
 class CircuitOpen(Exception):
     """Raised when the circuit breaker is open due to consecutive failures."""
+
     pass
 
 
@@ -63,13 +65,15 @@ class ApiBudgetGuard:
     def _get_redis(self):
         if self._redis is None:
             import redis
+
             broker_url = settings.CELERY_BROKER_URL
             self._redis = redis.from_url(broker_url, socket_connect_timeout=3)
         return self._redis
 
     def _daily_key(self, suffix):
         from datetime import date
-        return f'ai_budget:{date.today().isoformat()}:{suffix}'
+
+        return f"ai_budget:{date.today().isoformat()}:{suffix}"
 
     def check_budget(self):
         """Raise BudgetExhausted if daily limit reached, CircuitOpen if breaker tripped."""
@@ -77,47 +81,43 @@ class ApiBudgetGuard:
             r = self._get_redis()
 
             # Check circuit breaker
-            cb_key = 'ai_budget:circuit_breaker'
+            cb_key = "ai_budget:circuit_breaker"
             if r.exists(cb_key):
                 ttl = r.ttl(cb_key)
-                raise CircuitOpen(
-                    f'Circuit breaker open — {ttl}s remaining. '
-                    f'Too many consecutive API failures.'
-                )
+                raise CircuitOpen(f"Circuit breaker open — {ttl}s remaining. Too many consecutive API failures.")
 
             # Check daily dollar spend
-            budget_limit = getattr(settings, 'AI_DAILY_BUDGET_LIMIT_USD', 5.0)
-            cost_cents = int(r.get(self._daily_key('cost_cents')) or 0)
+            budget_limit = getattr(settings, "AI_DAILY_BUDGET_LIMIT_USD", 5.0)
+            cost_cents = int(r.get(self._daily_key("cost_cents")) or 0)
             spent_usd = cost_cents / 100
             if spent_usd >= budget_limit:
                 raise BudgetExhausted(
-                    f'Daily budget exhausted (${spent_usd:.2f}/${budget_limit:.2f}). '
-                    f'Pipeline will use template fallback. Resets at midnight UTC.'
+                    f"Daily budget exhausted (${spent_usd:.2f}/${budget_limit:.2f}). "
+                    f"Pipeline will use template fallback. Resets at midnight UTC."
                 )
 
             # Check daily call count
-            daily_limit = getattr(settings, 'AI_DAILY_CALL_LIMIT', 500)
-            call_count = int(r.get(self._daily_key('calls')) or 0)
+            daily_limit = getattr(settings, "AI_DAILY_CALL_LIMIT", 500)
+            call_count = int(r.get(self._daily_key("calls")) or 0)
             if call_count >= daily_limit:
                 raise BudgetExhausted(
-                    f'Daily API call limit reached ({call_count}/{daily_limit}). '
-                    f'Resets at midnight UTC.'
+                    f"Daily API call limit reached ({call_count}/{daily_limit}). Resets at midnight UTC."
                 )
         except (BudgetExhausted, CircuitOpen):
             raise
         except Exception as e:
             # If Redis is down, allow the call (fail-open for availability)
-            logger.warning('Budget check failed (Redis unavailable): %s — allowing call', e)
+            logger.warning("Budget check failed (Redis unavailable): %s — allowing call", e)
 
-    def record_call(self, input_tokens=0, output_tokens=0, model=''):
+    def record_call(self, input_tokens=0, output_tokens=0, model=""):
         """Increment daily call counter, token usage, and dollar cost."""
         try:
             r = self._get_redis()
             pipe = r.pipeline()
 
-            calls_key = self._daily_key('calls')
-            tokens_key = self._daily_key('tokens')
-            cost_key = self._daily_key('cost_cents')
+            calls_key = self._daily_key("calls")
+            tokens_key = self._daily_key("tokens")
+            cost_key = self._daily_key("cost_cents")
 
             # Calculate cost in cents for integer-safe Redis storage
             cost_usd = estimate_cost_usd(input_tokens, output_tokens, model)
@@ -133,17 +133,20 @@ class ApiBudgetGuard:
             pipe.execute()
 
             logger.info(
-                'API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f',
-                input_tokens, output_tokens, model or 'unknown', cost_usd,
+                "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f",
+                input_tokens,
+                output_tokens,
+                model or "unknown",
+                cost_usd,
             )
         except Exception as e:
-            logger.warning('Failed to record API call: %s', e)
+            logger.warning("Failed to record API call: %s", e)
 
     def record_success(self):
         """Reset consecutive failure counter on success."""
         try:
             r = self._get_redis()
-            r.delete('ai_budget:consecutive_failures')
+            r.delete("ai_budget:consecutive_failures")
         except Exception:
             pass
 
@@ -151,41 +154,44 @@ class ApiBudgetGuard:
         """Increment consecutive failure counter. Trip circuit breaker after threshold."""
         try:
             r = self._get_redis()
-            key = 'ai_budget:consecutive_failures'
+            key = "ai_budget:consecutive_failures"
             failures = r.incr(key)
             r.expire(key, 300)  # 5 minute window
 
-            failure_threshold = getattr(settings, 'AI_CIRCUIT_BREAKER_THRESHOLD', 3)
-            cooldown_seconds = getattr(settings, 'AI_CIRCUIT_BREAKER_COOLDOWN', 600)
+            failure_threshold = getattr(settings, "AI_CIRCUIT_BREAKER_THRESHOLD", 3)
+            cooldown_seconds = getattr(settings, "AI_CIRCUIT_BREAKER_COOLDOWN", 600)
 
             if failures >= failure_threshold:
-                r.setex('ai_budget:circuit_breaker', cooldown_seconds, 1)
+                r.setex("ai_budget:circuit_breaker", cooldown_seconds, 1)
                 logger.error(
-                    'Circuit breaker tripped: %d consecutive API failures. '
-                    'Blocking calls for %ds.',
-                    failures, cooldown_seconds,
+                    "Circuit breaker tripped: %d consecutive API failures. Blocking calls for %ds.",
+                    failures,
+                    cooldown_seconds,
                 )
         except Exception as e:
-            logger.warning('Failed to record API failure: %s', e)
+            logger.warning("Failed to record API failure: %s", e)
 
     def get_daily_stats(self):
         """Return current daily usage stats."""
         try:
             r = self._get_redis()
-            cost_cents = int(r.get(self._daily_key('cost_cents')) or 0)
+            cost_cents = int(r.get(self._daily_key("cost_cents")) or 0)
             return {
-                'calls': int(r.get(self._daily_key('calls')) or 0),
-                'tokens': int(r.get(self._daily_key('tokens')) or 0),
-                'cost_usd': cost_cents / 100,
-                'budget_limit_usd': getattr(settings, 'AI_DAILY_BUDGET_LIMIT_USD', 5.0),
-                'call_limit': getattr(settings, 'AI_DAILY_CALL_LIMIT', 500),
-                'circuit_breaker_open': bool(r.exists('ai_budget:circuit_breaker')),
+                "calls": int(r.get(self._daily_key("calls")) or 0),
+                "tokens": int(r.get(self._daily_key("tokens")) or 0),
+                "cost_usd": cost_cents / 100,
+                "budget_limit_usd": getattr(settings, "AI_DAILY_BUDGET_LIMIT_USD", 5.0),
+                "call_limit": getattr(settings, "AI_DAILY_CALL_LIMIT", 500),
+                "circuit_breaker_open": bool(r.exists("ai_budget:circuit_breaker")),
             }
         except Exception:
             return {
-                'calls': 0, 'tokens': 0, 'cost_usd': 0.0,
-                'budget_limit_usd': getattr(settings, 'AI_DAILY_BUDGET_LIMIT_USD', 5.0),
-                'call_limit': 500, 'circuit_breaker_open': False,
+                "calls": 0,
+                "tokens": 0,
+                "cost_usd": 0.0,
+                "budget_limit_usd": getattr(settings, "AI_DAILY_BUDGET_LIMIT_USD", 5.0),
+                "call_limit": 500,
+                "circuit_breaker_open": False,
             }
 
 
@@ -210,9 +216,9 @@ def guarded_api_call(client, **kwargs):
         ValueError: client is None (no API key configured)
     """
     if client is None:
-        raise BudgetExhausted('No API client configured — using fallback')
+        raise BudgetExhausted("No API client configured — using fallback")
 
-    model = kwargs.get('model', '')
+    model = kwargs.get("model", "")
     budget = ApiBudgetGuard()
     budget.check_budget()
 
@@ -223,9 +229,9 @@ def guarded_api_call(client, **kwargs):
         raise
 
     # Track cost from actual usage
-    usage = getattr(response, 'usage', None)
-    input_tokens = getattr(usage, 'input_tokens', 0) if usage else 0
-    output_tokens = getattr(usage, 'output_tokens', 0) if usage else 0
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
+    output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
     budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens, model=model)
     budget.record_success()
 

@@ -19,14 +19,14 @@ _correlation_id = threading.local()
 
 def get_correlation_id() -> str | None:
     """Return the current request's correlation ID (or ``None`` outside a request)."""
-    return getattr(_correlation_id, 'value', None)
+    return getattr(_correlation_id, "value", None)
 
 
 class _CorrelationIdFilter(logging.Filter):
     """Logging filter that adds ``correlation_id`` to every LogRecord."""
 
     def filter(self, record):
-        record.correlation_id = get_correlation_id() or '-'
+        record.correlation_id = get_correlation_id() or "-"
         return True
 
 
@@ -49,12 +49,12 @@ class CorrelationIdMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        cid = request.META.get('HTTP_X_REQUEST_ID') or uuid.uuid4().hex
+        cid = request.META.get("HTTP_X_REQUEST_ID") or uuid.uuid4().hex
         _correlation_id.value = cid
         request.correlation_id = cid
 
         response = self.get_response(request)
 
-        response['X-Request-ID'] = cid
+        response["X-Request-ID"] = cid
         _correlation_id.value = None
         return response

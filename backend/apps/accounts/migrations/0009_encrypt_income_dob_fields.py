@@ -11,14 +11,14 @@
 # REVERSIBILITY: RunSQL operations convert data back to native types on reverse.
 # AlterField operations restore the original field definitions on reverse.
 
+from django.db import migrations
+
 import apps.accounts.fields
-from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('accounts', '0008_customerprofile_deleted_at_and_more'),
+        ("accounts", "0008_customerprofile_deleted_at_and_more"),
     ]
 
     operations = [
@@ -27,45 +27,45 @@ class Migration(migrations.Migration):
         # We use AlterField which handles the schema change. Existing date values in the column
         # will be read as strings by the new EncryptedCharField (CharField base).
         migrations.AlterField(
-            model_name='customerprofile',
-            name='date_of_birth',
+            model_name="customerprofile",
+            name="date_of_birth",
             field=apps.accounts.fields.EncryptedCharField(
                 blank=True,
-                default='',
-                help_text='ISO-8601 date string, encrypted at rest',
+                default="",
+                help_text="ISO-8601 date string, encrypted at rest",
                 max_length=500,
             ),
         ),
         # ── gross_annual_income: DecimalField → EncryptedCharField ──
         migrations.AlterField(
-            model_name='customerprofile',
-            name='gross_annual_income',
+            model_name="customerprofile",
+            name="gross_annual_income",
             field=apps.accounts.fields.EncryptedCharField(
                 blank=True,
-                default='',
-                help_text='Decimal string, encrypted at rest',
+                default="",
+                help_text="Decimal string, encrypted at rest",
                 max_length=500,
             ),
         ),
         # ── other_income: DecimalField → EncryptedCharField ──
         migrations.AlterField(
-            model_name='customerprofile',
-            name='other_income',
+            model_name="customerprofile",
+            name="other_income",
             field=apps.accounts.fields.EncryptedCharField(
                 blank=True,
-                default='0',
-                help_text='Decimal string, encrypted at rest',
+                default="0",
+                help_text="Decimal string, encrypted at rest",
                 max_length=500,
             ),
         ),
         # ── partner_annual_income: DecimalField → EncryptedCharField ──
         migrations.AlterField(
-            model_name='customerprofile',
-            name='partner_annual_income',
+            model_name="customerprofile",
+            name="partner_annual_income",
             field=apps.accounts.fields.EncryptedCharField(
                 blank=True,
-                default='',
-                help_text='Decimal string, encrypted at rest',
+                default="",
+                help_text="Decimal string, encrypted at rest",
                 max_length=500,
             ),
         ),

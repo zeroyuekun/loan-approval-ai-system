@@ -4,15 +4,17 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('ml_engine', '0004_modelversion_traffic_percentage_driftreport'),
+        ("ml_engine", "0004_modelversion_traffic_percentage_driftreport"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='modelversion',
-            name='algorithm',
-            field=models.CharField(choices=[('rf', 'Random Forest'), ('xgb', 'XGBoost'), ('lgbm', 'LightGBM'), ('ensemble', 'Ensemble')], max_length=20),
+            model_name="modelversion",
+            name="algorithm",
+            field=models.CharField(
+                choices=[("rf", "Random Forest"), ("xgb", "XGBoost"), ("lgbm", "LightGBM"), ("ensemble", "Ensemble")],
+                max_length=20,
+            ),
         ),
     ]

@@ -14,17 +14,17 @@ class PiiMaskingFilter(logging.Filter):
 
     _PATTERNS: list[tuple[re.Pattern, str]] = [
         # Australian Tax File Number (XXX XXX XXX)
-        (re.compile(r'\b\d{3}\s?\d{3}\s?\d{3}\b'), '[TFN_REDACTED]'),
+        (re.compile(r"\b\d{3}\s?\d{3}\s?\d{3}\b"), "[TFN_REDACTED]"),
         # Medicare number (XXXX XXXXX X)
-        (re.compile(r'\b\d{4}\s?\d{5}\s?\d\b'), '[MEDICARE_REDACTED]'),
+        (re.compile(r"\b\d{4}\s?\d{5}\s?\d\b"), "[MEDICARE_REDACTED]"),
         # Email addresses
-        (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[EMAIL_REDACTED]'),
+        (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"), "[EMAIL_REDACTED]"),
         # Phone numbers (Australian: 04XX XXX XXX, 1300/1800, +61)
-        (re.compile(r'(?:\+61|0)[2-478]\d{8}'), '[PHONE_REDACTED]'),
+        (re.compile(r"(?:\+61|0)[2-478]\d{8}"), "[PHONE_REDACTED]"),
         # Dollar amounts following sensitive keywords
-        (re.compile(r'(?:income|salary|wage|earning)[=:\s"\']+\$?[\d,.]+', re.IGNORECASE), '[INCOME_REDACTED]'),
+        (re.compile(r'(?:income|salary|wage|earning)[=:\s"\']+\$?[\d,.]+', re.IGNORECASE), "[INCOME_REDACTED]"),
         # Generic ID number patterns after identity keywords
-        (re.compile(r'(?:passport|licence|license|driver)[=:\s"\']+[A-Z0-9]{6,12}', re.IGNORECASE), '[ID_REDACTED]'),
+        (re.compile(r'(?:passport|licence|license|driver)[=:\s"\']+[A-Z0-9]{6,12}', re.IGNORECASE), "[ID_REDACTED]"),
     ]
 
     def filter(self, record: logging.LogRecord) -> bool:

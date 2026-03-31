@@ -4,115 +4,146 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0010_add_open_banking_features'),
+        ("loans", "0010_add_open_banking_features"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loanapplication',
-            name='balance_before_payday',
-            field=models.DecimalField(blank=True, decimal_places=2, help_text='Average balance 3 days before salary', max_digits=10, null=True),
+            model_name="loanapplication",
+            name="balance_before_payday",
+            field=models.DecimalField(
+                blank=True, decimal_places=2, help_text="Average balance 3 days before salary", max_digits=10, null=True
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='bnpl_late_payments_12m',
-            field=models.IntegerField(blank=True, default=0, help_text='Late BNPL payments in 12 months', null=True),
+            model_name="loanapplication",
+            name="bnpl_late_payments_12m",
+            field=models.IntegerField(blank=True, default=0, help_text="Late BNPL payments in 12 months", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='bnpl_monthly_commitment',
-            field=models.DecimalField(blank=True, decimal_places=2, default=0, help_text='Average monthly BNPL repayment', max_digits=8, null=True),
+            model_name="loanapplication",
+            name="bnpl_monthly_commitment",
+            field=models.DecimalField(
+                blank=True,
+                decimal_places=2,
+                default=0,
+                help_text="Average monthly BNPL repayment",
+                max_digits=8,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='bnpl_total_limit',
-            field=models.DecimalField(blank=True, decimal_places=2, default=0, help_text='Total BNPL credit limit', max_digits=10, null=True),
+            model_name="loanapplication",
+            name="bnpl_total_limit",
+            field=models.DecimalField(
+                blank=True, decimal_places=2, default=0, help_text="Total BNPL credit limit", max_digits=10, null=True
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='bnpl_utilization_pct',
-            field=models.FloatField(blank=True, default=0, help_text='BNPL balance / BNPL limit', null=True),
+            model_name="loanapplication",
+            name="bnpl_utilization_pct",
+            field=models.FloatField(blank=True, default=0, help_text="BNPL balance / BNPL limit", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='credit_utilization_pct',
-            field=models.FloatField(blank=True, help_text='Total balance / total credit limit', null=True),
+            model_name="loanapplication",
+            name="credit_utilization_pct",
+            field=models.FloatField(blank=True, help_text="Total balance / total credit limit", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='days_negative_balance_90d',
-            field=models.IntegerField(blank=True, default=0, help_text='Days with negative balance in 90 days', null=True),
+            model_name="loanapplication",
+            name="days_negative_balance_90d",
+            field=models.IntegerField(
+                blank=True, default=0, help_text="Days with negative balance in 90 days", null=True
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='essential_to_total_spend',
-            field=models.FloatField(blank=True, help_text='Essential spending / total spending', null=True),
+            model_name="loanapplication",
+            name="essential_to_total_spend",
+            field=models.FloatField(blank=True, help_text="Essential spending / total spending", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='income_source_count',
-            field=models.IntegerField(blank=True, default=1, help_text='Count of distinct income sources', null=True),
+            model_name="loanapplication",
+            name="income_source_count",
+            field=models.IntegerField(blank=True, default=1, help_text="Count of distinct income sources", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='industry_risk_tier',
-            field=models.CharField(blank=True, choices=[('low', 'Low'), ('medium', 'Medium'), ('high', 'High'), ('very_high', 'Very High')], max_length=20, null=True),
+            model_name="loanapplication",
+            name="industry_risk_tier",
+            field=models.CharField(
+                blank=True,
+                choices=[("low", "Low"), ("medium", "Medium"), ("high", "High"), ("very_high", "Very High")],
+                max_length=20,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='min_balance_30d',
-            field=models.DecimalField(blank=True, decimal_places=2, help_text='Lowest account balance in last 30 days', max_digits=10, null=True),
+            model_name="loanapplication",
+            name="min_balance_30d",
+            field=models.DecimalField(
+                blank=True,
+                decimal_places=2,
+                help_text="Lowest account balance in last 30 days",
+                max_digits=10,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='months_since_last_default',
-            field=models.IntegerField(blank=True, help_text='Months since most recent default', null=True),
+            model_name="loanapplication",
+            name="months_since_last_default",
+            field=models.IntegerField(blank=True, help_text="Months since most recent default", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='num_credit_providers',
-            field=models.IntegerField(blank=True, default=1, help_text='Count of distinct credit providers', null=True),
+            model_name="loanapplication",
+            name="num_credit_providers",
+            field=models.IntegerField(blank=True, default=1, help_text="Count of distinct credit providers", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='num_hardship_flags',
-            field=models.IntegerField(blank=True, default=0, help_text='Financial Hardship Information flags (CCR since 2022)', null=True),
+            model_name="loanapplication",
+            name="num_hardship_flags",
+            field=models.IntegerField(
+                blank=True, default=0, help_text="Financial Hardship Information flags (CCR since 2022)", null=True
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='num_late_payments_24m',
-            field=models.IntegerField(blank=True, default=0, help_text='Late (14+ days) payments in 24-month CCR window', null=True),
+            model_name="loanapplication",
+            name="num_late_payments_24m",
+            field=models.IntegerField(
+                blank=True, default=0, help_text="Late (14+ days) payments in 24-month CCR window", null=True
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='postcode_default_rate',
-            field=models.FloatField(blank=True, help_text='Historical default rate for postcode area', null=True),
+            model_name="loanapplication",
+            name="postcode_default_rate",
+            field=models.FloatField(blank=True, help_text="Historical default rate for postcode area", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='rent_payment_regularity',
-            field=models.FloatField(blank=True, help_text='0-1: on-time rent payment consistency', null=True),
+            model_name="loanapplication",
+            name="rent_payment_regularity",
+            field=models.FloatField(blank=True, help_text="0-1: on-time rent payment consistency", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='subscription_burden',
-            field=models.FloatField(blank=True, help_text='Total recurring subscriptions / monthly income', null=True),
+            model_name="loanapplication",
+            name="subscription_burden",
+            field=models.FloatField(blank=True, help_text="Total recurring subscriptions / monthly income", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='total_credit_limit',
-            field=models.DecimalField(blank=True, decimal_places=2, help_text='Sum of all credit limits from CCR', max_digits=12, null=True),
+            model_name="loanapplication",
+            name="total_credit_limit",
+            field=models.DecimalField(
+                blank=True, decimal_places=2, help_text="Sum of all credit limits from CCR", max_digits=12, null=True
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='utility_payment_regularity',
-            field=models.FloatField(blank=True, help_text='0-1: on-time utility payment consistency', null=True),
+            model_name="loanapplication",
+            name="utility_payment_regularity",
+            field=models.FloatField(blank=True, help_text="0-1: on-time utility payment consistency", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='worst_late_payment_days',
-            field=models.IntegerField(blank=True, default=0, help_text='Worst arrears: 0, 14, 30, 60, 90+ days', null=True),
+            model_name="loanapplication",
+            name="worst_late_payment_days",
+            field=models.IntegerField(
+                blank=True, default=0, help_text="Worst arrears: 0, 14, 30, 60, 90+ days", null=True
+            ),
         ),
     ]

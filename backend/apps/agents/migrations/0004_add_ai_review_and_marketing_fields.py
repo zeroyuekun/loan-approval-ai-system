@@ -4,30 +4,40 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('agents', '0003_add_nbo_marketing_fields'),
+        ("agents", "0003_add_nbo_marketing_fields"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='biasreport',
-            name='ai_review_approved',
+            model_name="biasreport",
+            name="ai_review_approved",
             field=models.BooleanField(default=None, null=True),
         ),
         migrations.AddField(
-            model_name='biasreport',
-            name='ai_review_reasoning',
-            field=models.TextField(blank=True, default=''),
+            model_name="biasreport",
+            name="ai_review_reasoning",
+            field=models.TextField(blank=True, default=""),
         ),
         migrations.AddField(
-            model_name='nextbestoffer',
-            name='marketing_message',
-            field=models.TextField(blank=True, default=''),
+            model_name="nextbestoffer",
+            name="marketing_message",
+            field=models.TextField(blank=True, default=""),
         ),
         migrations.AlterField(
-            model_name='agentrun',
-            name='status',
-            field=models.CharField(choices=[('pending', 'Pending'), ('running', 'Running'), ('completed', 'Completed'), ('failed', 'Failed'), ('escalated', 'Escalated to Human')], db_index=True, default='pending', max_length=20),
+            model_name="agentrun",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("pending", "Pending"),
+                    ("running", "Running"),
+                    ("completed", "Completed"),
+                    ("failed", "Failed"),
+                    ("escalated", "Escalated to Human"),
+                ],
+                db_index=True,
+                default="pending",
+                max_length=20,
+            ),
         ),
     ]

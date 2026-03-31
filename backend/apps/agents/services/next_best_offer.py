@@ -4,21 +4,21 @@ import os
 import anthropic
 import httpx
 
-from .api_budget import BudgetExhausted, guarded_api_call
+from .api_budget import guarded_api_call
 from .recommendation_engine import RecommendationEngine
 
 
 def _extract_tool_result(response, fallback):
     """Extract structured result from tool_use response, with fallback."""
     try:
-        tool_block = next(b for b in response.content if b.type == 'tool_use')
+        tool_block = next(b for b in response.content if b.type == "tool_use")
         return tool_block.input
     except (StopIteration, AttributeError):
-        text_block = next((b for b in response.content if b.type == 'text'), None)
+        text_block = next((b for b in response.content if b.type == "text"), None)
         if text_block:
             try:
-                json_start = text_block.text.find('{')
-                json_end = text_block.text.rfind('}') + 1
+                json_start = text_block.text.find("{")
+                json_end = text_block.text.rfind("}") + 1
                 return json.loads(text_block.text[json_start:json_end])
             except (json.JSONDecodeError, ValueError):
                 pass
@@ -34,7 +34,7 @@ class NextBestOfferGenerator:
     """
 
     def __init__(self):
-        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if api_key:
             self.client = anthropic.Anthropic(
                 api_key=api_key,
@@ -44,7 +44,7 @@ class NextBestOfferGenerator:
             self.client = None
         self.engine = RecommendationEngine()
 
-    def generate(self, application, denial_reasons=''):
+    def generate(self, application, denial_reasons=""):
         """Build alternative offers for a denied applicant.
 
         1. RecommendationEngine calculates eligible products with exact amounts/rates
@@ -53,34 +53,34 @@ class NextBestOfferGenerator:
         """
         result = self.engine.recommend(application, denial_reasons)
 
-        if not result['offers']:
-            result['analysis'] = (
-                'Based on your current financial profile, we recommend building your '
-                'savings and credit history before reapplying. Our Goal Saver account '
-                'can help you get started.'
+        if not result["offers"]:
+            result["analysis"] = (
+                "Based on your current financial profile, we recommend building your "
+                "savings and credit history before reapplying. Our Goal Saver account "
+                "can help you get started."
             )
-            result['personalized_message'] = (
-                'We appreciate your interest in banking with us. While we were unable '
-                'to approve your application at this time, we have options to help you '
-                'work toward your financial goals.'
+            result["personalized_message"] = (
+                "We appreciate your interest in banking with us. While we were unable "
+                "to approve your application at this time, we have options to help you "
+                "work toward your financial goals."
             )
             return result
 
         # Get LLM to write messaging around the pre-calculated offers
-        messaging = self._generate_messaging(application, result['offers'], denial_reasons)
+        messaging = self._generate_messaging(application, result["offers"], denial_reasons)
 
         # Merge LLM reasoning into each offer
-        offer_reasonings = messaging.get('offer_reasoning', [])
-        for i, offer in enumerate(result['offers']):
+        offer_reasonings = messaging.get("offer_reasoning", [])
+        for i, offer in enumerate(result["offers"]):
             if i < len(offer_reasonings):
-                offer['reasoning'] = offer_reasonings[i]
+                offer["reasoning"] = offer_reasonings[i]
 
-        result['analysis'] = messaging.get('analysis', '')
-        result['personalized_message'] = messaging.get('personalized_message', '')
+        result["analysis"] = messaging.get("analysis", "")
+        result["personalized_message"] = messaging.get("personalized_message", "")
 
         return result
 
-    def _generate_messaging(self, application, offers, denial_reasons=''):
+    def _generate_messaging(self, application, offers, denial_reasons=""):
         """Ask the LLM to write personalised reasoning for pre-calculated offers.
 
         The LLM receives the exact product details and is instructed NOT to change
@@ -97,7 +97,7 @@ Your job is ONLY to write personalised reasoning text for each offer. DO NOT cha
 - Requested: ${float(application.loan_amount):,.2f} for {application.get_purpose_display()}
 - Credit Score: {application.credit_score} (Equifax, 0-1200)
 - Annual Income: ${float(application.annual_income):,.2f}
-- Decline factors: {denial_reasons or 'Not specified'}
+- Decline factors: {denial_reasons or "Not specified"}
 
 === BANKING RELATIONSHIP ===
 {profile_context}
@@ -129,59 +129,68 @@ RULES:
             from django.conf import settings as django_settings
 
             NBO_MESSAGING_TOOL = {
-                'name': 'record_offer_messaging',
-                'description': 'Record the personalised messaging for pre-calculated offers.',
-                'input_schema': {
-                    'type': 'object',
-                    'properties': {
-                        'offer_reasoning': {
-                            'type': 'array',
-                            'items': {'type': 'string'},
+                "name": "record_offer_messaging",
+                "description": "Record the personalised messaging for pre-calculated offers.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "offer_reasoning": {
+                            "type": "array",
+                            "items": {"type": "string"},
                         },
-                        'analysis': {'type': 'string'},
-                        'personalized_message': {'type': 'string'},
+                        "analysis": {"type": "string"},
+                        "personalized_message": {"type": "string"},
                     },
-                    'required': ['offer_reasoning', 'analysis', 'personalized_message'],
+                    "required": ["offer_reasoning", "analysis", "personalized_message"],
                 },
             }
 
-            response = guarded_api_call(self.client,
-                model='claude-sonnet-4-20250514',
+            response = guarded_api_call(
+                self.client,
+                model="claude-sonnet-4-20250514",
                 max_tokens=1024,
-                temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
-                messages=[{'role': 'user', 'content': prompt}],
+                temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
+                messages=[{"role": "user", "content": prompt}],
                 tools=[NBO_MESSAGING_TOOL],
-                tool_choice={'type': 'tool', 'name': 'record_offer_messaging'},
+                tool_choice={"type": "tool", "name": "record_offer_messaging"},
             )
 
             result = _extract_tool_result(response, None)
             if result is None:
-                raise ValueError('No tool result extracted')
+                raise ValueError("No tool result extracted")
             return result
-        except (anthropic.AuthenticationError, anthropic.RateLimitError,
-                anthropic.APITimeoutError, anthropic.APIConnectionError,
-                anthropic.APIStatusError) as e:
+        except (
+            anthropic.AuthenticationError,
+            anthropic.RateLimitError,
+            anthropic.APITimeoutError,
+            anthropic.APIConnectionError,
+            anthropic.APIStatusError,
+        ) as e:
             import logging as _logging
-            _logging.getLogger('agents.next_best_offer').warning('NBO messaging LLM call failed: %s', e)
+
+            _logging.getLogger("agents.next_best_offer").warning("NBO messaging LLM call failed: %s", e)
             # Fallback: generate basic reasoning from the benefit text
             return {
-                'offer_reasoning': [o.get('benefit', '') for o in offers],
-                'analysis': 'We have identified alternative products based on your financial profile.',
-                'personalized_message': (
-                    'Thank you for your interest in banking with us. '
-                    'We have some tailored options that may suit your needs.'
+                "offer_reasoning": [o.get("benefit", "") for o in offers],
+                "analysis": "We have identified alternative products based on your financial profile.",
+                "personalized_message": (
+                    "Thank you for your interest in banking with us. "
+                    "We have some tailored options that may suit your needs."
                 ),
             }
         except Exception as e:
             import logging as _logging
-            _logging.getLogger('agents.next_best_offer').critical('NBO messaging UNEXPECTED failure: %s', e, exc_info=True)
+
+            _logging.getLogger("agents.next_best_offer").critical(
+                "NBO messaging UNEXPECTED failure: %s", e, exc_info=True
+            )
             # Fallback: generate basic reasoning from the benefit text
             return {
-                'offer_reasoning': [o.get('benefit', '') for o in offers],
-                'analysis': 'We have identified alternative products based on your financial profile.',
-                'personalized_message': (
-                    'Thank you for your interest in banking with us. '
-                    'We have some tailored options that may suit your needs.'
+                "offer_reasoning": [o.get("benefit", "") for o in offers],
+                "analysis": "We have identified alternative products based on your financial profile.",
+                "personalized_message": (
+                    "Thank you for your interest in banking with us. "
+                    "We have some tailored options that may suit your needs."
                 ),
             }
 
@@ -190,24 +199,25 @@ RULES:
         lines = []
         for i, o in enumerate(offers, 1):
             parts = [f"Offer {i}: {o.get('name', o.get('type', 'Product'))}"]
-            if o.get('amount'):
+            if o.get("amount"):
                 parts.append(f"  Amount: ${o['amount']:,.2f}")
-            if o.get('term_months'):
+            if o.get("term_months"):
                 parts.append(f"  Term: {o['term_months']} months")
-            if o.get('estimated_rate'):
+            if o.get("estimated_rate"):
                 parts.append(f"  Rate: {o['estimated_rate']:.2f}% p.a.")
-            if o.get('monthly_repayment'):
+            if o.get("monthly_repayment"):
                 parts.append(f"  Monthly repayment: ${o['monthly_repayment']:,.2f}")
-            if o.get('fortnightly_repayment'):
+            if o.get("fortnightly_repayment"):
                 parts.append(f"  Fortnightly repayment: ${o['fortnightly_repayment']:,.2f}")
-            if o.get('benefit'):
+            if o.get("benefit"):
                 parts.append(f"  Benefit: {o['benefit']}")
-            lines.append('\n'.join(parts))
-        return '\n\n'.join(lines)
+            lines.append("\n".join(parts))
+        return "\n\n".join(lines)
 
-    def generate_marketing_message(self, application, offers, denial_reasons=''):
+    def generate_marketing_message(self, application, offers, denial_reasons=""):
         """Generate a customer-facing marketing message based on NBO offers for denial emails."""
         import time
+
         start = time.time()
 
         profile_context = self._get_customer_context(application)
@@ -215,10 +225,8 @@ RULES:
         def _fmt_amount(amt):
             return f"${amt:,.2f}" if amt else "N/A"
 
-        offers_summary = '\n'.join(
-            f"- {o.get('name', o.get('type', 'Product'))}: "
-            f"{_fmt_amount(o.get('amount'))}, "
-            f"{o.get('benefit', '')}"
+        offers_summary = "\n".join(
+            f"- {o.get('name', o.get('type', 'Product'))}: {_fmt_amount(o.get('amount'))}, {o.get('benefit', '')}"
             for o in offers
         )
 
@@ -229,7 +237,7 @@ RULES:
 - Credit Score: {application.credit_score} (Equifax, 0-1200)
 - Annual Income: ${float(application.annual_income):,.2f}
 - Employment: {application.get_employment_type_display()} ({application.employment_length} years)
-- Decline factors: {denial_reasons or 'Not specified'}
+- Decline factors: {denial_reasons or "Not specified"}
 
 === BANKING RELATIONSHIP ===
 {profile_context}
@@ -252,52 +260,56 @@ RULES:
 Respond with the marketing message text only, no JSON wrapping."""
 
         from django.conf import settings as django_settings
+
         try:
-            response = guarded_api_call(self.client,
-                model='claude-sonnet-4-20250514',
+            response = guarded_api_call(
+                self.client,
+                model="claude-sonnet-4-20250514",
                 max_tokens=1024,
-                temperature=getattr(django_settings, 'AI_TEMPERATURE_MARKETING', 0.2),
-                messages=[{'role': 'user', 'content': prompt}],
+                temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
+                messages=[{"role": "user", "content": prompt}],
             )
             generation_time_ms = int((time.time() - start) * 1000)
             return {
-                'marketing_message': response.content[0].text.strip(),
-                'generation_time_ms': generation_time_ms,
+                "marketing_message": response.content[0].text.strip(),
+                "generation_time_ms": generation_time_ms,
             }
         except Exception as e:
             import logging as _logging
-            _logging.getLogger('agents.next_best_offer').warning(
-                'Marketing message LLM call failed: %s — using template fallback', e,
+
+            _logging.getLogger("agents.next_best_offer").warning(
+                "Marketing message LLM call failed: %s — using template fallback",
+                e,
             )
             generation_time_ms = int((time.time() - start) * 1000)
             # Build a deterministic fallback message from the offers
             offer_lines = []
             for o in offers:
-                name = o.get('name', o.get('type', 'Product'))
-                amt = o.get('amount')
-                benefit = o.get('benefit', '')
-                line = f'{name}'
+                name = o.get("name", o.get("type", "Product"))
+                amt = o.get("amount")
+                benefit = o.get("benefit", "")
+                line = f"{name}"
                 if amt:
-                    line += f' (${amt:,.2f})'
+                    line += f" (${amt:,.2f})"
                 if benefit:
-                    line += f' \u2013 {benefit}'
+                    line += f" \u2013 {benefit}"
                 offer_lines.append(line)
-            offers_text = '\n'.join(f'  - {l}' for l in offer_lines)
-            applicant_name = f'{application.applicant.first_name} {application.applicant.last_name}'.strip()
+            offers_text = "\n".join(f"  - {line}" for line in offer_lines)
+            applicant_name = f"{application.applicant.first_name} {application.applicant.last_name}".strip()
             message = (
-                f'Dear {applicant_name},\n\n'
-                f'We appreciate your interest in banking with AussieLoanAI. '
-                f'Based on your financial profile, we have identified the following '
-                f'products that may suit your needs:\n\n'
-                f'{offers_text}\n\n'
-                f'To discuss these options, please contact our team on 1300 000 000 '
-                f'or visit your nearest branch.\n\n'
-                f'Kind regards,\n'
-                f'The AussieLoanAI Team'
+                f"Dear {applicant_name},\n\n"
+                f"We appreciate your interest in banking with AussieLoanAI. "
+                f"Based on your financial profile, we have identified the following "
+                f"products that may suit your needs:\n\n"
+                f"{offers_text}\n\n"
+                f"To discuss these options, please contact our team on 1300 000 000 "
+                f"or visit your nearest branch.\n\n"
+                f"Kind regards,\n"
+                f"The AussieLoanAI Team"
             )
             return {
-                'marketing_message': message,
-                'generation_time_ms': generation_time_ms,
+                "marketing_message": message,
+                "generation_time_ms": generation_time_ms,
             }
 
     def _get_customer_context(self, application):
@@ -318,8 +330,5 @@ Respond with the marketing message text only, no JSON wrapping."""
                 f"- Previous Loans Repaid: {profile.previous_loans_repaid}\n"
                 f"- Loyal Customer: {'Yes' if profile.is_loyal_customer else 'No'}"
             )
-        except (AttributeError,):  # RelatedObjectDoesNotExist is a subclass
-            return (
-                "- No banking relationship data available\n"
-                "- This appears to be a new customer"
-            )
+        except AttributeError:  # RelatedObjectDoesNotExist is a subclass
+            return "- No banking relationship data available\n- This appears to be a new customer"

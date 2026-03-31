@@ -1,17 +1,15 @@
+import uuid
 from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
-import uuid
 
 
 class ModelVersion(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    algorithm = models.CharField(
-        max_length=20, choices=[('rf', 'Random Forest'), ('xgb', 'XGBoost')]
-    )
+    algorithm = models.CharField(max_length=20, choices=[("rf", "Random Forest"), ("xgb", "XGBoost")])
     version = models.CharField(max_length=50)
     file_path = models.CharField(max_length=500)
     file_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hash for integrity verification")
@@ -19,7 +17,7 @@ class ModelVersion(models.Model):
     traffic_percentage = models.IntegerField(
         default=100,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
-        help_text='Percentage of predictions routed to this model (for A/B testing)',
+        help_text="Percentage of predictions routed to this model (for A/B testing)",
     )
 
     # Metrics
@@ -46,38 +44,45 @@ class ModelVersion(models.Model):
 
     # Model governance (SR 11-7 / APRA CPG 235 alignment)
     decision_threshold_approve = models.FloatField(
-        null=True, blank=True,
-        help_text='Confidence >= this threshold → approve',
+        null=True,
+        blank=True,
+        help_text="Confidence >= this threshold → approve",
     )
     decision_threshold_deny = models.FloatField(
-        null=True, blank=True,
-        help_text='Confidence <= this threshold → deny',
+        null=True,
+        blank=True,
+        help_text="Confidence <= this threshold → deny",
     )
     decision_threshold_review = models.FloatField(
-        null=True, blank=True,
-        help_text='Between deny and approve → human review',
+        null=True,
+        blank=True,
+        help_text="Between deny and approve → human review",
     )
     next_review_date = models.DateField(
-        null=True, blank=True,
-        help_text='Scheduled performance review / revalidation date',
+        null=True,
+        blank=True,
+        help_text="Scheduled performance review / revalidation date",
     )
     explainability_method = models.CharField(
-        max_length=50, default='shap_tree',
-        help_text='Explainability framework used (e.g. shap_tree, lime)',
+        max_length=50,
+        default="shap_tree",
+        help_text="Explainability framework used (e.g. shap_tree, lime)",
     )
     retired_at = models.DateTimeField(
-        null=True, blank=True,
-        help_text='When this model version was retired from production',
+        null=True,
+        blank=True,
+        help_text="When this model version was retired from production",
     )
     retraining_policy = models.JSONField(
-        default=dict, blank=True,
-        help_text='Retraining cadence, validation criteria, and data requirements (SR 11-7)',
+        default=dict,
+        blank=True,
+        help_text="Retraining cadence, validation criteria, and data requirements (SR 11-7)",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.get_algorithm_display()} v{self.version} (active={self.is_active})"
@@ -88,23 +93,22 @@ class ModelVersion(models.Model):
             models_dir = Path(settings.ML_MODELS_DIR).resolve()
             resolved = Path(self.file_path).resolve()
             if not resolved.is_relative_to(models_dir):
-                raise ValidationError(
-                    {'file_path': f'Model file must be within {models_dir}'}
-                )
-            if resolved.suffix != '.joblib':
-                raise ValidationError(
-                    {'file_path': 'Model file must have .joblib extension'}
-                )
+                raise ValidationError({"file_path": f"Model file must be within {models_dir}"})
+            if resolved.suffix != ".joblib":
+                raise ValidationError({"file_path": "Model file must have .joblib extension"})
         if self.is_active:
             other_traffic = (
-                ModelVersion.objects.filter(is_active=True)
-                .exclude(pk=self.pk)
-                .aggregate(total=models.Sum('traffic_percentage'))['total']
-            ) or 0
+                (
+                    ModelVersion.objects.filter(is_active=True)
+                    .exclude(pk=self.pk)
+                    .aggregate(total=models.Sum("traffic_percentage"))["total"]
+                )
+                or 0
+            )
             if other_traffic + (self.traffic_percentage or 0) > 100:
                 raise ValidationError(
-                    f'Total traffic would be {other_traffic + (self.traffic_percentage or 0)}% '
-                    f'(max 100%). Reduce other models\' traffic first.'
+                    f"Total traffic would be {other_traffic + (self.traffic_percentage or 0)}% "
+                    f"(max 100%). Reduce other models' traffic first."
                 )
 
     def save(self, *args, **kwargs):
@@ -122,58 +126,64 @@ class ModelValidationReport(models.Model):
     """
 
     class Outcome(models.TextChoices):
-        APPROVED = 'approved', 'Approved for Production'
-        CONDITIONAL = 'conditional', 'Approved with Conditions'
-        REJECTED = 'rejected', 'Rejected'
-        PENDING = 'pending', 'Pending Review'
+        APPROVED = "approved", "Approved for Production"
+        CONDITIONAL = "conditional", "Approved with Conditions"
+        REJECTED = "rejected", "Rejected"
+        PENDING = "pending", "Pending Review"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     model_version = models.ForeignKey(
-        ModelVersion, on_delete=models.CASCADE, related_name='validation_reports',
+        ModelVersion,
+        on_delete=models.CASCADE,
+        related_name="validation_reports",
     )
 
     # Validator identity (must not be the model developer)
-    validator_name = models.CharField(max_length=255, help_text='Name of the independent validator')
-    validator_role = models.CharField(max_length=100, help_text='e.g. Risk Manager, External Auditor')
+    validator_name = models.CharField(max_length=255, help_text="Name of the independent validator")
+    validator_role = models.CharField(max_length=100, help_text="e.g. Risk Manager, External Auditor")
     validation_date = models.DateField()
 
     # Validation scope and findings
     outcome = models.CharField(max_length=20, choices=Outcome.choices, default=Outcome.PENDING)
     methodology = models.TextField(
-        help_text='Description of validation methodology (holdout test, challenger comparison, etc.)',
+        help_text="Description of validation methodology (holdout test, challenger comparison, etc.)",
     )
-    findings = models.TextField(help_text='Key findings from the validation')
+    findings = models.TextField(help_text="Key findings from the validation")
     conditions = models.TextField(
         blank=True,
-        help_text='Conditions for approval (if outcome is conditional)',
+        help_text="Conditions for approval (if outcome is conditional)",
     )
 
     # Quantitative results
     challenger_comparison = models.JSONField(
-        default=dict, blank=True,
-        help_text='Metrics comparison between champion and challenger model(s)',
+        default=dict,
+        blank=True,
+        help_text="Metrics comparison between champion and challenger model(s)",
     )
     holdout_metrics = models.JSONField(
-        default=dict, blank=True,
-        help_text='Performance metrics on holdout/out-of-time sample',
+        default=dict,
+        blank=True,
+        help_text="Performance metrics on holdout/out-of-time sample",
     )
     fairness_review = models.JSONField(
-        default=dict, blank=True,
-        help_text='Fairness assessment results from validation',
+        default=dict,
+        blank=True,
+        help_text="Fairness assessment results from validation",
     )
 
     # Sign-off
     signed_off = models.BooleanField(default=False)
     signed_off_at = models.DateTimeField(null=True, blank=True)
     next_validation_due = models.DateField(
-        null=True, blank=True,
-        help_text='When the next validation is required (typically annual for high-risk models)',
+        null=True,
+        blank=True,
+        help_text="When the next validation is required (typically annual for high-risk models)",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-validation_date']
+        ordering = ["-validation_date"]
 
     def __str__(self):
         return (
@@ -185,9 +195,7 @@ class ModelValidationReport(models.Model):
 class PredictionLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     model_version = models.ForeignKey(ModelVersion, on_delete=models.SET_NULL, null=True)
-    application = models.ForeignKey(
-        'loans.LoanApplication', on_delete=models.CASCADE, related_name='predictions'
-    )
+    application = models.ForeignKey("loans.LoanApplication", on_delete=models.CASCADE, related_name="predictions")
     prediction = models.CharField(max_length=20)
     probability = models.FloatField()
     feature_importances = models.JSONField(default=dict)
@@ -200,16 +208,17 @@ class PredictionLog(models.Model):
 
 class DriftReport(models.Model):
     """Weekly model drift monitoring report."""
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    model_version = models.ForeignKey(ModelVersion, on_delete=models.CASCADE, related_name='drift_reports')
+    model_version = models.ForeignKey(ModelVersion, on_delete=models.CASCADE, related_name="drift_reports")
     report_date = models.DateField(db_index=True)
     period_start = models.DateField()
     period_end = models.DateField()
     num_predictions = models.IntegerField(default=0)
 
     # Population Stability Index
-    psi_score = models.FloatField(null=True, help_text='PSI: <0.1 stable, 0.1-0.25 moderate, >0.25 significant drift')
-    psi_per_feature = models.JSONField(default=dict, help_text='PSI score per feature')
+    psi_score = models.FloatField(null=True, help_text="PSI: <0.1 stable, 0.1-0.25 moderate, >0.25 significant drift")
+    psi_per_feature = models.JSONField(default=dict, help_text="PSI score per feature")
 
     # Prediction distribution stats
     mean_probability = models.FloatField(null=True)
@@ -220,15 +229,15 @@ class DriftReport(models.Model):
     drift_detected = models.BooleanField(default=False)
     alert_level = models.CharField(
         max_length=20,
-        choices=[('none', 'None'), ('moderate', 'Moderate'), ('significant', 'Significant')],
-        default='none',
+        choices=[("none", "None"), ("moderate", "Moderate"), ("significant", "Significant")],
+        default="none",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-report_date']
-        unique_together = [('model_version', 'report_date')]
+        ordering = ["-report_date"]
+        unique_together = [("model_version", "report_date")]
 
     def __str__(self):
         return f"DriftReport {self.report_date}: PSI={self.psi_score}, alert={self.alert_level}"

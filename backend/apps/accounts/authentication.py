@@ -12,7 +12,7 @@ class CookieJWTAuthentication(JWTAuthentication):
 
     def authenticate(self, request):
         # Try cookie-based auth first
-        cookie_name = getattr(settings, 'JWT_ACCESS_COOKIE_NAME', 'access_token')
+        cookie_name = getattr(settings, "JWT_ACCESS_COOKIE_NAME", "access_token")
         raw_token = request.COOKIES.get(cookie_name)
 
         if raw_token is not None:

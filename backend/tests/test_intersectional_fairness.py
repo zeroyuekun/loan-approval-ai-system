@@ -2,6 +2,7 @@
 
 Pure computation tests — no Django DB required.
 """
+
 import numpy as np
 import pytest
 
@@ -16,6 +17,7 @@ from apps.ml_engine.services.intersectional_fairness import (
 # Helpers
 # ---------------------------------------------------------------
 
+
 def _make_uniform_data(n=600):
     """Create data where all groups have identical approval rates (exactly 50%).
 
@@ -26,9 +28,9 @@ def _make_uniform_data(n=600):
     y_true = y_pred.copy()
     y_prob = y_pred.astype(float)
     # 2 employment types, 2 applicant types, evenly distributed
-    emp = np.array(['full_time', 'part_time'] * (n // 2))[:n]
-    app = np.array((['individual'] * (n // 2)) + (['joint'] * (n // 2)))
-    return y_true, y_pred, y_prob, {'employment_type': emp, 'applicant_type': app}
+    emp = np.array(["full_time", "part_time"] * (n // 2))[:n]
+    app = np.array((["individual"] * (n // 2)) + (["joint"] * (n // 2)))
+    return y_true, y_pred, y_prob, {"employment_type": emp, "applicant_type": app}
 
 
 def _make_single_axis_compliant_intersectional_violation(n=1200):
@@ -53,20 +55,15 @@ def _make_single_axis_compliant_intersectional_violation(n=1200):
     rng = np.random.RandomState(123)
     group_size = n // 4  # 300 each
 
-    emp = np.array(
-        ['A'] * (2 * group_size) + ['B'] * (2 * group_size)
-    )
-    app = np.array(
-        ['X'] * group_size + ['Y'] * group_size +
-        ['X'] * group_size + ['Y'] * group_size
-    )
+    emp = np.array(["A"] * (2 * group_size) + ["B"] * (2 * group_size))
+    app = np.array(["X"] * group_size + ["Y"] * group_size + ["X"] * group_size + ["Y"] * group_size)
 
     # Approval rates per intersection
     rates = {
-        ('A', 'X'): 0.70,
-        ('A', 'Y'): 0.30,
-        ('B', 'X'): 0.30,
-        ('B', 'Y'): 0.60,
+        ("A", "X"): 0.70,
+        ("A", "Y"): 0.30,
+        ("B", "X"): 0.30,
+        ("B", "Y"): 0.60,
     }
 
     y_pred = np.zeros(4 * group_size, dtype=int)
@@ -75,18 +72,19 @@ def _make_single_axis_compliant_intersectional_violation(n=1200):
         approved = int(group_size * rate)
         segment = np.array([1] * approved + [0] * (group_size - approved))
         rng.shuffle(segment)
-        y_pred[offset:offset + group_size] = segment
+        y_pred[offset : offset + group_size] = segment
         offset += group_size
 
     y_true = y_pred.copy()
     y_prob = y_pred.astype(float)
 
-    return y_true, y_pred, y_prob, {'employment_type': emp, 'applicant_type': app}
+    return y_true, y_pred, y_prob, {"employment_type": emp, "applicant_type": app}
 
 
 # ---------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------
+
 
 class TestUniformApprovalRates:
     """When all groups have similar approval rates, no amplification."""
@@ -95,27 +93,27 @@ class TestUniformApprovalRates:
         y_true, y_pred, y_prob, attrs = _make_uniform_data()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert result['amplification_detected'] == False
+        assert result["amplification_detected"] == False
 
     def test_single_axis_keys_present(self):
         y_true, y_pred, y_prob, attrs = _make_uniform_data()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert 'employment_type' in result['single_axis']
-        assert 'applicant_type' in result['single_axis']
+        assert "employment_type" in result["single_axis"]
+        assert "applicant_type" in result["single_axis"]
 
     def test_intersectional_key_present(self):
         y_true, y_pred, y_prob, attrs = _make_uniform_data()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert 'employment_type x applicant_type' in result['intersectional']
+        assert "employment_type x applicant_type" in result["intersectional"]
 
     def test_summary_is_string(self):
         y_true, y_pred, y_prob, attrs = _make_uniform_data()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert isinstance(result['summary'], str)
-        assert len(result['summary']) > 0
+        assert isinstance(result["summary"], str)
+        assert len(result["summary"]) > 0
 
 
 class TestIntersectionalViolation:
@@ -126,29 +124,25 @@ class TestIntersectionalViolation:
         self.result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
     def test_single_axis_passes(self):
-        for attr_name, attr_result in self.result['single_axis'].items():
-            assert attr_result['passes_80_percent_rule'] is True, (
-                f"Single-axis {attr_name} should pass 80% rule"
-            )
+        for attr_name, attr_result in self.result["single_axis"].items():
+            assert attr_result["passes_80_percent_rule"] is True, f"Single-axis {attr_name} should pass 80% rule"
 
     def test_intersectional_fails(self):
-        pair = self.result['intersectional']['employment_type x applicant_type']
-        assert pair['passes_80_percent_rule'] is False, (
-            "Intersectional DI should fail 80% rule"
-        )
+        pair = self.result["intersectional"]["employment_type x applicant_type"]
+        assert pair["passes_80_percent_rule"] is False, "Intersectional DI should fail 80% rule"
 
     def test_amplification_detected(self):
-        assert self.result['amplification_detected'] is True
+        assert self.result["amplification_detected"] is True
 
     def test_worst_subgroup_identified(self):
-        ws = self.result['worst_subgroup']
+        ws = self.result["worst_subgroup"]
         assert ws is not None
-        assert ws['approval_rate'] == 0.3
+        assert ws["approval_rate"] == 0.3
         # The worst subgroup should be one of the 30% groups
-        assert '0.3' in str(ws['approval_rate'])
+        assert "0.3" in str(ws["approval_rate"])
 
     def test_summary_mentions_amplification(self):
-        assert 'AMPLIFICATION' in self.result['summary']
+        assert "AMPLIFICATION" in self.result["summary"]
 
 
 class TestMinGroupSizeFiltering:
@@ -158,24 +152,24 @@ class TestMinGroupSizeFiltering:
         n = 200
         y_pred = np.ones(n, dtype=int)
         # 195 in group 'big', 5 in group 'tiny'
-        labels = np.array(['big'] * 195 + ['tiny'] * 5)
+        labels = np.array(["big"] * 195 + ["tiny"] * 5)
 
         result = _compute_group_fairness(y_pred, labels, min_group_size=30)
 
-        assert 'big' in result['groups']
-        assert 'tiny' not in result['groups']
+        assert "big" in result["groups"]
+        assert "tiny" not in result["groups"]
         # With only one qualifying group, DI should be None
-        assert result['disparate_impact_ratio'] is None
+        assert result["disparate_impact_ratio"] is None
 
     def test_group_included_above_threshold(self):
         n = 200
         y_pred = np.ones(n, dtype=int)
-        labels = np.array(['big'] * 100 + ['medium'] * 100)
+        labels = np.array(["big"] * 100 + ["medium"] * 100)
 
         result = _compute_group_fairness(y_pred, labels, min_group_size=30)
 
-        assert 'big' in result['groups']
-        assert 'medium' in result['groups']
+        assert "big" in result["groups"]
+        assert "medium" in result["groups"]
 
     def test_intersectional_respects_min_group_size(self):
         """Intersection subgroups below min_group_size are excluded."""
@@ -186,18 +180,20 @@ class TestMinGroupSizeFiltering:
         y_prob = y_pred.astype(float)
 
         # Most people are A+X, a few are B+Y
-        emp = np.array(['A'] * 290 + ['B'] * 10)
-        app = np.array(['X'] * 290 + ['Y'] * 10)
+        emp = np.array(["A"] * 290 + ["B"] * 10)
+        app = np.array(["X"] * 290 + ["Y"] * 10)
 
         result = compute_intersectional_fairness(
-            y_true, y_pred, y_prob,
-            {'employment_type': emp, 'applicant_type': app},
+            y_true,
+            y_pred,
+            y_prob,
+            {"employment_type": emp, "applicant_type": app},
             min_group_size=30,
         )
 
-        pair = result['intersectional']['employment_type x applicant_type']
+        pair = result["intersectional"]["employment_type x applicant_type"]
         # B + Y group (10 members) should be excluded
-        assert 'B + Y' not in pair['groups']
+        assert "B + Y" not in pair["groups"]
 
 
 class TestEmptyInput:
@@ -205,21 +201,25 @@ class TestEmptyInput:
 
     def test_empty_arrays(self):
         result = compute_intersectional_fairness(
-            np.array([]), np.array([]), np.array([]),
-            {'attr': np.array([])},
+            np.array([]),
+            np.array([]),
+            np.array([]),
+            {"attr": np.array([])},
         )
-        assert result['amplification_detected'] is False
-        assert result['worst_subgroup'] is None
-        assert 'No data' in result['summary']
+        assert result["amplification_detected"] is False
+        assert result["worst_subgroup"] is None
+        assert "No data" in result["summary"]
 
     def test_no_protected_attributes(self):
         result = compute_intersectional_fairness(
-            np.array([1, 0, 1]), np.array([1, 0, 1]), np.array([0.9, 0.1, 0.8]),
+            np.array([1, 0, 1]),
+            np.array([1, 0, 1]),
+            np.array([0.9, 0.1, 0.8]),
             {},
         )
-        assert result['amplification_detected'] is False
-        assert result['single_axis'] == {}
-        assert result['intersectional'] == {}
+        assert result["amplification_detected"] is False
+        assert result["single_axis"] == {}
+        assert result["intersectional"] == {}
 
     def test_single_attribute_no_intersections(self):
         """With only one attribute, there are no pairwise intersections."""
@@ -227,13 +227,13 @@ class TestEmptyInput:
         y_pred = np.ones(n, dtype=int)
         y_true = y_pred.copy()
         y_prob = y_pred.astype(float)
-        attrs = {'employment_type': np.array(['A'] * 50 + ['B'] * 50)}
+        attrs = {"employment_type": np.array(["A"] * 50 + ["B"] * 50)}
 
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert len(result['single_axis']) == 1
-        assert len(result['intersectional']) == 0
-        assert result['amplification_detected'] is False
+        assert len(result["single_axis"]) == 1
+        assert len(result["intersectional"]) == 0
+        assert result["amplification_detected"] is False
 
 
 class TestWorstSubgroupIdentification:
@@ -243,22 +243,22 @@ class TestWorstSubgroupIdentification:
         y_true, y_pred, y_prob, attrs = _make_single_axis_compliant_intersectional_violation()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        ws = result['worst_subgroup']
+        ws = result["worst_subgroup"]
         # Collect all approval rates from all intersections
         all_rates = []
-        for pair_result in result['intersectional'].values():
-            for group_info in pair_result['groups'].values():
-                all_rates.append(group_info['approval_rate'])
+        for pair_result in result["intersectional"].values():
+            for group_info in pair_result["groups"].values():
+                all_rates.append(group_info["approval_rate"])
 
-        assert ws['approval_rate'] == min(all_rates)
+        assert ws["approval_rate"] == min(all_rates)
 
     def test_worst_subgroup_has_count(self):
         y_true, y_pred, y_prob, attrs = _make_single_axis_compliant_intersectional_violation()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        ws = result['worst_subgroup']
-        assert 'count' in ws
-        assert ws['count'] > 0
+        ws = result["worst_subgroup"]
+        assert "count" in ws
+        assert ws["count"] > 0
 
 
 class TestAmplificationFlag:
@@ -269,14 +269,14 @@ class TestAmplificationFlag:
         y_true, y_pred, y_prob, attrs = _make_uniform_data()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert result['amplification_detected'] == False
+        assert result["amplification_detected"] == False
 
     def test_amplification_when_intersectional_is_worse(self):
         """If intersections are worse than single-axis, amplification detected."""
         y_true, y_pred, y_prob, attrs = _make_single_axis_compliant_intersectional_violation()
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert result['amplification_detected'] is True
+        assert result["amplification_detected"] is True
 
 
 class TestThreeAttributes:
@@ -290,17 +290,17 @@ class TestThreeAttributes:
         y_prob = y_pred.astype(float)
 
         attrs = {
-            'employment_type': np.array(['FT', 'PT', 'CAS'] * (n // 3))[:n],
-            'applicant_type': np.array(['IND', 'JNT'] * (n // 2))[:n],
-            'state': np.array(['NSW', 'VIC', 'QLD'] * (n // 3))[:n],
+            "employment_type": np.array(["FT", "PT", "CAS"] * (n // 3))[:n],
+            "applicant_type": np.array(["IND", "JNT"] * (n // 2))[:n],
+            "state": np.array(["NSW", "VIC", "QLD"] * (n // 3))[:n],
         }
 
         result = compute_intersectional_fairness(y_true, y_pred, y_prob, attrs)
 
-        assert len(result['intersectional']) == 3
+        assert len(result["intersectional"]) == 3
         expected_pairs = {
-            'employment_type x applicant_type',
-            'employment_type x state',
-            'applicant_type x state',
+            "employment_type x applicant_type",
+            "employment_type x state",
+            "applicant_type x state",
         }
-        assert set(result['intersectional'].keys()) == expected_pairs
+        assert set(result["intersectional"].keys()) == expected_pairs

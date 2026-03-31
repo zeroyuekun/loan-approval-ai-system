@@ -8,6 +8,7 @@ Covers:
 - Vintage analysis grouping by origination month
 - Binary outcome mapping (arrears_90 and default -> bad; performing/prepaid -> good)
 """
+
 import pytest
 from datetime import date
 from decimal import Decimal

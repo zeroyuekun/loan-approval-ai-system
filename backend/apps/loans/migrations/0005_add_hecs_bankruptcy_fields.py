@@ -5,60 +5,91 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0004_auditlog'),
+        ("loans", "0004_auditlog"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loanapplication',
-            name='has_bankruptcy',
-            field=models.BooleanField(default=False, help_text='Undischarged bankrupt or within 7 years'),
+            model_name="loanapplication",
+            name="has_bankruptcy",
+            field=models.BooleanField(default=False, help_text="Undischarged bankrupt or within 7 years"),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='has_hecs',
-            field=models.BooleanField(default=False, help_text='Has HECS/HELP debt (ATO compulsory repayment)'),
+            model_name="loanapplication",
+            name="has_hecs",
+            field=models.BooleanField(default=False, help_text="Has HECS/HELP debt (ATO compulsory repayment)"),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='annual_income',
-            field=models.DecimalField(decimal_places=2, max_digits=12, validators=[django.core.validators.MinValueValidator(0)]),
+            model_name="loanapplication",
+            name="annual_income",
+            field=models.DecimalField(
+                decimal_places=2, max_digits=12, validators=[django.core.validators.MinValueValidator(0)]
+            ),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='credit_score',
-            field=models.IntegerField(validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(1200)]),
+            model_name="loanapplication",
+            name="credit_score",
+            field=models.IntegerField(
+                validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(1200)]
+            ),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='employment_length',
-            field=models.IntegerField(help_text='Years of employment', validators=[django.core.validators.MinValueValidator(0)]),
+            model_name="loanapplication",
+            name="employment_length",
+            field=models.IntegerField(
+                help_text="Years of employment", validators=[django.core.validators.MinValueValidator(0)]
+            ),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='loan_amount',
-            field=models.DecimalField(decimal_places=2, max_digits=12, validators=[django.core.validators.MinValueValidator(0)]),
+            model_name="loanapplication",
+            name="loan_amount",
+            field=models.DecimalField(
+                decimal_places=2, max_digits=12, validators=[django.core.validators.MinValueValidator(0)]
+            ),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='loan_term_months',
+            model_name="loanapplication",
+            name="loan_term_months",
             field=models.IntegerField(default=36, validators=[django.core.validators.MinValueValidator(1)]),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='number_of_dependants',
-            field=models.IntegerField(default=0, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(10)]),
+            model_name="loanapplication",
+            name="number_of_dependants",
+            field=models.IntegerField(
+                default=0,
+                validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(10)],
+            ),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='purpose',
-            field=models.CharField(choices=[('home', 'Home Purchase'), ('auto', 'Auto Loan'), ('education', 'Education'), ('personal', 'Personal'), ('business', 'Business')], db_index=True, max_length=20),
+            model_name="loanapplication",
+            name="purpose",
+            field=models.CharField(
+                choices=[
+                    ("home", "Home Purchase"),
+                    ("auto", "Auto Loan"),
+                    ("education", "Education"),
+                    ("personal", "Personal"),
+                    ("business", "Business"),
+                ],
+                db_index=True,
+                max_length=20,
+            ),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='status',
-            field=models.CharField(choices=[('pending', 'Pending'), ('processing', 'Processing'), ('approved', 'Approved'), ('denied', 'Denied'), ('review', 'Under Review')], db_index=True, default='pending', max_length=20),
+            model_name="loanapplication",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("pending", "Pending"),
+                    ("processing", "Processing"),
+                    ("approved", "Approved"),
+                    ("denied", "Denied"),
+                    ("review", "Under Review"),
+                ],
+                db_index=True,
+                default="pending",
+                max_length=20,
+            ),
         ),
     ]

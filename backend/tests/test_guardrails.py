@@ -6,6 +6,7 @@ from django.test import TestCase
 class GuardrailTestCase(TestCase):
     def setUp(self):
         from apps.email_engine.services.guardrails import GuardrailChecker
+
         self.checker = GuardrailChecker()
 
     def test_passing_email(self):
@@ -48,36 +49,39 @@ AussieLoanAI Lending Team
 If unresolved, contact the Australian Financial Complaints Authority (AFCA) on 1800 931 678 or at www.afca.org.au.
 """
         context = {
-            'applicant_name': 'John Smith',
-            'loan_amount': 350000.0,
-            'purpose': 'Home Purchase',
-            'decision': 'approved',
-            'pricing': {
-                'interest_rate': '6.14% p.a.',
-                'comparison_rate': '6.45% p.a.',
-                'monthly_payment': '$2,134.56',
-                'monthly_payment_number': 2134.56,
-                'loan_term_display': '30 years',
-                'establishment_fee': '$600.00',
-                'establishment_fee_number': 600.00,
+            "applicant_name": "John Smith",
+            "loan_amount": 350000.0,
+            "purpose": "Home Purchase",
+            "decision": "approved",
+            "pricing": {
+                "interest_rate": "6.14% p.a.",
+                "comparison_rate": "6.45% p.a.",
+                "monthly_payment": "$2,134.56",
+                "monthly_payment_number": 2134.56,
+                "loan_term_display": "30 years",
+                "establishment_fee": "$600.00",
+                "establishment_fee_number": 600.00,
             },
         }
         results = self.checker.run_all_checks(body, context)
-        blocking_failures = [r for r in results if not r['passed'] and r.get('severity') != 'warning']
+        blocking_failures = [r for r in results if not r["passed"] and r.get("severity") != "warning"]
         # Should have no blocking failures
-        self.assertEqual(len(blocking_failures), 0,
-            f"Unexpected failures: {[r['check_name'] + ': ' + r['details'] for r in blocking_failures]}")
+        self.assertEqual(
+            len(blocking_failures),
+            0,
+            f"Unexpected failures: {[r['check_name'] + ': ' + r['details'] for r in blocking_failures]}",
+        )
 
     def test_discrimination_language_detected(self):
         """Email containing discriminatory language should fail."""
         body = "Dear Customer, your loan was denied because of your age and gender."
         context = {
-            'applicant_name': 'Test',
-            'loan_amount': 100000.0,
-            'purpose': 'Personal',
-            'decision': 'denied',
+            "applicant_name": "Test",
+            "loan_amount": 100000.0,
+            "purpose": "Personal",
+            "decision": "denied",
         }
         results = self.checker.run_all_checks(body, context)
-        failed_names = [r['check_name'] for r in results if not r['passed']]
+        failed_names = [r["check_name"] for r in results if not r["passed"]]
         # Should detect discrimination
-        self.assertTrue(len(failed_names) > 0, 'Expected guardrail failures for discriminatory language')
+        self.assertTrue(len(failed_names) > 0, "Expected guardrail failures for discriminatory language")

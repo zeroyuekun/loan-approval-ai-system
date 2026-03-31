@@ -21,32 +21,37 @@ import os
 import pytest
 
 # Skip if schemathesis is not installed or no server URL configured
-schemathesis = pytest.importorskip('schemathesis')
+schemathesis = pytest.importorskip("schemathesis")
 
-BASE_URL = os.environ.get('CONTRACT_TEST_BASE_URL', 'http://localhost:8000')
-SCHEMA_URL = f'{BASE_URL}/api/schema/'
+BASE_URL = os.environ.get("CONTRACT_TEST_BASE_URL", "http://localhost:8000")
+SCHEMA_URL = f"{BASE_URL}/api/schema/"
 
 
-@pytest.fixture(scope='module')
+@pytest.fixture(scope="module")
 def api_schema():
     """Load the OpenAPI schema from the running server."""
     try:
         return schemathesis.from_url(SCHEMA_URL)
     except Exception:
-        pytest.skip(f'Cannot reach schema at {SCHEMA_URL} — is the server running?')
+        pytest.skip(f"Cannot reach schema at {SCHEMA_URL} — is the server running?")
 
 
 # Stateful test: schemathesis automatically generates test cases from the schema
 # and validates responses against declared schemas.
-schema = schemathesis.from_url(
-    SCHEMA_URL,
-    # Only test public endpoints that don't require auth
-    # Auth-protected endpoints need fixtures for JWT cookies
-    base_url=BASE_URL,
-) if os.environ.get('RUN_CONTRACT_TESTS') else None
+schema = (
+    schemathesis.from_url(
+        SCHEMA_URL,
+        # Only test public endpoints that don't require auth
+        # Auth-protected endpoints need fixtures for JWT cookies
+        base_url=BASE_URL,
+    )
+    if os.environ.get("RUN_CONTRACT_TESTS")
+    else None
+)
 
 
 if schema:
+
     @schema.parametrize()
     def test_api_contract(case):
         """Auto-generated contract test: validates response matches schema."""

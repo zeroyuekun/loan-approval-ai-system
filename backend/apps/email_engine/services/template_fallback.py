@@ -6,175 +6,184 @@ same AFCA/hardship/cooling-off elements, same Australian English conventions.
 
 No API credits required. All applicant-specific details are dynamically filled.
 """
-from datetime import date, timedelta
-import random
+
 import hashlib
+from datetime import date, timedelta
 
 
 def _ref_number(purpose, applicant_name):
     """Generate a deterministic reference number from purpose + name."""
     type_codes = {
-        'home': 'HL', 'auto': 'VL', 'personal': 'PL',
-        'business': 'BL', 'education': 'EL',
+        "home": "HL",
+        "auto": "VL",
+        "personal": "PL",
+        "business": "BL",
+        "education": "EL",
     }
-    code = type_codes.get(purpose.lower(), 'PL')
-    today = date.today().strftime('%Y%m%d')
+    code = type_codes.get(purpose.lower(), "PL")
+    today = date.today().strftime("%Y%m%d")
     # Deterministic 4-digit suffix from name hash
-    suffix = int(hashlib.md5(applicant_name.encode()).hexdigest()[:4], 16) % 10000
-    return f'{code}-{today}-{suffix:04d}'
+    suffix = int(hashlib.sha256(applicant_name.encode()).hexdigest()[:4], 16) % 10000  # noqa: S324
+    return f"{code}-{today}-{suffix:04d}"
 
 
 def _loan_type(purpose):
     """Convert purpose to display loan type."""
     mapping = {
-        'home': 'Home Purchase', 'auto': 'Vehicle',
-        'personal': 'Personal', 'business': 'Business',
-        'education': 'Education',
+        "home": "Home Purchase",
+        "auto": "Vehicle",
+        "personal": "Personal",
+        "business": "Business",
+        "education": "Education",
     }
     return mapping.get(purpose.lower(), purpose.title())
 
 
 def _first_name(applicant_name):
     """Extract first name from full name."""
-    return applicant_name.split()[0] if applicant_name else 'Customer'
+    return applicant_name.split()[0] if applicant_name else "Customer"
 
 
 # Denial reason explanations — contextual, dignity-preserving language
 _REASON_EXPLANATIONS = {
-    'Credit score below our lending threshold': (
-        'Credit profile: Your credit profile at the time of assessment '
-        'fell below the threshold we require for a loan of this type and size.'
+    "Credit score below our lending threshold": (
+        "Credit profile: Your credit profile at the time of assessment "
+        "fell below the threshold we require for a loan of this type and size."
     ),
-    'Debt-to-income ratio above acceptable range': (
-        'Debt-to-income ratio: The total of your existing financial '
-        'commitments relative to your verified income exceeded our '
-        'serviceability thresholds.'
+    "Debt-to-income ratio above acceptable range": (
+        "Debt-to-income ratio: The total of your existing financial "
+        "commitments relative to your verified income exceeded our "
+        "serviceability thresholds."
     ),
-    'Employment tenure below minimum requirement': (
-        'Employment type and tenure: Your current employment arrangements '
-        'fell outside the parameters we require for a loan of this size.'
+    "Employment tenure below minimum requirement": (
+        "Employment type and tenure: Your current employment arrangements "
+        "fell outside the parameters we require for a loan of this size."
     ),
-    'Income insufficient for requested loan amount': (
-        'Income and loan amount: The requested loan amount relative to '
-        'your verified income exceeded our serviceability thresholds.'
+    "Income insufficient for requested loan amount": (
+        "Income and loan amount: The requested loan amount relative to "
+        "your verified income exceeded our serviceability thresholds."
     ),
-    'Requested loan amount exceeds serviceable limit': (
-        'Loan serviceability: The requested amount exceeded what our '
-        'assessment determined to be a manageable repayment level based '
-        'on your current financial position.'
+    "Requested loan amount exceeds serviceable limit": (
+        "Loan serviceability: The requested amount exceeded what our "
+        "assessment determined to be a manageable repayment level based "
+        "on your current financial position."
     ),
-    'Debt service coverage outside acceptable range': (
-        'Debt servicing capacity: Based on your income, existing debts, and '
-        'living expenses, the total repayments required would exceed what we '
-        'consider manageable for your current financial position.'
+    "Debt service coverage outside acceptable range": (
+        "Debt servicing capacity: Based on your income, existing debts, and "
+        "living expenses, the total repayments required would exceed what we "
+        "consider manageable for your current financial position."
     ),
-    'Employment stability outside acceptable range': (
-        'Employment stability: Your current employment type or length of time '
-        'in your role fell outside the requirements for a loan of this size. '
-        'We look for a demonstrated period of stable income.'
+    "Employment stability outside acceptable range": (
+        "Employment stability: Your current employment type or length of time "
+        "in your role fell outside the requirements for a loan of this size. "
+        "We look for a demonstrated period of stable income."
     ),
-    'Monthly repayment ratio outside acceptable range': (
-        'Repayment affordability: The estimated monthly repayments for this '
-        'loan would represent a higher share of your income than our '
-        'lending criteria allow.'
+    "Monthly repayment ratio outside acceptable range": (
+        "Repayment affordability: The estimated monthly repayments for this "
+        "loan would represent a higher share of your income than our "
+        "lending criteria allow."
     ),
-    'Stress index outside acceptable range': (
-        'Financial resilience: Our assessment considers how your repayments '
-        'would be affected if interest rates were to rise. Under a stressed '
-        'scenario, the repayments may not be sustainable.'
+    "Stress index outside acceptable range": (
+        "Financial resilience: Our assessment considers how your repayments "
+        "would be affected if interest rates were to rise. Under a stressed "
+        "scenario, the repayments may not be sustainable."
     ),
-    'Bureau risk score outside acceptable range': (
-        'Credit history: The information in your credit file, including '
-        'enquiries, repayment history, and existing accounts, did not meet '
-        'our requirements for a loan of this type.'
+    "Bureau risk score outside acceptable range": (
+        "Credit history: The information in your credit file, including "
+        "enquiries, repayment history, and existing accounts, did not meet "
+        "our requirements for a loan of this type."
     ),
-    'Savings to loan ratio outside acceptable range': (
-        'Savings position: The level of genuine savings relative to the '
-        'loan amount was below what we require, as savings demonstrate '
-        'capacity to manage repayments.'
+    "Savings to loan ratio outside acceptable range": (
+        "Savings position: The level of genuine savings relative to the "
+        "loan amount was below what we require, as savings demonstrate "
+        "capacity to manage repayments."
     ),
 }
 
 # Improvement steps matched to denial reasons
 _IMPROVEMENT_STEPS = {
-    'Credit score below our lending threshold': (
-        'Reviewing your credit report for accuracy and taking steps to '
-        'strengthen your credit profile, such as reducing existing credit '
-        'card limits, ensuring all bills are paid on time, and limiting '
-        'new credit enquiries for the next 6\u201312 months.'
+    "Credit score below our lending threshold": (
+        "Reviewing your credit report for accuracy and taking steps to "
+        "strengthen your credit profile, such as reducing existing credit "
+        "card limits, ensuring all bills are paid on time, and limiting "
+        "new credit enquiries for the next 6\u201312 months."
     ),
-    'Debt-to-income ratio above acceptable range': (
-        'Reducing your existing debt obligations to improve your '
-        'debt-to-income ratio. Consolidating high-interest debts or '
-        'paying down revolving balances may help.'
+    "Debt-to-income ratio above acceptable range": (
+        "Reducing your existing debt obligations to improve your "
+        "debt-to-income ratio. Consolidating high-interest debts or "
+        "paying down revolving balances may help."
     ),
-    'Employment tenure below minimum requirement': (
-        'Establishing a longer tenure in your current role, or '
-        'transitioning to a permanent employment arrangement.'
+    "Employment tenure below minimum requirement": (
+        "Establishing a longer tenure in your current role, or transitioning to a permanent employment arrangement."
     ),
-    'Income insufficient for requested loan amount': (
-        'Considering a reduced loan amount that sits within a sustainable '
-        'repayment range relative to your income.'
+    "Income insufficient for requested loan amount": (
+        "Considering a reduced loan amount that sits within a sustainable repayment range relative to your income."
     ),
-    'Requested loan amount exceeds serviceable limit': (
-        'Considering a reduced loan amount that sits within a sustainable '
-        'repayment range relative to your income.'
+    "Requested loan amount exceeds serviceable limit": (
+        "Considering a reduced loan amount that sits within a sustainable repayment range relative to your income."
     ),
-    'Debt service coverage outside acceptable range': (
-        'Reducing your existing debt obligations before reapplying. '
-        'Paying down credit cards, personal loans, or BNPL balances will '
-        'improve your debt servicing capacity.'
+    "Debt service coverage outside acceptable range": (
+        "Reducing your existing debt obligations before reapplying. "
+        "Paying down credit cards, personal loans, or BNPL balances will "
+        "improve your debt servicing capacity."
     ),
-    'Employment stability outside acceptable range': (
-        'Establishing a longer period in your current role. For permanent '
-        'employees, we typically look for at least 6 months of continuous '
-        'employment; for self-employed applicants, at least 2 years of trading.'
+    "Employment stability outside acceptable range": (
+        "Establishing a longer period in your current role. For permanent "
+        "employees, we typically look for at least 6 months of continuous "
+        "employment; for self-employed applicants, at least 2 years of trading."
     ),
-    'Monthly repayment ratio outside acceptable range': (
-        'Considering a smaller loan amount or a longer loan term to reduce '
-        'the monthly repayment, or increasing your income through additional '
-        'employment before reapplying.'
+    "Monthly repayment ratio outside acceptable range": (
+        "Considering a smaller loan amount or a longer loan term to reduce "
+        "the monthly repayment, or increasing your income through additional "
+        "employment before reapplying."
     ),
-    'Stress index outside acceptable range': (
-        'Reducing your overall debt position so that your repayments remain '
-        'manageable even if interest rates were to rise by 2\u20133 percentage points.'
+    "Stress index outside acceptable range": (
+        "Reducing your overall debt position so that your repayments remain "
+        "manageable even if interest rates were to rise by 2\u20133 percentage points."
     ),
-    'Bureau risk score outside acceptable range': (
-        'Reviewing your credit report for accuracy and taking steps to '
-        'strengthen your credit profile. Paying all bills on time and '
-        'limiting new credit applications for 6\u201312 months will help.'
+    "Bureau risk score outside acceptable range": (
+        "Reviewing your credit report for accuracy and taking steps to "
+        "strengthen your credit profile. Paying all bills on time and "
+        "limiting new credit applications for 6\u201312 months will help."
     ),
-    'Savings to loan ratio outside acceptable range': (
-        'Building your savings over time to demonstrate a pattern of regular '
-        'saving. A higher deposit or savings balance strengthens your application.'
+    "Savings to loan ratio outside acceptable range": (
+        "Building your savings over time to demonstrate a pattern of regular "
+        "saving. A higher deposit or savings balance strengthens your application."
     ),
 }
 
 
-def generate_approval_template(applicant_name, loan_amount, purpose, pricing=None,
-                               conditions=None, employment_type=None,
-                               applicant_type=None, has_cosigner=False):
+def generate_approval_template(
+    applicant_name,
+    loan_amount,
+    purpose,
+    pricing=None,
+    conditions=None,
+    employment_type=None,
+    applicant_type=None,
+    has_cosigner=False,
+):
     """Generate an approval email matching the Claude-generated format exactly."""
     loan_type = _loan_type(purpose)
     first = _first_name(applicant_name)
     today = date.today()
-    sign_by = (today + timedelta(days=30)).strftime('%d %B %Y')
+    sign_by = (today + timedelta(days=30)).strftime("%d %B %Y")
 
-    subject = f'Congratulations! Your {loan_type} Loan is Approved'
+    subject = f"Congratulations! Your {loan_type} Loan is Approved"
 
     # Pricing section
-    pricing_block = ''
+    pricing_block = ""
     if pricing:
         pricing_block = f"""
 Loan Details:
 
   Loan Amount:             ${loan_amount:,.2f}
-  Interest Rate:           {pricing.get('interest_rate', 'To be confirmed')} ({pricing.get('rate_type', 'Variable')})
-  Comparison Rate:         {pricing.get('comparison_rate', 'To be confirmed')}*
-  Loan Term:               {pricing.get('loan_term_display', 'As requested')}
-  Estimated Monthly Payment: {pricing.get('monthly_payment', 'To be confirmed')}
-  Establishment Fee:       {pricing.get('establishment_fee', 'To be confirmed')}
-  First Repayment Date:    {pricing.get('first_repayment_date', 'To be confirmed')}
+  Interest Rate:           {pricing.get("interest_rate", "To be confirmed")} ({pricing.get("rate_type", "Variable")})
+  Comparison Rate:         {pricing.get("comparison_rate", "To be confirmed")}*
+  Loan Term:               {pricing.get("loan_term_display", "As requested")}
+  Estimated Monthly Payment: {pricing.get("monthly_payment", "To be confirmed")}
+  Establishment Fee:       {pricing.get("establishment_fee", "To be confirmed")}
+  First Repayment Date:    {pricing.get("first_repayment_date", "To be confirmed")}
 """
     else:
         pricing_block = f"""
@@ -185,17 +194,17 @@ Loan Details:
   Loan Term:               As requested
 """
 
-    conditions_block = ''
+    conditions_block = ""
 
     # Co-signer note
-    cosigner_note = ''
+    cosigner_note = ""
     if has_cosigner:
-        cosigner_note = '\nYour co-signer will receive separate documentation for their records.\n'
-    elif applicant_type and applicant_type.lower() == 'couple':
-        cosigner_note = '\nAs a joint application, both parties will need to sign the loan contract.\n'
+        cosigner_note = "\nYour co-signer will receive separate documentation for their records.\n"
+    elif applicant_type and applicant_type.lower() == "couple":
+        cosigner_note = "\nAs a joint application, both parties will need to sign the loan contract.\n"
 
     # Purpose-specific next steps
-    if purpose.lower() == 'home':
+    if purpose.lower() == "home":
         next_steps = f"""Next Steps:
 
 Please review the attached loan agreement, which outlines all terms and conditions:
@@ -213,14 +222,14 @@ Please review the attached loan agreement, which outlines all terms and conditio
   3. Once received, funds are typically in your account within 1\u20132 business days."""
 
     opening = (
-        f'We are pleased to advise that your application for a '
-        f'{loan_type} Loan with AussieLoanAI has been approved. Congratulations!'
+        f"We are pleased to advise that your application for a "
+        f"{loan_type} Loan with AussieLoanAI has been approved. Congratulations!"
     )
     if conditions:
         opening = (
-            f'We are pleased to advise that your application for a '
-            f'{loan_type} Loan with AussieLoanAI has been conditionally approved. '
-            f'Congratulations!'
+            f"We are pleased to advise that your application for a "
+            f"{loan_type} Loan with AussieLoanAI has been conditionally approved. "
+            f"Congratulations!"
         )
 
     body = f"""Dear {first},
@@ -263,55 +272,62 @@ This approval is valid for 30 days and is subject to no material change in your 
 This communication is confidential and intended solely for the named recipient.
 """
 
-    return {'subject': subject, 'body': body}
+    return {"subject": subject, "body": body}
 
 
-def generate_denial_template(applicant_name, loan_amount, purpose, denial_reasons='',
-                             feature_importances=None, credit_score=None,
-                             debt_to_income=None, employment_type=None):
+def generate_denial_template(
+    applicant_name,
+    loan_amount,
+    purpose,
+    denial_reasons="",
+    feature_importances=None,
+    credit_score=None,
+    debt_to_income=None,
+    employment_type=None,
+):
     """Generate a denial email matching the Claude-generated format exactly."""
     loan_type = _loan_type(purpose)
     first = _first_name(applicant_name)
     ref = _ref_number(purpose, applicant_name)
 
-    subject = f'Update on Your {loan_type} Loan Application | Ref #{ref}'
+    subject = f"Update on Your {loan_type} Loan Application | Ref #{ref}"
 
     # Build assessment factor bullets
     reason_list = []
     if denial_reasons:
-        reason_list = [r.strip() for r in denial_reasons.split(';') if r.strip()]
+        reason_list = [r.strip() for r in denial_reasons.split(";") if r.strip()]
 
     factor_bullets = []
     for reason in reason_list:
         explanation = _REASON_EXPLANATIONS.get(
             reason,
-            reason.replace('_', ' ').capitalize(),
+            reason.replace("_", " ").capitalize(),
         )
-        factor_bullets.append(f'  \u2022  {explanation}')
+        factor_bullets.append(f"  \u2022  {explanation}")
 
     if not factor_bullets:
         factor_bullets = [
-            '  \u2022  Credit assessment criteria: Your financial profile '
-            'at the time of assessment did not meet the requirements for '
-            'a loan of this type and size.'
+            "  \u2022  Credit assessment criteria: Your financial profile "
+            "at the time of assessment did not meet the requirements for "
+            "a loan of this type and size."
         ]
 
-    factors_text = '\n'.join(factor_bullets)
+    factors_text = "\n".join(factor_bullets)
 
     # Build improvement step bullets
     step_bullets = []
     for reason in reason_list:
         step = _IMPROVEMENT_STEPS.get(reason)
         if step:
-            step_bullets.append(f'  \u2022  {step}')
+            step_bullets.append(f"  \u2022  {step}")
 
     if not step_bullets:
         step_bullets = [
-            '  \u2022  Reviewing your financial position and considering '
-            'a loan amount that aligns with your current income and commitments.'
+            "  \u2022  Reviewing your financial position and considering "
+            "a loan amount that aligns with your current income and commitments."
         ]
 
-    steps_text = '\n'.join(step_bullets)
+    steps_text = "\n".join(step_bullets)
 
     body = f"""Dear {first},
 
@@ -361,13 +377,15 @@ Email: info@afca.org.au
 This communication is confidential and intended solely for the named recipient.
 """
 
-    return {'subject': subject, 'body': body}
+    return {"subject": subject, "body": body}
 
 
-def generate_conditional_template(applicant_name, loan_amount, purpose, conditions,
-                                  pricing=None):
+def generate_conditional_template(applicant_name, loan_amount, purpose, conditions, pricing=None):
     """Convenience wrapper — conditional uses the approval template with conditions."""
     return generate_approval_template(
-        applicant_name, loan_amount, purpose,
-        pricing=pricing, conditions=conditions,
+        applicant_name,
+        loan_amount,
+        purpose,
+        pricing=pricing,
+        conditions=conditions,
     )

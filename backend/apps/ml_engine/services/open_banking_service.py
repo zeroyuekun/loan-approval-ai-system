@@ -9,11 +9,11 @@ Sources:
 
 These populate CDR/Open Banking features on LoanApplication that feed the ML model.
 """
+
 import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional
 
 import httpx
 
@@ -22,16 +22,62 @@ from apps.ml_engine.services.predictor import FEATURE_BOUNDS
 logger = logging.getLogger(__name__)
 
 # Transaction classification keywords
-_INCOME_KEYWORDS = {'salary', 'wage', 'payroll', 'commission', 'dividend', 'interest', 'pension', 'centrelink'}
-_RENT_KEYWORDS = {'rent', 'lease', 'rental', 'real estate', 'realestate', 'property'}
-_UTILITY_KEYWORDS = {'electricity', 'gas', 'water', 'energy', 'agl', 'origin', 'telstra', 'optus', 'vodafone', 'nbn', 'internet'}
-_SUBSCRIPTION_KEYWORDS = {'netflix', 'spotify', 'disney', 'apple.com', 'google storage', 'amazon prime', 'stan', 'binge', 'kayo', 'gym', 'membership'}
-_ESSENTIAL_KEYWORDS = _RENT_KEYWORDS | _UTILITY_KEYWORDS | {'woolworths', 'coles', 'aldi', 'iga', 'grocery', 'chemist', 'pharmacy', 'medical', 'doctor', 'health', 'insurance', 'petrol', 'fuel', 'transport', 'opal', 'myki'}
+_INCOME_KEYWORDS = {"salary", "wage", "payroll", "commission", "dividend", "interest", "pension", "centrelink"}
+_RENT_KEYWORDS = {"rent", "lease", "rental", "real estate", "realestate", "property"}
+_UTILITY_KEYWORDS = {
+    "electricity",
+    "gas",
+    "water",
+    "energy",
+    "agl",
+    "origin",
+    "telstra",
+    "optus",
+    "vodafone",
+    "nbn",
+    "internet",
+}
+_SUBSCRIPTION_KEYWORDS = {
+    "netflix",
+    "spotify",
+    "disney",
+    "apple.com",
+    "google storage",
+    "amazon prime",
+    "stan",
+    "binge",
+    "kayo",
+    "gym",
+    "membership",
+}
+_ESSENTIAL_KEYWORDS = (
+    _RENT_KEYWORDS
+    | _UTILITY_KEYWORDS
+    | {
+        "woolworths",
+        "coles",
+        "aldi",
+        "iga",
+        "grocery",
+        "chemist",
+        "pharmacy",
+        "medical",
+        "doctor",
+        "health",
+        "insurance",
+        "petrol",
+        "fuel",
+        "transport",
+        "opal",
+        "myki",
+    }
+)
 
 
 @dataclass
 class OpenBankingProfile:
     """Transaction-derived features from open banking data."""
+
     income_source_count: int
     rent_payment_regularity: float  # 0-1
     utility_payment_regularity: float  # 0-1
@@ -61,12 +107,10 @@ class OpenBankingService:
 
     def __init__(self):
         self.timeout = httpx.Timeout(20.0, connect=5.0)
-        self.adatree_api_key = os.environ.get('ADATREE_SANDBOX_KEY', '')
-        self.obp_base_url = os.environ.get(
-            'OBP_BASE_URL', 'https://apisandbox.openbankproject.com'
-        )
+        self.adatree_api_key = os.environ.get("ADATREE_SANDBOX_KEY", "")
+        self.obp_base_url = os.environ.get("OBP_BASE_URL", "https://apisandbox.openbankproject.com")
 
-    def get_banking_profile(self, consent_id: str) -> Optional[OpenBankingProfile]:
+    def get_banking_profile(self, consent_id: str) -> OpenBankingProfile | None:
         """Fetch open banking profile from CDR or OBP sandbox.
 
         Requires consumer consent_id (CDR consent token).
@@ -74,68 +118,70 @@ class OpenBankingService:
         """
         # Try Adatree CDR sandbox first
         data = self._fetch_adatree_data(consent_id)
-        if data and data.get('transactions'):
+        if data and data.get("transactions"):
             logger.info("Using Adatree CDR data for consent_id=%s", consent_id)
-            return self._derive_features(data['transactions'])
+            return self._derive_features(data["transactions"])
 
         # Fall back to Open Bank Project sandbox
         data = self._fetch_obp_data(consent_id)
-        if data and data.get('transactions'):
+        if data and data.get("transactions"):
             logger.info("Using OBP data for account_id=%s", consent_id)
-            return self._derive_features(data['transactions'])
+            return self._derive_features(data["transactions"])
 
         logger.warning("No open banking data available for consent_id=%s", consent_id)
         return None
 
-    def _fetch_adatree_data(self, consent_id: str) -> Optional[dict]:
+    def _fetch_adatree_data(self, consent_id: str) -> dict | None:
         """Fetch CDR data from Adatree sandbox."""
         if not self.adatree_api_key:
             logger.debug("Adatree API key not configured, skipping")
             return None
 
-        url = 'https://cdr-sandbox.adatree.com.au/data/banking/accounts/transactions'
+        url = "https://cdr-sandbox.adatree.com.au/data/banking/accounts/transactions"
         headers = {
-            'Authorization': f'Bearer {self.adatree_api_key}',
-            'x-cds-client-headers': consent_id,
-            'x-v': '1',
+            "Authorization": f"Bearer {self.adatree_api_key}",
+            "x-cds-client-headers": consent_id,
+            "x-v": "1",
         }
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.get(url, headers=headers)
                 resp.raise_for_status()
                 body = resp.json()
-                transactions = body.get('data', {}).get('transactions', [])
-                return {'transactions': transactions}
+                transactions = body.get("data", {}).get("transactions", [])
+                return {"transactions": transactions}
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as exc:
             logger.warning("Adatree fetch failed: %s", exc)
             return None
 
-    def _fetch_obp_data(self, account_id: str) -> Optional[dict]:
+    def _fetch_obp_data(self, account_id: str) -> dict | None:
         """Fetch transaction data from Open Bank Project sandbox."""
-        url = f'{self.obp_base_url}/obp/v4.0.0/my/banks/au.01.sandbox/accounts/{account_id}/transactions'
+        url = f"{self.obp_base_url}/obp/v4.0.0/my/banks/au.01.sandbox/accounts/{account_id}/transactions"
         headers = {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
         }
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.get(url, headers=headers)
                 resp.raise_for_status()
                 body = resp.json()
-                raw_txns = body.get('transactions', [])
+                raw_txns = body.get("transactions", [])
                 # Normalize OBP format to our internal format
                 transactions = []
                 for t in raw_txns:
-                    details = t.get('details', {})
-                    other = t.get('other_account', {})
-                    transactions.append({
-                        'description': details.get('description', ''),
-                        'amount': float(details.get('value', {}).get('amount', 0)),
-                        'date': details.get('completed', ''),
-                        'type': details.get('type', ''),
-                        'balance': float(t.get('details', {}).get('new_balance', {}).get('amount', 0)),
-                        'counterparty': other.get('holder', {}).get('name', ''),
-                    })
-                return {'transactions': transactions}
+                    details = t.get("details", {})
+                    other = t.get("other_account", {})
+                    transactions.append(
+                        {
+                            "description": details.get("description", ""),
+                            "amount": float(details.get("value", {}).get("amount", 0)),
+                            "date": details.get("completed", ""),
+                            "type": details.get("type", ""),
+                            "balance": float(t.get("details", {}).get("new_balance", {}).get("amount", 0)),
+                            "counterparty": other.get("holder", {}).get("name", ""),
+                        }
+                    )
+                return {"transactions": transactions}
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as exc:
             logger.warning("OBP fetch failed: %s", exc)
             return None
@@ -156,83 +202,80 @@ class OpenBankingService:
         income_sources = set()
         income_txns_by_month: dict[str, list] = {}
         for t, cat in classified:
-            if cat == 'income':
-                cp = t.get('counterparty', '') or t.get('description', '')
+            if cat == "income":
+                cp = t.get("counterparty", "") or t.get("description", "")
                 if cp:
                     income_sources.add(cp.lower().strip())
-                date_str = t.get('date', '')[:7]  # YYYY-MM
+                date_str = t.get("date", "")[:7]  # YYYY-MM
                 if date_str:
                     income_txns_by_month.setdefault(date_str, []).append(t)
 
-        income_source_count = int(_clamp(max(len(income_sources), 1), 'income_source_count'))
+        income_source_count = int(_clamp(max(len(income_sources), 1), "income_source_count"))
 
         # Rent payment regularity
-        rent_payment_regularity = self._compute_regularity(classified, 'rent')
+        rent_payment_regularity = self._compute_regularity(classified, "rent")
 
         # Utility payment regularity
-        utility_payment_regularity = self._compute_regularity(classified, 'utility')
+        utility_payment_regularity = self._compute_regularity(classified, "utility")
 
         # Essential to total spend
         total_spend = 0.0
         essential_spend = 0.0
         for t, cat in classified:
-            amount = abs(float(t.get('amount', 0)))
-            if float(t.get('amount', 0)) < 0:  # debits
+            amount = abs(float(t.get("amount", 0)))
+            if float(t.get("amount", 0)) < 0:  # debits
                 total_spend += amount
-                if cat in ('rent', 'utility', 'essential'):
+                if cat in ("rent", "utility", "essential"):
                     essential_spend += amount
         essential_to_total_spend = (essential_spend / total_spend) if total_spend > 0 else 0.5
-        essential_to_total_spend = _clamp(essential_to_total_spend, 'essential_to_total_spend')
+        essential_to_total_spend = _clamp(essential_to_total_spend, "essential_to_total_spend")
 
         # Subscription burden (subscriptions / monthly income)
-        subscription_total = sum(
-            abs(float(t.get('amount', 0)))
-            for t, cat in classified if cat == 'subscription'
-        )
-        total_income = sum(
-            float(t.get('amount', 0))
-            for t, cat in classified if cat == 'income'
-        )
+        subscription_total = sum(abs(float(t.get("amount", 0))) for t, cat in classified if cat == "subscription")
+        total_income = sum(float(t.get("amount", 0)) for t, cat in classified if cat == "income")
         months = max(len(income_txns_by_month), 1)
         monthly_income = total_income / months if total_income > 0 else 1.0
         subscription_burden = (subscription_total / months) / monthly_income if monthly_income > 0 else 0.0
-        subscription_burden = _clamp(subscription_burden, 'subscription_burden')
+        subscription_burden = _clamp(subscription_burden, "subscription_burden")
 
         # Balance before payday: average balance on transactions 3 days before income
         balances_before_payday = self._get_balances_before_payday(transactions, classified)
         balance_before_payday = (
-            sum(balances_before_payday) / len(balances_before_payday)
-            if balances_before_payday else 0.0
+            sum(balances_before_payday) / len(balances_before_payday) if balances_before_payday else 0.0
         )
-        balance_before_payday = _clamp(balance_before_payday, 'balance_before_payday')
+        balance_before_payday = _clamp(balance_before_payday, "balance_before_payday")
 
         # Min balance 30d: lowest balance in last 30 days
-        balances = [float(t.get('balance', 0)) for t in transactions if t.get('balance') is not None]
+        balances = [float(t.get("balance", 0)) for t in transactions if t.get("balance") is not None]
         min_balance_30d = min(balances) if balances else 0.0
-        min_balance_30d = _clamp(min_balance_30d, 'min_balance_30d')
+        min_balance_30d = _clamp(min_balance_30d, "min_balance_30d")
 
         # Days negative balance 90d
         negative_days = sum(1 for b in balances if b < 0)
-        days_negative_balance_90d = int(_clamp(negative_days, 'days_negative_balance_90d'))
+        days_negative_balance_90d = int(_clamp(negative_days, "days_negative_balance_90d"))
 
         # Savings rate
         avg_monthly_savings_rate = self._compute_savings_rate(classified)
-        avg_monthly_savings_rate = _clamp(avg_monthly_savings_rate, 'avg_monthly_savings_rate')
+        avg_monthly_savings_rate = _clamp(avg_monthly_savings_rate, "avg_monthly_savings_rate")
 
         # Salary credit regularity
         salary_credit_regularity = self._compute_salary_regularity(income_txns_by_month)
-        salary_credit_regularity = _clamp(salary_credit_regularity, 'salary_credit_regularity')
+        salary_credit_regularity = _clamp(salary_credit_regularity, "salary_credit_regularity")
 
         # Dishonours (bounced payments)
         num_dishonours_12m = sum(
-            1 for t in transactions
-            if any(kw in (t.get('description', '') or '').lower() for kw in ('dishonour', 'bounced', 'returned', 'insufficient funds', 'nsf'))
+            1
+            for t in transactions
+            if any(
+                kw in (t.get("description", "") or "").lower()
+                for kw in ("dishonour", "bounced", "returned", "insufficient funds", "nsf")
+            )
         )
-        num_dishonours_12m = int(_clamp(num_dishonours_12m, 'num_dishonours_12m'))
+        num_dishonours_12m = int(_clamp(num_dishonours_12m, "num_dishonours_12m"))
 
         # Days in overdraft
         days_in_overdraft_12m = sum(1 for b in balances if b < 0)
-        days_in_overdraft_12m = int(_clamp(days_in_overdraft_12m, 'days_in_overdraft_12m'))
+        days_in_overdraft_12m = int(_clamp(days_in_overdraft_12m, "days_in_overdraft_12m"))
 
         return OpenBankingProfile(
             income_source_count=income_source_count,
@@ -252,32 +295,32 @@ class OpenBankingService:
 
     def _classify_transaction(self, transaction: dict) -> str:
         """Classify a transaction as income/rent/utility/subscription/essential/other."""
-        description = (transaction.get('description', '') or '').lower()
-        counterparty = (transaction.get('counterparty', '') or '').lower()
-        combined = f'{description} {counterparty}'
-        amount = float(transaction.get('amount', 0))
+        description = (transaction.get("description", "") or "").lower()
+        counterparty = (transaction.get("counterparty", "") or "").lower()
+        combined = f"{description} {counterparty}"
+        amount = float(transaction.get("amount", 0))
 
         # Income: positive amounts with income keywords
         if amount > 0 and any(kw in combined for kw in _INCOME_KEYWORDS):
-            return 'income'
+            return "income"
 
         # Rent
         if any(kw in combined for kw in _RENT_KEYWORDS):
-            return 'rent'
+            return "rent"
 
         # Utility
         if any(kw in combined for kw in _UTILITY_KEYWORDS):
-            return 'utility'
+            return "utility"
 
         # Subscription
         if any(kw in combined for kw in _SUBSCRIPTION_KEYWORDS):
-            return 'subscription'
+            return "subscription"
 
         # Essential spending
         if any(kw in combined for kw in _ESSENTIAL_KEYWORDS):
-            return 'essential'
+            return "essential"
 
-        return 'other'
+        return "other"
 
     def _compute_savings_rate(self, classified: list) -> float:
         """Compute average monthly savings rate from transactions.
@@ -288,11 +331,11 @@ class OpenBankingService:
         monthly_spend: dict[str, float] = {}
 
         for t, cat in classified:
-            date_str = (t.get('date', '') or '')[:7]
+            date_str = (t.get("date", "") or "")[:7]
             if not date_str:
                 continue
-            amount = float(t.get('amount', 0))
-            if cat == 'income' and amount > 0:
+            amount = float(t.get("amount", 0))
+            if cat == "income" and amount > 0:
                 monthly_income[date_str] = monthly_income.get(date_str, 0) + amount
             elif amount < 0:
                 monthly_spend[date_str] = monthly_spend.get(date_str, 0) + abs(amount)
@@ -320,7 +363,7 @@ class OpenBankingService:
         all_months: set[str] = set()
 
         for t, cat in classified:
-            date_str = (t.get('date', '') or '')[:7]
+            date_str = (t.get("date", "") or "")[:7]
             if date_str:
                 all_months.add(date_str)
                 if cat == category:
@@ -330,7 +373,7 @@ class OpenBankingService:
             return 0.0
 
         regularity = len(months_with_payment) / len(all_months)
-        return _clamp(regularity, f'{category}_payment_regularity' if category != 'rent' else 'rent_payment_regularity')
+        return _clamp(regularity, f"{category}_payment_regularity" if category != "rent" else "rent_payment_regularity")
 
     def _compute_salary_regularity(self, income_txns_by_month: dict) -> float:
         """Compute salary credit regularity from monthly income transactions.
@@ -349,7 +392,7 @@ class OpenBankingService:
             return 0.0
 
         variance = sum((c - avg) ** 2 for c in counts) / len(counts)
-        std = variance ** 0.5
+        std = variance**0.5
         cv = std / avg  # coefficient of variation
 
         # Low CV = high regularity
@@ -361,8 +404,8 @@ class OpenBankingService:
         # Find income dates
         income_dates = set()
         for t, cat in classified:
-            if cat == 'income':
-                date_str = t.get('date', '')[:10]
+            if cat == "income":
+                date_str = t.get("date", "")[:10]
                 if date_str:
                     income_dates.add(date_str)
 
@@ -372,17 +415,17 @@ class OpenBankingService:
         # Build a date-to-balance lookup
         date_balances: dict[str, float] = {}
         for t in transactions:
-            date_str = (t.get('date', '') or '')[:10]
-            if date_str and t.get('balance') is not None:
-                date_balances[date_str] = float(t['balance'])
+            date_str = (t.get("date", "") or "")[:10]
+            if date_str and t.get("balance") is not None:
+                date_balances[date_str] = float(t["balance"])
 
         # Look up balances 3 days before each income date
         result = []
         for d_str in income_dates:
             try:
-                d = datetime.strptime(d_str, '%Y-%m-%d')
+                d = datetime.strptime(d_str, "%Y-%m-%d")
                 for offset in range(1, 4):
-                    check = (d - timedelta(days=offset)).strftime('%Y-%m-%d')
+                    check = (d - timedelta(days=offset)).strftime("%Y-%m-%d")
                     if check in date_balances:
                         result.append(date_balances[check])
                         break

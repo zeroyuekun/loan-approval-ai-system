@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0012_add_outcome_tracking'),
+        ("loans", "0012_add_outcome_tracking"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loandecision',
-            name='shap_values',
+            model_name="loandecision",
+            name="shap_values",
             field=models.JSONField(blank=True, default=dict),
         ),
     ]

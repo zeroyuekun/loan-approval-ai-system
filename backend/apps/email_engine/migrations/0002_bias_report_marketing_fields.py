@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('email_engine', '0001_initial'),
+        ("email_engine", "0001_initial"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='generatedemail',
-            name='created_at',
+            model_name="generatedemail",
+            name="created_at",
             field=models.DateTimeField(auto_now_add=True, db_index=True),
         ),
     ]

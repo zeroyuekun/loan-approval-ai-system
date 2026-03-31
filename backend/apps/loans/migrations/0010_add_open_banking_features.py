@@ -4,40 +4,47 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0009_add_bureau_behavioural_macro_fields'),
+        ("loans", "0009_add_bureau_behavioural_macro_fields"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loanapplication',
-            name='savings_trend_3m',
-            field=models.CharField(blank=True, choices=[('positive', 'Positive'), ('negative', 'Negative'), ('flat', 'Flat')], help_text='3-month savings trend', max_length=10, null=True),
+            model_name="loanapplication",
+            name="savings_trend_3m",
+            field=models.CharField(
+                blank=True,
+                choices=[("positive", "Positive"), ("negative", "Negative"), ("flat", "Flat")],
+                help_text="3-month savings trend",
+                max_length=10,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='discretionary_spend_ratio',
-            field=models.FloatField(blank=True, help_text='Ratio of discretionary to essential spending', null=True),
+            model_name="loanapplication",
+            name="discretionary_spend_ratio",
+            field=models.FloatField(blank=True, help_text="Ratio of discretionary to essential spending", null=True),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='gambling_transaction_flag',
-            field=models.BooleanField(default=False, help_text='Gambling transactions detected'),
+            model_name="loanapplication",
+            name="gambling_transaction_flag",
+            field=models.BooleanField(default=False, help_text="Gambling transactions detected"),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='bnpl_active_count',
-            field=models.IntegerField(default=0, help_text='Number of active BNPL accounts'),
+            model_name="loanapplication",
+            name="bnpl_active_count",
+            field=models.IntegerField(default=0, help_text="Number of active BNPL accounts"),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='overdraft_frequency_90d',
-            field=models.IntegerField(default=0, help_text='Overdraft events in last 90 days'),
+            model_name="loanapplication",
+            name="overdraft_frequency_90d",
+            field=models.IntegerField(default=0, help_text="Overdraft events in last 90 days"),
         ),
         migrations.AddField(
-            model_name='loanapplication',
-            name='income_verification_score',
-            field=models.FloatField(blank=True, help_text='0.0-1.0: declared vs observed income consistency', null=True),
+            model_name="loanapplication",
+            name="income_verification_score",
+            field=models.FloatField(
+                blank=True, help_text="0.0-1.0: declared vs observed income consistency", null=True
+            ),
         ),
     ]

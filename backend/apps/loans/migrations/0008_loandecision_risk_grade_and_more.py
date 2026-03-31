@@ -5,20 +5,33 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0007_loanapplication_state_and_more'),
+        ("loans", "0007_loanapplication_state_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loandecision',
-            name='risk_grade',
-            field=models.CharField(blank=True, choices=[('AAA', 'AAA'), ('AA', 'AA'), ('A', 'A'), ('BBB', 'BBB'), ('BB', 'BB'), ('B', 'B'), ('CCC', 'CCC')], default='', help_text='APS 220 internal risk grade', max_length=5),
+            model_name="loandecision",
+            name="risk_grade",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("AAA", "AAA"),
+                    ("AA", "AA"),
+                    ("A", "A"),
+                    ("BBB", "BBB"),
+                    ("BB", "BB"),
+                    ("B", "B"),
+                    ("CCC", "CCC"),
+                ],
+                default="",
+                help_text="APS 220 internal risk grade",
+                max_length=5,
+            ),
         ),
         migrations.AddIndex(
-            model_name='auditlog',
-            index=models.Index(fields=['user', '-timestamp'], name='auditlog_user_timestamp'),
+            model_name="auditlog",
+            index=models.Index(fields=["user", "-timestamp"], name="auditlog_user_timestamp"),
         ),
     ]

@@ -4,30 +4,29 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('agents', '0005_add_marketing_email'),
+        ("agents", "0005_add_marketing_email"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='biasreport',
-            name='deterministic_score',
+            model_name="biasreport",
+            name="deterministic_score",
             field=models.FloatField(default=None, null=True),
         ),
         migrations.AddField(
-            model_name='biasreport',
-            name='llm_raw_score',
+            model_name="biasreport",
+            name="llm_raw_score",
             field=models.FloatField(default=None, null=True),
         ),
         migrations.AddField(
-            model_name='biasreport',
-            name='score_source',
-            field=models.CharField(default='composite', max_length=20),
+            model_name="biasreport",
+            name="score_source",
+            field=models.CharField(default="composite", max_length=20),
         ),
         migrations.AlterField(
-            model_name='agentrun',
-            name='created_at',
+            model_name="agentrun",
+            name="created_at",
             field=models.DateTimeField(auto_now_add=True, db_index=True),
         ),
     ]

@@ -20,7 +20,7 @@ def test_budget_check_passes():
     """Under daily limit -> check_budget succeeds silently."""
     r = MagicMock()
     r.exists.return_value = False
-    r.get.return_value = b'100'
+    r.get.return_value = b"100"
     _guard(r).check_budget()
 
 
@@ -29,8 +29,8 @@ def test_budget_exhausted():
     """At daily limit -> raises BudgetExhausted."""
     r = MagicMock()
     r.exists.return_value = False
-    r.get.return_value = b'500'
-    with pytest.raises(BudgetExhausted, match='Daily API call limit reached'):
+    r.get.return_value = b"500"
+    with pytest.raises(BudgetExhausted, match="Daily API call limit reached"):
         _guard(r).check_budget()
 
 
@@ -39,7 +39,7 @@ def test_circuit_open():
     r = MagicMock()
     r.exists.return_value = True
     r.ttl.return_value = 300
-    with pytest.raises(CircuitOpen, match='Circuit breaker open'):
+    with pytest.raises(CircuitOpen, match="Circuit breaker open"):
         _guard(r).check_budget()
 
 
@@ -59,19 +59,19 @@ def test_failures_trip_breaker():
     r = MagicMock()
     r.incr.return_value = 3
     _guard(r).record_failure()
-    r.setex.assert_called_once_with('ai_budget:circuit_breaker', 600, 1)
+    r.setex.assert_called_once_with("ai_budget:circuit_breaker", 600, 1)
 
 
 def test_success_resets_failures():
     """record_success deletes the consecutive failure counter."""
     r = MagicMock()
     _guard(r).record_success()
-    r.delete.assert_called_once_with('ai_budget:consecutive_failures')
+    r.delete.assert_called_once_with("ai_budget:consecutive_failures")
 
 
 def test_redis_down_fails_open():
     """When Redis is unreachable, check_budget allows the call (fail-open)."""
     r = MagicMock()
-    r.exists.side_effect = ConnectionError('Redis connection refused')
+    r.exists.side_effect = ConnectionError("Redis connection refused")
     # Should not raise
     _guard(r).check_budget()

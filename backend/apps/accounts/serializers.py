@@ -36,7 +36,7 @@ class EncryptedDecimalField(serializers.DecimalField):
         return str(decimal_val)
 
     def to_representation(self, value):
-        if value is None or value == '':
+        if value is None or value == "":
             return None
         if isinstance(value, str):
             try:
@@ -52,24 +52,24 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CustomUser
-        fields = ('username', 'email', 'password', 'password2', 'first_name', 'last_name')
+        fields = ("username", "email", "password", "password2", "first_name", "last_name")
 
     def validate(self, data):
-        if data['password'] != data['password2']:
-            raise serializers.ValidationError({'password2': 'Passwords do not match.'})
-        pw = data['password']
-        if not re.search(r'[A-Z]', pw):
-            raise serializers.ValidationError({'password': 'Password must contain at least one uppercase letter.'})
-        if not re.search(r'[a-z]', pw):
-            raise serializers.ValidationError({'password': 'Password must contain at least one lowercase letter.'})
-        if not re.search(r'[0-9]', pw):
-            raise serializers.ValidationError({'password': 'Password must contain at least one digit.'})
+        if data["password"] != data["password2"]:
+            raise serializers.ValidationError({"password2": "Passwords do not match."})
+        pw = data["password"]
+        if not re.search(r"[A-Z]", pw):
+            raise serializers.ValidationError({"password": "Password must contain at least one uppercase letter."})
+        if not re.search(r"[a-z]", pw):
+            raise serializers.ValidationError({"password": "Password must contain at least one lowercase letter."})
+        if not re.search(r"[0-9]", pw):
+            raise serializers.ValidationError({"password": "Password must contain at least one digit."})
         return data
 
     def create(self, validated_data):
-        validated_data.pop('password2')
-        password = validated_data.pop('password')
-        user = CustomUser(**validated_data, role='customer')
+        validated_data.pop("password2")
+        password = validated_data.pop("password")
+        user = CustomUser(**validated_data, role="customer")
         user.set_password(password)
         user.save()
         return user
@@ -80,35 +80,35 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        username_or_email = data['username']
+        username_or_email = data["username"]
         # Allow login with email: resolve to username first
-        if '@' in username_or_email:
+        if "@" in username_or_email:
             try:
                 user_obj = CustomUser.objects.get(email=username_or_email)
                 username_or_email = user_obj.username
-            except CustomUser.DoesNotExist:
-                raise serializers.ValidationError('Invalid credentials.')
-        user = authenticate(username=username_or_email, password=data['password'])
+            except CustomUser.DoesNotExist as err:
+                raise serializers.ValidationError("Invalid credentials.") from err
+        user = authenticate(username=username_or_email, password=data["password"])
         if not user:
-            raise serializers.ValidationError('Invalid credentials.')
+            raise serializers.ValidationError("Invalid credentials.")
         if not user.is_active:
-            raise serializers.ValidationError('User account is disabled.')
-        data['user'] = user
+            raise serializers.ValidationError("User account is disabled.")
+        data["user"] = user
         return data
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ('id', 'username', 'email', 'role', 'first_name', 'last_name', 'created_at')
-        read_only_fields = ('id', 'username', 'role', 'created_at')
+        fields = ("id", "username", "email", "role", "first_name", "last_name", "created_at")
+        read_only_fields = ("id", "username", "role", "created_at")
 
 
 def _mask_id_number(value):
     """Show only last 4 characters of an ID number."""
     if not value or len(value) <= 4:
         return value
-    return '****' + value[-4:]
+    return "****" + value[-4:]
 
 
 class CustomerProfileSerializer(serializers.ModelSerializer):
@@ -130,85 +130,124 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerProfile
         fields = (
-            'id',
+            "id",
             # Profile completeness
-            'is_profile_complete', 'missing_profile_fields',
+            "is_profile_complete",
+            "missing_profile_fields",
             # Personal details
-            'date_of_birth', 'phone', 'address_line_1', 'address_line_2',
-            'suburb', 'state', 'postcode', 'marital_status',
+            "date_of_birth",
+            "phone",
+            "address_line_1",
+            "address_line_2",
+            "suburb",
+            "state",
+            "postcode",
+            "marital_status",
             # Identity & compliance
-            'residency_status', 'primary_id_type', 'primary_id_number',
-            'secondary_id_type', 'secondary_id_number',
-            'primary_id_number_masked', 'secondary_id_number_masked',
-            'tax_file_number_provided', 'is_politically_exposed',
+            "residency_status",
+            "primary_id_type",
+            "primary_id_number",
+            "secondary_id_type",
+            "secondary_id_number",
+            "primary_id_number_masked",
+            "secondary_id_number_masked",
+            "tax_file_number_provided",
+            "is_politically_exposed",
             # Employment
-            'employer_name', 'occupation', 'industry', 'employment_status',
-            'years_in_current_role', 'previous_employer',
+            "employer_name",
+            "occupation",
+            "industry",
+            "employment_status",
+            "years_in_current_role",
+            "previous_employer",
             # Income
-            'gross_annual_income', 'other_income', 'other_income_source',
-            'partner_annual_income',
+            "gross_annual_income",
+            "other_income",
+            "other_income_source",
+            "partner_annual_income",
             # Assets
-            'estimated_property_value', 'vehicle_value',
-            'savings_other_institutions', 'investment_value',
-            'superannuation_balance',
+            "estimated_property_value",
+            "vehicle_value",
+            "savings_other_institutions",
+            "investment_value",
+            "superannuation_balance",
             # Liabilities
-            'other_loan_repayments_monthly', 'other_credit_card_limits',
-            'rent_or_board_monthly',
+            "other_loan_repayments_monthly",
+            "other_credit_card_limits",
+            "rent_or_board_monthly",
             # Living situation
-            'housing_situation', 'time_at_current_address_years',
-            'number_of_dependants', 'previous_suburb', 'previous_state',
-            'previous_postcode',
+            "housing_situation",
+            "time_at_current_address_years",
+            "number_of_dependants",
+            "previous_suburb",
+            "previous_state",
+            "previous_postcode",
             # Contact
-            'preferred_contact_method',
+            "preferred_contact_method",
             # Computed (read-only)
-            'total_assets', 'total_monthly_liabilities',
+            "total_assets",
+            "total_monthly_liabilities",
             # Banking (read-only for customer)
-            'account_tenure_years', 'loyalty_tier', 'num_products',
-            'savings_balance', 'checking_balance',
-            'has_credit_card', 'has_mortgage', 'has_auto_loan',
-            'on_time_payment_pct', 'previous_loans_repaid',
+            "account_tenure_years",
+            "loyalty_tier",
+            "num_products",
+            "savings_balance",
+            "checking_balance",
+            "has_credit_card",
+            "has_mortgage",
+            "has_auto_loan",
+            "on_time_payment_pct",
+            "previous_loans_repaid",
             # Timestamps
-            'created_at', 'updated_at',
+            "created_at",
+            "updated_at",
         )
         read_only_fields = (
-            'id', 'is_profile_complete', 'missing_profile_fields',
+            "id",
+            "is_profile_complete",
+            "missing_profile_fields",
             # Computed
-            'total_assets', 'total_monthly_liabilities',
+            "total_assets",
+            "total_monthly_liabilities",
             # Banking — managed by the bank
-            'account_tenure_years', 'loyalty_tier', 'num_products',
-            'savings_balance', 'checking_balance',
-            'has_credit_card', 'has_mortgage', 'has_auto_loan',
-            'on_time_payment_pct', 'previous_loans_repaid',
-            'created_at', 'updated_at',
+            "account_tenure_years",
+            "loyalty_tier",
+            "num_products",
+            "savings_balance",
+            "checking_balance",
+            "has_credit_card",
+            "has_mortgage",
+            "has_auto_loan",
+            "on_time_payment_pct",
+            "previous_loans_repaid",
+            "created_at",
+            "updated_at",
         )
 
     def validate(self, data):
         warnings = []
 
         # Soft warning: short tenure at current role — previous employer recommended
-        years_in_role = data.get('years_in_current_role')
+        years_in_role = data.get("years_in_current_role")
         if years_in_role is not None and years_in_role < 2:
-            if not data.get('previous_employer') and not getattr(self.instance, 'previous_employer', None):
-                warnings.append(
-                    'years_in_current_role is less than 2; providing previous_employer is recommended.'
-                )
+            if not data.get("previous_employer") and not getattr(self.instance, "previous_employer", None):
+                warnings.append("years_in_current_role is less than 2; providing previous_employer is recommended.")
 
         # Soft warning: short time at current address — previous address details recommended
-        time_at_address = data.get('time_at_current_address_years')
+        time_at_address = data.get("time_at_current_address_years")
         if time_at_address is not None and time_at_address < 3:
             instance = self.instance
             missing_prev = []
-            for field in ('previous_suburb', 'previous_state', 'previous_postcode'):
+            for field in ("previous_suburb", "previous_state", "previous_postcode"):
                 if not data.get(field) and not getattr(instance, field, None):
                     missing_prev.append(field)
             if missing_prev:
                 warnings.append(
-                    f'time_at_current_address_years is less than 3; providing '
-                    f'{", ".join(missing_prev)} is recommended.'
+                    f"time_at_current_address_years is less than 3; providing {', '.join(missing_prev)} is recommended."
                 )
 
         if warnings:
-            data['_warnings'] = warnings
+            data["_warnings"] = warnings
 
         return data
 
@@ -221,6 +260,7 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
 
 class StaffCustomerDetailSerializer(serializers.ModelSerializer):
     """Read-only serializer for staff viewing any customer's full profile."""
+
     user = UserSerializer(read_only=True)
     primary_id_number = serializers.SerializerMethodField()
     secondary_id_number = serializers.SerializerMethodField()
@@ -235,42 +275,73 @@ class StaffCustomerDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerProfile
         fields = (
-            'id', 'user',
+            "id",
+            "user",
             # Personal details
-            'date_of_birth', 'phone', 'address_line_1', 'address_line_2',
-            'suburb', 'state', 'postcode', 'marital_status',
+            "date_of_birth",
+            "phone",
+            "address_line_1",
+            "address_line_2",
+            "suburb",
+            "state",
+            "postcode",
+            "marital_status",
             # Identity & compliance
-            'residency_status', 'primary_id_type', 'primary_id_number',
-            'secondary_id_type', 'secondary_id_number',
-            'tax_file_number_provided', 'is_politically_exposed',
+            "residency_status",
+            "primary_id_type",
+            "primary_id_number",
+            "secondary_id_type",
+            "secondary_id_number",
+            "tax_file_number_provided",
+            "is_politically_exposed",
             # Employment
-            'employer_name', 'occupation', 'industry', 'employment_status',
-            'years_in_current_role', 'previous_employer',
+            "employer_name",
+            "occupation",
+            "industry",
+            "employment_status",
+            "years_in_current_role",
+            "previous_employer",
             # Income
-            'gross_annual_income', 'other_income', 'other_income_source',
-            'partner_annual_income',
+            "gross_annual_income",
+            "other_income",
+            "other_income_source",
+            "partner_annual_income",
             # Assets
-            'estimated_property_value', 'vehicle_value',
-            'savings_other_institutions', 'investment_value',
-            'superannuation_balance',
+            "estimated_property_value",
+            "vehicle_value",
+            "savings_other_institutions",
+            "investment_value",
+            "superannuation_balance",
             # Liabilities
-            'other_loan_repayments_monthly', 'other_credit_card_limits',
-            'rent_or_board_monthly',
+            "other_loan_repayments_monthly",
+            "other_credit_card_limits",
+            "rent_or_board_monthly",
             # Living situation
-            'housing_situation', 'time_at_current_address_years',
-            'number_of_dependants', 'previous_suburb', 'previous_state',
-            'previous_postcode',
+            "housing_situation",
+            "time_at_current_address_years",
+            "number_of_dependants",
+            "previous_suburb",
+            "previous_state",
+            "previous_postcode",
             # Contact
-            'preferred_contact_method',
+            "preferred_contact_method",
             # Computed (read-only)
-            'total_assets', 'total_monthly_liabilities',
+            "total_assets",
+            "total_monthly_liabilities",
             # Banking
-            'account_tenure_years', 'loyalty_tier', 'num_products',
-            'savings_balance', 'checking_balance',
-            'has_credit_card', 'has_mortgage', 'has_auto_loan',
-            'on_time_payment_pct', 'previous_loans_repaid',
+            "account_tenure_years",
+            "loyalty_tier",
+            "num_products",
+            "savings_balance",
+            "checking_balance",
+            "has_credit_card",
+            "has_mortgage",
+            "has_auto_loan",
+            "on_time_payment_pct",
+            "previous_loans_repaid",
             # Timestamps
-            'created_at', 'updated_at',
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -283,6 +354,7 @@ class StaffCustomerDetailSerializer(serializers.ModelSerializer):
 
 class AdminCustomerProfileUpdateSerializer(serializers.ModelSerializer):
     """Serializer for admin to update any customer's profile fields."""
+
     user = UserSerializer(read_only=True)
     primary_id_number_masked = serializers.SerializerMethodField()
     secondary_id_number_masked = serializers.SerializerMethodField()
@@ -297,48 +369,80 @@ class AdminCustomerProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerProfile
         fields = (
-            'id', 'user',
+            "id",
+            "user",
             # Personal details
-            'date_of_birth', 'phone', 'address_line_1', 'address_line_2',
-            'suburb', 'state', 'postcode', 'marital_status',
+            "date_of_birth",
+            "phone",
+            "address_line_1",
+            "address_line_2",
+            "suburb",
+            "state",
+            "postcode",
+            "marital_status",
             # Identity & compliance
-            'residency_status', 'primary_id_type', 'primary_id_number',
-            'secondary_id_type', 'secondary_id_number',
-            'primary_id_number_masked', 'secondary_id_number_masked',
-            'tax_file_number_provided', 'is_politically_exposed',
+            "residency_status",
+            "primary_id_type",
+            "primary_id_number",
+            "secondary_id_type",
+            "secondary_id_number",
+            "primary_id_number_masked",
+            "secondary_id_number_masked",
+            "tax_file_number_provided",
+            "is_politically_exposed",
             # Employment
-            'employer_name', 'occupation', 'industry', 'employment_status',
-            'years_in_current_role', 'previous_employer',
+            "employer_name",
+            "occupation",
+            "industry",
+            "employment_status",
+            "years_in_current_role",
+            "previous_employer",
             # Income
-            'gross_annual_income', 'other_income', 'other_income_source',
-            'partner_annual_income',
+            "gross_annual_income",
+            "other_income",
+            "other_income_source",
+            "partner_annual_income",
             # Assets
-            'estimated_property_value', 'vehicle_value',
-            'savings_other_institutions', 'investment_value',
-            'superannuation_balance',
+            "estimated_property_value",
+            "vehicle_value",
+            "savings_other_institutions",
+            "investment_value",
+            "superannuation_balance",
             # Liabilities
-            'other_loan_repayments_monthly', 'other_credit_card_limits',
-            'rent_or_board_monthly',
+            "other_loan_repayments_monthly",
+            "other_credit_card_limits",
+            "rent_or_board_monthly",
             # Living situation
-            'housing_situation', 'time_at_current_address_years',
-            'number_of_dependants', 'previous_suburb', 'previous_state',
-            'previous_postcode',
+            "housing_situation",
+            "time_at_current_address_years",
+            "number_of_dependants",
+            "previous_suburb",
+            "previous_state",
+            "previous_postcode",
             # Contact
-            'preferred_contact_method',
+            "preferred_contact_method",
             # Computed (read-only)
-            'total_assets', 'total_monthly_liabilities',
+            "total_assets",
+            "total_monthly_liabilities",
             # Banking
-            'account_tenure_years', 'loyalty_tier', 'num_products',
-            'savings_balance', 'checking_balance',
-            'has_credit_card', 'has_mortgage', 'has_auto_loan',
-            'on_time_payment_pct', 'previous_loans_repaid',
+            "account_tenure_years",
+            "loyalty_tier",
+            "num_products",
+            "savings_balance",
+            "checking_balance",
+            "has_credit_card",
+            "has_mortgage",
+            "has_auto_loan",
+            "on_time_payment_pct",
+            "previous_loans_repaid",
             # Timestamps
-            'created_at', 'updated_at',
+            "created_at",
+            "updated_at",
         )
-        read_only_fields = ('id', 'total_assets', 'total_monthly_liabilities', 'created_at', 'updated_at')
+        read_only_fields = ("id", "total_assets", "total_monthly_liabilities", "created_at", "updated_at")
         extra_kwargs = {
-            'primary_id_number': {'write_only': True, 'required': False},
-            'secondary_id_number': {'write_only': True, 'required': False},
+            "primary_id_number": {"write_only": True, "required": False},
+            "secondary_id_number": {"write_only": True, "required": False},
         }
 
     def get_primary_id_number_masked(self, obj):

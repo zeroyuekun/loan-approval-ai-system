@@ -33,9 +33,11 @@ def send_application_received(application):
     """
     applicant = application.applicant
     name = applicant.first_name or applicant.username
-    purpose = application.get_purpose_display() if hasattr(application, 'get_purpose_display') else application.purpose
+    purpose = application.get_purpose_display() if hasattr(application, "get_purpose_display") else application.purpose
     amount = f"${application.loan_amount:,.2f}"
-    ref_code = f"{application.purpose.upper()[:3]}-{datetime.now().strftime('%Y%m%d')}-{str(application.id)[:4].upper()}"
+    ref_code = (
+        f"{application.purpose.upper()[:3]}-{datetime.now().strftime('%Y%m%d')}-{str(application.id)[:4].upper()}"
+    )
 
     subject = f"We've Received Your {purpose.title()} Loan Application | Ref #{ref_code}"
     body = f"""Dear {name},
@@ -67,12 +69,12 @@ Australian Financial Complaints Authority (AFCA) | www.afca.org.au | 1800 931 67
 
     email = GeneratedEmail.objects.create(
         application=application,
-        notification_type='received',
-        decision='pending',
+        notification_type="received",
+        decision="pending",
         subject=subject,
         body=body,
-        prompt_used='lifecycle_template:received',
-        model_used='template',
+        prompt_used="lifecycle_template:received",
+        model_used="template",
         generation_time_ms=0,
         attempt_number=1,
         passed_guardrails=True,
@@ -82,5 +84,5 @@ Australian Financial Complaints Authority (AFCA) | www.afca.org.au | 1800 931 67
     if applicant.email:
         send_decision_email(applicant.email, subject, body)
 
-    logger.info('Sent application received email for %s', application.id)
+    logger.info("Sent application received email for %s", application.id)
     return email

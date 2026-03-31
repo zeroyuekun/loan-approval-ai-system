@@ -13,12 +13,13 @@ References:
   - Yurdakul (2020): "Statistical Properties of PSI", J. Risk Model Validation
   - Siddiqi (2023): Population Resemblance Statistic, arXiv:2307.11878
 """
+
 import logging
 import os
+from datetime import timedelta
 
 import joblib
 import numpy as np
-from datetime import timedelta
 from django.utils import timezone
 from scipy.stats import ks_2samp
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 # See: Yurdakul (2020) "Statistical Properties of PSI", J. Risk Model Validation.
 # For statistically grounded thresholds, supplement with KS-test (p-value based)
 # or the Population Resemblance Statistic (Siddiqi, 2023, arXiv:2307.11878).
-PSI_STABLE = 0.10       # Heuristic: no significant shift
+PSI_STABLE = 0.10  # Heuristic: no significant shift
 PSI_INVESTIGATE = 0.25  # Heuristic: moderate shift, investigate
 # CSI uses the same thresholds applied per-feature
 CSI_STABLE = 0.10
@@ -102,19 +103,19 @@ def compute_csi(expected_features: dict, actual_features: dict, bins: int = 10) 
 
         # Guard against empty or single-element arrays
         if len(expected) < 2 or len(actual) < 2:
-            results[feature] = {'csi': 0.0, 'status': 'stable'}
+            results[feature] = {"csi": 0.0, "status": "stable"}
             continue
 
         csi_value = compute_psi(expected, actual, bins=bins)
 
         if csi_value >= CSI_INVESTIGATE:
-            status = 'action_required'
+            status = "action_required"
         elif csi_value >= CSI_STABLE:
-            status = 'investigate'
+            status = "investigate"
         else:
-            status = 'stable'
+            status = "stable"
 
-        results[feature] = {'csi': csi_value, 'status': status}
+        results[feature] = {"csi": csi_value, "status": status}
 
     return results
 
@@ -136,14 +137,14 @@ def compute_ks_test(expected, actual):
     actual = np.array(actual, dtype=float)
 
     if len(expected) < 2 or len(actual) < 2:
-        return {'ks_statistic': 0.0, 'p_value': 1.0, 'significant': False}
+        return {"ks_statistic": 0.0, "p_value": 1.0, "significant": False}
 
     stat, p_value = ks_2samp(expected, actual)
 
     return {
-        'ks_statistic': round(float(stat), 6),
-        'p_value': round(float(p_value), 6),
-        'significant': p_value < 0.05,
+        "ks_statistic": round(float(stat), 6),
+        "p_value": round(float(p_value), 6),
+        "significant": p_value < 0.05,
     }
 
 
@@ -157,7 +158,7 @@ def compute_batch_drift_report(model_version, days=7):
     Returns:
         dict with per-feature PSI, overall assessment, and label drift
     """
-    from apps.ml_engine.models import PredictionLog, DriftReport
+    from apps.ml_engine.models import DriftReport, PredictionLog
 
     cutoff = timezone.now() - timedelta(days=days)
 
@@ -166,28 +167,28 @@ def compute_batch_drift_report(model_version, days=7):
         PredictionLog.objects.filter(
             model_version=model_version,
             created_at__gte=cutoff,
-        ).values_list('probability', flat=True)
+        ).values_list("probability", flat=True)
     )
 
     if not recent_probs or len(recent_probs) < 10:
-        logger.info('Not enough recent predictions (%d) for drift analysis', len(recent_probs))
+        logger.info("Not enough recent predictions (%d) for drift analysis", len(recent_probs))
         return None
 
     # Load training reference distribution from model bundle
     bundle_path = model_version.file_path
     if not os.path.exists(bundle_path):
-        logger.error('Model bundle not found: %s', bundle_path)
+        logger.error("Model bundle not found: %s", bundle_path)
         return None
 
     try:
         bundle = joblib.load(bundle_path)
-        reference_distribution = bundle.get('reference_distribution', {})
+        reference_distribution = bundle.get("reference_distribution", {})
     except Exception as e:
-        logger.error('Failed to load model bundle for drift check: %s', e)
+        logger.error("Failed to load model bundle for drift check: %s", e)
         return None
 
     if not reference_distribution:
-        logger.warning('No reference distribution in model bundle -- skipping drift check')
+        logger.warning("No reference distribution in model bundle -- skipping drift check")
         return None
 
     # Compute per-feature PSI
@@ -195,28 +196,26 @@ def compute_batch_drift_report(model_version, days=7):
     max_psi = 0.0
 
     # Label drift: compare approval rate
-    recent_approval_rate = sum(
-        1 for p in recent_probs if p >= (model_version.optimal_threshold or 0.5)
-    ) / len(recent_probs)
-    training_approval_rate = reference_distribution.get('approval_rate', 0.5)
+    recent_approval_rate = sum(1 for p in recent_probs if p >= (model_version.optimal_threshold or 0.5)) / len(
+        recent_probs
+    )
+    training_approval_rate = reference_distribution.get("approval_rate", 0.5)
     label_drift = abs(recent_approval_rate - training_approval_rate)
 
     # Compute PSI for prediction probability distribution
     ks_results = {}
-    if 'probability_distribution' in reference_distribution:
-        prob_psi = compute_psi(
-            reference_distribution['probability_distribution'], recent_probs
-        )
-        psi_results['prediction_probability'] = prob_psi
+    if "probability_distribution" in reference_distribution:
+        prob_psi = compute_psi(reference_distribution["probability_distribution"], recent_probs)
+        psi_results["prediction_probability"] = prob_psi
         max_psi = max(max_psi, prob_psi)
-        ks_results['prediction_probability'] = compute_ks_test(
-            reference_distribution['probability_distribution'], recent_probs
+        ks_results["prediction_probability"] = compute_ks_test(
+            reference_distribution["probability_distribution"], recent_probs
         )
 
     # Compute CSI on per-feature distributions if available
     csi_results = {}
-    ref_features = reference_distribution.get('feature_distributions', {})
-    actual_features = reference_distribution.get('_actual_feature_cache', {})
+    ref_features = reference_distribution.get("feature_distributions", {})
+    actual_features = reference_distribution.get("_actual_feature_cache", {})
     # If feature distributions are available in the reference, compute CSI
     if ref_features:
         # Build actual feature dict from recent prediction logs if not cached
@@ -224,7 +223,7 @@ def compute_batch_drift_report(model_version, days=7):
             recent_logs = PredictionLog.objects.filter(
                 model_version=model_version,
                 created_at__gte=cutoff,
-            ).values_list('input_data', flat=True)
+            ).values_list("input_data", flat=True)
             actual_features = {}
             for input_data in recent_logs:
                 if isinstance(input_data, dict):
@@ -236,27 +235,25 @@ def compute_batch_drift_report(model_version, days=7):
             csi_results = compute_csi(ref_features, actual_features)
             # Also compute KS-test per feature
             for feature in sorted(set(ref_features) & set(actual_features)):
-                ks_results[feature] = compute_ks_test(
-                    ref_features[feature], actual_features[feature]
-                )
+                ks_results[feature] = compute_ks_test(ref_features[feature], actual_features[feature])
 
     # Merge CSI and KS data into psi_per_feature for storage
     for feature, csi_data in csi_results.items():
         if feature not in psi_results:
-            psi_results[feature] = csi_data['csi']
-        psi_results[f'{feature}_csi'] = csi_data
+            psi_results[feature] = csi_data["csi"]
+        psi_results[f"{feature}_csi"] = csi_data
     for feature, ks_data in ks_results.items():
-        psi_results[f'{feature}_ks'] = ks_data
+        psi_results[f"{feature}_ks"] = ks_data
 
     # Determine alert level
     if max_psi >= PSI_INVESTIGATE:
-        alert_level = 'significant'
+        alert_level = "significant"
         drift_detected = True
     elif max_psi >= PSI_STABLE:
-        alert_level = 'moderate'
+        alert_level = "moderate"
         drift_detected = True
     else:
-        alert_level = 'none'
+        alert_level = "none"
         drift_detected = False
 
     # Create DriftReport (period_start/period_end are DateFields)
@@ -277,20 +274,23 @@ def compute_batch_drift_report(model_version, days=7):
 
     if drift_detected:
         logger.warning(
-            'Drift detected for model %s: PSI=%.4f, alert_level=%s, label_drift=%.4f',
-            model_version.version, max_psi, alert_level, label_drift,
+            "Drift detected for model %s: PSI=%.4f, alert_level=%s, label_drift=%.4f",
+            model_version.version,
+            max_psi,
+            alert_level,
+            label_drift,
         )
     else:
-        logger.info('No drift detected for model %s: PSI=%.4f', model_version.version, max_psi)
+        logger.info("No drift detected for model %s: PSI=%.4f", model_version.version, max_psi)
 
     return {
-        'report_id': report.pk,
-        'psi_score': max_psi,
-        'psi_per_feature': psi_results,
-        'csi_per_feature': csi_results,
-        'ks_tests': ks_results,
-        'drift_detected': drift_detected,
-        'alert_level': alert_level,
-        'label_drift': label_drift,
-        'num_predictions': len(recent_probs),
+        "report_id": report.pk,
+        "psi_score": max_psi,
+        "psi_per_feature": psi_results,
+        "csi_per_feature": csi_results,
+        "ks_tests": ks_results,
+        "drift_detected": drift_detected,
+        "alert_level": alert_level,
+        "label_drift": label_drift,
+        "num_predictions": len(recent_probs),
     }

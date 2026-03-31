@@ -10,6 +10,7 @@ References:
       Determination of Risk Scores" arXiv:1609.05807
     - EEOC Uniform Guidelines 29 CFR 1607.4 (four-fifths rule)
 """
+
 import logging
 from itertools import combinations
 
@@ -55,17 +56,15 @@ def compute_intersectional_fairness(
     # Graceful handling of empty / degenerate input
     if n == 0 or len(protected_attributes) == 0:
         return {
-            'single_axis': {},
-            'intersectional': {},
-            'worst_subgroup': None,
-            'amplification_detected': False,
-            'summary': 'No data or no protected attributes provided.',
+            "single_axis": {},
+            "intersectional": {},
+            "worst_subgroup": None,
+            "amplification_detected": False,
+            "summary": "No data or no protected attributes provided.",
         }
 
     # Convert all attribute arrays once
-    attrs = {
-        name: np.asarray(values) for name, values in protected_attributes.items()
-    }
+    attrs = {name: np.asarray(values) for name, values in protected_attributes.items()}
 
     # ------------------------------------------------------------------
     # Step 1: Single-axis fairness per attribute
@@ -76,8 +75,8 @@ def compute_intersectional_fairness(
     for attr_name, labels in attrs.items():
         result = _compute_group_fairness(y_pred, labels, min_group_size)
         single_axis[attr_name] = result
-        if result['disparate_impact_ratio'] is not None:
-            worst_single_axis_di = min(worst_single_axis_di, result['disparate_impact_ratio'])
+        if result["disparate_impact_ratio"] is not None:
+            worst_single_axis_di = min(worst_single_axis_di, result["disparate_impact_ratio"])
 
     # ------------------------------------------------------------------
     # Step 2: Pairwise intersectional fairness
@@ -94,27 +93,25 @@ def compute_intersectional_fairness(
         labels_b = attrs[attr_b]
 
         # Build intersection labels: "value_a + value_b"
-        intersection_labels = np.array([
-            f"{a} + {b}" for a, b in zip(labels_a, labels_b)
-        ])
+        intersection_labels = np.array([f"{a} + {b}" for a, b in zip(labels_a, labels_b, strict=False)])
 
         pair_key = f"{attr_a} x {attr_b}"
         result = _compute_group_fairness(y_pred, intersection_labels, min_group_size)
         intersectional[pair_key] = result
 
-        if result['disparate_impact_ratio'] is not None:
-            worst_intersectional_di = min(worst_intersectional_di, result['disparate_impact_ratio'])
+        if result["disparate_impact_ratio"] is not None:
+            worst_intersectional_di = min(worst_intersectional_di, result["disparate_impact_ratio"])
 
         # Track worst subgroup across all intersections
-        for group_name, group_info in result['groups'].items():
-            rate = group_info['approval_rate']
+        for group_name, group_info in result["groups"].items():
+            rate = group_info["approval_rate"]
             if rate < worst_subgroup_rate:
                 worst_subgroup_rate = rate
                 worst_subgroup = {
-                    'intersection': pair_key,
-                    'subgroup': group_name,
-                    'approval_rate': round(rate, 4),
-                    'count': group_info['count'],
+                    "intersection": pair_key,
+                    "subgroup": group_name,
+                    "approval_rate": round(rate, 4),
+                    "count": group_info["count"],
                 }
 
     # ------------------------------------------------------------------
@@ -127,16 +124,11 @@ def compute_intersectional_fairness(
     # ------------------------------------------------------------------
     summary_parts = []
     summary_parts.append(
-        f"Analysed {len(single_axis)} single-axis attributes and "
-        f"{len(intersectional)} pairwise intersections."
+        f"Analysed {len(single_axis)} single-axis attributes and {len(intersectional)} pairwise intersections."
     )
-    summary_parts.append(
-        f"Worst single-axis disparate impact: {worst_single_axis_di:.4f}."
-    )
+    summary_parts.append(f"Worst single-axis disparate impact: {worst_single_axis_di:.4f}.")
     if intersectional:
-        summary_parts.append(
-            f"Worst intersectional disparate impact: {worst_intersectional_di:.4f}."
-        )
+        summary_parts.append(f"Worst intersectional disparate impact: {worst_intersectional_di:.4f}.")
     if amplification_detected:
         summary_parts.append(
             "AMPLIFICATION DETECTED: intersectional disparity is worse than "
@@ -146,11 +138,11 @@ def compute_intersectional_fairness(
         summary_parts.append("No intersectional amplification detected.")
 
     return {
-        'single_axis': single_axis,
-        'intersectional': intersectional,
-        'worst_subgroup': worst_subgroup,
-        'amplification_detected': amplification_detected,
-        'summary': ' '.join(summary_parts),
+        "single_axis": single_axis,
+        "intersectional": intersectional,
+        "worst_subgroup": worst_subgroup,
+        "amplification_detected": amplification_detected,
+        "summary": " ".join(summary_parts),
     }
 
 
@@ -179,8 +171,8 @@ def _compute_group_fairness(
             continue
         rate = float(y_pred[mask].mean())
         groups[str(group)] = {
-            'count': count,
-            'approval_rate': round(rate, 4),
+            "count": count,
+            "approval_rate": round(rate, 4),
         }
         approval_rates.append(rate)
 
@@ -192,7 +184,7 @@ def _compute_group_fairness(
     passes = di_ratio >= DISPARATE_IMPACT_THRESHOLD if di_ratio is not None else None
 
     return {
-        'groups': groups,
-        'disparate_impact_ratio': round(di_ratio, 4) if di_ratio is not None else None,
-        'passes_80_percent_rule': passes,
+        "groups": groups,
+        "disparate_impact_ratio": round(di_ratio, 4) if di_ratio is not None else None,
+        "passes_80_percent_rule": passes,
     }

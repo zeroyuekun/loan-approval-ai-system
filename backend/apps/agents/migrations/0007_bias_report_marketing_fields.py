@@ -5,26 +5,39 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('agents', '0006_add_bias_report_audit_fields'),
-        ('email_engine', '0002_bias_report_marketing_fields'),
+        ("agents", "0006_add_bias_report_audit_fields"),
+        ("email_engine", "0002_bias_report_marketing_fields"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='biasreport',
-            name='marketing_email',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='bias_reports', to='agents.marketingemail'),
+            model_name="biasreport",
+            name="marketing_email",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="bias_reports",
+                to="agents.marketingemail",
+            ),
         ),
         migrations.AddField(
-            model_name='biasreport',
-            name='report_type',
-            field=models.CharField(choices=[('decision', 'Decision'), ('marketing', 'Marketing')], default='decision', max_length=20),
+            model_name="biasreport",
+            name="report_type",
+            field=models.CharField(
+                choices=[("decision", "Decision"), ("marketing", "Marketing")], default="decision", max_length=20
+            ),
         ),
         migrations.AlterField(
-            model_name='biasreport',
-            name='email',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='bias_reports', to='email_engine.generatedemail'),
+            model_name="biasreport",
+            name="email",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="bias_reports",
+                to="email_engine.generatedemail",
+            ),
         ),
     ]

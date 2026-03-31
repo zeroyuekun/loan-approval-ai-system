@@ -4,25 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('agents', '0008_agentrun_total_cost_usd_agentrun_total_input_tokens_and_more'),
+        ("agents", "0008_agentrun_total_cost_usd_agentrun_total_input_tokens_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='agentrun',
-            name='failure_category',
+            model_name="agentrun",
+            name="failure_category",
             field=models.CharField(
                 blank=True,
-                choices=[('transient', 'Transient'), ('permanent', 'Permanent'), ('config_error', 'Config Error')],
+                choices=[("transient", "Transient"), ("permanent", "Permanent"), ("config_error", "Config Error")],
                 max_length=20,
                 null=True,
             ),
         ),
         migrations.AddField(
-            model_name='agentrun',
-            name='retry_count',
+            model_name="agentrun",
+            name="retry_count",
             field=models.IntegerField(default=0),
         ),
     ]

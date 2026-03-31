@@ -11,19 +11,19 @@ from apps.ml_engine.services.predictor import (
 class TestPrometheusMetrics:
     def test_predictions_counter_registered(self):
         # prometheus_client Counter strips _total suffix from _name
-        assert 'ml_predictions' in ml_predictions_total._name
-        assert 'decision' in ml_predictions_total._labelnames
-        assert 'model_version' in ml_predictions_total._labelnames
+        assert "ml_predictions" in ml_predictions_total._name
+        assert "decision" in ml_predictions_total._labelnames
+        assert "model_version" in ml_predictions_total._labelnames
 
     def test_latency_histogram_registered(self):
-        assert 'ml_prediction_latency' in ml_prediction_latency_seconds._name
+        assert "ml_prediction_latency" in ml_prediction_latency_seconds._name
 
     def test_confidence_histogram_registered(self):
-        assert 'ml_prediction_confidence' in ml_prediction_confidence._name
+        assert "ml_prediction_confidence" in ml_prediction_confidence._name
         assert len(ml_prediction_confidence._upper_bounds) == 11  # 10 buckets + inf
 
     def test_drift_counter_registered(self):
-        assert 'ml_drift_warnings' in ml_drift_warnings_total._name
+        assert "ml_drift_warnings" in ml_drift_warnings_total._name
 
     def test_counter_can_increment(self):
         before = ml_drift_warnings_total._value.get()

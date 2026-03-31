@@ -4,31 +4,41 @@ from django.db import migrations, models
 
 
 def convert_conditional_to_approved(apps, schema_editor):
-    LoanApplication = apps.get_model('loans', 'LoanApplication')
-    LoanApplication.objects.filter(status='conditional').update(status='approved')
+    LoanApplication = apps.get_model("loans", "LoanApplication")
+    LoanApplication.objects.filter(status="conditional").update(status="approved")
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0017_loanapplication_deleted_at'),
+        ("loans", "0017_loanapplication_deleted_at"),
     ]
 
     operations = [
         migrations.RunPython(convert_conditional_to_approved, migrations.RunPython.noop),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='conditions',
+            model_name="loanapplication",
+            name="conditions",
             field=models.JSONField(blank=True, default=list),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='conditions_met',
+            model_name="loanapplication",
+            name="conditions_met",
             field=models.BooleanField(default=False),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='status',
-            field=models.CharField(choices=[('pending', 'Pending'), ('processing', 'Processing'), ('approved', 'Approved'), ('denied', 'Denied'), ('review', 'Under Review')], db_index=True, default='pending', max_length=20),
+            model_name="loanapplication",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("pending", "Pending"),
+                    ("processing", "Processing"),
+                    ("approved", "Approved"),
+                    ("denied", "Denied"),
+                    ("review", "Under Review"),
+                ],
+                db_index=True,
+                default="pending",
+                max_length=20,
+            ),
         ),
     ]

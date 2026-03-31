@@ -18,6 +18,7 @@ References:
 - AML/CTF Rules Chapter 4: Customer identification
 - AUSTRAC guidance: austrac.gov.au
 """
+
 import logging
 import os
 from dataclasses import dataclass, field
@@ -30,18 +31,18 @@ logger = logging.getLogger(__name__)
 # AML/CTF Act 2006 — 100-point ID check document point values
 DOCUMENT_POINTS = {
     # Primary ID (70 points each)
-    'passport': {'category': 'primary', 'points': 70},
-    'birth_certificate': {'category': 'primary', 'points': 70},
+    "passport": {"category": "primary", "points": 70},
+    "birth_certificate": {"category": "primary", "points": 70},
     # Secondary ID (25 points each)
-    'drivers_licence': {'category': 'secondary', 'points': 25},
-    'medicare_card': {'category': 'secondary', 'points': 25},
-    'photo_id': {'category': 'secondary', 'points': 25},
-    'immicard': {'category': 'secondary', 'points': 25},
+    "drivers_licence": {"category": "secondary", "points": 25},
+    "medicare_card": {"category": "secondary", "points": 25},
+    "photo_id": {"category": "secondary", "points": 25},
+    "immicard": {"category": "secondary", "points": 25},
     # Supplementary (5 points each)
-    'utility_bill': {'category': 'supplementary', 'points': 5},
-    'bank_statement': {'category': 'supplementary', 'points': 5},
-    'tax_assessment': {'category': 'supplementary', 'points': 5},
-    'council_rates': {'category': 'supplementary', 'points': 5},
+    "utility_bill": {"category": "supplementary", "points": 5},
+    "bank_statement": {"category": "supplementary", "points": 5},
+    "tax_assessment": {"category": "supplementary", "points": 5},
+    "council_rates": {"category": "supplementary", "points": 5},
 }
 
 # Maximum points allowed per category (AML/CTF Rules Chapter 4)
@@ -70,19 +71,17 @@ class VerificationResult:
 class KYCService:
     """Orchestrates identity verification and sanctions screening."""
 
-    AUSPOST_SANDBOX_URL = 'https://digitalid-sandbox.auspost.com.au/api/v1'
-    AUSPOST_PRODUCTION_URL = 'https://digitalid.auspost.com.au/api/v1'
-    DIDIT_AUTH_URL = 'https://apx.didit.me/auth/v2/token'
-    DIDIT_API_URL = 'https://apx.didit.me/v2'
+    AUSPOST_SANDBOX_URL = "https://digitalid-sandbox.auspost.com.au/api/v1"
+    AUSPOST_PRODUCTION_URL = "https://digitalid.auspost.com.au/api/v1"
+    DIDIT_AUTH_URL = "https://apx.didit.me/auth/v2/token"
+    DIDIT_API_URL = "https://apx.didit.me/v2"
 
     def __init__(self):
         self.timeout = httpx.Timeout(30.0, connect=10.0)
-        self.auspost_api_key = os.environ.get('AUSPOST_DIGITAL_ID_KEY', '')
-        self.auspost_sandbox = (
-            os.environ.get('AUSPOST_DIGITAL_ID_SANDBOX', 'true').lower() == 'true'
-        )
-        self.didit_client_id = os.environ.get('DIDIT_CLIENT_ID', '')
-        self.didit_client_secret = os.environ.get('DIDIT_CLIENT_SECRET', '')
+        self.auspost_api_key = os.environ.get("AUSPOST_DIGITAL_ID_KEY", "")
+        self.auspost_sandbox = os.environ.get("AUSPOST_DIGITAL_ID_SANDBOX", "true").lower() == "true"
+        self.didit_client_id = os.environ.get("DIDIT_CLIENT_ID", "")
+        self.didit_client_secret = os.environ.get("DIDIT_CLIENT_SECRET", "")
 
     def verify_identity(
         self,
@@ -106,29 +105,29 @@ class KYCService:
             result = self._verify_via_auspost(customer_profile, documents)
             if result is not None:
                 return result
-            logger.warning('Australia Post verification failed, falling back to Didit')
+            logger.warning("Australia Post verification failed, falling back to Didit")
 
         # Fallback to Didit
         if self.didit_client_id and self.didit_client_secret:
             result = self._verify_via_didit(customer_profile, documents)
             if result is not None:
                 return result
-            logger.warning('Didit verification also failed')
+            logger.warning("Didit verification also failed")
 
         # Both providers unavailable — return safe default (not verified)
-        logger.error('All KYC providers unavailable; returning unverified result')
+        logger.error("All KYC providers unavailable; returning unverified result")
         point_score = self.compute_point_score(documents)
         return VerificationResult(
             verified=False,
-            total_points=point_score['total'],
-            primary_id_points=point_score['primary'],
-            secondary_id_points=point_score['secondary'],
-            supplementary_points=point_score['supplementary'],
+            total_points=point_score["total"],
+            primary_id_points=point_score["primary"],
+            secondary_id_points=point_score["secondary"],
+            supplementary_points=point_score["supplementary"],
             sanctions_clear=False,
-            provider='none',
-            reference_id='',
-            checks_performed=['point_score_only'],
-            raw_response={'error': 'All providers unavailable'},
+            provider="none",
+            reference_id="",
+            checks_performed=["point_score_only"],
+            raw_response={"error": "All providers unavailable"},
         )
 
     def _verify_via_auspost(
@@ -140,27 +139,22 @@ class KYCService:
 
         Sandbox endpoint: POST /api/v1/verifications
         """
-        url = f'{self._get_auspost_sandbox_url()}/verifications'
+        url = f"{self._get_auspost_sandbox_url()}/verifications"
         point_score = self.compute_point_score(documents)
 
         payload = {
-            'given_name': customer_profile.user.first_name,
-            'family_name': customer_profile.user.last_name,
-            'date_of_birth': (
-                customer_profile.date_of_birth_date.isoformat()
-                if customer_profile.date_of_birth_date
-                else None
+            "given_name": customer_profile.user.first_name,
+            "family_name": customer_profile.user.last_name,
+            "date_of_birth": (
+                customer_profile.date_of_birth_date.isoformat() if customer_profile.date_of_birth_date else None
             ),
-            'address': {
-                'line_1': customer_profile.address_line_1,
-                'suburb': customer_profile.suburb,
-                'state': customer_profile.state,
-                'postcode': customer_profile.postcode,
+            "address": {
+                "line_1": customer_profile.address_line_1,
+                "suburb": customer_profile.suburb,
+                "state": customer_profile.state,
+                "postcode": customer_profile.postcode,
             },
-            'documents': [
-                {'type': d.get('type', ''), 'number': d.get('number', '')}
-                for d in documents
-            ],
+            "documents": [{"type": d.get("type", ""), "number": d.get("number", "")} for d in documents],
         }
 
         try:
@@ -169,43 +163,40 @@ class KYCService:
                     url,
                     json=payload,
                     headers={
-                        'Authorization': f'Bearer {self.auspost_api_key}',
-                        'Content-Type': 'application/json',
+                        "Authorization": f"Bearer {self.auspost_api_key}",
+                        "Content-Type": "application/json",
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
 
-            verified = data.get('status') == 'verified'
+            verified = data.get("status") == "verified"
             sanctions_result = self.check_sanctions(
-                full_name=(
-                    f'{customer_profile.user.first_name} '
-                    f'{customer_profile.user.last_name}'
-                ),
+                full_name=(f"{customer_profile.user.first_name} {customer_profile.user.last_name}"),
                 date_of_birth=customer_profile.date_of_birth_date,
             )
 
             return VerificationResult(
-                verified=verified and point_score['sufficient'],
-                total_points=point_score['total'],
-                primary_id_points=point_score['primary'],
-                secondary_id_points=point_score['secondary'],
-                supplementary_points=point_score['supplementary'],
-                sanctions_clear=sanctions_result['clear'],
-                provider='australia_post',
-                reference_id=data.get('verification_id', ''),
-                checks_performed=['document', 'biometric', 'sanctions'],
+                verified=verified and point_score["sufficient"],
+                total_points=point_score["total"],
+                primary_id_points=point_score["primary"],
+                secondary_id_points=point_score["secondary"],
+                supplementary_points=point_score["supplementary"],
+                sanctions_clear=sanctions_result["clear"],
+                provider="australia_post",
+                reference_id=data.get("verification_id", ""),
+                checks_performed=["document", "biometric", "sanctions"],
                 raw_response=data,
             )
         except httpx.HTTPStatusError as exc:
             logger.error(
-                'Australia Post API HTTP error: %s %s',
+                "Australia Post API HTTP error: %s %s",
                 exc.response.status_code,
                 exc.response.text[:200],
             )
             return None
         except httpx.RequestError as exc:
-            logger.error('Australia Post API request error: %s', exc)
+            logger.error("Australia Post API request error: %s", exc)
             return None
 
     def _verify_via_didit(
@@ -220,25 +211,20 @@ class KYCService:
         """
         token = self._get_didit_token()
         if not token:
-            logger.error('Failed to obtain Didit access token')
+            logger.error("Failed to obtain Didit access token")
             return None
 
         point_score = self.compute_point_score(documents)
-        url = f'{self.DIDIT_API_URL}/verification-sessions'
+        url = f"{self.DIDIT_API_URL}/verification-sessions"
 
         payload = {
-            'first_name': customer_profile.user.first_name,
-            'last_name': customer_profile.user.last_name,
-            'date_of_birth': (
-                customer_profile.date_of_birth_date.isoformat()
-                if customer_profile.date_of_birth_date
-                else None
+            "first_name": customer_profile.user.first_name,
+            "last_name": customer_profile.user.last_name,
+            "date_of_birth": (
+                customer_profile.date_of_birth_date.isoformat() if customer_profile.date_of_birth_date else None
             ),
-            'documents': [
-                {'type': d.get('type', ''), 'number': d.get('number', '')}
-                for d in documents
-            ],
-            'checks': ['document', 'liveness'],
+            "documents": [{"type": d.get("type", ""), "number": d.get("number", "")} for d in documents],
+            "checks": ["document", "liveness"],
         }
 
         try:
@@ -247,43 +233,40 @@ class KYCService:
                     url,
                     json=payload,
                     headers={
-                        'Authorization': f'Bearer {token}',
-                        'Content-Type': 'application/json',
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
 
-            verified = data.get('status') == 'verified'
+            verified = data.get("status") == "verified"
             sanctions_result = self.check_sanctions(
-                full_name=(
-                    f'{customer_profile.user.first_name} '
-                    f'{customer_profile.user.last_name}'
-                ),
+                full_name=(f"{customer_profile.user.first_name} {customer_profile.user.last_name}"),
                 date_of_birth=customer_profile.date_of_birth_date,
             )
 
             return VerificationResult(
-                verified=verified and point_score['sufficient'],
-                total_points=point_score['total'],
-                primary_id_points=point_score['primary'],
-                secondary_id_points=point_score['secondary'],
-                supplementary_points=point_score['supplementary'],
-                sanctions_clear=sanctions_result['clear'],
-                provider='didit',
-                reference_id=data.get('session_id', ''),
-                checks_performed=['document', 'liveness', 'sanctions'],
+                verified=verified and point_score["sufficient"],
+                total_points=point_score["total"],
+                primary_id_points=point_score["primary"],
+                secondary_id_points=point_score["secondary"],
+                supplementary_points=point_score["supplementary"],
+                sanctions_clear=sanctions_result["clear"],
+                provider="didit",
+                reference_id=data.get("session_id", ""),
+                checks_performed=["document", "liveness", "sanctions"],
                 raw_response=data,
             )
         except httpx.HTTPStatusError as exc:
             logger.error(
-                'Didit API HTTP error: %s %s',
+                "Didit API HTTP error: %s %s",
                 exc.response.status_code,
                 exc.response.text[:200],
             )
             return None
         except httpx.RequestError as exc:
-            logger.error('Didit API request error: %s', exc)
+            logger.error("Didit API request error: %s", exc)
             return None
 
     def check_sanctions(
@@ -303,33 +286,32 @@ class KYCService:
 
         Note: In sandbox mode, always returns clear=True.
         """
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now().strftime("%Y-%m-%d")
 
         # Sandbox mode — return safe clear result
         if self.auspost_sandbox:
             return {
-                'checked': True,
-                'clear': True,
-                'lists_checked': [
-                    'DFAT Consolidated List',
-                    'UN Security Council',
-                    'AUSTRAC PEP List',
+                "checked": True,
+                "clear": True,
+                "lists_checked": [
+                    "DFAT Consolidated List",
+                    "UN Security Council",
+                    "AUSTRAC PEP List",
                 ],
-                'date': today,
+                "date": today,
             }
 
         # Production sanctions screening would call a real API here.
         # For safety, default to not-clear when we can't verify.
         logger.warning(
-            'Production sanctions screening not yet implemented; '
-            'returning sanctions_clear=False for %s',
+            "Production sanctions screening not yet implemented; returning sanctions_clear=False for %s",
             full_name,
         )
         return {
-            'checked': False,
-            'clear': False,
-            'lists_checked': [],
-            'date': today,
+            "checked": False,
+            "clear": False,
+            "lists_checked": [],
+            "date": today,
         }
 
     def compute_point_score(self, documents: list[dict]) -> dict:
@@ -358,29 +340,29 @@ class KYCService:
         supplementary = 0
 
         for doc in documents:
-            doc_type = doc.get('type', '').lower().strip()
+            doc_type = doc.get("type", "").lower().strip()
             info = DOCUMENT_POINTS.get(doc_type)
             if info is None:
-                logger.warning('Unknown document type: %s', doc_type)
+                logger.warning("Unknown document type: %s", doc_type)
                 continue
 
-            category = info['category']
-            points = info['points']
+            category = info["category"]
+            points = info["points"]
 
-            if category == 'primary':
+            if category == "primary":
                 primary = min(primary + points, MAX_PRIMARY_POINTS)
-            elif category == 'secondary':
+            elif category == "secondary":
                 secondary = min(secondary + points, MAX_SECONDARY_POINTS)
-            elif category == 'supplementary':
+            elif category == "supplementary":
                 supplementary = min(supplementary + points, MAX_SUPPLEMENTARY_POINTS)
 
         total = primary + secondary + supplementary
         return {
-            'total': total,
-            'primary': primary,
-            'secondary': secondary,
-            'supplementary': supplementary,
-            'sufficient': total >= MINIMUM_TOTAL_POINTS,
+            "total": total,
+            "primary": primary,
+            "secondary": secondary,
+            "supplementary": supplementary,
+            "sufficient": total >= MINIMUM_TOTAL_POINTS,
         }
 
     def _get_auspost_sandbox_url(self) -> str:
@@ -399,34 +381,32 @@ class KYCService:
                 response = client.post(
                     self.DIDIT_AUTH_URL,
                     data={
-                        'grant_type': 'client_credentials',
-                        'client_id': self.didit_client_id,
-                        'client_secret': self.didit_client_secret,
+                        "grant_type": "client_credentials",
+                        "client_id": self.didit_client_id,
+                        "client_secret": self.didit_client_secret,
                     },
-                    headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
                 response.raise_for_status()
                 data = response.json()
-                return data.get('access_token')
+                return data.get("access_token")
         except httpx.HTTPStatusError as exc:
             logger.error(
-                'Didit token request failed: %s %s',
+                "Didit token request failed: %s %s",
                 exc.response.status_code,
                 exc.response.text[:200],
             )
             return None
         except httpx.RequestError as exc:
-            logger.error('Didit token request error: %s', exc)
+            logger.error("Didit token request error: %s", exc)
             return None
 
     @staticmethod
     def get_available_providers() -> list[str]:
         """Return list of configured KYC providers based on env vars."""
         providers = []
-        if os.environ.get('AUSPOST_DIGITAL_ID_KEY', ''):
-            providers.append('australia_post')
-        if os.environ.get('DIDIT_CLIENT_ID', '') and os.environ.get(
-            'DIDIT_CLIENT_SECRET', ''
-        ):
-            providers.append('didit')
+        if os.environ.get("AUSPOST_DIGITAL_ID_KEY", ""):
+            providers.append("australia_post")
+        if os.environ.get("DIDIT_CLIENT_ID", "") and os.environ.get("DIDIT_CLIENT_SECRET", ""):
+            providers.append("didit")
         return providers

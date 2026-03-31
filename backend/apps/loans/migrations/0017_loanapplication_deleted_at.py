@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0016_add_conditional_approval'),
+        ("loans", "0016_add_conditional_approval"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loanapplication',
-            name='deleted_at',
+            model_name="loanapplication",
+            name="deleted_at",
             field=models.DateTimeField(blank=True, db_index=True, null=True),
         ),
     ]

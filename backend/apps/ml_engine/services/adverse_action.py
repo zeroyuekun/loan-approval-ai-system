@@ -17,7 +17,7 @@ References:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from apps.ml_engine.services.reason_codes import generate_adverse_action_reasons
 
@@ -83,10 +83,7 @@ def generate_adverse_action_notice(
     )
 
     # Strip raw SHAP contribution values — consumer-facing only
-    principal_reasons = [
-        {"code": r["code"], "reason": r["reason"], "feature": r["feature"]}
-        for r in raw_reasons
-    ]
+    principal_reasons = [{"code": r["code"], "reason": r["reason"], "feature": r["feature"]} for r in raw_reasons]
 
     # Build applicant name from the application's user relation
     applicant_name = _get_applicant_name(application)
@@ -95,7 +92,7 @@ def generate_adverse_action_notice(
         "notice_type": "adverse_action",
         "applicant_name": applicant_name,
         "application_id": str(getattr(application, "id", "")),
-        "date": datetime.now(timezone.utc).isoformat(),
+        "date": datetime.now(UTC).isoformat(),
         "decision": "denied",
         "principal_reasons": principal_reasons,
         "model_version": str(model_version),
@@ -160,11 +157,7 @@ def generate_model_inventory_entry(model_version) -> dict:
 
     # Development date
     if created_at is not None:
-        dev_date = (
-            created_at.isoformat()
-            if hasattr(created_at, "isoformat")
-            else str(created_at)
-        )
+        dev_date = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
     else:
         dev_date = None
 
@@ -173,14 +166,10 @@ def generate_model_inventory_entry(model_version) -> dict:
     next_validation = None
     if created_at and hasattr(created_at, "replace"):
         try:
-            next_validation = created_at.replace(
-                year=created_at.year + 1
-            ).isoformat()
+            next_validation = created_at.replace(year=created_at.year + 1).isoformat()
         except ValueError:
             # Leap year edge case (Feb 29 → Feb 28)
-            next_validation = created_at.replace(
-                year=created_at.year + 1, day=28
-            ).isoformat()
+            next_validation = created_at.replace(year=created_at.year + 1, day=28).isoformat()
 
     # Performance metrics — pull from model fields
     performance_metrics = {

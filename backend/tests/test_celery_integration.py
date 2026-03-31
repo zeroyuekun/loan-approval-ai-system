@@ -5,6 +5,7 @@ worker -> result backend. They require Redis to be running (available in CI).
 
 Skipped when Redis is not available (local dev without Docker).
 """
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -22,15 +23,15 @@ class TestCeleryTaskExecution:
         from apps.ml_engine.tasks import run_prediction_task
 
         # Mock the actual prediction to avoid needing a trained model
-        with patch('apps.ml_engine.tasks.ModelPredictor') as mock_predictor:
+        with patch("apps.ml_engine.tasks.ModelPredictor") as mock_predictor:
             mock_predictor.return_value.predict.return_value = {
-                'prediction': 'approved',
-                'probability': 0.85,
-                'risk_grade': 'BB',
-                'feature_importances': {},
-                'shap_values': {},
-                'processing_time_ms': 100,
-                'model_version': 'test-v1',
+                "prediction": "approved",
+                "probability": 0.85,
+                "risk_grade": "BB",
+                "feature_importances": {},
+                "shap_values": {},
+                "processing_time_ms": 100,
+                "model_version": "test-v1",
             }
             # Use .apply() to execute synchronously but still go through
             # the full serialization path (args must be JSON-serializable)
@@ -44,7 +45,7 @@ class TestCeleryTaskExecution:
         from apps.email_engine.tasks import generate_email_task
 
         # apply() runs synchronously but exercises serialization
-        result = generate_email_task.apply(args=[999, 'approved'])
+        result = generate_email_task.apply(args=[999, "approved"])
         # Will fail on DB lookup, but serialization succeeded if we get here
         assert result is not None
 
@@ -61,7 +62,7 @@ class TestCeleryTaskExecution:
         from celery import current_app
 
         # Send a built-in ping task that always succeeds
-        result = current_app.send_task('celery.ping')
+        result = current_app.send_task("celery.ping")
         # If Redis is available, this should work
         assert result is not None
 
@@ -71,20 +72,25 @@ class TestCeleryTaskExecution:
 
         # apply() exercises full serialization; the task will fail inside
         # trainer logic but that's fine — we're testing the transport layer
-        result = train_model_task.apply(kwargs={
-            'algorithm': 'xgb',
-            'data_path': '/tmp/nonexistent.csv',
-        })
+        result = train_model_task.apply(
+            kwargs={
+                "algorithm": "xgb",
+                "data_path": "/tmp/nonexistent.csv",
+            }
+        )
         assert result is not None
 
     def test_resume_pipeline_task_serializes_correctly(self):
         """Verify resume_pipeline_task serializes its string arguments."""
         from apps.agents.tasks import resume_pipeline_task
 
-        result = resume_pipeline_task.apply(args=[999], kwargs={
-            'reviewer': 'test-officer',
-            'note': 'Approved after manual review',
-        })
+        result = resume_pipeline_task.apply(
+            args=[999],
+            kwargs={
+                "reviewer": "test-officer",
+                "note": "Approved after manual review",
+            },
+        )
         assert result is not None
 
 
@@ -96,7 +102,7 @@ class TestCeleryBrokerHealth:
         """Verify we can ping the Celery broker."""
         import redis
 
-        r = redis.Redis(host='localhost', port=6379, db=0, socket_connect_timeout=2)
+        r = redis.Redis(host="localhost", port=6379, db=0, socket_connect_timeout=2)
         assert r.ping() is True
 
     def test_celery_app_configured(self):
@@ -107,21 +113,19 @@ class TestCeleryBrokerHealth:
         registered = app.tasks.keys()
         # Check at least one of our custom tasks is registered
         expected_tasks = [
-            'apps.ml_engine.tasks.run_prediction_task',
-            'apps.email_engine.tasks.generate_email_task',
-            'apps.agents.tasks.orchestrate_pipeline_task',
+            "apps.ml_engine.tasks.run_prediction_task",
+            "apps.email_engine.tasks.generate_email_task",
+            "apps.agents.tasks.orchestrate_pipeline_task",
         ]
         for task_name in expected_tasks:
-            assert task_name in registered, (
-                f'{task_name} not found in registered tasks: {sorted(registered)}'
-            )
+            assert task_name in registered, f"{task_name} not found in registered tasks: {sorted(registered)}"
 
     def test_task_routing_configured(self):
         """Verify task routing sends tasks to the correct queues."""
         from config.celery import app
 
         routes = app.conf.task_routes
-        assert 'apps.ml_engine.tasks.*' in routes
-        assert routes['apps.ml_engine.tasks.*'] == {'queue': 'ml'}
-        assert routes['apps.email_engine.tasks.*'] == {'queue': 'email'}
-        assert routes['apps.agents.tasks.*'] == {'queue': 'agents'}
+        assert "apps.ml_engine.tasks.*" in routes
+        assert routes["apps.ml_engine.tasks.*"] == {"queue": "ml"}
+        assert routes["apps.email_engine.tasks.*"] == {"queue": "email"}
+        assert routes["apps.agents.tasks.*"] == {"queue": "agents"}

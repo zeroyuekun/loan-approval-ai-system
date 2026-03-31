@@ -24,10 +24,10 @@ class TSTRValidator:
     """Estimate real-world model performance from synthetic training metrics."""
 
     # Literature-based degradation constants
-    BASE_DEGRADATION = 0.05        # Midpoint of CTGAN 3-8% range
-    MIN_DEGRADATION = 0.01         # Floor: synthetic never matches real exactly
-    CTGAN_RANGE = (0.03, 0.08)     # Published CTGAN degradation range
-    GENERAL_RANGE = (0.05, 0.15)   # General synthetic data degradation range
+    BASE_DEGRADATION = 0.05  # Midpoint of CTGAN 3-8% range
+    MIN_DEGRADATION = 0.01  # Floor: synthetic never matches real exactly
+    CTGAN_RANGE = (0.03, 0.08)  # Published CTGAN degradation range
+    GENERAL_RANGE = (0.05, 0.15)  # General synthetic data degradation range
 
     # APRA benchmark for approval rate alignment
     APRA_APPROVAL_RATE = 0.65
@@ -43,17 +43,17 @@ class TSTRValidator:
         (5% AUC drop) modulated by observable model quality signals that
         predict larger or smaller synthetic-to-real transfer gaps.
         """
-        synthetic_auc = metrics.get('auc_roc', 0.80)
-        metadata = metrics.get('training_metadata', {})
+        synthetic_auc = metrics.get("auc_roc", 0.80)
+        metadata = metrics.get("training_metadata", {})
 
         # Extract quality signals with safe defaults
-        overfitting_gap = metadata.get('overfitting_gap', 0.0)
-        cv_auc_std = metadata.get('cv_auc_std', 0.02)
-        ece = metrics.get('ece') or metrics.get('calibration_data', {}).get('ece', 0.03)
+        overfitting_gap = metadata.get("overfitting_gap", 0.0)
+        cv_auc_std = metadata.get("cv_auc_std", 0.02)
+        ece = metrics.get("ece") or metrics.get("calibration_data", {}).get("ece", 0.03)
 
         # Temporal PSI (if available from vintage analysis)
-        temporal_psi = metrics.get('vintage_analysis', {}).get('temporal_psi', {})
-        max_psi = temporal_psi.get('max_psi') if temporal_psi else None
+        temporal_psi = metrics.get("vintage_analysis", {}).get("temporal_psi", {})
+        max_psi = temporal_psi.get("max_psi") if temporal_psi else None
 
         # Compute penalty adjustments
         overfitting_penalty = max(0, (overfitting_gap - 0.03)) * 0.5
@@ -69,31 +69,31 @@ class TSTRValidator:
         estimated_real_auc = max(0.50, min(synthetic_auc - self.MIN_DEGRADATION, estimated_real_auc))
 
         return {
-            'synthetic_auc': round(synthetic_auc, 4),
-            'estimated_real_auc': round(estimated_real_auc, 4),
-            'estimated_range': [
+            "synthetic_auc": round(synthetic_auc, 4),
+            "estimated_real_auc": round(estimated_real_auc, 4),
+            "estimated_range": [
                 round(max(0.50, estimated_real_auc - self.CI_LOW_OFFSET), 4),
                 round(min(synthetic_auc - 0.005, estimated_real_auc + self.CI_HIGH_OFFSET), 4),
             ],
-            'total_degradation': round(total_degradation, 4),
-            'degradation_breakdown': {
-                'base': self.BASE_DEGRADATION,
-                'overfitting_penalty': round(overfitting_penalty, 4),
-                'cv_instability_penalty': round(cv_penalty, 4),
-                'calibration_penalty': round(calibration_penalty, 4),
-                'temporal_bonus': round(temporal_bonus, 4),
+            "total_degradation": round(total_degradation, 4),
+            "degradation_breakdown": {
+                "base": self.BASE_DEGRADATION,
+                "overfitting_penalty": round(overfitting_penalty, 4),
+                "cv_instability_penalty": round(cv_penalty, 4),
+                "calibration_penalty": round(calibration_penalty, 4),
+                "temporal_bonus": round(temporal_bonus, 4),
             },
-            'methodology': (
-                'Literature-based TSTR degradation model: 5% base AUC drop '
-                '(Xu et al. 2019, CTGAN) with penalties for overfitting, '
-                'CV instability, and poor calibration. Temporal PSI stability '
-                'provides a small bonus when score distributions are stable '
-                'across origination vintages.'
+            "methodology": (
+                "Literature-based TSTR degradation model: 5% base AUC drop "
+                "(Xu et al. 2019, CTGAN) with penalties for overfitting, "
+                "CV instability, and poor calibration. Temporal PSI stability "
+                "provides a small bonus when score distributions are stable "
+                "across origination vintages."
             ),
-            'references': [
-                'Xu et al. (2019), Modeling Tabular Data using Conditional GAN',
-                'Jordon et al. (2022), Synthetic Data — What, Why and How?',
-                'Assefa et al. (2020), Generating Synthetic Data in Finance',
+            "references": [
+                "Xu et al. (2019), Modeling Tabular Data using Conditional GAN",
+                "Jordon et al. (2022), Synthetic Data — What, Why and How?",
+                "Assefa et al. (2020), Generating Synthetic Data in Finance",
             ],
         }
 
@@ -104,46 +104,46 @@ class TSTRValidator:
         to a 0-1 range. Optional sub-scores are omitted if data is
         unavailable (average uses only available components).
         """
-        metadata = metrics.get('training_metadata', {})
+        metadata = metrics.get("training_metadata", {})
 
         sub_scores = {}
         available = []
 
         # 1. CV stability (cv_auc_std < 0.01 is excellent)
-        cv_std = metadata.get('cv_auc_std')
+        cv_std = metadata.get("cv_auc_std")
         if cv_std is not None:
-            sub_scores['cv_stability'] = round(max(0.0, 1.0 - cv_std / 0.05), 4)
-            available.append(sub_scores['cv_stability'])
+            sub_scores["cv_stability"] = round(max(0.0, 1.0 - cv_std / 0.05), 4)
+            available.append(sub_scores["cv_stability"])
 
         # 2. Overfitting (gap < 0.02 is excellent)
-        gap = metadata.get('overfitting_gap')
+        gap = metadata.get("overfitting_gap")
         if gap is not None:
-            sub_scores['overfitting'] = round(max(0.0, 1.0 - gap / 0.10), 4)
-            available.append(sub_scores['overfitting'])
+            sub_scores["overfitting"] = round(max(0.0, 1.0 - gap / 0.10), 4)
+            available.append(sub_scores["overfitting"])
 
         # 3. Calibration (ECE < 0.02 is excellent)
-        ece = metrics.get('ece') or metrics.get('calibration_data', {}).get('ece')
+        ece = metrics.get("ece") or metrics.get("calibration_data", {}).get("ece")
         if ece is not None:
-            sub_scores['calibration'] = round(max(0.0, 1.0 - ece / 0.10), 4)
-            available.append(sub_scores['calibration'])
+            sub_scores["calibration"] = round(max(0.0, 1.0 - ece / 0.10), 4)
+            available.append(sub_scores["calibration"])
 
         # 4. Temporal PSI stability (optional — requires vintage analysis)
-        temporal_psi = metrics.get('vintage_analysis', {}).get('temporal_psi', {})
-        max_psi = temporal_psi.get('max_psi') if temporal_psi else None
+        temporal_psi = metrics.get("vintage_analysis", {}).get("temporal_psi", {})
+        max_psi = temporal_psi.get("max_psi") if temporal_psi else None
         if max_psi is not None:
-            sub_scores['temporal_stability'] = round(max(0.0, 1.0 - max_psi / 0.25), 4)
-            available.append(sub_scores['temporal_stability'])
+            sub_scores["temporal_stability"] = round(max(0.0, 1.0 - max_psi / 0.25), 4)
+            available.append(sub_scores["temporal_stability"])
         else:
-            sub_scores['temporal_stability'] = None
+            sub_scores["temporal_stability"] = None
 
         # 5. Benchmark alignment (optional — approval rate vs APRA 65%)
-        class_balance = metadata.get('class_balance')
+        class_balance = metadata.get("class_balance")
         if class_balance is not None:
             alignment = max(0.0, 1.0 - abs(class_balance - self.APRA_APPROVAL_RATE) / 0.15)
-            sub_scores['benchmark_alignment'] = round(alignment, 4)
-            available.append(sub_scores['benchmark_alignment'])
+            sub_scores["benchmark_alignment"] = round(alignment, 4)
+            available.append(sub_scores["benchmark_alignment"])
         else:
-            sub_scores['benchmark_alignment'] = None
+            sub_scores["benchmark_alignment"] = None
 
         # Compute overall score
         if available:
@@ -152,21 +152,21 @@ class TSTRValidator:
             overall = 0.5  # Unknown — neutral default
 
         if overall >= 0.80:
-            interpretation = 'high'
+            interpretation = "high"
         elif overall >= 0.60:
-            interpretation = 'moderate'
+            interpretation = "moderate"
         else:
-            interpretation = 'low'
+            interpretation = "low"
 
         return {
-            'overall_score': overall,
-            'interpretation': interpretation,
-            'sub_scores': sub_scores,
-            'n_components': len(available),
-            'methodology': (
-                'Composite of up to 5 quality signals: CV stability, '
-                'overfitting gap, calibration error, temporal PSI, '
-                'and benchmark alignment. Each mapped to 0-1 and averaged.'
+            "overall_score": overall,
+            "interpretation": interpretation,
+            "sub_scores": sub_scores,
+            "n_components": len(available),
+            "methodology": (
+                "Composite of up to 5 quality signals: CV stability, "
+                "overfitting gap, calibration error, temporal PSI, "
+                "and benchmark alignment. Each mapped to 0-1 and averaged."
             ),
         }
 
@@ -184,7 +184,7 @@ class TSTRValidator:
         )
 
         return {
-            'estimated_real_world_auc': real_auc,
-            'synthetic_confidence': confidence,
-            'summary': summary,
+            "estimated_real_world_auc": real_auc,
+            "synthetic_confidence": confidence,
+            "summary": summary,
         }

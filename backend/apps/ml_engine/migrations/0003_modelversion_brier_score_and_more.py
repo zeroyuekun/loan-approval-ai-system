@@ -4,65 +4,64 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('ml_engine', '0002_modelversion_file_hash'),
+        ("ml_engine", "0002_modelversion_file_hash"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='modelversion',
-            name='brier_score',
+            model_name="modelversion",
+            name="brier_score",
             field=models.FloatField(null=True),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='calibration_data',
+            model_name="modelversion",
+            name="calibration_data",
             field=models.JSONField(default=dict),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='decile_analysis',
+            model_name="modelversion",
+            name="decile_analysis",
             field=models.JSONField(default=dict),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='ece',
+            model_name="modelversion",
+            name="ece",
             field=models.FloatField(null=True),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='fairness_metrics',
+            model_name="modelversion",
+            name="fairness_metrics",
             field=models.JSONField(default=dict),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='gini_coefficient',
+            model_name="modelversion",
+            name="gini_coefficient",
             field=models.FloatField(null=True),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='ks_statistic',
+            model_name="modelversion",
+            name="ks_statistic",
             field=models.FloatField(null=True),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='log_loss_value',
+            model_name="modelversion",
+            name="log_loss_value",
             field=models.FloatField(null=True),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='optimal_threshold',
+            model_name="modelversion",
+            name="optimal_threshold",
             field=models.FloatField(null=True),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='threshold_analysis',
+            model_name="modelversion",
+            name="threshold_analysis",
             field=models.JSONField(default=dict),
         ),
         migrations.AddField(
-            model_name='modelversion',
-            name='training_metadata',
+            model_name="modelversion",
+            name="training_metadata",
             field=models.JSONField(default=dict),
         ),
     ]

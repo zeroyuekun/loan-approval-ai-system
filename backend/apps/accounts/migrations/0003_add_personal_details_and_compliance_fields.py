@@ -4,85 +4,121 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('accounts', '0002_add_customer_profile'),
+        ("accounts", "0002_add_customer_profile"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='customerprofile',
-            name='address_line_1',
+            model_name="customerprofile",
+            name="address_line_1",
             field=models.CharField(blank=True, max_length=255),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='address_line_2',
+            model_name="customerprofile",
+            name="address_line_2",
             field=models.CharField(blank=True, max_length=255),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='date_of_birth',
+            model_name="customerprofile",
+            name="date_of_birth",
             field=models.DateField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='is_politically_exposed',
-            field=models.BooleanField(default=False, help_text='PEP status under AML/CTF rules'),
+            model_name="customerprofile",
+            name="is_politically_exposed",
+            field=models.BooleanField(default=False, help_text="PEP status under AML/CTF rules"),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='marital_status',
-            field=models.CharField(blank=True, choices=[('single', 'Single'), ('married', 'Married'), ('de_facto', 'De Facto'), ('divorced', 'Divorced'), ('widowed', 'Widowed')], max_length=20),
+            model_name="customerprofile",
+            name="marital_status",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("single", "Single"),
+                    ("married", "Married"),
+                    ("de_facto", "De Facto"),
+                    ("divorced", "Divorced"),
+                    ("widowed", "Widowed"),
+                ],
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='phone',
-            field=models.CharField(blank=True, help_text='Australian mobile or landline', max_length=20),
+            model_name="customerprofile",
+            name="phone",
+            field=models.CharField(blank=True, help_text="Australian mobile or landline", max_length=20),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='postcode',
+            model_name="customerprofile",
+            name="postcode",
             field=models.CharField(blank=True, max_length=10),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='primary_id_number',
-            field=models.CharField(blank=True, help_text='Encrypted at rest', max_length=50),
+            model_name="customerprofile",
+            name="primary_id_number",
+            field=models.CharField(blank=True, help_text="Encrypted at rest", max_length=50),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='primary_id_type',
-            field=models.CharField(blank=True, choices=[('drivers_licence', "Driver's Licence"), ('passport', 'Australian Passport'), ('medicare', 'Medicare Card'), ('immicard', 'ImmiCard')], max_length=20),
+            model_name="customerprofile",
+            name="primary_id_type",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("drivers_licence", "Driver's Licence"),
+                    ("passport", "Australian Passport"),
+                    ("medicare", "Medicare Card"),
+                    ("immicard", "ImmiCard"),
+                ],
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='residency_status',
-            field=models.CharField(blank=True, choices=[('citizen', 'Australian Citizen'), ('permanent_resident', 'Permanent Resident'), ('temporary_visa', 'Temporary Visa Holder'), ('nz_citizen', 'New Zealand Citizen')], max_length=20),
+            model_name="customerprofile",
+            name="residency_status",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("citizen", "Australian Citizen"),
+                    ("permanent_resident", "Permanent Resident"),
+                    ("temporary_visa", "Temporary Visa Holder"),
+                    ("nz_citizen", "New Zealand Citizen"),
+                ],
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='secondary_id_number',
+            model_name="customerprofile",
+            name="secondary_id_number",
             field=models.CharField(blank=True, max_length=50),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='secondary_id_type',
-            field=models.CharField(blank=True, choices=[('drivers_licence', "Driver's Licence"), ('passport', 'Australian Passport'), ('medicare', 'Medicare Card'), ('immicard', 'ImmiCard')], max_length=20),
+            model_name="customerprofile",
+            name="secondary_id_type",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("drivers_licence", "Driver's Licence"),
+                    ("passport", "Australian Passport"),
+                    ("medicare", "Medicare Card"),
+                    ("immicard", "ImmiCard"),
+                ],
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='state',
-            field=models.CharField(blank=True, help_text='e.g. NSW, VIC, QLD', max_length=3),
+            model_name="customerprofile",
+            name="state",
+            field=models.CharField(blank=True, help_text="e.g. NSW, VIC, QLD", max_length=3),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='suburb',
+            model_name="customerprofile",
+            name="suburb",
             field=models.CharField(blank=True, max_length=100),
         ),
         migrations.AddField(
-            model_name='customerprofile',
-            name='tax_file_number_provided',
-            field=models.BooleanField(default=False, help_text='TFN declaration lodged (not stored)'),
+            model_name="customerprofile",
+            name="tax_file_number_provided",
+            field=models.BooleanField(default=False, help_text="TFN declaration lodged (not stored)"),
         ),
     ]

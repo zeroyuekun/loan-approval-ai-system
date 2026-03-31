@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('ml_engine', '0001_initial'),
+        ("ml_engine", "0001_initial"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='modelversion',
-            name='file_hash',
-            field=models.CharField(blank=True, help_text='SHA-256 hash for integrity verification', max_length=64),
+            model_name="modelversion",
+            name="file_hash",
+            field=models.CharField(blank=True, help_text="SHA-256 hash for integrity verification", max_length=64),
         ),
     ]

@@ -9,7 +9,7 @@ from django.db import migrations
 
 def encrypt_existing_pii(apps, schema_editor):
     """Encrypt plaintext primary_id_number and secondary_id_number values."""
-    from apps.accounts.utils.encryption import get_fernet, decrypt_field
+    from apps.accounts.utils.encryption import get_fernet
 
     try:
         f = get_fernet()
@@ -17,12 +17,12 @@ def encrypt_existing_pii(apps, schema_editor):
         # No encryption key configured (dev mode) — skip migration
         return
 
-    CustomerProfile = apps.get_model('accounts', 'CustomerProfile')
+    CustomerProfile = apps.get_model("accounts", "CustomerProfile")
     db_alias = schema_editor.connection.alias
 
     for profile in CustomerProfile.objects.using(db_alias).all().iterator(chunk_size=200):
         changed = False
-        for field_name in ('primary_id_number', 'secondary_id_number'):
+        for field_name in ("primary_id_number", "secondary_id_number"):
             raw_value = getattr(profile, field_name, None)
             if not raw_value or not raw_value.strip():
                 continue
@@ -39,7 +39,7 @@ def encrypt_existing_pii(apps, schema_editor):
                 changed = True
 
         if changed:
-            profile.save(update_fields=['primary_id_number', 'secondary_id_number'])
+            profile.save(update_fields=["primary_id_number", "secondary_id_number"])
 
 
 def decrypt_existing_pii(apps, schema_editor):
@@ -51,12 +51,12 @@ def decrypt_existing_pii(apps, schema_editor):
     except ValueError:
         return
 
-    CustomerProfile = apps.get_model('accounts', 'CustomerProfile')
+    CustomerProfile = apps.get_model("accounts", "CustomerProfile")
     db_alias = schema_editor.connection.alias
 
     for profile in CustomerProfile.objects.using(db_alias).all().iterator(chunk_size=200):
         changed = False
-        for field_name in ('primary_id_number', 'secondary_id_number'):
+        for field_name in ("primary_id_number", "secondary_id_number"):
             raw_value = getattr(profile, field_name, None)
             if not raw_value or not raw_value.strip():
                 continue
@@ -65,18 +65,17 @@ def decrypt_existing_pii(apps, schema_editor):
                 decrypted = f.decrypt(raw_value.encode()).decode()
                 setattr(profile, field_name, decrypted)
                 changed = True
-            except Exception:
+            except Exception:  # noqa: S112
                 # Already plaintext
                 continue
 
         if changed:
-            profile.save(update_fields=['primary_id_number', 'secondary_id_number'])
+            profile.save(update_fields=["primary_id_number", "secondary_id_number"])
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('accounts', '0006_customerprofile_data_sharing_consent_and_more'),
+        ("accounts", "0006_customerprofile_data_sharing_consent_and_more"),
     ]
 
     operations = [

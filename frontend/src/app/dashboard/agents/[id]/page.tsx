@@ -59,7 +59,7 @@ function RunCard({ run }: { run: AgentRun }) {
           <div className="flex items-center gap-2">
             {run.total_input_tokens != null && run.total_output_tokens != null && (
               <span className="text-xs text-muted-foreground tabular-nums">
-                {((run.total_input_tokens + run.total_output_tokens) as number).toLocaleString()} tokens
+                {((run.total_input_tokens ?? 0) + (run.total_output_tokens ?? 0)).toLocaleString()} tokens
               </span>
             )}
             <Badge className={getStatusColor(run.status)} variant="outline">

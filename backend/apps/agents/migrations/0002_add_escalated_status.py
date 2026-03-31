@@ -4,15 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('agents', '0001_initial'),
+        ("agents", "0001_initial"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='agentrun',
-            name='status',
-            field=models.CharField(choices=[('pending', 'Pending'), ('running', 'Running'), ('completed', 'Completed'), ('failed', 'Failed'), ('escalated', 'Escalated to Human')], default='pending', max_length=20),
+            model_name="agentrun",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("pending", "Pending"),
+                    ("running", "Running"),
+                    ("completed", "Completed"),
+                    ("failed", "Failed"),
+                    ("escalated", "Escalated to Human"),
+                ],
+                default="pending",
+                max_length=20,
+            ),
         ),
     ]

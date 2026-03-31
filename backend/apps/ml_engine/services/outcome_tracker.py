@@ -7,13 +7,14 @@ References:
     - SR 11-7: federalreserve.gov/supervisionreg/srletters/sr1107.htm
     - APRA CPG 235: data integrity and model performance monitoring
 """
+
 import logging
 from collections import defaultdict
 
 from django.db.models import Count, Q
 from django.db.models.functions import TruncMonth
 
-from apps.loans.models import LoanApplication, LoanDecision
+from apps.loans.models import LoanApplication
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,10 @@ def compute_outcome_analysis(days=90):
     - outcome_breakdown: dict mapping outcome type -> count
     """
     # Fetch applications that have both a decision and an actual outcome
-    apps = (
-        LoanApplication.objects.filter(
-            actual_outcome__isnull=False,
-            decision__isnull=False,
-        )
-        .select_related("decision")
-    )
+    apps = LoanApplication.objects.filter(
+        actual_outcome__isnull=False,
+        decision__isnull=False,
+    ).select_related("decision")
 
     total = apps.count()
 
@@ -98,9 +96,7 @@ def compute_outcome_analysis(days=90):
     accuracy_by_risk_grade = {}
     for grade in grade_total:
         g_total = grade_total[grade]
-        accuracy_by_risk_grade[grade] = (
-            grade_correct[grade] / g_total if g_total else 0.0
-        )
+        accuracy_by_risk_grade[grade] = grade_correct[grade] / g_total if g_total else 0.0
 
     return {
         "total_with_outcomes": total,

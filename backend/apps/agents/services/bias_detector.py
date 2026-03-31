@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 
 import anthropic
 import httpx
@@ -9,17 +8,17 @@ from django.conf import settings as django_settings
 
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
-from .api_budget import BudgetExhausted, guarded_api_call
+from .api_budget import guarded_api_call
 from .deterministic_prescreen import DeterministicBiasPreScreen
 
-logger = logging.getLogger('agents.bias_detector')
+logger = logging.getLogger("agents.bias_detector")
 
 
 def _parse_json_response(response_text, fallback):
     """Extract JSON from a response, returning fallback on failure."""
     try:
-        json_start = response_text.find('{')
-        json_end = response_text.rfind('}') + 1
+        json_start = response_text.find("{")
+        json_end = response_text.rfind("}") + 1
         return json.loads(response_text[json_start:json_end])
     except (json.JSONDecodeError, ValueError):
         return fallback
@@ -28,10 +27,10 @@ def _parse_json_response(response_text, fallback):
 def _extract_tool_result(response, fallback):
     """Extract structured result from tool_use response, with fallback."""
     try:
-        tool_block = next(b for b in response.content if b.type == 'tool_use')
+        tool_block = next(b for b in response.content if b.type == "tool_use")
         return tool_block.input
     except (StopIteration, AttributeError):
-        text_block = next((b for b in response.content if b.type == 'text'), None)
+        text_block = next((b for b in response.content if b.type == "text"), None)
         if text_block:
             return _parse_json_response(text_block.text, fallback)
         return fallback
@@ -42,74 +41,81 @@ def _extract_tool_result(response, fallback):
 # ---------------------------------------------------------------------------
 
 BIAS_ANALYSIS_TOOL = {
-    'name': 'record_bias_analysis',
-    'description': 'Record the bias analysis results for this email.',
-    'input_schema': {
-        'type': 'object',
-        'properties': {
-            'score': {'type': 'integer', 'minimum': 0, 'maximum': 100},
-            'categories': {
-                'type': 'array',
-                'items': {
-                    'type': 'string',
-                    'enum': ['gender', 'race', 'age', 'religion', 'disability', 'marital_status'],
+    "name": "record_bias_analysis",
+    "description": "Record the bias analysis results for this email.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "score": {"type": "integer", "minimum": 0, "maximum": 100},
+            "categories": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["gender", "race", "age", "religion", "disability", "marital_status"],
                 },
             },
-            'analysis': {'type': 'string'},
+            "analysis": {"type": "string"},
         },
-        'required': ['score', 'categories', 'analysis'],
+        "required": ["score", "categories", "analysis"],
     },
 }
 
 EMAIL_REVIEW_TOOL = {
-    'name': 'record_review_decision',
-    'description': 'Record the senior compliance review decision.',
-    'input_schema': {
-        'type': 'object',
-        'properties': {
-            'approved': {'type': 'boolean'},
-            'confidence': {'type': 'number', 'minimum': 0.0, 'maximum': 1.0},
-            'reasoning': {'type': 'string'},
+    "name": "record_review_decision",
+    "description": "Record the senior compliance review decision.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "approved": {"type": "boolean"},
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "reasoning": {"type": "string"},
         },
-        'required': ['approved', 'confidence', 'reasoning'],
+        "required": ["approved", "confidence", "reasoning"],
     },
 }
 
 MARKETING_BIAS_TOOL = {
-    'name': 'record_marketing_bias_analysis',
-    'description': 'Record the marketing email bias analysis results.',
-    'input_schema': {
-        'type': 'object',
-        'properties': {
-            'score': {'type': 'integer', 'minimum': 0, 'maximum': 100},
-            'categories': {
-                'type': 'array',
-                'items': {
-                    'type': 'string',
-                    'enum': [
-                        'patronising_tone', 'pressure_tactics',
-                        'discriminatory_product_steering', 'false_promises',
-                        'gender', 'race', 'age', 'religion', 'disability', 'marital_status',
+    "name": "record_marketing_bias_analysis",
+    "description": "Record the marketing email bias analysis results.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "score": {"type": "integer", "minimum": 0, "maximum": 100},
+            "categories": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "patronising_tone",
+                        "pressure_tactics",
+                        "discriminatory_product_steering",
+                        "false_promises",
+                        "gender",
+                        "race",
+                        "age",
+                        "religion",
+                        "disability",
+                        "marital_status",
                     ],
                 },
             },
-            'analysis': {'type': 'string'},
+            "analysis": {"type": "string"},
         },
-        'required': ['score', 'categories', 'analysis'],
+        "required": ["score", "categories", "analysis"],
     },
 }
 
 MARKETING_REVIEW_TOOL = {
-    'name': 'record_marketing_review_decision',
-    'description': 'Record the senior compliance review decision for marketing email.',
-    'input_schema': {
-        'type': 'object',
-        'properties': {
-            'approved': {'type': 'boolean'},
-            'confidence': {'type': 'number', 'minimum': 0.0, 'maximum': 1.0},
-            'reasoning': {'type': 'string'},
+    "name": "record_marketing_review_decision",
+    "description": "Record the senior compliance review decision for marketing email.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "approved": {"type": "boolean"},
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "reasoning": {"type": "string"},
         },
-        'required': ['approved', 'confidence', 'reasoning'],
+        "required": ["approved", "confidence", "reasoning"],
     },
 }
 
@@ -117,6 +123,7 @@ MARKETING_REVIEW_TOOL = {
 # ---------------------------------------------------------------------------
 # Agent 1: Compliance Analyst — first-pass bias detection on decision emails
 # ---------------------------------------------------------------------------
+
 
 class BiasDetector:
     """Junior compliance analyst that screens loan decision emails for bias.
@@ -129,10 +136,10 @@ class BiasDetector:
     "it's probably fine."
     """
 
-    BIAS_CATEGORIES = ['gender', 'race', 'age', 'religion', 'disability', 'marital_status']
+    BIAS_CATEGORIES = ["gender", "race", "age", "religion", "disability", "marital_status"]
 
     def __init__(self):
-        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if api_key:
             self.client = anthropic.Anthropic(
                 api_key=api_key,
@@ -162,56 +169,56 @@ class BiasDetector:
         as a secondary layer only where deterministic rules are insufficient.
         """
         prescreen = self.prescreener.prescreen_decision_email(email_text, application_context)
-        det_score = prescreen['deterministic_score']
+        det_score = prescreen["deterministic_score"]
 
-        bias_threshold_pass = getattr(django_settings, 'BIAS_THRESHOLD_PASS', 30)
-        bias_threshold_review = getattr(django_settings, 'BIAS_THRESHOLD_REVIEW', 60)
+        bias_threshold_pass = getattr(django_settings, "BIAS_THRESHOLD_PASS", 30)
+        bias_threshold_review = getattr(django_settings, "BIAS_THRESHOLD_REVIEW", 60)
 
         # ── Clean email: all deterministic checks passed ──
         # Real banks don't ask a second reviewer to "score" a clean email.
         # If the compliance checklist passes, the email ships.
-        if prescreen['all_clean']:
-            logger.info('Bias pre-screen: all checks passed, deterministic_score=%d — email compliant', det_score)
+        if prescreen["all_clean"]:
+            logger.info("Bias pre-screen: all checks passed, deterministic_score=%d — email compliant", det_score)
             return {
-                'score': det_score,
-                'deterministic_score': det_score,
-                'llm_raw_score': None,
-                'score_source': 'deterministic',
-                'categories': [],
-                'analysis': 'All deterministic compliance checks passed. No bias detected.',
-                'flagged': False,
-                'requires_human_review': False,
+                "score": det_score,
+                "deterministic_score": det_score,
+                "llm_raw_score": None,
+                "score_source": "deterministic",
+                "categories": [],
+                "analysis": "All deterministic compliance checks passed. No bias detected.",
+                "flagged": False,
+                "requires_human_review": False,
             }
 
         # ── Severe violation: prohibited language or multiple failures ──
         # Clear compliance breach — no need for LLM interpretation.
         if det_score > bias_threshold_review:
-            logger.warning('Bias pre-screen: severe violation, deterministic_score=%d — blocking', det_score)
+            logger.warning("Bias pre-screen: severe violation, deterministic_score=%d — blocking", det_score)
             return {
-                'score': det_score,
-                'deterministic_score': det_score,
-                'llm_raw_score': None,
-                'score_source': 'deterministic',
-                'categories': [f['check_name'] for f in prescreen['findings']],
-                'analysis': '; '.join(f['details'] for f in prescreen['findings']),
-                'flagged': True,
-                'requires_human_review': True,
+                "score": det_score,
+                "deterministic_score": det_score,
+                "llm_raw_score": None,
+                "score_source": "deterministic",
+                "categories": [f["check_name"] for f in prescreen["findings"]],
+                "analysis": "; ".join(f["details"] for f in prescreen["findings"]),
+                "flagged": True,
+                "requires_human_review": True,
             }
 
         # ── Minor findings (e.g., AI giveaway language, tone) ──
         # Score is low-to-moderate. These are style issues, not bias.
         # Real banks handle these by regenerating the email, not escalating.
         if det_score <= bias_threshold_pass:
-            logger.info('Bias pre-screen: minor findings only, deterministic_score=%d — compliant', det_score)
+            logger.info("Bias pre-screen: minor findings only, deterministic_score=%d — compliant", det_score)
             return {
-                'score': det_score,
-                'deterministic_score': det_score,
-                'llm_raw_score': None,
-                'score_source': 'deterministic',
-                'categories': [f['check_name'] for f in prescreen['findings']],
-                'analysis': '; '.join(f['details'] for f in prescreen['findings']),
-                'flagged': False,
-                'requires_human_review': False,
+                "score": det_score,
+                "deterministic_score": det_score,
+                "llm_raw_score": None,
+                "score_source": "deterministic",
+                "categories": [f["check_name"] for f in prescreen["findings"]],
+                "analysis": "; ".join(f["details"] for f in prescreen["findings"]),
+                "flagged": False,
+                "requires_human_review": False,
             }
 
         # ── Moderate findings: deterministic flagged something ambiguous ──
@@ -220,12 +227,14 @@ class BiasDetector:
         # (e.g., prohibited term appearing in a legal disclosure context).
         # The junior analyst's mandate is NARROW: classify each flag, nothing more.
         # Finding new issues is the senior reviewer's job (Layer 3).
-        logger.info('Bias pre-screen: moderate findings, deterministic_score=%d — invoking LLM for interpretation', det_score)
+        logger.info(
+            "Bias pre-screen: moderate findings, deterministic_score=%d — invoking LLM for interpretation", det_score
+        )
 
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
-        sanitized_purpose = _sanitize_prompt_input(str(application_context.get('purpose', 'N/A')), max_length=200)
-        sanitized_decision = _sanitize_prompt_input(str(application_context.get('decision', 'N/A')), max_length=20)
-        prescreen_summary = self._format_prescreen_results(prescreen)
+        sanitized_purpose = _sanitize_prompt_input(str(application_context.get("purpose", "N/A")), max_length=200)
+        sanitized_decision = _sanitize_prompt_input(str(application_context.get("decision", "N/A")), max_length=20)
+        self._format_prescreen_results(prescreen)
         flag_detail = self._format_flag_detail(prescreen)
 
         prompt = f"""You are a compliance analyst at an Australian bank called AussieLoanAI. You have been on the team for two years. You follow the checklist. You do not editorialize.
@@ -238,7 +247,7 @@ Your deterministic compliance system flagged specific issues in a loan decision 
 <user_content>{sanitized_email}</user_content>
 
 === APPLICATION CONTEXT ===
-- Loan Amount: ${application_context.get('loan_amount', 'N/A')}
+- Loan Amount: ${application_context.get("loan_amount", "N/A")}
 - Purpose: {sanitized_purpose}
 - Decision: {sanitized_decision}
 
@@ -264,63 +273,75 @@ DO NOT look for issues beyond what was flagged. Stay in your lane. If a flag is 
 Use the record_bias_analysis tool to submit your findings. In the analysis field, address each flag individually."""
 
         fallback = {
-            'score': det_score,
-            'categories': [f['check_name'] for f in prescreen['findings']],
-            'analysis': 'LLM interpretation unavailable — using deterministic score.',
+            "score": det_score,
+            "categories": [f["check_name"] for f in prescreen["findings"]],
+            "analysis": "LLM interpretation unavailable — using deterministic score.",
         }
 
         result = fallback
         for attempt in range(3):
             try:
-                response = guarded_api_call(self.client,
-                    model='claude-sonnet-4-20250514',
+                response = guarded_api_call(
+                    self.client,
+                    model="claude-sonnet-4-20250514",
                     max_tokens=1024,
-                    temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
-                    messages=[{'role': 'user', 'content': prompt}],
+                    temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
+                    messages=[{"role": "user", "content": prompt}],
                     tools=[BIAS_ANALYSIS_TOOL],
-                    tool_choice={'type': 'tool', 'name': 'record_bias_analysis'},
+                    tool_choice={"type": "tool", "name": "record_bias_analysis"},
                 )
                 result = _extract_tool_result(response, fallback)
                 break
             except anthropic.AuthenticationError as e:
-                logger.error('LLM bias interpretation auth error (not retryable): %s', e)
+                logger.error("LLM bias interpretation auth error (not retryable): %s", e)
                 result = fallback
                 break
             except anthropic.RateLimitError as e:
-                logger.warning('LLM bias interpretation attempt %d rate limited: %s', attempt + 1, e)
+                logger.warning("LLM bias interpretation attempt %d rate limited: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
+
                     _time.sleep(2 ** (attempt + 1))  # longer backoff for rate limits
                 else:
-                    logger.error('LLM bias interpretation failed after 3 attempts (rate limit) — falling back to deterministic')
+                    logger.error(
+                        "LLM bias interpretation failed after 3 attempts (rate limit) — falling back to deterministic"
+                    )
                     result = fallback
             except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
-                logger.warning('LLM bias interpretation attempt %d failed: %s', attempt + 1, e)
+                logger.warning("LLM bias interpretation attempt %d failed: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
-                    _time.sleep(2 ** attempt)
+
+                    _time.sleep(2**attempt)
                 else:
-                    logger.error('LLM bias interpretation failed after 3 attempts — falling back to deterministic')
+                    logger.error("LLM bias interpretation failed after 3 attempts — falling back to deterministic")
                     result = fallback
             except anthropic.APIStatusError as e:
                 if e.status_code >= 500:
-                    logger.warning('LLM bias interpretation attempt %d server error (%d): %s', attempt + 1, e.status_code, e)
+                    logger.warning(
+                        "LLM bias interpretation attempt %d server error (%d): %s", attempt + 1, e.status_code, e
+                    )
                     if attempt < 2:
                         import time as _time
-                        _time.sleep(2 ** attempt)
+
+                        _time.sleep(2**attempt)
                     else:
-                        logger.error('LLM bias interpretation failed after 3 attempts (server error) — falling back to deterministic')
+                        logger.error(
+                            "LLM bias interpretation failed after 3 attempts (server error) — falling back to deterministic"
+                        )
                         result = fallback
                 else:
-                    logger.error('LLM bias interpretation client error (%d, not retryable): %s', e.status_code, e)
+                    logger.error("LLM bias interpretation client error (%d, not retryable): %s", e.status_code, e)
                     result = fallback
                     break
             except Exception as e:
-                logger.critical('LLM bias interpretation UNEXPECTED failure attempt %d: %s', attempt + 1, e, exc_info=True)
+                logger.critical(
+                    "LLM bias interpretation UNEXPECTED failure attempt %d: %s", attempt + 1, e, exc_info=True
+                )
                 result = fallback
                 break
 
-        llm_raw_score = result.get('score', det_score)
+        llm_raw_score = result.get("score", det_score)
 
         # Final score: deterministic is the anchor, LLM adjusts.
         # Deterministic weighted higher (60%) due to LLM agreeableness bias (TNR < 25%, ACL 2025)
@@ -332,47 +353,48 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             final_score = int(det_score * 0.6 + llm_raw_score * 0.4)
 
         return {
-            'score': final_score,
-            'deterministic_score': det_score,
-            'llm_raw_score': llm_raw_score,
-            'score_source': 'deterministic_weighted' if llm_raw_score > 30 else 'llm_false_positive',
-            'categories': result.get('categories', []),
-            'analysis': result.get('analysis', ''),
-            'flagged': final_score > bias_threshold_pass,
-            'requires_human_review': bias_threshold_pass < final_score <= bias_threshold_review,
+            "score": final_score,
+            "deterministic_score": det_score,
+            "llm_raw_score": llm_raw_score,
+            "score_source": "deterministic_weighted" if llm_raw_score > 30 else "llm_false_positive",
+            "categories": result.get("categories", []),
+            "analysis": result.get("analysis", ""),
+            "flagged": final_score > bias_threshold_pass,
+            "requires_human_review": bias_threshold_pass < final_score <= bias_threshold_review,
         }
 
     def _format_prescreen_results(self, prescreen):
         """Format pre-screen results summary for injection into the LLM prompt."""
         lines = []
         checks = {
-            'prohibited_language': 'Prohibited language',
-            'tone_check': 'Tone',
-            'professional_financial_language': 'Professional language',
-            'ai_giveaway_language': 'AI giveaway language',
+            "prohibited_language": "Prohibited language",
+            "tone_check": "Tone",
+            "professional_financial_language": "Professional language",
+            "ai_giveaway_language": "AI giveaway language",
         }
-        triggered_names = {f['check_name'] for f in prescreen['findings']}
+        triggered_names = {f["check_name"] for f in prescreen["findings"]}
         for check_name, label in checks.items():
-            status = 'FAILED' if check_name in triggered_names else 'PASSED'
-            lines.append(f'- {label}: {status}')
+            status = "FAILED" if check_name in triggered_names else "PASSED"
+            lines.append(f"- {label}: {status}")
         lines.append(f"- Pre-screen score: {prescreen['deterministic_score']}/100")
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def _format_flag_detail(self, prescreen):
         """Format each individual flag with its details for the junior analyst."""
-        if not prescreen['findings']:
-            return 'No flags to classify.'
+        if not prescreen["findings"]:
+            return "No flags to classify."
         lines = []
-        for i, finding in enumerate(prescreen['findings'], 1):
-            check_name = finding.get('check_name', 'unknown')
-            sanitized_finding = _sanitize_prompt_input(str(finding.get('details', 'No details')), max_length=500)
+        for i, finding in enumerate(prescreen["findings"], 1):
+            check_name = finding.get("check_name", "unknown")
+            sanitized_finding = _sanitize_prompt_input(str(finding.get("details", "No details")), max_length=500)
             lines.append(f"Flag {i}: [{check_name}] {sanitized_finding}")
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
 # Agent 2: Head of Compliance — senior review using a tougher model (Opus)
 # ---------------------------------------------------------------------------
+
 
 class AIEmailReviewer:
     """Head of Compliance who does a holistic review of flagged emails.
@@ -389,10 +411,10 @@ class AIEmailReviewer:
     """
 
     # Use Opus for the senior reviewer — tougher model, harder to fool
-    MODEL = 'claude-opus-4-20250514'
+    MODEL = "claude-opus-4-20250514"
 
     def __init__(self):
-        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if api_key:
             self.client = anthropic.Anthropic(
                 api_key=api_key,
@@ -410,9 +432,9 @@ class AIEmailReviewer:
         subtle framing, coded language, contextual implications, tone shifts.
         """
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
-        sanitized_analysis = _sanitize_prompt_input(str(bias_result.get('analysis', 'N/A')), max_length=2000)
-        sanitized_purpose = _sanitize_prompt_input(str(application_context.get('purpose', 'N/A')), max_length=200)
-        sanitized_decision = _sanitize_prompt_input(str(application_context.get('decision', 'N/A')), max_length=20)
+        sanitized_analysis = _sanitize_prompt_input(str(bias_result.get("analysis", "N/A")), max_length=2000)
+        sanitized_purpose = _sanitize_prompt_input(str(application_context.get("purpose", "N/A")), max_length=200)
+        sanitized_decision = _sanitize_prompt_input(str(application_context.get("decision", "N/A")), max_length=20)
 
         prompt = f"""You are the Head of Compliance at AussieLoanAI, an Australian bank. You have 18 years in financial services regulation. You lived through the Hayne Royal Commission. You have personally drafted remediation programs after ASIC enforcement actions. You do not get nervous about compliance. You get precise.
 
@@ -424,9 +446,9 @@ Your junior analyst and the deterministic system have ALREADY handled the follow
 - AI-giveaway language detection
 - The junior classified each flag as genuine or false positive
 
-Junior's score: {bias_result.get('score', 0)}/100
+Junior's score: {bias_result.get("score", 0)}/100
 Junior's flag classifications: {sanitized_analysis}
-Categories the junior flagged: {', '.join(bias_result.get('categories', [])) or 'None'}
+Categories the junior flagged: {", ".join(bias_result.get("categories", [])) or "None"}
 
 DO NOT re-check what the junior already covered. That work is done. If the junior flagged "debt-to-income ratio" as bias, that is not your problem to fix. Your job is different.
 
@@ -437,7 +459,7 @@ Read this email with 18 years of experience and look for what a two-year analyst
 
 2. CODED LANGUAGE: Are there phrases that a sophisticated reader from a protected group would recognise as loaded, even though they pass a literal compliance check?
 
-3. CONTEXTUAL IMPLICATIONS: Given this is a {sanitized_decision} for ${application_context.get('loan_amount', 'N/A')} ({sanitized_purpose}), does the tone match what a Big 4 bank (CBA, Westpac, ANZ, NAB) would send? Would you sign off on this going out under your name?
+3. CONTEXTUAL IMPLICATIONS: Given this is a {sanitized_decision} for ${application_context.get("loan_amount", "N/A")} ({sanitized_purpose}), does the tone match what a Big 4 bank (CBA, Westpac, ANZ, NAB) would send? Would you sign off on this going out under your name?
 
 4. REGULATORY RISK: If ASIC pulled this email in a compliance audit, would you have to explain anything beyond standard lending language? Would it satisfy Banking Code of Practice 2025 para 81-91?
 
@@ -457,7 +479,7 @@ Read this email with 18 years of experience and look for what a two-year analyst
 {sanitized_email}
 
 === APPLICATION CONTEXT ===
-- Loan Amount: ${application_context.get('loan_amount', 'N/A')}
+- Loan Amount: ${application_context.get("loan_amount", "N/A")}
 - Purpose: {sanitized_purpose}
 - Decision: {sanitized_decision}
 
@@ -478,72 +500,79 @@ Read this email with 18 years of experience and look for what a two-year analyst
 Use the record_review_decision tool to submit your decision."""
 
         fallback = {
-            'approved': False,
-            'confidence': 0.0,
-            'reasoning': 'Unable to parse senior review response, defaulting to human escalation.',
+            "approved": False,
+            "confidence": 0.0,
+            "reasoning": "Unable to parse senior review response, defaulting to human escalation.",
         }
 
         result = fallback
         for attempt in range(3):
             try:
-                response = guarded_api_call(self.client,
+                response = guarded_api_call(
+                    self.client,
                     model=self.MODEL,
                     max_tokens=1024,
-                    temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
-                    messages=[{'role': 'user', 'content': prompt}],
+                    temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
+                    messages=[{"role": "user", "content": prompt}],
                     tools=[EMAIL_REVIEW_TOOL],
-                    tool_choice={'type': 'tool', 'name': 'record_review_decision'},
+                    tool_choice={"type": "tool", "name": "record_review_decision"},
                 )
                 result = _extract_tool_result(response, fallback)
                 break
             except anthropic.AuthenticationError as e:
-                logger.error('Senior review auth error (not retryable): %s', e)
+                logger.error("Senior review auth error (not retryable): %s", e)
                 result = fallback
                 break
             except anthropic.RateLimitError as e:
-                logger.warning('Senior review attempt %d rate limited: %s', attempt + 1, e)
+                logger.warning("Senior review attempt %d rate limited: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
+
                     _time.sleep(2 ** (attempt + 1))
                 else:
-                    logger.error('Senior review failed after 3 attempts (rate limit) — defaulting to human escalation')
+                    logger.error("Senior review failed after 3 attempts (rate limit) — defaulting to human escalation")
                     result = fallback
             except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
-                logger.warning('Senior review attempt %d failed: %s', attempt + 1, e)
+                logger.warning("Senior review attempt %d failed: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
-                    _time.sleep(2 ** attempt)
+
+                    _time.sleep(2**attempt)
                 else:
-                    logger.error('Senior review failed after 3 attempts — defaulting to human escalation')
+                    logger.error("Senior review failed after 3 attempts — defaulting to human escalation")
                     result = fallback
             except anthropic.APIStatusError as e:
                 if e.status_code >= 500:
-                    logger.warning('Senior review attempt %d server error (%d): %s', attempt + 1, e.status_code, e)
+                    logger.warning("Senior review attempt %d server error (%d): %s", attempt + 1, e.status_code, e)
                     if attempt < 2:
                         import time as _time
-                        _time.sleep(2 ** attempt)
+
+                        _time.sleep(2**attempt)
                     else:
-                        logger.error('Senior review failed after 3 attempts (server error) — defaulting to human escalation')
+                        logger.error(
+                            "Senior review failed after 3 attempts (server error) — defaulting to human escalation"
+                        )
                         result = fallback
                 else:
-                    logger.error('Senior review client error (%d, not retryable): %s', e.status_code, e)
+                    logger.error("Senior review client error (%d, not retryable): %s", e.status_code, e)
                     result = fallback
                     break
             except Exception as e:
-                logger.critical('Senior review UNEXPECTED failure attempt %d: %s', attempt + 1, e, exc_info=True)
+                logger.critical("Senior review UNEXPECTED failure attempt %d: %s", attempt + 1, e, exc_info=True)
                 result = fallback
                 break
 
         return {
-            'approved': result.get('approved', False),
-            'confidence': result.get('confidence', 0.0),
-            'reasoning': result.get('reasoning', ''),
+            "approved": result.get("approved", False),
+            "confidence": result.get("confidence", 0.0),
+            "reasoning": result.get("reasoning", ""),
         }
 
 
 # ---------------------------------------------------------------------------
 # Agent 3: Marketing Compliance Analyst — bias detection for marketing emails
 # ---------------------------------------------------------------------------
+
 
 class MarketingBiasDetector:
     """Compliance analyst screening marketing/retention emails for bias.
@@ -558,15 +587,20 @@ class MarketingBiasDetector:
     """
 
     MARKETING_BIAS_CATEGORIES = [
-        'patronising_tone',
-        'pressure_tactics',
-        'discriminatory_product_steering',
-        'false_promises',
-        'gender', 'race', 'age', 'religion', 'disability', 'marital_status',
+        "patronising_tone",
+        "pressure_tactics",
+        "discriminatory_product_steering",
+        "false_promises",
+        "gender",
+        "race",
+        "age",
+        "religion",
+        "disability",
+        "marital_status",
     ]
 
     def __init__(self):
-        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if api_key:
             self.client = anthropic.Anthropic(
                 api_key=api_key,
@@ -585,59 +619,59 @@ class MarketingBiasDetector:
         tactics, false urgency) but the flow is identical.
         """
         prescreen = self.prescreener.prescreen_marketing_email(email_text, application_context)
-        det_score = prescreen['deterministic_score']
+        det_score = prescreen["deterministic_score"]
 
-        mkt_pass = getattr(django_settings, 'MARKETING_BIAS_THRESHOLD_PASS', 50)
-        mkt_review = getattr(django_settings, 'MARKETING_BIAS_THRESHOLD_REVIEW', 70)
+        mkt_pass = getattr(django_settings, "MARKETING_BIAS_THRESHOLD_PASS", 50)
+        mkt_review = getattr(django_settings, "MARKETING_BIAS_THRESHOLD_REVIEW", 70)
 
         # ── Clean email: all deterministic checks passed ──
-        if prescreen['all_clean']:
-            logger.info('Marketing bias pre-screen: all checks passed, score=%d — compliant', det_score)
+        if prescreen["all_clean"]:
+            logger.info("Marketing bias pre-screen: all checks passed, score=%d — compliant", det_score)
             return {
-                'score': det_score,
-                'deterministic_score': det_score,
-                'llm_raw_score': None,
-                'score_source': 'deterministic',
-                'categories': [],
-                'analysis': 'All deterministic compliance checks passed. No bias detected.',
-                'flagged': False,
-                'requires_human_review': False,
+                "score": det_score,
+                "deterministic_score": det_score,
+                "llm_raw_score": None,
+                "score_source": "deterministic",
+                "categories": [],
+                "analysis": "All deterministic compliance checks passed. No bias detected.",
+                "flagged": False,
+                "requires_human_review": False,
             }
 
         # ── Severe violation ──
         if det_score > mkt_review:
-            logger.warning('Marketing bias pre-screen: severe violation, score=%d — blocking', det_score)
+            logger.warning("Marketing bias pre-screen: severe violation, score=%d — blocking", det_score)
             return {
-                'score': det_score,
-                'deterministic_score': det_score,
-                'llm_raw_score': None,
-                'score_source': 'deterministic',
-                'categories': [f['check_name'] for f in prescreen['findings']],
-                'analysis': '; '.join(f['details'] for f in prescreen['findings']),
-                'flagged': True,
-                'requires_human_review': True,
+                "score": det_score,
+                "deterministic_score": det_score,
+                "llm_raw_score": None,
+                "score_source": "deterministic",
+                "categories": [f["check_name"] for f in prescreen["findings"]],
+                "analysis": "; ".join(f["details"] for f in prescreen["findings"]),
+                "flagged": True,
+                "requires_human_review": True,
             }
 
         # ── Minor findings ──
         if det_score <= mkt_pass:
-            logger.info('Marketing bias pre-screen: minor findings, score=%d — compliant', det_score)
+            logger.info("Marketing bias pre-screen: minor findings, score=%d — compliant", det_score)
             return {
-                'score': det_score,
-                'deterministic_score': det_score,
-                'llm_raw_score': None,
-                'score_source': 'deterministic',
-                'categories': [f['check_name'] for f in prescreen['findings']],
-                'analysis': '; '.join(f['details'] for f in prescreen['findings']),
-                'flagged': False,
-                'requires_human_review': False,
+                "score": det_score,
+                "deterministic_score": det_score,
+                "llm_raw_score": None,
+                "score_source": "deterministic",
+                "categories": [f["check_name"] for f in prescreen["findings"]],
+                "analysis": "; ".join(f["details"] for f in prescreen["findings"]),
+                "flagged": False,
+                "requires_human_review": False,
             }
 
         # ── Moderate findings: LLM interprets ambiguous flags ──
-        logger.info('Marketing bias pre-screen: moderate findings, score=%d — invoking LLM', det_score)
+        logger.info("Marketing bias pre-screen: moderate findings, score=%d — invoking LLM", det_score)
 
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
-        sanitized_purpose = _sanitize_prompt_input(str(application_context.get('purpose', 'N/A')), max_length=200)
-        prescreen_summary = self._format_prescreen_results(prescreen)
+        sanitized_purpose = _sanitize_prompt_input(str(application_context.get("purpose", "N/A")), max_length=200)
+        self._format_prescreen_results(prescreen)
 
         flag_detail = self._format_flag_detail(prescreen)
 
@@ -651,7 +685,7 @@ Your deterministic compliance system flagged specific issues in a marketing emai
 <user_content>{sanitized_email}</user_content>
 
 === CUSTOMER CONTEXT ===
-- Originally requested: ${application_context.get('loan_amount', 'N/A')} for {sanitized_purpose}
+- Originally requested: ${application_context.get("loan_amount", "N/A")} for {sanitized_purpose}
 - Decision: Declined
 
 === DETERMINISTIC FLAGS (classify each one) ===
@@ -676,63 +710,71 @@ DO NOT look for issues beyond what was flagged. Stay in your lane.
 Use the record_marketing_bias_analysis tool to submit your findings. In the analysis field, address each flag individually."""
 
         fallback = {
-            'score': det_score,
-            'categories': [f['check_name'] for f in prescreen['findings']],
-            'analysis': 'LLM interpretation unavailable — using deterministic score.',
+            "score": det_score,
+            "categories": [f["check_name"] for f in prescreen["findings"]],
+            "analysis": "LLM interpretation unavailable — using deterministic score.",
         }
 
         result = fallback
         for attempt in range(3):
             try:
-                response = guarded_api_call(self.client,
-                    model='claude-sonnet-4-20250514',
+                response = guarded_api_call(
+                    self.client,
+                    model="claude-sonnet-4-20250514",
                     max_tokens=1024,
-                    temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
-                    messages=[{'role': 'user', 'content': prompt}],
+                    temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
+                    messages=[{"role": "user", "content": prompt}],
                     tools=[MARKETING_BIAS_TOOL],
-                    tool_choice={'type': 'tool', 'name': 'record_marketing_bias_analysis'},
+                    tool_choice={"type": "tool", "name": "record_marketing_bias_analysis"},
                 )
                 result = _extract_tool_result(response, fallback)
                 break
             except anthropic.AuthenticationError as e:
-                logger.error('LLM marketing bias auth error (not retryable): %s', e)
+                logger.error("LLM marketing bias auth error (not retryable): %s", e)
                 result = fallback
                 break
             except anthropic.RateLimitError as e:
-                logger.warning('LLM marketing bias attempt %d rate limited: %s', attempt + 1, e)
+                logger.warning("LLM marketing bias attempt %d rate limited: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
+
                     _time.sleep(2 ** (attempt + 1))
                 else:
-                    logger.error('LLM marketing bias failed after 3 attempts (rate limit) — falling back to deterministic')
+                    logger.error(
+                        "LLM marketing bias failed after 3 attempts (rate limit) — falling back to deterministic"
+                    )
                     result = fallback
             except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
-                logger.warning('LLM marketing bias attempt %d failed: %s', attempt + 1, e)
+                logger.warning("LLM marketing bias attempt %d failed: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
-                    _time.sleep(2 ** attempt)
+
+                    _time.sleep(2**attempt)
                 else:
-                    logger.error('LLM marketing bias failed after 3 attempts — falling back to deterministic')
+                    logger.error("LLM marketing bias failed after 3 attempts — falling back to deterministic")
                     result = fallback
             except anthropic.APIStatusError as e:
                 if e.status_code >= 500:
-                    logger.warning('LLM marketing bias attempt %d server error (%d): %s', attempt + 1, e.status_code, e)
+                    logger.warning("LLM marketing bias attempt %d server error (%d): %s", attempt + 1, e.status_code, e)
                     if attempt < 2:
                         import time as _time
-                        _time.sleep(2 ** attempt)
+
+                        _time.sleep(2**attempt)
                     else:
-                        logger.error('LLM marketing bias failed after 3 attempts (server error) — falling back to deterministic')
+                        logger.error(
+                            "LLM marketing bias failed after 3 attempts (server error) — falling back to deterministic"
+                        )
                         result = fallback
                 else:
-                    logger.error('LLM marketing bias client error (%d, not retryable): %s', e.status_code, e)
+                    logger.error("LLM marketing bias client error (%d, not retryable): %s", e.status_code, e)
                     result = fallback
                     break
             except Exception as e:
-                logger.critical('LLM marketing bias UNEXPECTED failure attempt %d: %s', attempt + 1, e, exc_info=True)
+                logger.critical("LLM marketing bias UNEXPECTED failure attempt %d: %s", attempt + 1, e, exc_info=True)
                 result = fallback
                 break
 
-        llm_raw_score = result.get('score', det_score)
+        llm_raw_score = result.get("score", det_score)
         # Deterministic weighted higher (60%) due to LLM agreeableness bias (TNR < 25%, ACL 2025)
         # If LLM says false positive (low score), trust it — that's why we called the LLM.
         if llm_raw_score <= 30:
@@ -741,50 +783,51 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
             final_score = int(det_score * 0.6 + llm_raw_score * 0.4)
 
         return {
-            'score': final_score,
-            'deterministic_score': det_score,
-            'llm_raw_score': llm_raw_score,
-            'score_source': 'deterministic_weighted' if llm_raw_score > 30 else 'llm_false_positive',
-            'categories': result.get('categories', []),
-            'analysis': result.get('analysis', ''),
-            'flagged': final_score > mkt_pass,
-            'requires_human_review': mkt_pass < final_score <= mkt_review,
+            "score": final_score,
+            "deterministic_score": det_score,
+            "llm_raw_score": llm_raw_score,
+            "score_source": "deterministic_weighted" if llm_raw_score > 30 else "llm_false_positive",
+            "categories": result.get("categories", []),
+            "analysis": result.get("analysis", ""),
+            "flagged": final_score > mkt_pass,
+            "requires_human_review": mkt_pass < final_score <= mkt_review,
         }
 
     def _format_prescreen_results(self, prescreen):
         """Format pre-screen results summary for injection into the LLM prompt."""
         lines = []
         checks = {
-            'prohibited_language': 'Prohibited language',
-            'tone_check': 'Tone',
-            'professional_financial_language': 'Professional language',
-            'decline_language': 'Decline references',
-            'patronising_language': 'Patronising language',
-            'false_urgency': 'False urgency',
-            'guaranteed_approval': 'Guaranteed approval claims',
+            "prohibited_language": "Prohibited language",
+            "tone_check": "Tone",
+            "professional_financial_language": "Professional language",
+            "decline_language": "Decline references",
+            "patronising_language": "Patronising language",
+            "false_urgency": "False urgency",
+            "guaranteed_approval": "Guaranteed approval claims",
         }
-        triggered_names = {f['check_name'] for f in prescreen['findings']}
+        triggered_names = {f["check_name"] for f in prescreen["findings"]}
         for check_name, label in checks.items():
-            status = 'FAILED' if check_name in triggered_names else 'PASSED'
-            lines.append(f'- {label}: {status}')
+            status = "FAILED" if check_name in triggered_names else "PASSED"
+            lines.append(f"- {label}: {status}")
         lines.append(f"- Pre-screen score: {prescreen['deterministic_score']}/100")
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def _format_flag_detail(self, prescreen):
         """Format each individual flag with its details for the junior analyst."""
-        if not prescreen['findings']:
-            return 'No flags to classify.'
+        if not prescreen["findings"]:
+            return "No flags to classify."
         lines = []
-        for i, finding in enumerate(prescreen['findings'], 1):
-            check_name = finding.get('check_name', 'unknown')
-            sanitized_finding = _sanitize_prompt_input(str(finding.get('details', 'No details')), max_length=500)
+        for i, finding in enumerate(prescreen["findings"], 1):
+            check_name = finding.get("check_name", "unknown")
+            sanitized_finding = _sanitize_prompt_input(str(finding.get("details", "No details")), max_length=500)
             lines.append(f"Flag {i}: [{check_name}] {sanitized_finding}")
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
 # Agent 4: Marketing Head of Compliance — senior review for marketing emails
 # ---------------------------------------------------------------------------
+
 
 class MarketingEmailReviewer:
     """Senior compliance review for marketing emails, focused on cross-selling risk.
@@ -799,10 +842,10 @@ class MarketingEmailReviewer:
     judgment that a pattern-matching system or junior analyst cannot provide.
     """
 
-    MODEL = 'claude-opus-4-20250514'
+    MODEL = "claude-opus-4-20250514"
 
     def __init__(self):
-        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if api_key:
             self.client = anthropic.Anthropic(
                 api_key=api_key,
@@ -820,8 +863,8 @@ class MarketingEmailReviewer:
         customer, or is it exploiting a vulnerable person post-decline?
         """
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
-        sanitized_analysis = _sanitize_prompt_input(str(bias_result.get('analysis', 'N/A')), max_length=2000)
-        sanitized_purpose = _sanitize_prompt_input(str(application_context.get('purpose', 'N/A')), max_length=200)
+        sanitized_analysis = _sanitize_prompt_input(str(bias_result.get("analysis", "N/A")), max_length=2000)
+        sanitized_purpose = _sanitize_prompt_input(str(application_context.get("purpose", "N/A")), max_length=200)
 
         prompt = f"""You are the Head of Compliance at AussieLoanAI. You are reviewing a marketing follow-up email to a customer whose loan was declined.
 
@@ -832,9 +875,9 @@ Your junior analyst and the deterministic system have ALREADY handled:
 - AI-giveaway language, professional financial language
 - The junior classified each flag as genuine or false positive
 
-Junior's score: {bias_result.get('score', 0)}/100
+Junior's score: {bias_result.get("score", 0)}/100
 Junior's flag classifications: {sanitized_analysis}
-Categories the junior flagged: {', '.join(bias_result.get('categories', [])) or 'None'}
+Categories the junior flagged: {", ".join(bias_result.get("categories", [])) or "None"}
 
 DO NOT re-check what the junior already covered. That work is done.
 
@@ -843,7 +886,7 @@ Marketing to declined customers is where Australian banks get into trouble with 
 
 Ask yourself these questions:
 
-1. IS THIS GENUINELY HELPING? A customer declined for a $500,000 home loan might genuinely benefit from a $15,000 secured personal loan. But are the alternatives in this email actually appropriate for this customer's financial position (originally requested ${application_context.get('loan_amount', 'N/A')} for {sanitized_purpose}), or does it look like product-pushing?
+1. IS THIS GENUINELY HELPING? A customer declined for a $500,000 home loan might genuinely benefit from a $15,000 secured personal loan. But are the alternatives in this email actually appropriate for this customer's financial position (originally requested ${application_context.get("loan_amount", "N/A")} for {sanitized_purpose}), or does it look like product-pushing?
 
 2. IS THE TIMING APPROPRIATE? The customer just received a decline letter. Does this email respect that context, or does it feel like the bank is immediately trying to sell them something else? There is a difference between "here are some options that may suit you" and "don't worry, we have other products!"
 
@@ -860,7 +903,7 @@ Ask yourself these questions:
 {sanitized_email}
 
 === CUSTOMER CONTEXT ===
-- Originally requested: ${application_context.get('loan_amount', 'N/A')} for {sanitized_purpose}
+- Originally requested: ${application_context.get("loan_amount", "N/A")} for {sanitized_purpose}
 - Decision: Declined
 
 === YOUR DECISION ===
@@ -871,64 +914,76 @@ Ask yourself these questions:
 Use the record_marketing_review_decision tool to submit your decision."""
 
         fallback = {
-            'approved': False,
-            'confidence': 0.0,
-            'reasoning': 'Unable to parse senior marketing review — defaulting to human escalation.',
+            "approved": False,
+            "confidence": 0.0,
+            "reasoning": "Unable to parse senior marketing review — defaulting to human escalation.",
         }
 
         result = fallback
         for attempt in range(3):
             try:
-                response = guarded_api_call(self.client,
+                response = guarded_api_call(
+                    self.client,
                     model=self.MODEL,
                     max_tokens=1024,
-                    temperature=getattr(django_settings, 'AI_TEMPERATURE_ANALYSIS', 0.0),
-                    messages=[{'role': 'user', 'content': prompt}],
+                    temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
+                    messages=[{"role": "user", "content": prompt}],
                     tools=[MARKETING_REVIEW_TOOL],
-                    tool_choice={'type': 'tool', 'name': 'record_marketing_review_decision'},
+                    tool_choice={"type": "tool", "name": "record_marketing_review_decision"},
                 )
                 result = _extract_tool_result(response, fallback)
                 break
             except anthropic.AuthenticationError as e:
-                logger.error('Marketing senior review auth error (not retryable): %s', e)
+                logger.error("Marketing senior review auth error (not retryable): %s", e)
                 result = fallback
                 break
             except anthropic.RateLimitError as e:
-                logger.warning('Marketing senior review attempt %d rate limited: %s', attempt + 1, e)
+                logger.warning("Marketing senior review attempt %d rate limited: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
+
                     _time.sleep(2 ** (attempt + 1))
                 else:
-                    logger.error('Marketing senior review failed after 3 attempts (rate limit) — defaulting to human escalation')
+                    logger.error(
+                        "Marketing senior review failed after 3 attempts (rate limit) — defaulting to human escalation"
+                    )
                     result = fallback
             except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
-                logger.warning('Marketing senior review attempt %d failed: %s', attempt + 1, e)
+                logger.warning("Marketing senior review attempt %d failed: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
-                    _time.sleep(2 ** attempt)
+
+                    _time.sleep(2**attempt)
                 else:
-                    logger.error('Marketing senior review failed after 3 attempts — defaulting to human escalation')
+                    logger.error("Marketing senior review failed after 3 attempts — defaulting to human escalation")
                     result = fallback
             except anthropic.APIStatusError as e:
                 if e.status_code >= 500:
-                    logger.warning('Marketing senior review attempt %d server error (%d): %s', attempt + 1, e.status_code, e)
+                    logger.warning(
+                        "Marketing senior review attempt %d server error (%d): %s", attempt + 1, e.status_code, e
+                    )
                     if attempt < 2:
                         import time as _time
-                        _time.sleep(2 ** attempt)
+
+                        _time.sleep(2**attempt)
                     else:
-                        logger.error('Marketing senior review failed after 3 attempts (server error) — defaulting to human escalation')
+                        logger.error(
+                            "Marketing senior review failed after 3 attempts (server error) — defaulting to human escalation"
+                        )
                         result = fallback
                 else:
-                    logger.error('Marketing senior review client error (%d, not retryable): %s', e.status_code, e)
+                    logger.error("Marketing senior review client error (%d, not retryable): %s", e.status_code, e)
                     result = fallback
                     break
             except Exception as e:
-                logger.critical('Marketing senior review UNEXPECTED failure attempt %d: %s', attempt + 1, e, exc_info=True)
+                logger.critical(
+                    "Marketing senior review UNEXPECTED failure attempt %d: %s", attempt + 1, e, exc_info=True
+                )
                 result = fallback
                 break
 
         return {
-            'approved': result.get('approved', False),
-            'confidence': result.get('confidence', 0.0),
-            'reasoning': result.get('reasoning', ''),
+            "approved": result.get("approved", False),
+            "confidence": result.get("confidence", 0.0),
+            "reasoning": result.get("reasoning", ""),
         }

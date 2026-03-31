@@ -28,40 +28,40 @@ from reportlab.platypus import (
 logger = logging.getLogger(__name__)
 
 # Brand colours
-BRAND_BLUE = colors.HexColor('#1e40af')
-BRAND_LIGHT = colors.HexColor('#dbeafe')
-MUTED_GREY = colors.HexColor('#6b7280')
+BRAND_BLUE = colors.HexColor("#1e40af")
+BRAND_LIGHT = colors.HexColor("#dbeafe")
+MUTED_GREY = colors.HexColor("#6b7280")
 
 
 def _get_styles():
     """Return custom paragraph styles for the PDF."""
     base = getSampleStyleSheet()
     return {
-        'title': ParagraphStyle(
-            'CustomTitle',
-            parent=base['Title'],
+        "title": ParagraphStyle(
+            "CustomTitle",
+            parent=base["Title"],
             fontSize=18,
             textColor=BRAND_BLUE,
             spaceAfter=6 * mm,
         ),
-        'heading': ParagraphStyle(
-            'CustomHeading',
-            parent=base['Heading2'],
+        "heading": ParagraphStyle(
+            "CustomHeading",
+            parent=base["Heading2"],
             fontSize=12,
             textColor=BRAND_BLUE,
             spaceBefore=6 * mm,
             spaceAfter=3 * mm,
         ),
-        'body': ParagraphStyle(
-            'CustomBody',
-            parent=base['Normal'],
+        "body": ParagraphStyle(
+            "CustomBody",
+            parent=base["Normal"],
             fontSize=10,
             leading=14,
             spaceAfter=2 * mm,
         ),
-        'small': ParagraphStyle(
-            'CustomSmall',
-            parent=base['Normal'],
+        "small": ParagraphStyle(
+            "CustomSmall",
+            parent=base["Normal"],
             fontSize=8,
             textColor=MUTED_GREY,
             leading=11,
@@ -78,9 +78,9 @@ def generate_decision_letter_pdf(application) -> bytes:
     Returns:
         PDF file content as bytes.
     """
-    decision = getattr(application, 'decision', None)
+    decision = getattr(application, "decision", None)
     if not decision:
-        raise ValueError('Application has no decision record')
+        raise ValueError("Application has no decision record")
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -96,59 +96,68 @@ def generate_decision_letter_pdf(application) -> bytes:
     elements = []
 
     # Header
-    elements.append(Paragraph('AussieLoanAI', styles['title']))
-    elements.append(Paragraph(
-        f'Decision Letter &mdash; {date.today().strftime("%d %B %Y")}',
-        styles['body'],
-    ))
+    elements.append(Paragraph("AussieLoanAI", styles["title"]))
+    elements.append(
+        Paragraph(
+            f"Decision Letter &mdash; {date.today().strftime('%d %B %Y')}",
+            styles["body"],
+        )
+    )
     elements.append(Spacer(1, 4 * mm))
 
     # Applicant info
     applicant = application.applicant
-    applicant_name = f'{applicant.first_name} {applicant.last_name}'.strip() or applicant.username
-    elements.append(Paragraph(f'Dear {applicant_name},', styles['body']))
+    applicant_name = f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username
+    elements.append(Paragraph(f"Dear {applicant_name},", styles["body"]))
     elements.append(Spacer(1, 2 * mm))
 
     # Application summary table
     summary_data = [
-        ['Application ID', str(application.id)],
-        ['Loan Amount', f'${application.loan_amount:,.2f}'],
-        ['Loan Term', f'{application.loan_term_months} months'],
-        ['Purpose', (application.purpose or '').replace('_', ' ').title()],
-        ['Decision', decision.decision.upper()],
+        ["Application ID", str(application.id)],
+        ["Loan Amount", f"${application.loan_amount:,.2f}"],
+        ["Loan Term", f"{application.loan_term_months} months"],
+        ["Purpose", (application.purpose or "").replace("_", " ").title()],
+        ["Decision", decision.decision.upper()],
     ]
 
     summary_table = Table(summary_data, colWidths=[45 * mm, 110 * mm])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), BRAND_LIGHT),
-        ('TEXTCOLOR', (0, 0), (0, -1), BRAND_BLUE),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-    ]))
+    summary_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (0, -1), BRAND_LIGHT),
+                ("TEXTCOLOR", (0, 0), (0, -1), BRAND_BLUE),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+            ]
+        )
+    )
     elements.append(summary_table)
     elements.append(Spacer(1, 4 * mm))
 
-    if decision.decision == 'approved':
+    if decision.decision == "approved":
         _build_approval_content(elements, styles, application, decision)
     else:
         _build_denial_content(elements, styles, application, decision)
 
     # Footer
     elements.append(Spacer(1, 8 * mm))
-    elements.append(Paragraph(
-        'This letter is generated by AussieLoanAI and forms part of your application record. '
-        'It is retained for 7 years in accordance with the AML/CTF Act 2006.',
-        styles['small'],
-    ))
-    elements.append(Paragraph(
-        f'Model version: {decision.model_version or "N/A"} | '
-        f'Confidence: {(decision.confidence or 0) * 100:.1f}%',
-        styles['small'],
-    ))
+    elements.append(
+        Paragraph(
+            "This letter is generated by AussieLoanAI and forms part of your application record. "
+            "It is retained for 7 years in accordance with the AML/CTF Act 2006.",
+            styles["small"],
+        )
+    )
+    elements.append(
+        Paragraph(
+            f"Model version: {decision.model_version or 'N/A'} | Confidence: {(decision.confidence or 0) * 100:.1f}%",
+            styles["small"],
+        )
+    )
 
     doc.build(elements)
     return buffer.getvalue()
@@ -156,113 +165,136 @@ def generate_decision_letter_pdf(application) -> bytes:
 
 def _build_approval_content(elements, styles, application, decision):
     """Build PDF content for an approved application."""
-    elements.append(Paragraph('Indicative Approval', styles['heading']))
-    elements.append(Paragraph(
-        'Based on the information provided, your loan application has been assessed as suitable '
-        'and has received indicative approval. Please note that this is subject to final '
-        'verification of supporting documentation.',
-        styles['body'],
-    ))
+    elements.append(Paragraph("Indicative Approval", styles["heading"]))
+    elements.append(
+        Paragraph(
+            "Based on the information provided, your loan application has been assessed as suitable "
+            "and has received indicative approval. Please note that this is subject to final "
+            "verification of supporting documentation.",
+            styles["body"],
+        )
+    )
 
     # Key terms
-    elements.append(Paragraph('Indicative Terms', styles['heading']))
+    elements.append(Paragraph("Indicative Terms", styles["heading"]))
     risk_score = decision.risk_score
-    risk_grade = 'N/A'
+    risk_grade = "N/A"
     if risk_score is not None:
         if risk_score <= 0.15:
-            risk_grade = 'AAA'
+            risk_grade = "AAA"
         elif risk_score <= 0.30:
-            risk_grade = 'AA'
+            risk_grade = "AA"
         elif risk_score <= 0.45:
-            risk_grade = 'A'
+            risk_grade = "A"
         elif risk_score <= 0.60:
-            risk_grade = 'BBB'
+            risk_grade = "BBB"
         else:
-            risk_grade = 'BB'
+            risk_grade = "BB"
 
     terms_data = [
-        ['Risk Grade', risk_grade],
-        ['Confidence', f'{(decision.confidence or 0) * 100:.1f}%'],
+        ["Risk Grade", risk_grade],
+        ["Confidence", f"{(decision.confidence or 0) * 100:.1f}%"],
     ]
     terms_table = Table(terms_data, colWidths=[45 * mm, 110 * mm])
-    terms_table.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-    ]))
+    terms_table.setStyle(
+        TableStyle(
+            [
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+            ]
+        )
+    )
     elements.append(terms_table)
 
     elements.append(Spacer(1, 4 * mm))
-    elements.append(Paragraph('Next Steps', styles['heading']))
-    elements.append(Paragraph(
-        'A lending officer will be in contact to finalise your application. '
-        'You may be required to provide additional documentation for verification purposes.',
-        styles['body'],
-    ))
+    elements.append(Paragraph("Next Steps", styles["heading"]))
+    elements.append(
+        Paragraph(
+            "A lending officer will be in contact to finalise your application. "
+            "You may be required to provide additional documentation for verification purposes.",
+            styles["body"],
+        )
+    )
 
 
 def _build_denial_content(elements, styles, application, decision):
     """Build PDF content for a denied application. No apology language."""
-    elements.append(Paragraph('Assessment Outcome', styles['heading']))
-    elements.append(Paragraph(
-        'Based on the information provided, your loan application was not approved '
-        'at this time. The principal factors that influenced this assessment are outlined below.',
-        styles['body'],
-    ))
+    elements.append(Paragraph("Assessment Outcome", styles["heading"]))
+    elements.append(
+        Paragraph(
+            "Based on the information provided, your loan application was not approved "
+            "at this time. The principal factors that influenced this assessment are outlined below.",
+            styles["body"],
+        )
+    )
 
     # Reason codes from SHAP values
     shap_values = decision.shap_values or {}
     if shap_values:
         from apps.ml_engine.services.reason_codes import generate_adverse_action_reasons
-        reasons = generate_adverse_action_reasons(shap_values, 'denied', max_reasons=4)
+
+        reasons = generate_adverse_action_reasons(shap_values, "denied", max_reasons=4)
 
         if reasons:
-            elements.append(Paragraph('Principal Factors', styles['heading']))
-            reason_data = [['Code', 'Factor']]
+            elements.append(Paragraph("Principal Factors", styles["heading"]))
+            reason_data = [["Code", "Factor"]]
             for r in reasons:
-                reason_data.append([r['code'], r['reason']])
+                reason_data.append([r["code"], r["reason"]])
 
             reason_table = Table(reason_data, colWidths=[20 * mm, 135 * mm])
-            reason_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), BRAND_BLUE),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, BRAND_LIGHT]),
-            ]))
+            reason_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), BRAND_BLUE),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                        ("FONTSIZE", (0, 0), (-1, -1), 9),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, BRAND_LIGHT]),
+                    ]
+                )
+            )
             elements.append(reason_table)
 
     # Credit reporting rights
     elements.append(Spacer(1, 4 * mm))
-    elements.append(Paragraph('Your Rights', styles['heading']))
-    elements.append(Paragraph(
-        'You are entitled to a free copy of your credit report from Equifax (equifax.com.au) '
-        'or Illion (illion.com.au) within 90 days of this decision. If your credit report '
-        'contains errors, you may request corrections directly with the credit reporting body.',
-        styles['body'],
-    ))
+    elements.append(Paragraph("Your Rights", styles["heading"]))
+    elements.append(
+        Paragraph(
+            "You are entitled to a free copy of your credit report from Equifax (equifax.com.au) "
+            "or Illion (illion.com.au) within 90 days of this decision. If your credit report "
+            "contains errors, you may request corrections directly with the credit reporting body.",
+            styles["body"],
+        )
+    )
 
     if application.credit_score:
-        elements.append(Paragraph(
-            f'The credit score used in this assessment was <b>{application.credit_score}</b> '
-            f'(Equifax Australia scale).',
-            styles['body'],
-        ))
+        elements.append(
+            Paragraph(
+                f"The credit score used in this assessment was <b>{application.credit_score}</b> "
+                f"(Equifax Australia scale).",
+                styles["body"],
+            )
+        )
 
     # AFCA info
-    elements.append(Paragraph('Dispute Resolution', styles['heading']))
-    elements.append(Paragraph(
-        'If you believe this assessment is incorrect, you may contact us to request a review. '
-        'If the matter is not resolved, you can lodge a complaint with the Australian Financial '
-        'Complaints Authority (AFCA).',
-        styles['body'],
-    ))
-    elements.append(Paragraph(
-        'AFCA: 1800 931 678 (free call) | www.afca.org.au | info@afca.org.au',
-        styles['body'],
-    ))
+    elements.append(Paragraph("Dispute Resolution", styles["heading"]))
+    elements.append(
+        Paragraph(
+            "If you believe this assessment is incorrect, you may contact us to request a review. "
+            "If the matter is not resolved, you can lodge a complaint with the Australian Financial "
+            "Complaints Authority (AFCA).",
+            styles["body"],
+        )
+    )
+    elements.append(
+        Paragraph(
+            "AFCA: 1800 931 678 (free call) | www.afca.org.au | info@afca.org.au",
+            styles["body"],
+        )
+    )

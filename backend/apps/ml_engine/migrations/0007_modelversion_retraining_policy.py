@@ -4,15 +4,18 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('ml_engine', '0006_add_governance_fields'),
+        ("ml_engine", "0006_add_governance_fields"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='modelversion',
-            name='retraining_policy',
-            field=models.JSONField(blank=True, default=dict, help_text='Retraining cadence, validation criteria, and data requirements (SR 11-7)'),
+            model_name="modelversion",
+            name="retraining_policy",
+            field=models.JSONField(
+                blank=True,
+                default=dict,
+                help_text="Retraining cadence, validation criteria, and data requirements (SR 11-7)",
+            ),
         ),
     ]

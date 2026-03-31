@@ -1,4 +1,5 @@
 """Tests for PSI drift monitoring."""
+
 import pytest
 import numpy as np
 
@@ -14,7 +15,7 @@ class TestPSIComputation:
         data = np.random.normal(0, 1, 1000)
 
         psi = compute_psi(data, data)
-        assert psi < 0.01, f'Identical distributions should have PSI near 0, got {psi}'
+        assert psi < 0.01, f"Identical distributions should have PSI near 0, got {psi}"
 
     def test_similar_distributions_stable(self):
         """Similar distributions should produce PSI < 0.10."""
@@ -25,7 +26,7 @@ class TestPSIComputation:
         actual = np.random.normal(0.05, 1.02, 1000)  # Slight shift
 
         psi = compute_psi(expected, actual)
-        assert psi < 0.10, f'Similar distributions should have PSI < 0.10, got {psi}'
+        assert psi < 0.10, f"Similar distributions should have PSI < 0.10, got {psi}"
 
     def test_shifted_distribution_high_psi(self):
         """Significantly shifted distribution should produce PSI > 0.25."""
@@ -36,7 +37,7 @@ class TestPSIComputation:
         actual = np.random.normal(2, 1.5, 1000)  # Major shift
 
         psi = compute_psi(expected, actual)
-        assert psi > 0.25, f'Shifted distributions should have PSI > 0.25, got {psi}'
+        assert psi > 0.25, f"Shifted distributions should have PSI > 0.25, got {psi}"
 
     def test_empty_distribution(self):
         """Empty arrays should return PSI = 0."""
@@ -60,8 +61,7 @@ class TestPSIComputation:
         psi_ba = compute_psi(b, a)
 
         # Should be in same ballpark (not identical due to binning from expected)
-        assert abs(psi_ab - psi_ba) < psi_ab * 0.5, \
-            f'PSI should be roughly symmetric: {psi_ab} vs {psi_ba}'
+        assert abs(psi_ab - psi_ba) < psi_ab * 0.5, f"PSI should be roughly symmetric: {psi_ab} vs {psi_ba}"
 
     def test_constant_distribution_returns_zero(self):
         """Constant distribution (all same value) should return PSI = 0."""
@@ -71,7 +71,7 @@ class TestPSIComputation:
         actual = np.ones(100)
 
         psi = compute_psi(expected, actual)
-        assert psi == 0.0, f'Constant distributions should have PSI = 0, got {psi}'
+        assert psi == 0.0, f"Constant distributions should have PSI = 0, got {psi}"
 
     def test_psi_non_negative(self):
         """PSI should always be non-negative."""
@@ -82,7 +82,7 @@ class TestPSIComputation:
             a = np.random.normal(np.random.uniform(-5, 5), np.random.uniform(0.5, 3), 500)
             b = np.random.normal(np.random.uniform(-5, 5), np.random.uniform(0.5, 3), 500)
             psi = compute_psi(a, b)
-            assert psi >= 0, f'PSI should be non-negative, got {psi}'
+            assert psi >= 0, f"PSI should be non-negative, got {psi}"
 
 
 class TestPSIThresholds:
@@ -92,9 +92,9 @@ class TestPSIThresholds:
         """Verify threshold constants match industry standards."""
         from apps.ml_engine.services.drift_monitor import PSI_STABLE, PSI_INVESTIGATE
 
-        assert PSI_STABLE == 0.10, f'PSI_STABLE should be 0.10, got {PSI_STABLE}'
-        assert PSI_INVESTIGATE == 0.25, f'PSI_INVESTIGATE should be 0.25, got {PSI_INVESTIGATE}'
-        assert PSI_STABLE < PSI_INVESTIGATE, 'PSI_STABLE should be less than PSI_INVESTIGATE'
+        assert PSI_STABLE == 0.10, f"PSI_STABLE should be 0.10, got {PSI_STABLE}"
+        assert PSI_INVESTIGATE == 0.25, f"PSI_INVESTIGATE should be 0.25, got {PSI_INVESTIGATE}"
+        assert PSI_STABLE < PSI_INVESTIGATE, "PSI_STABLE should be less than PSI_INVESTIGATE"
 
 
 class TestConformalSSBC:
@@ -115,12 +115,12 @@ class TestConformalSSBC:
 
         # With n=100 and alpha=0.05, q_idx = 95 (96th value out of 100)
         # The coverage variance is significant for small n
-        assert q_idx < n, f'Quantile index {q_idx} should be < n={n}'
-        assert q_idx >= n * 0.9, f'Quantile index should be near top for small alpha'
+        assert q_idx < n, f"Quantile index {q_idx} should be < n={n}"
+        assert q_idx >= n * 0.9, f"Quantile index should be near top for small alpha"
         # Key property: for small n, the gap between q_idx and n is small,
         # meaning a single outlier in calibration could shift coverage significantly
         gap = n - q_idx
-        assert gap <= 10, f'Gap between quantile and n should be small for small n, got {gap}'
+        assert gap <= 10, f"Gap between quantile and n should be small for small n, got {gap}"
 
     def test_ssbc_no_adjustment_for_large_n(self):
         """SSBC should not significantly adjust alpha for large calibration sets."""
@@ -139,8 +139,9 @@ class TestConformalSSBC:
                 break
 
         # For large n, adjustment should be minimal
-        assert abs(adjusted_alpha - alpha) < 0.01, \
-            f'SSBC should not significantly adjust for n={n}: got {adjusted_alpha}'
+        assert abs(adjusted_alpha - alpha) < 0.01, (
+            f"SSBC should not significantly adjust for n={n}: got {adjusted_alpha}"
+        )
 
     def test_ssbc_monotonic_in_n(self):
         """As n increases, the adjustment should decrease (closer to original alpha)."""
@@ -162,5 +163,4 @@ class TestConformalSSBC:
 
         # Adjustment should decrease as n increases
         for i in range(len(adjustments) - 1):
-            assert adjustments[i] >= adjustments[i + 1], \
-                f'Adjustment should decrease with n: {adjustments}'
+            assert adjustments[i] >= adjustments[i + 1], f"Adjustment should decrease with n: {adjustments}"

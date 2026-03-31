@@ -1,4 +1,5 @@
 """Tests for bias detector calibration: weighting, known-biased samples."""
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -41,12 +42,11 @@ class TestDeterministicBiasDetection:
         caught = 0
         for email in KNOWN_BIASED_EMAILS:
             result = checker.check_prohibited_language(email)
-            if not result['passed']:
+            if not result["passed"]:
                 caught += 1
 
         detection_rate = caught / len(KNOWN_BIASED_EMAILS)
-        assert detection_rate >= 0.8, \
-            f'Deterministic detection rate {detection_rate:.0%} below 80% threshold'
+        assert detection_rate >= 0.8, f"Deterministic detection rate {detection_rate:.0%} below 80% threshold"
 
     def test_passes_clean_emails(self):
         """Clean emails should pass deterministic bias checks."""
@@ -56,12 +56,11 @@ class TestDeterministicBiasDetection:
         false_positives = 0
         for email in KNOWN_CLEAN_EMAILS:
             result = checker.check_prohibited_language(email)
-            if not result['passed']:
+            if not result["passed"]:
                 false_positives += 1
 
         fp_rate = false_positives / len(KNOWN_CLEAN_EMAILS)
-        assert fp_rate <= 0.2, \
-            f'False positive rate {fp_rate:.0%} above 20% threshold'
+        assert fp_rate <= 0.2, f"False positive rate {fp_rate:.0%} above 20% threshold"
 
 
 class TestBiasWeighting:
@@ -78,16 +77,15 @@ class TestBiasWeighting:
         # New weighting: 0.6 * 80 + 0.4 * 20 = 56 (would trigger review)
         new_composite = 0.6 * det_score + 0.4 * llm_score
 
-        assert new_composite > old_composite, 'New weighting should give more weight to deterministic'
-        assert new_composite >= 56, f'Expected composite >= 56, got {new_composite}'
+        assert new_composite > old_composite, "New weighting should give more weight to deterministic"
+        assert new_composite >= 56, f"Expected composite >= 56, got {new_composite}"
 
     def test_composite_score_range(self):
         """Composite scores should always be between 0 and 100."""
         for det in range(0, 101, 10):
             for llm in range(0, 101, 10):
                 composite = 0.6 * det + 0.4 * llm
-                assert 0 <= composite <= 100, \
-                    f'Composite {composite} out of range for det={det}, llm={llm}'
+                assert 0 <= composite <= 100, f"Composite {composite} out of range for det={det}, llm={llm}"
 
     def test_high_deterministic_overrides_low_llm(self):
         """When deterministic finds strong bias, low LLM score should not mask it."""
@@ -96,8 +94,9 @@ class TestBiasWeighting:
 
         composite = 0.6 * det_score + 0.4 * llm_score
         # 0.6 * 90 + 0.4 * 10 = 54 + 4 = 58, which should be above review threshold
-        assert composite >= 50, \
-            f'High deterministic bias ({det_score}) masked by low LLM ({llm_score}): composite={composite}'
+        assert composite >= 50, (
+            f"High deterministic bias ({det_score}) masked by low LLM ({llm_score}): composite={composite}"
+        )
 
 
 class TestBiasDetectionEdgeCases:
@@ -108,15 +107,15 @@ class TestBiasDetectionEdgeCases:
         from apps.email_engine.services.guardrails import GuardrailChecker
 
         checker = GuardrailChecker()
-        result = checker.check_prohibited_language('')
-        assert 'passed' in result
+        result = checker.check_prohibited_language("")
+        assert "passed" in result
 
     def test_very_long_email(self):
         """Very long email should be handled without errors."""
         from apps.email_engine.services.guardrails import GuardrailChecker
 
         checker = GuardrailChecker()
-        long_email = 'This is a clean financial assessment paragraph. ' * 500
+        long_email = "This is a clean financial assessment paragraph. " * 500
         result = checker.check_prohibited_language(long_email)
-        assert 'passed' in result
-        assert result['passed'] is True
+        assert "passed" in result
+        assert result["passed"] is True

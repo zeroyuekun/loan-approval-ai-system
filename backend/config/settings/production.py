@@ -8,25 +8,25 @@ from .base import *  # noqa: F401, F403
 
 DEBUG = False
 
-_hosts = os.environ.get('ALLOWED_HOSTS', '')
-ALLOWED_HOSTS = [h.strip() for h in _hosts.split(',') if h.strip()]
+_hosts = os.environ.get("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()]
 
 # Security settings
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
-SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() in ('true', '1', 'yes')
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "True").lower() in ("true", "1", "yes")
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
-X_FRAME_OPTIONS = 'DENY'
+X_FRAME_OPTIONS = "DENY"
 SESSION_COOKIE_HTTPONLY = True
-SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
-DATABASES['default']['CONN_MAX_AGE'] = 600
-DATABASES['default'].setdefault('OPTIONS', {})['sslmode'] = 'require'
+DATABASES["default"]["CONN_MAX_AGE"] = 600
+DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = "require"
 
 # CSRF cookie must be readable by JS for cookie-based auth
 CSRF_COOKIE_HTTPONLY = False
@@ -53,59 +53,59 @@ CONTENT_SECURITY_POLICY = {
 
 # Logging
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {message}',
-            'style': '{',
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {message}",
+            "style": "{",
         },
-        'json': {
-            '()': 'pythonjsonlogger.jsonlogger.JsonFormatter',
-            'format': '%(asctime)s %(name)s %(levelname)s %(correlation_id)s %(message)s',
-        },
-    },
-    'filters': {
-        'mask_pii': {
-            '()': 'config.logging_filters.PiiMaskingFilter',
+        "json": {
+            "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
+            "format": "%(asctime)s %(name)s %(levelname)s %(correlation_id)s %(message)s",
         },
     },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'json',
-            'filters': ['mask_pii'],
+    "filters": {
+        "mask_pii": {
+            "()": "config.logging_filters.PiiMaskingFilter",
         },
     },
-    'root': {
-        'handlers': ['console'],
-        'level': 'WARNING',
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+            "filters": ["mask_pii"],
+        },
     },
-    'loggers': {
-        'django': {
-            'handlers': ['console'],
-            'level': 'WARNING',
-            'propagate': False,
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
         },
-        'django.request': {
-            'handlers': ['console'],
-            'level': 'ERROR',
-            'propagate': False,
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
         },
-        'agents': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
+        "agents": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
-        'email_engine': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
+        "email_engine": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
-        'ml_engine': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
+        "ml_engine": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
     },
 }

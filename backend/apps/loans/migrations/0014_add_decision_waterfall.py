@@ -4,19 +4,18 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0013_add_shap_values_to_loandecision'),
+        ("loans", "0013_add_shap_values_to_loandecision"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loandecision',
-            name='decision_waterfall',
+            model_name="loandecision",
+            name="decision_waterfall",
             field=models.JSONField(
                 blank=True,
                 default=list,
-                help_text='Ordered list of decision gate results for ASIC RG 209 audit trail',
+                help_text="Ordered list of decision gate results for ASIC RG 209 audit trail",
             ),
         ),
     ]
