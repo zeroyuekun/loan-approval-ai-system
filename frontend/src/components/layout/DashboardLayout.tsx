@@ -36,7 +36,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopNav title={title} onMenuClick={() => setSidebarOpen(true)} />
         <main id="main-content" className="flex-1 overflow-y-auto p-4 lg:p-8">
-          <div className="mx-auto max-w-screen-2xl">
+          <div>
             {children}
           </div>
         </main>
