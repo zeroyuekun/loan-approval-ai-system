@@ -44,7 +44,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <aside
         aria-label="Main navigation"
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col gradient-sidebar text-white transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 border-r border-white/[0.06]",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-hidden gradient-sidebar text-white transition-transform duration-300 ease-in-out lg:static lg:h-full lg:translate-x-0 border-r border-white/[0.06]",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
