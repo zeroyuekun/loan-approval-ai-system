@@ -77,6 +77,9 @@ services:
         required: false
     environment:
       POSTGRES_HOST: db
+      POSTGRES_DB: ${POSTGRES_DB:-loan_approval}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-}
@@ -122,6 +125,7 @@ services:
         required: false
     environment:
       POSTGRES_HOST: db
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -163,6 +167,7 @@ services:
         required: false
     environment:
       POSTGRES_HOST: db
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -204,6 +209,7 @@ services:
         required: false
     environment:
       POSTGRES_HOST: db
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
