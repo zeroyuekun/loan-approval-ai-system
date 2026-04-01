@@ -224,7 +224,24 @@ jobs:
       - name: Start application stack
         run: |
           docker compose build
-          docker compose up -d --wait --timeout 120
+          docker compose up -d
+          echo "Waiting for backend to be ready..."
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8000/api/v1/health/ > /dev/null 2>&1; then
+              echo "Backend is healthy"
+              exit 0
+            fi
+            if ! docker compose ps backend --format '{{.State}}' | grep -q running; then
+              echo "Backend container crashed. Logs:"
+              docker compose logs backend --tail 50
+              exit 1
+            fi
+            echo "Waiting for backend... ($i/40)"
+            sleep 5
+          done
+          echo "Backend did not become healthy. Logs:"
+          docker compose logs backend --tail 50
+          exit 1
         env:
           DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
           DJANGO_DEBUG: 'true'
@@ -236,19 +253,6 @@ jobs:
           REDIS_PASSWORD: testpass
           FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
           ANTHROPIC_API_KEY: sk-ant-test-key
-
-      - name: Wait for backend health
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8000/api/v1/health/ > /dev/null 2>&1; then
-              echo "Backend is healthy"
-              exit 0
-            fi
-            echo "Waiting for backend... ($i/30)"
-            sleep 5
-          done
-          echo "Backend did not become healthy"
-          exit 1
 
       - name: OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.14.0
@@ -281,7 +285,24 @@ jobs:
       - name: Start application stack
         run: |
           docker compose build
-          docker compose up -d --wait --timeout 120
+          docker compose up -d
+          echo "Waiting for backend to be ready..."
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8000/api/v1/health/ready/ > /dev/null 2>&1; then
+              echo "Backend is ready"
+              exit 0
+            fi
+            if ! docker compose ps backend --format '{{.State}}' | grep -q running; then
+              echo "Backend container crashed. Logs:"
+              docker compose logs backend --tail 50
+              exit 1
+            fi
+            echo "Waiting for backend... ($i/40)"
+            sleep 5
+          done
+          echo "Backend did not become ready. Logs:"
+          docker compose logs backend --tail 50
+          exit 1
         env:
           DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
           DJANGO_DEBUG: 'true'
@@ -293,19 +314,6 @@ jobs:
           REDIS_PASSWORD: testpass
           FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
           ANTHROPIC_API_KEY: sk-ant-test-key
-
-      - name: Wait for backend readiness
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8000/api/v1/health/ready/ > /dev/null 2>&1; then
-              echo "Backend is ready"
-              exit 0
-            fi
-            echo "Waiting for backend... ($i/30)"
-            sleep 5
-          done
-          echo "Backend did not become ready"
-          exit 1
 
       - name: Seed test data
         run: |
