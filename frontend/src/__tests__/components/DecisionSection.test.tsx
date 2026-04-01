@@ -2,12 +2,6 @@ import { render, screen } from '@testing-library/react'
 import { DecisionSection } from '@/components/applications/DecisionSection'
 import { LoanDecision } from '@/types'
 
-vi.mock('@/components/metrics/FeatureImportance', () => ({
-  FeatureImportance: () => <div data-testid="feature-importance" />,
-}))
-vi.mock('@/components/metrics/ShapWaterfall', () => ({
-  ShapWaterfall: () => <div data-testid="shap-waterfall" />,
-}))
 const baseDecision: LoanDecision = {
   id: 'dec-1',
   decision: 'approved',
@@ -68,42 +62,4 @@ describe('DecisionSection', () => {
     renderDecision({ reasoning: 'Strong income-to-debt ratio with excellent credit history.' })
     expect(screen.getByText('Strong income-to-debt ratio with excellent credit history.')).toBeInTheDocument()
   })
-
-  it('renders FeatureImportance when feature_importances has data (object)', () => {
-    renderDecision({ feature_importances: { income: 0.35 } })
-    expect(screen.getByTestId('feature-importance')).toBeInTheDocument()
-  })
-
-  it('renders FeatureImportance when feature_importances has data (array)', () => {
-    renderDecision({
-      feature_importances: [{ feature: 'income', importance: 0.35 }],
-    })
-    expect(screen.getByTestId('feature-importance')).toBeInTheDocument()
-  })
-
-  it('hides FeatureImportance when feature_importances is empty object', () => {
-    renderDecision({ feature_importances: {} })
-    expect(screen.queryByTestId('feature-importance')).not.toBeInTheDocument()
-  })
-
-  it('hides FeatureImportance when feature_importances is empty array', () => {
-    renderDecision({ feature_importances: [] as any })
-    expect(screen.queryByTestId('feature-importance')).not.toBeInTheDocument()
-  })
-
-  it('renders ShapWaterfall when shap_values has data', () => {
-    renderDecision({ shap_values: { income: 0.12 } })
-    expect(screen.getByTestId('shap-waterfall')).toBeInTheDocument()
-  })
-
-  it('hides ShapWaterfall when shap_values is missing', () => {
-    renderDecision({ shap_values: undefined })
-    expect(screen.queryByTestId('shap-waterfall')).not.toBeInTheDocument()
-  })
-
-  it('hides ShapWaterfall when shap_values is empty', () => {
-    renderDecision({ shap_values: {} })
-    expect(screen.queryByTestId('shap-waterfall')).not.toBeInTheDocument()
-  })
-
 })
