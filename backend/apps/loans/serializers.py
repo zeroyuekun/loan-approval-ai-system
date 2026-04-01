@@ -2,6 +2,11 @@ from rest_framework import serializers
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.serializers import UserSerializer
+from apps.ml_engine.services.reason_codes import (
+    generate_adverse_action_reasons,
+    generate_reapplication_guidance,
+)
+from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
 from .models import AuditLog, FraudCheck, LoanApplication, LoanDecision
 
@@ -21,6 +26,30 @@ class LoanDecisionSerializer(serializers.ModelSerializer):
             "reasoning",
             "created_at",
         )
+
+
+class CustomerLoanDecisionSerializer(serializers.ModelSerializer):
+    denial_reasons = serializers.SerializerMethodField()
+    reapplication_guidance = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LoanDecision
+        fields = (
+            "id",
+            "decision",
+            "created_at",
+            "denial_reasons",
+            "reapplication_guidance",
+        )
+
+    def get_denial_reasons(self, obj):
+        return generate_adverse_action_reasons(obj.shap_values or {}, obj.decision)
+
+    def get_reapplication_guidance(self, obj):
+        if obj.decision != "denied":
+            return None
+        reasons = self.get_denial_reasons(obj)
+        return generate_reapplication_guidance([], reasons)
 
 
 class FraudCheckSerializer(serializers.ModelSerializer):
@@ -75,10 +104,49 @@ class LoanApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "status", "created_at", "updated_at", "applicant")
 
     def get_latest_fraud_check(self, obj):
-        fraud_check = obj.fraud_checks.first() if hasattr(obj, "fraud_checks") else None
-        if fraud_check is None:
+        # Use .all() to hit the prefetch cache — .first() bypasses it and causes N+1
+        fraud_checks = list(obj.fraud_checks.all()[:1]) if hasattr(obj, "fraud_checks") else []
+        if not fraud_checks:
             return None
-        return FraudCheckSerializer(fraud_check).data
+        return FraudCheckSerializer(fraud_checks[0]).data
+
+
+class CustomerLoanApplicationSerializer(PIIMaskingMixin, serializers.ModelSerializer):
+    decision = CustomerLoanDecisionSerializer(read_only=True)
+
+    PII_MASKED_FIELDS = {
+        "annual_income": mask_currency,
+        "credit_score": mask_credit_score,
+        "loan_amount": mask_currency,
+        "monthly_expenses": mask_currency,
+    }
+
+    class Meta:
+        model = LoanApplication
+        fields = (
+            "id",
+            "annual_income",
+            "credit_score",
+            "loan_amount",
+            "loan_term_months",
+            "debt_to_income",
+            "employment_length",
+            "property_value",
+            "deposit_amount",
+            "monthly_expenses",
+            "number_of_dependants",
+            "employment_type",
+            "purpose",
+            "home_ownership",
+            "has_cosigner",
+            "has_hecs",
+            "status",
+            "notes",
+            "created_at",
+            "updated_at",
+            "decision",
+        )
+        read_only_fields = ("id", "status", "created_at", "updated_at")
 
 
 class LoanApplicationCreateSerializer(serializers.ModelSerializer):

@@ -206,8 +206,7 @@ class PipelineOrchestrator:
                     application=application,
                     status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
                 ).update(status=AgentRun.Status.FAILED, error="Stale pipeline — automatically cleared")
-            application.status = LoanApplication.Status.PROCESSING
-            application.save(update_fields=["status"])
+            application.transition_to("processing", details={"source": "orchestrator_pipeline"})
 
         # Refetch with profile (nullable) outside the lock — select_for_update
         # cannot be combined with outer joins on nullable relations in PostgreSQL.

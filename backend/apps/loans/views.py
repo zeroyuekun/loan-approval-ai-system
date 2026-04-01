@@ -1,7 +1,6 @@
 import logging
 
 from django.db import models, transaction
-from django.http import HttpResponse
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
@@ -10,12 +9,13 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import CustomerProfile
-from apps.accounts.permissions import IsAdmin
+from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 
 from .filters import AuditLogFilter, LoanApplicationFilter
 from .models import AuditLog, LoanApplication
 from .serializers import (
     AuditLogSerializer,
+    CustomerLoanApplicationSerializer,
     LoanApplicationCreateSerializer,
     LoanApplicationCustomerUpdateSerializer,
     LoanApplicationSerializer,
@@ -50,6 +50,8 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             return LoanApplicationCreateSerializer
         if self.action in ("update", "partial_update") and self.request.user.role == "customer":
             return LoanApplicationCustomerUpdateSerializer
+        if self.action in ("retrieve", "list") and self.request.user.role == "customer":
+            return CustomerLoanApplicationSerializer
         return LoanApplicationSerializer
 
     def get_queryset(self):
@@ -130,25 +132,6 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         )
         super().perform_destroy(instance)
 
-    @action(detail=True, methods=["get"], url_path="decision-letter")
-    def decision_letter(self, request, pk=None):
-        """Download a PDF decision letter for a completed application."""
-        application = self.get_object()
-        decision = getattr(application, "decision", None)
-        if not decision:
-            return HttpResponse("No decision available for this application.", status=404)
-
-        from apps.loans.services.pdf_generator import generate_decision_letter_pdf
-
-        try:
-            pdf_bytes = generate_decision_letter_pdf(application)
-        except Exception:
-            logger.exception("PDF generation failed for application %s", pk)
-            return HttpResponse("Failed to generate decision letter.", status=500)
-
-        response = HttpResponse(pdf_bytes, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="decision-letter-{application.id}.pdf"'
-        return response
 
 
 class AuditLogViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
@@ -164,7 +147,7 @@ class AuditLogViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 
 
 class DashboardStatsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrOfficer]
 
     def get(self, request):
         from datetime import timedelta
@@ -183,8 +166,9 @@ class DashboardStatsView(APIView):
 
         # Approval rate
         decided = LoanApplication.objects.filter(status__in=["approved", "denied"])
+        decided_count = decided.count()
         approved = decided.filter(status="approved").count()
-        approval_rate = round(approved / decided.count() * 100, 1) if decided.count() > 0 else 0
+        approval_rate = round(approved / decided_count * 100, 1) if decided_count > 0 else 0
 
         # Average processing time from AgentRun
         avg_time = AgentRun.objects.filter(status="completed", total_time_ms__isnull=False).aggregate(

@@ -6,7 +6,7 @@ export default function AuthLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* Left panel - branding */}
       <div className="hidden lg:flex lg:w-1/2 gradient-sidebar relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-indigo-600/10 to-violet-600/20" />
@@ -40,8 +40,14 @@ export default function AuthLayout({
       </div>
 
       {/* Right panel - form */}
-      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 bg-background">
-        {children}
+      <div className="flex w-full lg:w-1/2 flex-col bg-background overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex h-16 items-center gap-2.5 px-6 gradient-sidebar text-white border-b border-white/[0.06] lg:hidden">
+          <LogoIcon detailed={false} />
+          <span className="text-lg font-bold tracking-tight">AussieLoanAI</span>
+        </div>
+        <div className="flex flex-1 items-center justify-center p-6">
+          {children}
+        </div>
       </div>
     </div>
   )

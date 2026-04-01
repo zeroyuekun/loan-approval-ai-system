@@ -54,11 +54,6 @@ export default function RegisterPage() {
 
   return (
     <div className="w-full max-w-sm">
-      <div className="flex items-center gap-2.5 mb-8 lg:hidden">
-        <LogoIcon />
-        <span className="text-lg font-bold">AussieLoanAI</span>
-      </div>
-
       <div className="space-y-2 mb-8">
         <h1 className="text-2xl font-bold tracking-tight">Create account</h1>
         <p className="text-muted-foreground">Get started with AussieLoanAI</p>

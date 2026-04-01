@@ -80,6 +80,25 @@ def train_model_task(self, algorithm="xgb", data_path=None):
             next_review_date=(timezone.now() + timedelta(days=90)).date(),
         )
 
+    # Pre-deployment fairness gate — check DIR >= 0.80 for all protected attributes
+    from apps.ml_engine.services.fairness_gate import check_fairness_gate
+
+    fairness_data = metrics.get("fairness", {})
+    if fairness_data:
+        gate_result = check_fairness_gate(fairness_data)
+        # Store gate result in the model version metadata
+        mv.training_metadata = {**(mv.training_metadata or {}), "fairness_gate": gate_result}
+        if not gate_result["passed"]:
+            logger.warning(
+                "Model %s FAILED fairness gate (failing: %s, min DIR: %s). "
+                "Deactivating model — requires human review before deployment.",
+                mv.id,
+                gate_result["failing_attributes"],
+                gate_result["minimum_dir"],
+            )
+            mv.is_active = False
+        mv.save(update_fields=["training_metadata", "is_active"])
+
     # Invalidate cached models so workers pick up the new version
     clear_model_cache()
 
@@ -100,16 +119,21 @@ def run_prediction_task(self, application_id):
     from apps.ml_engine.services.predictor import ModelPredictor
 
     application = LoanApplication.objects.get(pk=application_id)
-    application.status = "processing"
-    application.save(update_fields=["status"])
+    try:
+        application.transition_to("processing")
+    except LoanApplication.InvalidStateTransition:
+        logger.info(
+            "Skipping prediction for application %s — status '%s' cannot transition to processing",
+            application_id, application.status,
+        )
+        return {"application_id": str(application_id), "status": "skipped", "reason": application.status}
 
     try:
         predictor = ModelPredictor()
         result = predictor.predict(application)
     except Exception:
         # Revert status so the application isn't stuck in 'processing'
-        application.status = "pending"
-        application.save(update_fields=["status"])
+        application.transition_to("pending", details={"reason": "prediction_failed"})
         raise
 
     # Save prediction log
@@ -137,10 +161,9 @@ def run_prediction_task(self, application_id):
 
     # Update application status — flag borderline cases for human review
     if result.get("requires_human_review"):
-        application.status = "review"
+        application.transition_to("review")
     else:
-        application.status = result["prediction"]
-    application.save(update_fields=["status"])
+        application.transition_to(result["prediction"])
 
     return {
         "application_id": str(application_id),
@@ -205,19 +228,7 @@ def check_fairness_violations(self):
     }
 
 
-def _compute_psi(reference: np.ndarray, current: np.ndarray, bins: int = 10) -> float:
-    """Compute Population Stability Index between reference and current distributions."""
-    eps = 1e-4
-    breakpoints = np.linspace(0, 1, bins + 1)
-
-    ref_counts = np.histogram(reference, bins=breakpoints)[0]
-    cur_counts = np.histogram(current, bins=breakpoints)[0]
-
-    ref_pct = ref_counts / ref_counts.sum() + eps
-    cur_pct = cur_counts / cur_counts.sum() + eps
-
-    psi = np.sum((cur_pct - ref_pct) * np.log(cur_pct / ref_pct))
-    return float(psi)
+from apps.ml_engine.services.drift_monitor import compute_psi as _compute_psi
 
 
 @shared_task(bind=True, name="apps.ml_engine.tasks.compute_weekly_drift_report", time_limit=600)
@@ -261,25 +272,9 @@ def compute_weekly_drift_report(self):
         ref_array = np.array(reference_probs, dtype=float)
         psi_score = _compute_psi(ref_array, probabilities)
 
-        # Per-feature PSI if feature distributions are available
-        ref_feature_dists = training_meta.get("feature_distributions", {})
-        if ref_feature_dists:
-            # Get feature values from recent predictions
-            recent_features = list(predictions.values_list("feature_importances", flat=True))
-            for feature_name, ref_dist in ref_feature_dists.items():
-                cur_values = [
-                    f.get(feature_name)
-                    for f in recent_features
-                    if isinstance(f, dict) and f.get(feature_name) is not None
-                ]
-                if cur_values and ref_dist:
-                    try:
-                        psi_per_feature[feature_name] = _compute_psi(
-                            np.array(ref_dist, dtype=float),
-                            np.array(cur_values, dtype=float),
-                        )
-                    except (ValueError, TypeError):
-                        pass
+        # Per-feature PSI is computed by compute_batch_drift_report (drift_monitor.py)
+        # which loads the full model bundle with reference distributions.
+        # This weekly task only computes probability-level PSI.
 
     # Determine alert level
     if psi_score is not None and psi_score >= 0.25:

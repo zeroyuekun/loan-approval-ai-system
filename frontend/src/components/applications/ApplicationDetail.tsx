@@ -17,8 +17,6 @@ import { EmailPreview } from '@/components/emails/EmailPreview'
 import { BiasScoreBadge } from '@/components/emails/BiasScoreBadge'
 import { RepaymentCalculator } from '@/components/applications/RepaymentCalculator'
 import { Button } from '@/components/ui/button'
-import { loansApi } from '@/lib/api'
-import { Download } from 'lucide-react'
 
 interface ApplicationDetailProps {
   application: LoanApplication
@@ -76,29 +74,6 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
       {/* ML Decision */}
       {decision && <DecisionSection decision={decision} />}
 
-      {/* Decision Letter Download */}
-      {decision && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={async () => {
-            try {
-              const { data } = await loansApi.downloadDecisionLetter(application.id)
-              const url = URL.createObjectURL(data as Blob)
-              const a = document.createElement('a')
-              a.href = url
-              a.download = `decision-letter-${application.id}.pdf`
-              a.click()
-              URL.revokeObjectURL(url)
-            } catch {
-              // error is handled by the API interceptor toast
-            }
-          }}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          Download Decision Letter
-        </Button>
-      )}
 
       {/* Repayment Calculator */}
       <RepaymentCalculator

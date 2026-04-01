@@ -157,8 +157,6 @@ export const loansApi = {
   create: (data: LoanPayload) => api.post('/loans/', data),
   update: (id: string, data: Partial<LoanPayload>) => api.patch(`/loans/${id}/`, data),
   delete: (id: string) => api.delete(`/loans/${id}/`),
-  downloadDecisionLetter: (id: string) =>
-    api.get(`/loans/${id}/decision-letter/`, { responseType: 'blob' }),
   getDashboardStats: () => api.get('/loans/dashboard-stats/'),
 }
 

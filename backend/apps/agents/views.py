@@ -194,14 +194,20 @@ class BatchOrchestrateView(APIView):
         recheck = request.query_params.get("recheck", "").lower() == "true"
         max_batch = 100  # Safety cap to prevent accidental mass re-processing
         if recheck:
-            # Reset non-processing apps to pending so they run fresh (capped)
-            app_ids = list(
-                LoanApplication.objects.exclude(status=LoanApplication.Status.PROCESSING).values_list("id", flat=True)[
-                    :max_batch
+            # Reset non-terminal, non-processing apps to pending via state machine (capped)
+            recheckable = LoanApplication.objects.filter(
+                status__in=[
+                    LoanApplication.Status.REVIEW,
+                    LoanApplication.Status.PROCESSING,
                 ]
-            )
-            LoanApplication.objects.filter(id__in=app_ids).update(status=LoanApplication.Status.PENDING)
-            pending_apps = app_ids
+            ).exclude(status=LoanApplication.Status.PROCESSING)[:max_batch]
+            pending_apps = []
+            for app in recheckable:
+                try:
+                    app.transition_to("pending", user=request.user, details={"reason": "batch_recheck"})
+                    pending_apps.append(app.id)
+                except LoanApplication.InvalidStateTransition:
+                    continue
         else:
             pending_apps = list(
                 LoanApplication.objects.filter(status=LoanApplication.Status.PENDING).values_list("id", flat=True)
@@ -420,8 +426,7 @@ class HumanReviewView(APIView):
             elif action == "deny":
                 # Human override: deny the application immediately
                 application = agent_run.application
-                application.status = LoanApplication.Status.DENIED
-                application.save(update_fields=["status", "updated_at"])
+                application.transition_to("denied", user=request.user, details={"reason": "human_review_deny"})
 
                 # Update LoanDecision to reflect human override
                 try:
@@ -462,8 +467,7 @@ class HumanReviewView(APIView):
 
                 # Reset application to pending so the new pipeline can process it
                 application = agent_run.application
-                application.status = LoanApplication.Status.PENDING
-                application.save(update_fields=["status", "updated_at"])
+                application.transition_to("pending", user=request.user, details={"reason": "human_review_regenerate"})
 
                 AuditLog.objects.create(
                     user=request.user,

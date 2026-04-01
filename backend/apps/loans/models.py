@@ -284,6 +284,46 @@ class LoanApplication(SoftDeleteModel):
             models.Index(fields=["applicant", "-created_at"], name="loan_applicant_created"),
         ]
 
+    # Valid state transitions — any transition not listed here is illegal
+    ALLOWED_TRANSITIONS: dict[str, list[str]] = {
+        "pending": ["processing", "denied"],
+        "processing": ["approved", "denied", "review", "pending"],  # pending = prediction failure rollback
+        "review": ["approved", "denied", "processing", "pending"],  # pending = regenerate, processing = retry
+        "approved": [],   # terminal
+        "denied": [],     # terminal
+    }
+
+    class InvalidStateTransition(Exception):
+        """Raised when an illegal status transition is attempted."""
+
+    def transition_to(self, new_status: str, *, user=None, details: dict | None = None) -> None:
+        """Transition to a new status with validation and audit logging.
+
+        Raises InvalidStateTransition if the transition is not allowed.
+        Creates an AuditLog entry for every successful transition.
+        """
+        old_status = self.status
+        allowed = self.ALLOWED_TRANSITIONS.get(old_status, [])
+        if new_status not in allowed:
+            raise self.InvalidStateTransition(
+                f"Cannot transition from '{old_status}' to '{new_status}'. "
+                f"Allowed transitions: {allowed}"
+            )
+        self.status = new_status
+        self.save(update_fields=["status", "updated_at"])
+
+        AuditLog.objects.create(
+            user=user,
+            action="status_transition",
+            resource_type="LoanApplication",
+            resource_id=str(self.id),
+            details={
+                "from_status": old_status,
+                "to_status": new_status,
+                **(details or {}),
+            },
+        )
+
     def __str__(self):
         return f"Loan {self.id} - {self.applicant.username} - ${self.loan_amount}"
 

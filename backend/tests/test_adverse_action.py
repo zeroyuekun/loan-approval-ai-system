@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from apps.ml_engine.services.adverse_action import (
     AFCA_COMPLAINT_TEXT,
-    RIGHT_TO_REQUEST_TEXT,
+    AU_RIGHT_TO_REQUEST_TEXT,
     generate_adverse_action_notice,
     generate_model_inventory_entry,
 )
@@ -18,9 +18,9 @@ from apps.ml_engine.services.adverse_action import (
 # ---------------------------------------------------------------------------
 
 
-def _make_application(app_id=42, first_name="Jane", last_name="Doe", email="jane@example.com"):
-    user = SimpleNamespace(first_name=first_name, last_name=last_name, email=email)
-    return SimpleNamespace(id=app_id, user=user)
+def _make_application(app_id=42, first_name="Jane", last_name="Doe", email="jane@example.com", credit_score=720):
+    applicant = SimpleNamespace(first_name=first_name, last_name=last_name, email=email)
+    return SimpleNamespace(id=app_id, applicant=applicant, credit_score=credit_score)
 
 
 def _make_prediction_result():
@@ -126,8 +126,8 @@ class TestAdverseActionNotice:
         pred = _make_prediction_result()
 
         notice = generate_adverse_action_notice(app, pred)
-        assert notice["right_to_request"] == RIGHT_TO_REQUEST_TEXT
-        assert "30 days" in notice["right_to_request"]
+        assert notice["right_to_request"] == AU_RIGHT_TO_REQUEST_TEXT
+        assert "Privacy Act" in notice["right_to_request"]
 
     def test_notice_includes_afca_complaint_info(self):
         app = _make_application()
@@ -146,7 +146,7 @@ class TestAdverseActionNotice:
         assert notice["principal_reasons"] == []
 
     def test_missing_user_falls_back_gracefully(self):
-        app = SimpleNamespace(id=99, user=None)
+        app = SimpleNamespace(id=99, applicant=None)
         pred = _make_prediction_result()
 
         notice = generate_adverse_action_notice(app, pred)
@@ -159,6 +159,60 @@ class TestAdverseActionNotice:
         notice = generate_adverse_action_notice(app, pred)
         # Should parse without error
         datetime.fromisoformat(notice["date"])
+
+    # --- New: jurisdiction-aware fields ---
+
+    def test_au_jurisdiction_includes_au_specific_fields(self):
+        app = _make_application()
+        pred = _make_prediction_result()
+
+        notice = generate_adverse_action_notice(app, pred, jurisdiction="AU")
+        assert "au_regulator_contact" in notice
+        assert "au_credit_bureau" in notice
+        assert notice["au_regulator_contact"]["name"] == "Australian Securities and Investments Commission (ASIC)"
+        assert "fcra_disclosure" not in notice  # US-only
+
+    def test_us_jurisdiction_includes_fcra_and_ecoa(self):
+        app = _make_application()
+        pred = _make_prediction_result()
+
+        notice = generate_adverse_action_notice(app, pred, jurisdiction="US")
+        assert "fcra_disclosure" in notice
+        assert "ecoa_antidiscrimination_notice" in notice
+        assert "us_regulator_contact" in notice
+        assert "us_credit_bureau" in notice
+        assert "60 days" in notice["fcra_disclosure"]
+        assert "Equal Credit Opportunity Act" in notice["ecoa_antidiscrimination_notice"]
+        assert "au_regulator_contact" not in notice  # AU-only
+
+    def test_credit_score_disclosure_present(self):
+        app = _make_application(credit_score=720)
+        pred = _make_prediction_result()
+
+        notice = generate_adverse_action_notice(app, pred, jurisdiction="AU")
+        assert "credit_score_disclosure" in notice
+        disclosure = notice["credit_score_disclosure"]
+        assert disclosure["score_used"] == 720
+        assert disclosure["score_range"]["max"] == 1200  # AU range
+        assert len(disclosure["key_factors"]) > 0
+
+    def test_us_credit_score_range(self):
+        app = _make_application(credit_score=650)
+        pred = _make_prediction_result()
+
+        notice = generate_adverse_action_notice(app, pred, jurisdiction="US")
+        disclosure = notice["credit_score_disclosure"]
+        assert disclosure["score_range"]["max"] == 850  # US FICO range
+
+    def test_reapplication_guidance_present(self):
+        app = _make_application()
+        pred = _make_prediction_result()
+
+        notice = generate_adverse_action_notice(app, pred)
+        assert "reapplication_guidance" in notice
+        guidance = notice["reapplication_guidance"]
+        assert "estimated_review_months" in guidance
+        assert "message" in guidance
 
 
 # ---------------------------------------------------------------------------

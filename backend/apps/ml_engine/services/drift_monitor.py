@@ -175,13 +175,17 @@ def compute_batch_drift_report(model_version, days=7):
         return None
 
     # Load training reference distribution from model bundle
+    from apps.ml_engine.services.predictor import _validate_model_path
+
     bundle_path = model_version.file_path
-    if not os.path.exists(bundle_path):
-        logger.error("Model bundle not found: %s", bundle_path)
+    try:
+        validated_path = _validate_model_path(bundle_path)
+    except (ValueError, FileNotFoundError) as e:
+        logger.error("Model bundle validation failed: %s", e)
         return None
 
     try:
-        bundle = joblib.load(bundle_path)
+        bundle = joblib.load(validated_path)
         reference_distribution = bundle.get("reference_distribution", {})
     except Exception as e:
         logger.error("Failed to load model bundle for drift check: %s", e)
@@ -245,11 +249,16 @@ def compute_batch_drift_report(model_version, days=7):
     for feature, ks_data in ks_results.items():
         psi_results[f"{feature}_ks"] = ks_data
 
-    # Determine alert level
-    if max_psi >= PSI_INVESTIGATE:
+    # Determine alert level — use per-model thresholds from retraining_policy
+    # if available, otherwise fall back to module-level defaults.
+    policy = getattr(model_version, "retraining_policy", None) or {}
+    psi_stable = policy.get("psi_stable", PSI_STABLE)
+    psi_investigate = policy.get("psi_investigate", PSI_INVESTIGATE)
+
+    if max_psi >= psi_investigate:
         alert_level = "significant"
         drift_detected = True
-    elif max_psi >= PSI_STABLE:
+    elif max_psi >= psi_stable:
         alert_level = "moderate"
         drift_detected = True
     else:

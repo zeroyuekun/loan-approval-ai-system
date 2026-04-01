@@ -19,15 +19,25 @@ References:
 import logging
 from datetime import UTC, datetime
 
-from apps.ml_engine.services.reason_codes import generate_adverse_action_reasons
+from apps.ml_engine.services.reason_codes import (
+    generate_adverse_action_reasons,
+    generate_reapplication_guidance,
+)
 
 logger = logging.getLogger(__name__)
 
-RIGHT_TO_REQUEST_TEXT = (
+US_RIGHT_TO_REQUEST_TEXT = (
     "Under the Equal Credit Opportunity Act (ECOA), you have the right to "
     "request a copy of the appraisal or valuation used in connection with "
     "your application within 30 days of this notice. You also have the right "
     "to know the specific reasons for this decision."
+)
+
+AU_RIGHT_TO_REQUEST_TEXT = (
+    "Under the Privacy Act 1988, you have the right to request access to "
+    "the personal information we hold about you and the reasons for this "
+    "decision. You may also request a review of this decision by contacting "
+    "us directly or lodging a complaint with AFCA."
 )
 
 AFCA_COMPLAINT_TEXT = (
@@ -43,37 +53,91 @@ SHAP_STABILITY_NOTE = (
     "mid-ranked factors may vary between assessments (arXiv:2508.01851)."
 )
 
+# --- US jurisdiction: FCRA / ECOA required disclosures ---
+
+FCRA_DISCLOSURE_TEXT = (
+    "This decision was based in whole or in part on information obtained from "
+    "a consumer reporting agency. You have the right to obtain a free copy of "
+    "your credit report from the agency listed below within 60 days of this "
+    "notice, and to dispute the accuracy or completeness of any information "
+    "contained therein. The consumer reporting agency did not make the credit "
+    "decision and is unable to provide the specific reasons for it."
+)
+
+ECOA_ANTIDISCRIMINATION_NOTICE = (
+    "The Federal Equal Credit Opportunity Act prohibits creditors from "
+    "discriminating against credit applicants on the basis of race, color, "
+    "religion, national origin, sex, marital status, age (provided the "
+    "applicant has the capacity to enter into a binding contract), because "
+    "all or part of the applicant's income derives from any public assistance "
+    "program, or because the applicant has in good faith exercised any right "
+    "under the Consumer Credit Protection Act."
+)
+
+US_REGULATOR_CONTACT = {
+    "name": "Consumer Financial Protection Bureau (CFPB)",
+    "address": "1700 G Street NW, Washington, DC 20552",
+    "phone": "(855) 411-2372",
+    "website": "www.consumerfinance.gov",
+}
+
+US_CREDIT_BUREAU = {
+    "name": "Equifax",
+    "address": "P.O. Box 740241, Atlanta, GA 30374-0241",
+    "phone": "(800) 685-1111",
+    "website": "www.equifax.com",
+}
+
+# --- Australian jurisdiction ---
+
+AU_CREDIT_BUREAU = {
+    "name": "Equifax Australia",
+    "address": "GPO Box 964, North Sydney NSW 2059",
+    "phone": "13 83 32",
+    "website": "www.equifax.com.au",
+}
+
+AU_REGULATOR_CONTACT = {
+    "name": "Australian Securities and Investments Commission (ASIC)",
+    "phone": "1300 300 630",
+    "website": "www.asic.gov.au",
+}
+
 
 def generate_adverse_action_notice(
     application,
     prediction_result: dict,
     max_reasons: int = 4,
+    jurisdiction: str = "AU",
 ) -> dict:
     """Generate a formal adverse action notice for a denied application.
 
     Args:
         application: LoanApplication instance
         prediction_result: Dict from ModelPredictor.predict() containing
-            shap_values, probability, model_version, risk_grade
+            shap_values, probability, model_version, risk_grade, counterfactuals
         max_reasons: Maximum principal reasons to include (ECOA allows up to 4)
+        jurisdiction: "AU" (Australia) or "US" (United States) — controls
+            which regulatory disclosures are included
 
     Returns dict with:
-        - notice_type: 'adverse_action'
-        - applicant_name: str
-        - application_id: str
-        - date: ISO timestamp
-        - decision: 'denied'
-        - principal_reasons: list of {code, reason, feature} (no raw
-          contribution values — those are internal)
-        - model_version: str
-        - risk_grade: str
-        - right_to_request: str (ECOA 30-day right)
-        - complaint_info: str (AFCA details for AU)
-        - shap_stability_note: str (caveat about mid-rank instability)
+        - notice_type, applicant_name, application_id, date, decision
+        - principal_reasons: list of {code, reason, feature}
+        - model_version, risk_grade
+        - right_to_request (ECOA 30-day right)
+        - complaint_info (AFCA for AU)
+        - shap_stability_note
+        - credit_score_disclosure (score used, range, key factors)
+        - reapplication_guidance (improvement targets, timeline)
+        - Jurisdiction-specific:
+          AU: au_regulator_contact, au_credit_bureau
+          US: fcra_disclosure, ecoa_antidiscrimination_notice,
+              us_regulator_contact, us_credit_bureau
     """
     shap_values = prediction_result.get("shap_values", {})
     model_version = prediction_result.get("model_version", "unknown")
     risk_grade = prediction_result.get("risk_grade", "unknown")
+    counterfactuals = prediction_result.get("counterfactuals", [])
 
     # Delegate to reason_codes for the heavy lifting
     raw_reasons = generate_adverse_action_reasons(
@@ -88,6 +152,18 @@ def generate_adverse_action_notice(
     # Build applicant name from the application's user relation
     applicant_name = _get_applicant_name(application)
 
+    # Credit score disclosure — required under both ECOA (US) and good practice (AU)
+    credit_score = getattr(application, "credit_score", None)
+    credit_score_disclosure = {
+        "score_used": credit_score,
+        "score_range": {"min": 0, "max": 1200} if jurisdiction == "AU" else {"min": 300, "max": 850},
+        "score_source": "Equifax Australia" if jurisdiction == "AU" else "Equifax",
+        "key_factors": [r["reason"] for r in principal_reasons[:4]],
+    }
+
+    # Reapplication guidance from counterfactuals
+    reapplication = generate_reapplication_guidance(counterfactuals, raw_reasons)
+
     notice = {
         "notice_type": "adverse_action",
         "applicant_name": applicant_name,
@@ -97,14 +173,27 @@ def generate_adverse_action_notice(
         "principal_reasons": principal_reasons,
         "model_version": str(model_version),
         "risk_grade": str(risk_grade),
-        "right_to_request": RIGHT_TO_REQUEST_TEXT,
+        "right_to_request": US_RIGHT_TO_REQUEST_TEXT if jurisdiction == "US" else AU_RIGHT_TO_REQUEST_TEXT,
         "complaint_info": AFCA_COMPLAINT_TEXT,
         "shap_stability_note": SHAP_STABILITY_NOTE,
+        "credit_score_disclosure": credit_score_disclosure,
+        "reapplication_guidance": reapplication,
     }
 
+    # Jurisdiction-specific disclosures
+    if jurisdiction == "US":
+        notice["fcra_disclosure"] = FCRA_DISCLOSURE_TEXT
+        notice["ecoa_antidiscrimination_notice"] = ECOA_ANTIDISCRIMINATION_NOTICE
+        notice["us_regulator_contact"] = US_REGULATOR_CONTACT
+        notice["us_credit_bureau"] = US_CREDIT_BUREAU
+    else:  # AU default
+        notice["au_regulator_contact"] = AU_REGULATOR_CONTACT
+        notice["au_credit_bureau"] = AU_CREDIT_BUREAU
+
     logger.info(
-        "Generated adverse action notice for application %s with %d reasons",
+        "Generated adverse action notice for application %s (%s jurisdiction) with %d reasons",
         notice["application_id"],
+        jurisdiction,
         len(principal_reasons),
     )
 
@@ -113,7 +202,7 @@ def generate_adverse_action_notice(
 
 def _get_applicant_name(application) -> str:
     """Extract applicant name from a LoanApplication instance."""
-    user = getattr(application, "user", None)
+    user = getattr(application, "applicant", None)
     if user is None:
         return "Applicant"
     first = getattr(user, "first_name", "") or ""

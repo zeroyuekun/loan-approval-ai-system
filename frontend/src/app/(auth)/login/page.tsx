@@ -31,11 +31,6 @@ export default function LoginPage() {
 
   return (
     <div className="w-full max-w-sm">
-      <div className="flex items-center gap-2.5 mb-8 lg:hidden">
-        <LogoIcon />
-        <span className="text-lg font-bold">AussieLoanAI</span>
-      </div>
-
       <div className="space-y-2 mb-8">
         <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
         <p className="text-muted-foreground">Sign in to your account to continue</p>

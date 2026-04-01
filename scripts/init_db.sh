@@ -14,9 +14,13 @@ echo "Running database migrations..."
 python manage.py migrate --noinput
 
 echo "Creating superuser..."
-python manage.py createsuperuser --noinput \
-  --username "${DJANGO_SUPERUSER_USERNAME:-admin}" \
-  --email "${DJANGO_SUPERUSER_EMAIL:-admin@example.com}" \
-  2>/dev/null || echo "Superuser already exists, skipping."
+if [ -z "$DJANGO_SUPERUSER_PASSWORD" ]; then
+  echo "WARNING: DJANGO_SUPERUSER_PASSWORD not set — skipping superuser creation."
+else
+  python manage.py createsuperuser --noinput \
+    --username "${DJANGO_SUPERUSER_USERNAME:-admin}" \
+    --email "${DJANGO_SUPERUSER_EMAIL:-admin@example.com}" \
+    || echo "Superuser already exists, skipping."
+fi
 
 echo "Database initialization complete."

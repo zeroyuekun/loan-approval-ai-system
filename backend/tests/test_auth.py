@@ -65,7 +65,7 @@ class AuthTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch("apps.accounts.views.LoginRateThrottle.allow_request", return_value=True)
-    def test_login_lockout_after_10_failures(self, mock_throttle):
+    def test_login_lockout_after_5_failures(self, mock_throttle):
         user = CustomUser.objects.create_user(username="testuser", password="TestPass123!", email="test@example.com")
         for _ in range(5):
             self.client.post(

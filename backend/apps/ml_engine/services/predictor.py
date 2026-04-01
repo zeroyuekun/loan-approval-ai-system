@@ -153,6 +153,9 @@ def _load_bundle(model_version):
     bundle = joblib.load(resolved_path)
 
     with _cache_lock:
+        # Re-check after expensive load — another worker may have cached it first
+        if version_id in _model_cache:
+            return _model_cache[version_id]
         # Evict oldest entries if cache is at capacity
         while len(_model_cache) >= _MAX_CACHE_ENTRIES:
             oldest_key = next(iter(_model_cache))

@@ -430,10 +430,32 @@ class ModelCompareView(APIView):
                     "avg_confidence": round(stats["avg_probability"], 4) if stats["avg_probability"] else None,
                     "avg_latency_ms": round(stats["avg_latency"], 1) if stats["avg_latency"] else None,
                     "training_auc": model.auc_roc,
+                    "fairness_gate": (model.training_metadata or {}).get("fairness_gate"),
                 }
             )
 
-        return Response({"comparison": comparison})
+        # Agreement rate: how often champion and challenger agree on the same applications
+        agreement_rate = None
+        if len(comparison) == 2:
+            m1, m2 = active_models[0], active_models[1]
+            shared_apps = set(
+                PredictionLog.objects.filter(model_version=m1).values_list("application_id", flat=True)
+            ) & set(
+                PredictionLog.objects.filter(model_version=m2).values_list("application_id", flat=True)
+            )
+            if shared_apps:
+                m1_preds = dict(
+                    PredictionLog.objects.filter(model_version=m1, application_id__in=shared_apps)
+                    .values_list("application_id", "prediction")
+                )
+                m2_preds = dict(
+                    PredictionLog.objects.filter(model_version=m2, application_id__in=shared_apps)
+                    .values_list("application_id", "prediction")
+                )
+                agreements = sum(1 for app_id in shared_apps if m1_preds.get(app_id) == m2_preds.get(app_id))
+                agreement_rate = round(agreements / len(shared_apps), 4)
+
+        return Response({"comparison": comparison, "agreement_rate": agreement_rate})
 
 
 class DriftReportListView(APIView):

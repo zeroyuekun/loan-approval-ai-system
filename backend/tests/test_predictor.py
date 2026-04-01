@@ -50,14 +50,9 @@ class PredictorInputValidationTestCase(TestCase):
         app.has_bankruptcy = False
         app.state = "NSW"
 
-        # Should raise or handle gracefully
-        try:
-            result = predictor.predict(app)
-            # If it returns, verify the warning is present
-            if "warnings" in result:
-                self.assertTrue(len(result["warnings"]) > 0)
-        except Exception:
-            pass  # Expected — no active model in test
+        # No active model in test DB — predict should raise or return an error
+        with self.assertRaises(Exception):
+            predictor.predict(app)
 
 
 class RiskGradeTestCase(TestCase):

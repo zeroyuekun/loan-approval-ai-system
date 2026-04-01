@@ -1,6 +1,51 @@
 # Loan Approval AI System
 
+![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![Django 5](https://img.shields.io/badge/Django-5-092E20?logo=django&logoColor=white)
+![Next.js 15](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white)
+![XGBoost](https://img.shields.io/badge/XGBoost-ML-blue)
+![Claude API](https://img.shields.io/badge/Claude-API-cc785c)
+![Tests](https://img.shields.io/badge/Tests-897+-brightgreen)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+
 A full-stack loan approval system that processes applications from submission to decision email. ML scores the applicant, Claude writes the correspondence, and an agent pipeline checks everything for bias before anything gets sent. Built around Australian lending regulations — APRA serviceability buffers, NCCP Act responsible lending, Banking Code of Practice disclosure requirements, the lot. The compliance layer is where most of the engineering work went.
+
+## Why this architecture
+
+This system deliberately uses three tiers of AI — not because one would be simpler, but because each tier solves a different problem in regulated lending:
+
+- **Traditional ML (XGBoost/Random Forest)** for credit scoring because regulators require auditable, explainable decisions. SHAP values map to 70 standardised reason codes so every denial has a specific, defensible explanation. Neural networks can't do this reliably under APRA CPG 235.
+- **LLM (Claude API)** for email generation because compliance correspondence needs to read like it came from a human lending officer while hitting every regulatory disclosure. Templates are brittle; an LLM with deterministic guardrails gets the tone right and catches its own mistakes.
+- **Agentic orchestration** for the pipeline because bias detection, next-best-offer generation, and escalation logic require chaining decisions with rollback. A single Celery task with step-level logging keeps it observable and debuggable — no distributed microservice complexity.
+
+The [WAT framework](backend/docs/adr/007-wat-architecture.md) (Workflows, Agents, Tools) separates probabilistic reasoning from deterministic execution so each layer can be tested and validated independently.
+
+## Key technical decisions
+
+| Decision | Why | ADR |
+|----------|-----|-----|
+| Gaussian copula synthetic data | Realistic feature correlations calibrated to ATO/ABS/APRA statistics | [001](backend/docs/adr/001-synthetic-data-with-copula.md) |
+| XGBoost with monotonic constraints | Regulatory directional consistency (higher income → lower risk) | [002](backend/docs/adr/002-xgboost-with-monotonic-constraints.md) |
+| Three-layer bias detection | Regex pre-screen → LLM review → human escalation; 95%+ emails never hit the LLM | [003](backend/docs/adr/003-hybrid-bias-detection.md) |
+| Temporal validation strategy | Out-of-time splits to catch data drift before production | [004](backend/docs/adr/004-temporal-validation-strategy.md) |
+| Django over FastAPI | Celery-native integration, admin panel, mature ORM with migrations | [005](backend/docs/adr/005-django-over-fastapi.md) |
+| Template-first email with cost cap | $5/day Claude budget cap with template fallback; emails always deliver | [006](backend/docs/adr/006-template-first-email-with-cost-cap.md) |
+| WAT architecture | Workflows as SOPs, agents for reasoning, tools for execution | [007](backend/docs/adr/007-wat-architecture.md) |
+| Security architecture | Fernet encryption, JWT rotation, Argon2, tiered rate limiting | [008](backend/docs/adr/008-security-architecture.md) |
+
+<details>
+<summary><strong>Screenshots</strong></summary>
+
+<!-- To add screenshots, run the system with `docker compose up` and capture:
+  1. Dashboard overview (admin view with stats cards)
+  2. Customer denial explanation page (status page with reason codes)
+  3. Agent pipeline visualization (orchestrator step-by-step view)
+  4. Model Card governance page (fairness tab with disparate impact ratios)
+-->
+
+*Screenshots to be added from running system.*
+
+</details>
 
 ## What this is
 
