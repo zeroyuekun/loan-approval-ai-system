@@ -2,16 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer utilities {
-  .scrollbar-hidden {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-hidden::-webkit-scrollbar {
-    display: none;
-  }
-}
-
 @layer base {
   :root {
     --background: 210 20% 98%;
@@ -80,9 +70,6 @@
 @layer base {
   * {
     @apply border-border;
-  }
-  html, body {
-    @apply h-full;
   }
   body {
     @apply bg-background text-foreground antialiased;

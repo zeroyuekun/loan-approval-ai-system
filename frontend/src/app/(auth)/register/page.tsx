@@ -39,9 +39,8 @@ export default function RegisterPage() {
     try {
       const { confirmPassword, ...submitData } = formData
       await register({ ...submitData, password2: formData.confirmPassword })
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: Record<string, string[]> } }
-      const data = axiosErr.response?.data
+    } catch (err: any) {
+      const data = err.response?.data
       if (data && typeof data === 'object') {
         const messages = Object.values(data).flat().join(' ')
         setError(messages || 'Registration failed. Please try again.')
@@ -57,7 +56,7 @@ export default function RegisterPage() {
     <div className="w-full max-w-sm">
       <div className="flex items-center gap-2.5 mb-8 lg:hidden">
         <LogoIcon />
-        <span className="text-lg font-bold text-blue-700">AussieLoanAI</span>
+        <span className="text-lg font-bold">AussieLoanAI</span>
       </div>
 
       <div className="space-y-2 mb-8">

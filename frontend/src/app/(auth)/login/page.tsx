@@ -22,9 +22,8 @@ export default function LoginPage() {
 
     try {
       await login(username, password)
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } }
-      setError(axiosErr.response?.data?.detail || 'Invalid credentials. Please try again.')
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Invalid credentials. Please try again.')
     } finally {
       setIsLoading(false)
     }
@@ -34,7 +33,7 @@ export default function LoginPage() {
     <div className="w-full max-w-sm">
       <div className="flex items-center gap-2.5 mb-8 lg:hidden">
         <LogoIcon />
-        <span className="text-lg font-bold text-blue-700">AussieLoanAI</span>
+        <span className="text-lg font-bold">AussieLoanAI</span>
       </div>
 
       <div className="space-y-2 mb-8">
