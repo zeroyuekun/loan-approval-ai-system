@@ -223,8 +223,11 @@ jobs:
 
       - name: Start application stack
         run: |
-          docker compose build
-          docker compose up -d
+          docker compose build backend
+          docker compose up -d db redis
+          echo "Waiting for db and redis..."
+          sleep 10
+          docker compose up -d backend
           echo "Waiting for backend to be ready..."
           for i in $(seq 1 40); do
             if curl -sf http://localhost:8000/api/v1/health/ > /dev/null 2>&1; then
@@ -233,14 +236,14 @@ jobs:
             fi
             if ! docker compose ps backend --format '{{.State}}' | grep -q running; then
               echo "Backend container crashed. Logs:"
-              docker compose logs backend --tail 50
+              docker compose logs backend --tail 80
               exit 1
             fi
             echo "Waiting for backend... ($i/40)"
             sleep 5
           done
-          echo "Backend did not become healthy. Logs:"
-          docker compose logs backend --tail 50
+          echo "Backend did not become ready. Logs:"
+          docker compose logs backend --tail 80
           exit 1
         env:
           DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
@@ -284,8 +287,11 @@ jobs:
 
       - name: Start application stack
         run: |
-          docker compose build
-          docker compose up -d
+          docker compose build backend
+          docker compose up -d db redis
+          echo "Waiting for db and redis..."
+          sleep 10
+          docker compose up -d backend
           echo "Waiting for backend to be ready..."
           for i in $(seq 1 40); do
             if curl -sf http://localhost:8000/api/v1/health/ready/ > /dev/null 2>&1; then
@@ -294,14 +300,14 @@ jobs:
             fi
             if ! docker compose ps backend --format '{{.State}}' | grep -q running; then
               echo "Backend container crashed. Logs:"
-              docker compose logs backend --tail 50
+              docker compose logs backend --tail 80
               exit 1
             fi
             echo "Waiting for backend... ($i/40)"
             sleep 5
           done
           echo "Backend did not become ready. Logs:"
-          docker compose logs backend --tail 50
+          docker compose logs backend --tail 80
           exit 1
         env:
           DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
