@@ -78,10 +78,13 @@ services:
     environment:
       POSTGRES_HOST: db
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
       SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - ./backend:/app
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120 --max-requests 1000 --max-requests-jitter 100 --access-logfile -
@@ -120,7 +123,9 @@ services:
     environment:
       POSTGRES_HOST: db
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
     volumes:
       - ./backend:/app
     command: celery -A config worker -l info -Q ml --concurrency 2
@@ -159,7 +164,9 @@ services:
     environment:
       POSTGRES_HOST: db
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
     volumes:
       - ./backend:/app
     command: celery -A config worker -l info -Q email,agents,celery --concurrency 4
@@ -198,7 +205,9 @@ services:
     environment:
       POSTGRES_HOST: db
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
     volumes:
       - ./backend:/app
     command: celery -A config beat -l info

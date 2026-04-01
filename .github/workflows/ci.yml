@@ -136,6 +136,14 @@ jobs:
         working-directory: frontend
         run: npm run test:ci
 
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 14
+
   security:
     name: Security Scan
     runs-on: ubuntu-latest
@@ -220,9 +228,8 @@ jobs:
         env:
           DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
           DJANGO_DEBUG: 'false'
-          DJANGO_SETTINGS_MODULE: config.settings.production
+          DJANGO_SETTINGS_MODULE: config.settings.development
           ALLOWED_HOSTS: '*'
-          SECURE_SSL_REDIRECT: 'false'
           POSTGRES_PASSWORD: testpass
           REDIS_PASSWORD: testpass
           FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
