@@ -44,7 +44,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <aside
         aria-label="Main navigation"
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex max-h-screen w-64 flex-col overflow-hidden gradient-sidebar text-white transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 border-r border-white/[0.06]",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col gradient-sidebar text-white transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 border-r border-white/[0.06]",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
@@ -55,8 +55,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <div className="min-h-0 flex-1 overflow-hidden">
-        <nav className="h-full overflow-y-auto -mr-[20px] pr-[20px] space-y-1 px-3 py-4">
+        <nav className="min-h-0 flex-1 overflow-y-auto scrollbar-hidden space-y-1 px-3 py-4">
           <p className="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
             Menu
           </p>
@@ -91,7 +90,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             )
           })}
         </nav>
-        </div>
 
         {/* User card */}
         {user && (
