@@ -169,6 +169,12 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
         </Card>
       )}
 
+      {/* Repayment Estimator */}
+      <RepaymentCalculator
+        loanAmount={application.loan_amount}
+        loanTermMonths={application.loan_term_months}
+      />
+
       {/* ML Decision */}
       {decision && <DecisionSection decision={decision} />}
 
@@ -197,12 +203,6 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
           </CardContent>
         </Card>
       )}
-
-      {/* Repayment Estimator */}
-      <RepaymentCalculator
-        loanAmount={application.loan_amount}
-        loanTermMonths={application.loan_term_months}
-      />
 
       {/* Notes */}
       {application.notes && (
