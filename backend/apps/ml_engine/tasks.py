@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
+from apps.ml_engine.services.drift_monitor import compute_psi as _compute_psi
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,8 @@ def run_prediction_task(self, application_id):
     except LoanApplication.InvalidStateTransition:
         logger.info(
             "Skipping prediction for application %s — status '%s' cannot transition to processing",
-            application_id, application.status,
+            application_id,
+            application.status,
         )
         return {"application_id": str(application_id), "status": "skipped", "reason": application.status}
 
@@ -226,9 +228,6 @@ def check_fairness_violations(self):
         "violation_count": len(violations),
         "violations": violations,
     }
-
-
-from apps.ml_engine.services.drift_monitor import compute_psi as _compute_psi
 
 
 @shared_task(bind=True, name="apps.ml_engine.tasks.compute_weekly_drift_report", time_limit=600)

@@ -289,8 +289,8 @@ class LoanApplication(SoftDeleteModel):
         "pending": ["processing", "denied"],
         "processing": ["approved", "denied", "review", "pending"],  # pending = prediction failure rollback
         "review": ["approved", "denied", "processing", "pending"],  # pending = regenerate, processing = retry
-        "approved": [],   # terminal
-        "denied": [],     # terminal
+        "approved": ["processing"],  # allow pipeline re-run
+        "denied": ["processing"],  # allow pipeline re-run
     }
 
     class InvalidStateTransition(Exception):
@@ -306,8 +306,7 @@ class LoanApplication(SoftDeleteModel):
         allowed = self.ALLOWED_TRANSITIONS.get(old_status, [])
         if new_status not in allowed:
             raise self.InvalidStateTransition(
-                f"Cannot transition from '{old_status}' to '{new_status}'. "
-                f"Allowed transitions: {allowed}"
+                f"Cannot transition from '{old_status}' to '{new_status}'. Allowed transitions: {allowed}"
             )
         self.status = new_status
         self.save(update_fields=["status", "updated_at"])

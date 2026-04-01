@@ -53,20 +53,24 @@ def check_fairness_gate(
         dir_value = metrics.get("disparate_impact_ratio")
         if dir_value is None:
             # Undefined (e.g., single group) — skip
-            results.append({
-                "attribute": attribute,
-                "dir": None,
-                "passed": True,
-                "note": "Undefined — single group or zero approvals",
-            })
+            results.append(
+                {
+                    "attribute": attribute,
+                    "dir": None,
+                    "passed": True,
+                    "note": "Undefined — single group or zero approvals",
+                }
+            )
             continue
 
         passed = dir_value >= threshold
-        results.append({
-            "attribute": attribute,
-            "dir": round(dir_value, 4),
-            "passed": passed,
-        })
+        results.append(
+            {
+                "attribute": attribute,
+                "dir": round(dir_value, 4),
+                "passed": passed,
+            }
+        )
         dir_values.append(dir_value)
 
         if not passed:

@@ -2,7 +2,6 @@ import logging
 
 from django.db import models, transaction
 from rest_framework import permissions, viewsets
-from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -131,7 +130,6 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             ip_address=self.request.META.get("REMOTE_ADDR"),
         )
         super().perform_destroy(instance)
-
 
 
 class AuditLogViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):

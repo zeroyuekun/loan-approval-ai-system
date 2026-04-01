@@ -440,17 +440,17 @@ class ModelCompareView(APIView):
             m1, m2 = active_models[0], active_models[1]
             shared_apps = set(
                 PredictionLog.objects.filter(model_version=m1).values_list("application_id", flat=True)
-            ) & set(
-                PredictionLog.objects.filter(model_version=m2).values_list("application_id", flat=True)
-            )
+            ) & set(PredictionLog.objects.filter(model_version=m2).values_list("application_id", flat=True))
             if shared_apps:
                 m1_preds = dict(
-                    PredictionLog.objects.filter(model_version=m1, application_id__in=shared_apps)
-                    .values_list("application_id", "prediction")
+                    PredictionLog.objects.filter(model_version=m1, application_id__in=shared_apps).values_list(
+                        "application_id", "prediction"
+                    )
                 )
                 m2_preds = dict(
-                    PredictionLog.objects.filter(model_version=m2, application_id__in=shared_apps)
-                    .values_list("application_id", "prediction")
+                    PredictionLog.objects.filter(model_version=m2, application_id__in=shared_apps).values_list(
+                        "application_id", "prediction"
+                    )
                 )
                 agreements = sum(1 for app_id in shared_apps if m1_preds.get(app_id) == m2_preds.get(app_id))
                 agreement_rate = round(agreements / len(shared_apps), 4)

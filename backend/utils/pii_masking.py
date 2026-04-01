@@ -8,8 +8,6 @@ Security principle: even if a user gains access to an API endpoint they
 shouldn't see, the response won't contain raw PII unless their role permits it.
 """
 
-from decimal import Decimal
-
 
 def mask_currency(value):
     """Mask a currency value, showing only the magnitude bracket."""

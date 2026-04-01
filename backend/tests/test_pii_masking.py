@@ -26,6 +26,7 @@ class TestMaskCurrency:
 
     def test_decimal_input(self):
         from decimal import Decimal
+
         assert mask_currency(Decimal("120000")) == "$100,000 - $250,000"
 
 
