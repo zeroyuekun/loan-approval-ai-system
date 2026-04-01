@@ -73,9 +73,6 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
         onDeleteConfirmToggle={onDeleteConfirmToggle}
       />
 
-      {/* ML Decision */}
-      {decision && <DecisionSection decision={decision} />}
-
       {/* Generated Email */}
       {email && <EmailPreview email={email} />}
 
@@ -171,6 +168,9 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
           </CardContent>
         </Card>
       )}
+
+      {/* ML Decision */}
+      {decision && <DecisionSection decision={decision} />}
 
       {/* Feature Importance */}
       {decision?.feature_importances && (Array.isArray(decision.feature_importances) ? decision.feature_importances.length > 0 : Object.keys(decision.feature_importances).length > 0) && (
