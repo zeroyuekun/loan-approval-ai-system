@@ -146,7 +146,8 @@ def send_decision_email(recipient_email, subject, body):
 
     Returns a dict with 'sent' (bool) and, on failure, 'error' (str).
     """
-    if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
+    using_console = settings.EMAIL_BACKEND == "django.core.mail.backends.console.EmailBackend"
+    if not using_console and (not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD):
         msg = "Email credentials not configured — skipping send"
         logger.warning("%s to %s", msg, recipient_email)
         return {"sent": False, "error": msg}

@@ -187,7 +187,8 @@ CSRF_COOKIE_HTTPONLY = False  # Frontend JS needs to read CSRF token
 
 # Celery
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = "django-db"
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "django-db")
+CELERY_RESULT_EXPIRES = 3600  # Expire task results after 1 hour to prevent DB bloat
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -244,13 +245,16 @@ if not FIELD_ENCRYPTION_KEY and not DEBUG:
 
     raise ImproperlyConfigured("FIELD_ENCRYPTION_KEY must be set in production")
 
-# Email (Gmail SMTP)
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+# Email — use Gmail SMTP when credentials are set, otherwise log to console
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "aussieloanai@gmail.com")
 
 # AI Budget Controls
