@@ -16,6 +16,8 @@ import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
 import { EmailPreview } from '@/components/emails/EmailPreview'
 import { BiasScoreBadge } from '@/components/emails/BiasScoreBadge'
 import { RepaymentCalculator } from '@/components/applications/RepaymentCalculator'
+import { FeatureImportance } from '@/components/metrics/FeatureImportance'
+import { ShapWaterfall } from '@/components/metrics/ShapWaterfall'
 import { Button } from '@/components/ui/button'
 
 interface ApplicationDetailProps {
@@ -73,13 +75,6 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
 
       {/* ML Decision */}
       {decision && <DecisionSection decision={decision} />}
-
-
-      {/* Repayment Calculator */}
-      <RepaymentCalculator
-        loanAmount={application.loan_amount}
-        loanTermMonths={application.loan_term_months}
-      />
 
       {/* Generated Email */}
       {email && <EmailPreview email={email} />}
@@ -176,6 +171,38 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
           </CardContent>
         </Card>
       )}
+
+      {/* Feature Importance */}
+      {decision?.feature_importances && (Array.isArray(decision.feature_importances) ? decision.feature_importances.length > 0 : Object.keys(decision.feature_importances).length > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Feature Importance</CardTitle>
+            <CardDescription>Top factors that influenced the ML decision</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FeatureImportance features={decision.feature_importances} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* SHAP Values */}
+      {decision?.shap_values && Object.keys(decision.shap_values).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">SHAP Values</CardTitle>
+            <CardDescription>How each feature pushed the prediction towards approval or denial</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ShapWaterfall shapValues={decision.shap_values} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Repayment Estimator */}
+      <RepaymentCalculator
+        loanAmount={application.loan_amount}
+        loanTermMonths={application.loan_term_months}
+      />
 
       {/* Notes */}
       {application.notes && (

@@ -4,8 +4,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { LoanDecision } from '@/types'
 import { formatPercent } from '@/lib/utils'
-import { FeatureImportance } from '@/components/metrics/FeatureImportance'
-import { ShapWaterfall } from '@/components/metrics/ShapWaterfall'
 
 interface DecisionSectionProps {
   decision: LoanDecision
@@ -33,12 +31,6 @@ export function DecisionSection({ decision }: DecisionSectionProps) {
           )}
         </div>
         <p className="text-sm">{decision.reasoning}</p>
-        {decision.feature_importances && (Array.isArray(decision.feature_importances) ? decision.feature_importances.length > 0 : Object.keys(decision.feature_importances).length > 0) && (
-          <FeatureImportance features={decision.feature_importances} />
-        )}
-        {decision.shap_values && Object.keys(decision.shap_values).length > 0 && (
-          <ShapWaterfall shapValues={decision.shap_values} />
-        )}
       </CardContent>
     </Card>
   )
