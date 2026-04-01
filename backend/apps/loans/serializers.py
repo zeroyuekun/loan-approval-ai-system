@@ -8,10 +8,13 @@ from apps.ml_engine.services.reason_codes import (
 )
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
-from .models import AuditLog, FraudCheck, LoanApplication, LoanDecision
+from .models import AuditLog, Complaint, FraudCheck, LoanApplication, LoanDecision
 
 
 class LoanDecisionSerializer(serializers.ModelSerializer):
+    model_version = serializers.SerializerMethodField()
+    model_version_name = serializers.SerializerMethodField()
+
     class Meta:
         model = LoanDecision
         fields = (
@@ -23,9 +26,20 @@ class LoanDecisionSerializer(serializers.ModelSerializer):
             "shap_values",
             "decision_waterfall",
             "model_version",
+            "model_version_name",
             "reasoning",
             "created_at",
         )
+
+    def get_model_version(self, obj):
+        """Return the model version ID as a string for backward compatibility."""
+        return str(obj.model_version_id) if obj.model_version_id else None
+
+    def get_model_version_name(self, obj):
+        """Return a human-readable model version string."""
+        if obj.model_version:
+            return f"{obj.model_version.algorithm} v{obj.model_version.version}"
+        return None
 
 
 class CustomerLoanDecisionSerializer(serializers.ModelSerializer):
@@ -96,12 +110,26 @@ class LoanApplicationSerializer(serializers.ModelSerializer):
             "state",
             "status",
             "notes",
+            "conditions",
+            "conditions_met",
+            "consumer_objectives",
+            "consumer_requirements",
+            "financial_situation_notes",
             "created_at",
             "updated_at",
             "decision",
             "latest_fraud_check",
         )
-        read_only_fields = ("id", "status", "created_at", "updated_at", "applicant")
+        read_only_fields = (
+            "id",
+            "status",
+            "created_at",
+            "updated_at",
+            "applicant",
+            "consumer_objectives",
+            "consumer_requirements",
+            "financial_situation_notes",
+        )
 
     def get_latest_fraud_check(self, obj):
         # Use .all() to hit the prefetch cache — .first() bypasses it and causes N+1
@@ -142,6 +170,11 @@ class CustomerLoanApplicationSerializer(PIIMaskingMixin, serializers.ModelSerial
             "has_hecs",
             "status",
             "notes",
+            "conditions",
+            "conditions_met",
+            "consumer_objectives",
+            "consumer_requirements",
+            "financial_situation_notes",
             "created_at",
             "updated_at",
             "decision",
@@ -174,6 +207,9 @@ class LoanApplicationCreateSerializer(serializers.ModelSerializer):
             "number_of_dependants",
             "employment_type",
             "applicant_type",
+            "consumer_objectives",
+            "consumer_requirements",
+            "financial_situation_notes",
         )
         read_only_fields = ("id",)
 
@@ -219,3 +255,50 @@ class AuditLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AuditLog
         fields = ("id", "timestamp", "username", "action", "resource_type", "resource_id", "details", "ip_address")
+
+
+class ComplaintSerializer(serializers.ModelSerializer):
+    complainant_name = serializers.CharField(source="complainant.get_full_name", read_only=True)
+
+    class Meta:
+        model = Complaint
+        fields = (
+            "id",
+            "complainant",
+            "complainant_name",
+            "loan_application",
+            "category",
+            "status",
+            "subject",
+            "description",
+            "resolution",
+            "acknowledged_at",
+            "resolved_at",
+            "sla_deadline",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "complainant",
+            "acknowledged_at",
+            "sla_deadline",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        now = timezone.now()
+        validated_data["complainant"] = self.context["request"].user
+        validated_data["acknowledged_at"] = now
+
+        # ASIC RG 271: 21 days for credit-related, 30 days for standard
+        category = validated_data.get("category", "other")
+        sla_days = 21 if category == "decision" else 30
+        validated_data["sla_deadline"] = now + timedelta(days=sla_days)
+
+        return super().create(validated_data)

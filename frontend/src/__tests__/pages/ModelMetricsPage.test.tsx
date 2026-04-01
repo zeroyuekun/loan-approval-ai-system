@@ -7,7 +7,7 @@ import { server } from '@/test/mocks/server'
 import { mockUser } from '@/test/mocks/handlers'
 import { User, ModelMetrics } from '@/types'
 
-const API_URL = 'http://localhost:8500/api/v1'
+const API_URL = 'http://localhost:8000/api/v1'
 
 // Recharts uses ResizeObserver which is not available in jsdom
 class ResizeObserverMock {

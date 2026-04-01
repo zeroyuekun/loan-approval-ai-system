@@ -5,7 +5,7 @@ import { useModelMetrics, useTrainModel } from '@/hooks/useMetrics'
 import { server } from '@/test/mocks/server'
 import { beforeEach } from 'vitest'
 
-const API_URL = 'http://localhost:8500/api/v1'
+const API_URL = 'http://localhost:8000/api/v1'
 const TRAINING_STORAGE_KEY = 'aussieloanai_training_task'
 
 function createWrapper() {

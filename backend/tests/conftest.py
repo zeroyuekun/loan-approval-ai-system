@@ -230,11 +230,22 @@ def escalated_agent_run(sample_application, db):
         steps=[{"step_name": "bias_check", "status": "completed"}],
     )
 
+    from django.conf import settings as django_settings
+
+    from apps.ml_engine.models import ModelVersion
+
+    mv = ModelVersion.objects.create(
+        algorithm="rf",
+        version="test-v1",
+        file_path=str(django_settings.ML_MODELS_DIR / "test_model.joblib"),
+        is_active=True,
+    )
+
     LoanDecision.objects.create(
         application=sample_application,
         decision="approved",
         confidence=0.85,
-        model_version="test-v1",
+        model_version=mv,
     )
 
     return run

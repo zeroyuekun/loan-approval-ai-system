@@ -329,7 +329,7 @@ class PipelineOrchestrator:
                     "feature_importances": prediction_result["feature_importances"],
                     "shap_values": prediction_result.get("shap_values", {}),
                     "decision_waterfall": [],
-                    "model_version": prediction_result["model_version"],
+                    "model_version_id": prediction_result["model_version"],
                 },
             )
 

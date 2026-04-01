@@ -98,6 +98,89 @@ _REASON_EXPLANATIONS = {
         "loan amount was below what we require, as savings demonstrate "
         "capacity to manage repayments."
     ),
+    "Rate stress buffer outside acceptable range": (
+        "Rate stress buffer: Our assessment considers how your repayments "
+        "would be affected if interest rates were to rise. Under a stressed "
+        "scenario, the projected repayments exceeded what we consider "
+        "sustainable for your financial position."
+    ),
+    "Stressed repayment capacity outside acceptable range": (
+        "Stressed repayment capacity: Under a higher interest rate scenario, "
+        "the estimated monthly repayments would exceed what our assessment "
+        "determined to be affordable based on your current income and commitments."
+    ),
+    "Debt service ratio under stress outside acceptable range": (
+        "Debt service ratio under stress: When your total debt repayments "
+        "are assessed under a stressed interest rate, the ratio of repayments "
+        "to income exceeded our serviceability threshold."
+    ),
+    "Financial stress indicators above acceptable range": (
+        "Financial resilience: Our assessment considers how your repayments "
+        "would be affected if interest rates were to rise. Under a stressed "
+        "scenario, the repayments may not be sustainable."
+    ),
+    "Household expenditure surplus below acceptable range": (
+        "Household expenditure surplus: After accounting for the household "
+        "expenditure measure and your committed expenses, the remaining "
+        "surplus was below the minimum we require to service this loan."
+    ),
+    "Uncommitted monthly income below acceptable range": (
+        "Uncommitted monthly income: The portion of your income remaining "
+        "after all existing financial commitments was below the minimum "
+        "threshold for a loan of this size."
+    ),
+    "Employment type outside acceptable range": (
+        "Employment type and tenure: Your current employment arrangements "
+        "fell outside the parameters we require for a loan of this size."
+    ),
+    "Loan-to-income ratio above acceptable range": (
+        "Loan-to-income ratio: The requested loan amount relative to your "
+        "annual income exceeded our maximum lending ratio for this product."
+    ),
+    "Serviceability ratio outside acceptable range": (
+        "Serviceability ratio: Your total financial commitments as a "
+        "proportion of your income exceeded our serviceability threshold."
+    ),
+    "Expense-to-income ratio above acceptable range": (
+        "Expense-to-income ratio: Your monthly expenses relative to your "
+        "income exceeded the maximum ratio permitted under our lending criteria."
+    ),
+    "Net monthly surplus below acceptable range": (
+        "Net monthly surplus: After all commitments and the proposed loan "
+        "repayment, the remaining monthly surplus was below the minimum "
+        "buffer we require."
+    ),
+    "Loan-to-value ratio above acceptable range": (
+        "Loan-to-value ratio: The loan amount relative to the property "
+        "value exceeded the maximum ratio for this loan product."
+    ),
+    "Deposit contribution below acceptable range": (
+        "Deposit contribution: The deposit amount relative to the property "
+        "value was below the minimum we require for this loan type."
+    ),
+    "Savings to loan ratio below acceptable range": (
+        "Savings position: The level of genuine savings relative to the "
+        "loan amount was below what we require, as savings demonstrate "
+        "capacity to manage repayments."
+    ),
+    "Bureau risk score outside acceptable range": (
+        "Credit history: The information in your credit file, including "
+        "enquiries, repayment history, and existing accounts, did not meet "
+        "our requirements for a loan of this type."
+    ),
+    "Credit utilisation ratio above acceptable range": (
+        "Credit utilisation: The proportion of your available credit that "
+        "is currently in use exceeded our acceptable threshold."
+    ),
+    "Recent credit enquiry frequency above acceptable range": (
+        "Credit enquiries: The number of credit enquiries on your file in "
+        "the recent period exceeded the threshold we apply for this product."
+    ),
+    "Debt service coverage outside acceptable range": (
+        "Debt servicing capacity: Based on your income, existing debts, and "
+        "living expenses, the total repayments required would exceed what we "
+        "consider manageable for your current financial position."
+    ),
 }
 
 # Improvement steps matched to denial reasons
@@ -149,6 +232,77 @@ _IMPROVEMENT_STEPS = {
     "Savings to loan ratio outside acceptable range": (
         "Building your savings over time to demonstrate a pattern of regular "
         "saving. A higher deposit or savings balance strengthens your application."
+    ),
+    "Rate stress buffer outside acceptable range": (
+        "Reducing your overall debt position so that your repayments remain "
+        "manageable even if interest rates were to rise by 2\u20133 percentage points. "
+        "A smaller loan amount or larger deposit would also help."
+    ),
+    "Stressed repayment capacity outside acceptable range": (
+        "Reducing your overall debt position so that your repayments remain "
+        "manageable under a higher interest rate scenario."
+    ),
+    "Debt service ratio under stress outside acceptable range": (
+        "Reducing existing debt obligations before reapplying. Lower total "
+        "debt improves your debt-service ratio under stress testing."
+    ),
+    "Financial stress indicators above acceptable range": (
+        "Reducing your overall debt position so that your repayments remain "
+        "manageable even if interest rates were to rise by 2\u20133 percentage points."
+    ),
+    "Household expenditure surplus below acceptable range": (
+        "Reducing monthly expenses or increasing income to ensure a larger "
+        "surplus after household costs and loan repayments."
+    ),
+    "Uncommitted monthly income below acceptable range": (
+        "Reducing existing financial commitments or increasing income so that "
+        "a larger portion of your monthly income remains uncommitted."
+    ),
+    "Employment type outside acceptable range": (
+        "Establishing a longer period in your current role. For permanent "
+        "employees, we typically look for at least 6 months; for self-employed "
+        "applicants, at least 2 years of trading."
+    ),
+    "Loan-to-income ratio above acceptable range": (
+        "Considering a reduced loan amount relative to your annual income, "
+        "or applying after a salary increase."
+    ),
+    "Serviceability ratio outside acceptable range": (
+        "Reducing existing financial commitments to improve the ratio of "
+        "total repayments to income."
+    ),
+    "Expense-to-income ratio above acceptable range": (
+        "Reviewing and reducing monthly expenses to improve the proportion "
+        "of income available for loan repayments."
+    ),
+    "Net monthly surplus below acceptable range": (
+        "Reducing monthly commitments or increasing income to ensure a "
+        "larger surplus remains after all expenses and the proposed repayment."
+    ),
+    "Loan-to-value ratio above acceptable range": (
+        "Increasing your deposit or considering a lower loan amount to "
+        "reduce the loan-to-value ratio."
+    ),
+    "Deposit contribution below acceptable range": (
+        "Saving a larger deposit over time. A higher deposit reduces the "
+        "loan amount and strengthens your application."
+    ),
+    "Savings to loan ratio below acceptable range": (
+        "Building your savings over time to demonstrate a pattern of regular "
+        "saving. A higher deposit or savings balance strengthens your application."
+    ),
+    "Bureau risk score outside acceptable range": (
+        "Reviewing your credit report for accuracy and taking steps to "
+        "strengthen your credit profile. Paying all bills on time and "
+        "limiting new credit applications for 6\u201312 months will help."
+    ),
+    "Credit utilisation ratio above acceptable range": (
+        "Reducing balances on existing credit cards and revolving credit "
+        "facilities to lower your overall credit utilisation ratio."
+    ),
+    "Recent credit enquiry frequency above acceptable range": (
+        "Limiting new credit applications for the next 6\u201312 months to "
+        "reduce the number of enquiries on your credit file."
     ),
 }
 

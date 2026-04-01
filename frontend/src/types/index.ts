@@ -199,6 +199,8 @@ export interface LoanApplication {
 
   status: 'pending' | 'processing' | 'approved' | 'denied' | 'review';
   notes: string;
+  conditions: string[];
+  conditions_met: boolean;
   created_at: string;
   updated_at: string;
   decision?: LoanDecision;

@@ -35,6 +35,7 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
     watch,
     step,
     setStep,
+    stepRef,
     totalSteps,
     user,
     profile,
@@ -111,15 +112,19 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Step indicator */}
-      <div className="flex items-center justify-center gap-1 mb-8">
+      <div className="flex items-center justify-center gap-1 mb-8" role="group" aria-label="Application form progress">
         {STEP_LABELS.map((label, i) => {
           const s = i + 1
           return (
             <div key={s} className="flex items-center">
               <div className="flex flex-col items-center">
-                <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors ${
-                  s <= step ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                }`}>
+                <div
+                  className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors ${
+                    s <= step ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}
+                  aria-current={s === step ? 'step' : undefined}
+                  aria-label={`Step ${s}: ${label}`}
+                >
                   {s}
                 </div>
                 <span className="text-[10px] text-muted-foreground mt-1 hidden sm:block">{label}</span>
@@ -130,11 +135,13 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
         })}
       </div>
 
-      {step === 1 && <PersonalStep register={register} errors={errors} user={user} />}
-      {step === 2 && <EmploymentStep register={register} errors={errors} />}
-      {step === 3 && <ExpensesStep register={register} errors={errors} />}
-      {step === 4 && <LoanDetailsStep register={register} errors={errors} watch={watch} />}
-      {step === 5 && <ReviewStep watch={watch} user={user} />}
+      <div ref={stepRef} tabIndex={-1} role="region" aria-label={STEP_LABELS[step - 1]} className="outline-none">
+        {step === 1 && <PersonalStep register={register} errors={errors} user={user} />}
+        {step === 2 && <EmploymentStep register={register} errors={errors} />}
+        {step === 3 && <ExpensesStep register={register} errors={errors} />}
+        {step === 4 && <LoanDetailsStep register={register} errors={errors} watch={watch} />}
+        {step === 5 && <ReviewStep watch={watch} user={user} />}
+      </div>
 
       {/* Navigation */}
       <div className="flex justify-between">

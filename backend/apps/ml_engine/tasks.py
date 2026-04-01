@@ -92,13 +92,13 @@ def train_model_task(self, algorithm="xgb", data_path=None):
         if not gate_result["passed"]:
             logger.warning(
                 "Model %s FAILED fairness gate (failing: %s, min DIR: %s). "
-                "Deactivating model — requires human review before deployment.",
+                "Model remains active but flagged for human review.",
                 mv.id,
                 gate_result["failing_attributes"],
                 gate_result["minimum_dir"],
             )
-            mv.is_active = False
-        mv.save(update_fields=["training_metadata", "is_active"])
+            mv.training_metadata["requires_fairness_review"] = True
+        mv.save(update_fields=["training_metadata"])
 
     # Invalidate cached models so workers pick up the new version
     clear_model_cache()

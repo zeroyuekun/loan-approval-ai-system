@@ -34,16 +34,37 @@ The [WAT framework](backend/docs/adr/007-wat-architecture.md) (Workflows, Agents
 | Security architecture | Fernet encryption, JWT rotation, Argon2, tiered rate limiting | [008](backend/docs/adr/008-security-architecture.md) |
 
 <details>
-<summary><strong>Screenshots</strong></summary>
+<summary><strong>Screenshots</strong> (click to expand)</summary>
 
-<!-- To add screenshots, run the system with `docker compose up` and capture:
-  1. Dashboard overview (admin view with stats cards)
-  2. Customer denial explanation page (status page with reason codes)
-  3. Agent pipeline visualization (orchestrator step-by-step view)
-  4. Model Card governance page (fairness tab with disparate impact ratios)
--->
+### Dashboard
+Stats cards, approval rate chart, and recent applications at a glance.
 
-*Screenshots to be added from running system.*
+![Dashboard](docs/screenshots/01-dashboard.png)
+
+### Loan Applications
+Searchable table with status filters, credit scores, and inline status badges.
+
+![Applications](docs/screenshots/02-applications.png)
+
+### Application Detail
+Full financial profile with AI pipeline controls and generated compliance email.
+
+![Application Detail](docs/screenshots/03-application-detail.png)
+
+### Model Metrics
+XGBoost performance: confusion matrix, ROC curve, Gini, KS statistic, Brier score.
+
+![Model Metrics](docs/screenshots/04-model-metrics.png)
+
+### Generated Emails
+Claude-generated approval/denial emails with guardrail pass/fail tracking per client.
+
+![Emails](docs/screenshots/05-emails.png)
+
+### Agent Workflows
+Orchestrator pipeline runs per client with completion and escalation status.
+
+![Agent Workflows](docs/screenshots/06-agent-workflows.png)
 
 </details>
 

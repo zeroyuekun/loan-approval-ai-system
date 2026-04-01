@@ -66,7 +66,7 @@ export function StatsCards({ totalApplications, approvalRate, avgProcessingTime,
               <p className="text-2xl font-bold tracking-tight">{stat.value}</p>
             </div>
             <div className={`rounded-xl bg-gradient-to-br ${stat.gradient} p-2.5 shadow-lg ${stat.shadowColor} border border-white/20`}>
-              <stat.icon className="h-5 w-5 text-white drop-shadow-sm" />
+              <stat.icon className="h-5 w-5 text-white drop-shadow-sm" aria-hidden="true" />
             </div>
           </div>
         </div>

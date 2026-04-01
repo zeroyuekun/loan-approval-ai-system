@@ -133,11 +133,11 @@ export default function EmailsPage() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
-                    {group.passedCount} passed
+                    {group.passedCount} Passed
                   </Badge>
                   {group.failedCount > 0 && (
                     <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-xs">
-                      {group.failedCount} failed
+                      {group.failedCount} Failed
                     </Badge>
                   )}
                 </div>

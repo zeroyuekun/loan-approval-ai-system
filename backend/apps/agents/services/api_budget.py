@@ -17,6 +17,7 @@ Or use the guarded_api_call() wrapper which handles all of the above:
     response = guarded_api_call(client, model='claude-sonnet-4-20250514', ...)
 """
 
+import hashlib
 import logging
 
 from django.conf import settings
@@ -195,6 +196,39 @@ class ApiBudgetGuard:
             }
 
 
+def _extract_prompt_text(kwargs):
+    """Extract prompt text from API call kwargs for hashing."""
+    parts = []
+    system = kwargs.get("system", "")
+    if system:
+        parts.append(str(system))
+    for msg in kwargs.get("messages", []):
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+    return "\n".join(parts)
+
+
+def _detect_pii_categories(prompt_text):
+    """Detect PII categories present in the prompt text."""
+    category_keywords = {
+        "name": ["name", "applicant", "customer"],
+        "income": ["income", "salary", "earnings"],
+        "employment": ["employment", "employer", "job", "occupation"],
+        "loan_amount": ["loan_amount", "loan amount", "borrowing"],
+        "credit_score": ["credit_score", "credit score"],
+        "address": ["address", "postcode", "suburb"],
+        "email": ["email"],
+        "phone": ["phone", "mobile"],
+    }
+    lower_text = prompt_text.lower()
+    return [cat for cat, keywords in category_keywords.items() if any(kw in lower_text for kw in keywords)]
+
+
 def guarded_api_call(client, **kwargs):
     """Make a Claude API call with budget guard and cost tracking.
 
@@ -206,6 +240,10 @@ def guarded_api_call(client, **kwargs):
     Args:
         client: anthropic.Anthropic instance (or None to raise immediately)
         **kwargs: passed directly to client.messages.create()
+            Extra keyword args (not passed to API):
+            - _service: str — service name for API call logging (e.g. 'email_generation')
+            - _loan_application_id: UUID — FK to LoanApplication
+            - _agent_run_id: UUID — FK to AgentRun
 
     Returns:
         The API response object.
@@ -217,6 +255,11 @@ def guarded_api_call(client, **kwargs):
     """
     if client is None:
         raise BudgetExhausted("No API client configured — using fallback")
+
+    # Pop internal metadata before passing to API
+    service = kwargs.pop("_service", "unknown")
+    loan_application_id = kwargs.pop("_loan_application_id", None)
+    agent_run_id = kwargs.pop("_agent_run_id", None)
 
     model = kwargs.get("model", "")
     budget = ApiBudgetGuard()
@@ -234,5 +277,25 @@ def guarded_api_call(client, **kwargs):
     output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
     budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens, model=model)
     budget.record_success()
+
+    # Log API call for PII cross-border audit (Privacy Act APP 8)
+    try:
+        from apps.agents.models import APICallLog
+
+        prompt_text = _extract_prompt_text(kwargs)
+        APICallLog.objects.create(
+            loan_application_id=loan_application_id,
+            agent_run_id=agent_run_id,
+            service=service,
+            provider="anthropic",
+            model_used=model,
+            pii_categories=_detect_pii_categories(prompt_text),
+            prompt_hash=hashlib.sha256(prompt_text.encode()).hexdigest(),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            destination_country="US",
+        )
+    except Exception as e:
+        logger.warning("Failed to create APICallLog: %s", e)
 
     return response

@@ -40,6 +40,7 @@ export function PipelineControls({
             onClick={handleOrchestrate}
             disabled={pipelineDisabled}
             variant={pipelineQueued ? 'outline' : 'default'}
+            aria-busy={orchestrating || pipelineQueued}
           >
             {orchestrating ? (
               <>
@@ -84,6 +85,7 @@ export function PipelineControls({
                 size="sm"
                 onClick={onDelete}
                 disabled={isDeleting}
+                aria-busy={isDeleting}
               >
                 {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
                 {isDeleting ? 'Deleting...' : 'Confirm'}

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
 import { LogOut, FileText, UserCircle, ChevronDown } from 'lucide-react'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
+import { ComplianceFooter } from '@/components/layout/ComplianceFooter'
 import { LogoIcon } from '@/components/ui/logo'
 import Link from 'next/link'
 
@@ -40,7 +41,7 @@ export default function CustomerLayout({
   if (!user || user.role !== 'customer') return null
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background">
       <header className="sticky top-0 z-50 border-b border-blue-700/30 gradient-primary backdrop-blur-xl shadow-lg shadow-blue-900/10">
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4">
           <Link href="/apply" className="flex items-center gap-2.5">
@@ -106,11 +107,12 @@ export default function CustomerLayout({
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-4xl px-4 py-8">
+      <main className="mx-auto max-w-4xl flex-1 px-4 py-8">
         <ErrorBoundary>
           {children}
         </ErrorBoundary>
       </main>
+      <ComplianceFooter />
     </div>
   )
 }

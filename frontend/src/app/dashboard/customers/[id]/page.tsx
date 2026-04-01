@@ -117,10 +117,11 @@ function BoolIndicator({ value, label }: { value: boolean; label: string }) {
   return (
     <div className="flex items-center gap-2">
       {value ? (
-        <CheckCircle className="h-4 w-4 text-green-600" />
+        <CheckCircle className="h-4 w-4 text-green-600" aria-hidden="true" />
       ) : (
-        <XCircle className="h-4 w-4 text-muted-foreground/40" />
+        <XCircle className="h-4 w-4 text-muted-foreground/40" aria-hidden="true" />
       )}
+      <span className="sr-only">{value ? 'Yes' : 'No'}:</span>
       <span className={value ? 'text-sm' : 'text-sm text-muted-foreground'}>{label}</span>
     </div>
   )

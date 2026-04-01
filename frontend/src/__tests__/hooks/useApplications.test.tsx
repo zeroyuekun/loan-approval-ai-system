@@ -5,7 +5,7 @@ import { useApplications, useApplication, useCreateApplication, useUpdateApplica
 import { server } from '@/test/mocks/server'
 import { mockLoanApplication } from '@/test/mocks/handlers'
 
-const API_URL = 'http://localhost:8500/api/v1'
+const API_URL = 'http://localhost:8000/api/v1'
 
 function createWrapper() {
   const queryClient = new QueryClient({

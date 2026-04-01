@@ -19,7 +19,7 @@ make migrate    # Run database migrations
 make seed       # Generate 10K synthetic records + train XGBoost model
 ```
 
-Frontend: http://localhost:3000 | Backend API: http://localhost:8500 | Grafana: http://localhost:3001
+Frontend: http://localhost:3000 | Backend API: http://localhost:8000 | Grafana: http://localhost:3001
 
 Default login: `admin` / `admin1234`
 

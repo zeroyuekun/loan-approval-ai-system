@@ -1,5 +1,6 @@
 import logging
 
+from django.core.cache import cache as django_cache
 from django.db import models, transaction
 from rest_framework import permissions, viewsets
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
@@ -11,9 +12,10 @@ from apps.accounts.models import CustomerProfile
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 
 from .filters import AuditLogFilter, LoanApplicationFilter
-from .models import AuditLog, LoanApplication
+from .models import AuditLog, Complaint, LoanApplication
 from .serializers import (
     AuditLogSerializer,
+    ComplaintSerializer,
     CustomerLoanApplicationSerializer,
     LoanApplicationCreateSerializer,
     LoanApplicationCustomerUpdateSerializer,
@@ -148,6 +150,13 @@ class DashboardStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrOfficer]
 
     def get(self, request):
+        data = django_cache.get("dashboard_stats")
+        if data is None:
+            data = self._compute_stats()
+            django_cache.set("dashboard_stats", data, 30)
+        return Response(data)
+
+    def _compute_stats(self):
         from datetime import timedelta
 
         from django.db.models import Avg, Count
@@ -206,25 +215,41 @@ class DashboardStatsView(APIView):
         pipeline_failed = AgentRun.objects.filter(status="failed").count()
         pipeline_escalated = AgentRun.objects.filter(status="escalated").count()
 
-        return Response(
-            {
-                "total_applications": total,
-                "approval_rate": approval_rate,
-                "avg_processing_seconds": avg_processing_seconds,
-                "active_model": {
-                    "name": f"{active_model.algorithm} v{active_model.version}" if active_model else None,
-                    "auc": float(active_model.auc_roc) if active_model and active_model.auc_roc else None,
-                }
-                if active_model
-                else None,
-                "daily_volume": [{"date": str(d["date"]), "count": d["count"]} for d in daily_volume],
-                "approval_trend": approval_trend,
-                "pipeline": {
-                    "total": pipeline_total,
-                    "completed": pipeline_completed,
-                    "failed": pipeline_failed,
-                    "escalated": pipeline_escalated,
-                    "success_rate": round(pipeline_completed / pipeline_total * 100, 1) if pipeline_total > 0 else 0,
-                },
+        return {
+            "total_applications": total,
+            "approval_rate": approval_rate,
+            "avg_processing_seconds": avg_processing_seconds,
+            "active_model": {
+                "name": f"{active_model.algorithm} v{active_model.version}" if active_model else None,
+                "auc": float(active_model.auc_roc) if active_model and active_model.auc_roc else None,
             }
-        )
+            if active_model
+            else None,
+            "daily_volume": [{"date": str(d["date"]), "count": d["count"]} for d in daily_volume],
+            "approval_trend": approval_trend,
+            "pipeline": {
+                "total": pipeline_total,
+                "completed": pipeline_completed,
+                "failed": pipeline_failed,
+                "escalated": pipeline_escalated,
+                "success_rate": round(pipeline_completed / pipeline_total * 100, 1) if pipeline_total > 0 else 0,
+            },
+        }
+
+
+class ComplaintViewSet(viewsets.ModelViewSet):
+    """Complaint management: customers create/view own, staff view/update all."""
+
+    serializer_class = ComplaintSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role in ("admin", "officer"):
+            return Complaint.objects.all().select_related("complainant", "loan_application")
+        return Complaint.objects.filter(complainant=user).select_related("loan_application")
+
+    def get_permissions(self):
+        if self.action in ("update", "partial_update", "destroy"):
+            return [permissions.IsAuthenticated(), IsAdminOrOfficer()]
+        return [permissions.IsAuthenticated()]

@@ -66,7 +66,7 @@ services:
           cpus: '0.5'
           memory: 1G
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -223,7 +223,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      target: builder
+      target: runner
     restart: unless-stopped
     deploy:
       resources:
@@ -234,11 +234,12 @@ services:
           cpus: '0.5'
           memory: 512M
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       backend:
         condition: service_healthy
     environment:
+      NODE_ENV: development
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
       WATCHPACK_POLLING: "true"
     volumes:
@@ -248,7 +249,10 @@ services:
       - ./frontend/tailwind.config.ts:/app/tailwind.config.ts
       - ./frontend/next.config.js:/app/next.config.js
       - ./frontend/postcss.config.js:/app/postcss.config.js
-    command: npm run dev
+      - frontend_next:/app/.next
+      - frontend_node_modules:/app/node_modules
+    user: root
+    command: sh -c "npm install && npm run dev"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
       interval: 30s
@@ -290,8 +294,62 @@ services:
     ports:
       - "3001:3000"
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - internal
+
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: loan-approval-loki
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - internal
+
+  promtail:
+    image: grafana/promtail:3.4.2
+    container_name: loan-approval-promtail
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki:
+        condition: service_healthy
     networks:
       - internal
 
@@ -346,5 +404,8 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  loki_data:
   prometheus_data:
   grafana_data:
+  frontend_next:
+  frontend_node_modules:

@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { LogoIcon } from '@/components/ui/logo'
+import { ComplianceFooter } from '@/components/layout/ComplianceFooter'
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -30,53 +30,58 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="w-full max-w-sm">
-      <div className="space-y-2 mb-8">
-        <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
-        <p className="text-muted-foreground">Sign in to your account to continue</p>
-      </div>
+    <div className="flex w-full flex-col items-center">
+      <div className="w-full max-w-sm flex-1">
+        <div className="space-y-2 mb-8">
+          <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
+          <p className="text-muted-foreground">Sign in to your account to continue</p>
+        </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {error && (
-          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
-            <p className="text-sm text-destructive">{error}</p>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {error && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="username">Email</Label>
+            <Input
+              id="username"
+              type="email"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              autoComplete="email"
+              placeholder="Enter your email"
+            />
           </div>
-        )}
-        <div className="space-y-2">
-          <Label htmlFor="username">Email</Label>
-          <Input
-            id="username"
-            type="email"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-            autoComplete="email"
-            placeholder="Enter your email"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            placeholder="Enter your password"
-          />
-        </div>
-        <Button type="submit" className="w-full" disabled={isLoading}>
-          {isLoading ? 'Signing in...' : 'Sign In'}
-        </Button>
-      </form>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoComplete="current-password"
+              placeholder="Enter your password"
+            />
+          </div>
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? 'Signing in...' : 'Sign In'}
+          </Button>
+        </form>
 
-      <p className="text-sm text-muted-foreground text-center mt-6">
-        Don&apos;t have an account?{' '}
-        <Link href="/register" className="text-primary font-medium hover:underline">
-          Create one
-        </Link>
-      </p>
+        <p className="text-sm text-muted-foreground text-center mt-6">
+          Don&apos;t have an account?{' '}
+          <Link href="/register" className="text-primary font-medium hover:underline">
+            Create one
+          </Link>
+        </p>
+      </div>
+      <div className="w-full mt-8">
+        <ComplianceFooter />
+      </div>
     </div>
   )
 }

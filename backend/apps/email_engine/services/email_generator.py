@@ -67,6 +67,33 @@ class EmailGenerator:
         "num_mortgages": "Mortgage exposure above policy threshold",
         "revolving_balance": "Revolving credit balance above acceptable range",
         "revolving_utilization": "Revolving credit utilisation above acceptable range",
+        # APRA stress test / serviceability
+        "rate_stress_buffer": "Rate stress buffer outside acceptable range",
+        "stressed_repayment": "Stressed repayment capacity outside acceptable range",
+        "stressed_dsr": "Debt service ratio under stress outside acceptable range",
+        "stress_index": "Financial stress indicators above acceptable range",
+        "hem_surplus": "Household expenditure surplus below acceptable range",
+        "uncommitted_monthly_income": "Uncommitted monthly income below acceptable range",
+        # Employment & stability
+        "employment_stability": "Employment stability outside acceptable range",
+        "employment_type_payg_casual": "Employment type outside acceptable range",
+        "employment_type_contract": "Employment type outside acceptable range",
+        "employment_type_self_employed": "Employment type outside acceptable range",
+        # Affordability
+        "debt_service_coverage": "Debt service coverage outside acceptable range",
+        "loan_to_income": "Loan-to-income ratio above acceptable range",
+        "serviceability_ratio": "Serviceability ratio outside acceptable range",
+        "expense_to_income": "Expense-to-income ratio above acceptable range",
+        "monthly_repayment_ratio": "Monthly repayment ratio outside acceptable range",
+        "net_monthly_surplus": "Net monthly surplus below acceptable range",
+        # Credit bureau
+        "bureau_risk_score": "Bureau risk score outside acceptable range",
+        "credit_utilization_pct": "Credit utilisation ratio above acceptable range",
+        "num_credit_enquiries_6m": "Recent credit enquiry frequency above acceptable range",
+        # Loan structure
+        "lvr": "Loan-to-value ratio above acceptable range",
+        "deposit_ratio": "Deposit contribution below acceptable range",
+        "savings_to_loan_ratio": "Savings to loan ratio below acceptable range",
     }
 
     def _format_denial_reasons(self, feature_importances):

@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth'
 import { server } from '@/test/mocks/server'
 import { mockUser } from '@/test/mocks/handlers'
 
-const API_URL = 'http://localhost:8500/api/v1'
+const API_URL = 'http://localhost:8000/api/v1'
 
 // A test consumer that exposes auth state
 function AuthConsumer() {

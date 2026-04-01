@@ -264,12 +264,22 @@ class TestLoanApplicationContracts:
 
     def test_detail_with_decision_shape(self, auth_admin_client, sample_application):
         """When a LoanDecision exists, it must match frontend LoanDecision interface."""
+        from django.conf import settings as django_settings
+
+        from apps.ml_engine.models import ModelVersion
+
+        mv = ModelVersion.objects.create(
+            algorithm="rf",
+            version="test-v1",
+            file_path=str(django_settings.ML_MODELS_DIR / "test_model.joblib"),
+            is_active=True,
+        )
         LoanDecision.objects.create(
             application=sample_application,
             decision="approved",
             confidence=0.92,
             risk_score=0.15,
-            model_version="test-v1",
+            model_version=mv,
             reasoning="Test reasoning",
             feature_importances={"credit_score": 0.3, "income": 0.2},
         )

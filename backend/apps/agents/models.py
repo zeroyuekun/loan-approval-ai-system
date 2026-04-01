@@ -136,3 +136,44 @@ class MarketingEmail(models.Model):
     def __str__(self):
         status = "sent" if self.sent else ("blocked" if self.blocked_reason else "unsent")
         return f"MarketingEmail for {self.application_id}: {self.subject} ({status})"
+
+
+class APICallLog(models.Model):
+    """Audit log for external API calls containing PII (Privacy Act APP 8 - cross-border disclosure)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    loan_application = models.ForeignKey(
+        "loans.LoanApplication",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="api_call_logs",
+    )
+    agent_run = models.ForeignKey(
+        "AgentRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="api_call_logs",
+    )
+    service = models.CharField(max_length=50, help_text="e.g. email_generation, bias_detection, nbo")
+    provider = models.CharField(max_length=50, default="anthropic", help_text="API provider")
+    model_used = models.CharField(max_length=100)
+    pii_categories = models.JSONField(
+        default=list,
+        help_text="Categories of PII sent: ['name', 'income', 'employment', 'loan_amount', etc.]",
+    )
+    prompt_hash = models.CharField(max_length=64, help_text="SHA-256 hash of prompt (not the prompt itself)")
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    destination_country = models.CharField(max_length=2, default="US", help_text="ISO country code of API endpoint")
+
+    class Meta:
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["loan_application", "timestamp"], name="apicalllog_app_ts"),
+        ]
+
+    def __str__(self):
+        return f"{self.service} → {self.provider} at {self.timestamp:%Y-%m-%d %H:%M}"

@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw'
 import { server } from '@/test/mocks/server'
 
-const API_URL = 'http://localhost:8500/api/v1'
+const API_URL = 'http://localhost:8000/api/v1'
 
 // We need to import a fresh api instance for each test to avoid shared state
 // with the refreshPromise variable

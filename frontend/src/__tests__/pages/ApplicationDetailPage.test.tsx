@@ -7,7 +7,7 @@ import { server } from '@/test/mocks/server'
 import { mockUser, mockLoanApplication } from '@/test/mocks/handlers'
 import { User } from '@/types'
 
-const API_URL = 'http://localhost:8500/api/v1'
+const API_URL = 'http://localhost:8000/api/v1'
 
 const mockRouterPush = vi.fn()
 const mockParams = { id: 'loan-1' }

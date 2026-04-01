@@ -68,19 +68,12 @@ def _plain_text_to_html(body: str) -> str:
             html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
             continue
 
-        # Bullet points with key:value (e.g. "• Amount: $85,000")
+        # Bullet points — render as plain text with bullet character
         bullet_match = re.match(r"^[\u2022•]\s*(.+)$", stripped)
         if bullet_match:
             _flush_detail_rows()
             content = bullet_match.group(1)
-            colon_idx = content.find(":")
-            if 0 < colon_idx < 30:
-                label = content[:colon_idx]
-                value = content[colon_idx + 1 :].strip()
-                if value:
-                    detail_rows.append(f"<tr><td {td_label}>&nbsp;&nbsp;{label}:</td><td {td_value}>{value}</td></tr>")
-                    continue
-            html_parts.append(f'<p style="margin:2px 0 2px 16px;">• {content}</p>')
+            html_parts.append(f'<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;{content}</p>')
             continue
 
         # Numbered list items (e.g. "  1. Document.pdf")

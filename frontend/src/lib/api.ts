@@ -56,7 +56,7 @@ interface LoanPayload {
   [key: string]: string | number | boolean | null | undefined
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500/api/v1'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
 const api = axios.create({
   baseURL: API_URL,

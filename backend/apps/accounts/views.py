@@ -458,17 +458,91 @@ class CustomerDataExportView(generics.GenericAPIView):
         except CustomerProfile.DoesNotExist:
             data["profile"] = None
 
-        # Loan applications
-        from apps.loans.models import LoanApplication
+        # Loan applications with related decisions, emails, agent runs, bias reports
+        from apps.loans.models import LoanApplication, LoanDecision
 
-        apps = LoanApplication.objects.filter(applicant=user).values(
-            "id",
-            "loan_amount",
-            "purpose",
-            "status",
-            "created_at",
+        applications = (
+            LoanApplication.objects.filter(applicant=user)
+            .select_related("decision", "decision__model_version")
+            .prefetch_related(
+                "emails",
+                "agent_runs__bias_reports",
+                "marketing_emails",
+            )
         )
-        data["loan_applications"] = [{k: str(v) for k, v in app.items()} for app in apps]
+
+        apps_data = []
+        for app in applications:
+            app_dict = {
+                "id": str(app.id),
+                "loan_amount": str(app.loan_amount),
+                "purpose": app.purpose,
+                "status": app.status,
+                "created_at": app.created_at.isoformat(),
+            }
+
+            # Loan decision with ML explanation
+            try:
+                d = app.decision
+                app_dict["decision"] = {
+                    "decision": d.decision,
+                    "confidence": d.confidence,
+                    "risk_grade": d.risk_grade,
+                    "feature_importances": d.feature_importances,
+                    "shap_values": d.shap_values,
+                    "reasoning": d.reasoning,
+                    "model_version": str(d.model_version) if d.model_version else None,
+                    "created_at": d.created_at.isoformat(),
+                }
+            except LoanDecision.DoesNotExist:
+                app_dict["decision"] = None
+
+            # Generated emails (approval/denial)
+            app_dict["emails"] = [
+                {
+                    "subject": e.subject,
+                    "body": e.body,
+                    "decision": e.decision,
+                    "created_at": e.created_at.isoformat(),
+                }
+                for e in app.emails.all()
+            ]
+
+            # Marketing emails
+            app_dict["marketing_emails"] = [
+                {
+                    "subject": me.subject,
+                    "body": me.body,
+                    "sent": me.sent,
+                    "sent_at": me.sent_at.isoformat() if me.sent_at else None,
+                    "created_at": me.created_at.isoformat(),
+                }
+                for me in app.marketing_emails.all()
+            ]
+
+            # Agent run summaries with bias reports
+            app_dict["agent_runs"] = [
+                {
+                    "status": run.status,
+                    "steps": run.steps,
+                    "created_at": run.created_at.isoformat(),
+                    "bias_reports": [
+                        {
+                            "bias_score": br.bias_score,
+                            "categories": br.categories,
+                            "analysis": br.analysis,
+                            "flagged": br.flagged,
+                            "created_at": br.created_at.isoformat(),
+                        }
+                        for br in run.bias_reports.all()
+                    ],
+                }
+                for run in app.agent_runs.all()
+            ]
+
+            apps_data.append(app_dict)
+
+        data["loan_applications"] = apps_data
 
         # Audit log entries
         audit_logs = (

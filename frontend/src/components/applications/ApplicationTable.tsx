@@ -95,6 +95,7 @@ export function ApplicationTable({
               className="bg-white hover:bg-slate-50 disabled:bg-white disabled:opacity-100 disabled:text-muted-foreground/40"
               onClick={() => onPageChange(page - 1)}
               disabled={page <= 1}
+              aria-label="Previous page"
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -107,6 +108,7 @@ export function ApplicationTable({
               className="bg-white hover:bg-slate-50 disabled:bg-white disabled:opacity-100 disabled:text-muted-foreground/40"
               onClick={() => onPageChange(page + 1)}
               disabled={page >= totalPages}
+              aria-label="Next page"
             >
               <ChevronRight className="h-4 w-4" />
             </Button>

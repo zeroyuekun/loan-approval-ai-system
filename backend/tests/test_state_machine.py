@@ -104,15 +104,29 @@ class TestLoanStatusTransitions(TestCase):
         with self.assertRaises(LoanApplication.InvalidStateTransition):
             self.app.transition_to("review")
 
-    def test_approved_is_terminal(self):
-        """Cannot transition out of approved."""
+    def test_approved_allows_reprocessing(self):
+        """Can transition from approved back to processing for pipeline re-run."""
+        self.app.transition_to("processing")
+        self.app.transition_to("approved")
+        self.app.transition_to("processing")
+        self.assertEqual(self.app.status, "processing")
+
+    def test_approved_blocks_other_transitions(self):
+        """Cannot transition from approved to anything except processing."""
         self.app.transition_to("processing")
         self.app.transition_to("approved")
         with self.assertRaises(LoanApplication.InvalidStateTransition):
             self.app.transition_to("pending")
 
-    def test_denied_is_terminal(self):
-        """Cannot transition out of denied."""
+    def test_denied_allows_reprocessing(self):
+        """Can transition from denied back to processing for pipeline re-run."""
+        self.app.transition_to("processing")
+        self.app.transition_to("denied")
+        self.app.transition_to("processing")
+        self.assertEqual(self.app.status, "processing")
+
+    def test_denied_blocks_other_transitions(self):
+        """Cannot transition from denied to anything except processing."""
         self.app.transition_to("processing")
         self.app.transition_to("denied")
         with self.assertRaises(LoanApplication.InvalidStateTransition):

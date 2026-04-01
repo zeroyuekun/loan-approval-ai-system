@@ -65,6 +65,10 @@ celerybeat-schedule*
 # TypeScript build info
 *.tsbuildinfo
 
+# Claude Code
+.claude/worktrees/
+.claude/settings.local.json
+
 # Windows artifacts
 nul
 backend/gunicorn.ctl

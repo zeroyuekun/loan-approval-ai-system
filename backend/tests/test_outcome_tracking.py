@@ -49,12 +49,24 @@ def _make_app(user, *, actual_outcome=None, outcome_date=None, **overrides):
 
 def _make_decision(application, *, decision="approved", confidence=0.85, risk_grade="A"):
     """Create a LoanDecision for the given application."""
+    from django.conf import settings as django_settings
+
+    from apps.ml_engine.models import ModelVersion
+
+    mv, _ = ModelVersion.objects.get_or_create(
+        version="test-v1",
+        defaults={
+            "algorithm": "rf",
+            "file_path": str(django_settings.ML_MODELS_DIR / "test_model.joblib"),
+            "is_active": True,
+        },
+    )
     return LoanDecision.objects.create(
         application=application,
         decision=decision,
         confidence=confidence,
         risk_grade=risk_grade,
-        model_version="test-v1",
+        model_version=mv,
     )
 
 

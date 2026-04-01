@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AgentRun, BiasReport, NextBestOffer
+from .models import AgentRun, APICallLog, BiasReport, NextBestOffer
 
 
 @admin.register(AgentRun)
@@ -22,3 +22,11 @@ class BiasReportAdmin(admin.ModelAdmin):
 class NextBestOfferAdmin(admin.ModelAdmin):
     list_display = ("id", "agent_run", "application", "created_at")
     readonly_fields = ("id", "created_at")
+
+
+@admin.register(APICallLog)
+class APICallLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "service", "provider", "model_used", "loan_application", "timestamp")
+    list_filter = ("service", "provider", "destination_country")
+    search_fields = ("loan_application__id", "service")
+    readonly_fields = ("id", "timestamp", "prompt_hash")

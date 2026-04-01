@@ -140,6 +140,8 @@ export function RepaymentCalculator({
                   stressBuffer === buffer && "bg-amber-50 border-amber-300 text-amber-800"
                 )}
                 onClick={() => setStressBuffer(buffer)}
+                aria-pressed={stressBuffer === buffer}
+                aria-label={buffer === 0 ? 'Base rate' : `Plus ${buffer} percent stress test`}
               >
                 {buffer === 0 ? 'Base' : `+${buffer}%`}
               </Button>

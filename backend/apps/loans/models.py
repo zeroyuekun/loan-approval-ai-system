@@ -62,6 +62,11 @@ class LoanApplication(SoftDeleteModel):
         SINGLE = "single", "Single"
         COUPLE = "couple", "Couple"
 
+    class HomeOwnership(models.TextChoices):
+        OWN = "own", "Own"
+        RENT = "rent", "Rent"
+        MORTGAGE = "mortgage", "Mortgage"
+
     class AustralianState(models.TextChoices):
         NSW = "NSW", "New South Wales"
         VIC = "VIC", "Victoria"
@@ -112,11 +117,25 @@ class LoanApplication(SoftDeleteModel):
         default=ApplicantType.SINGLE,
     )
 
+    # NCCP consumer requirements/objectives
+    consumer_objectives = models.TextField(
+        blank=True,
+        help_text="Consumer's stated objectives for this loan (NCCP Act s.12A)",
+    )
+    consumer_requirements = models.TextField(
+        blank=True,
+        help_text="Consumer's stated requirements and how this loan meets them",
+    )
+    financial_situation_notes = models.TextField(
+        blank=True,
+        help_text="Summary of inquiries into consumer's financial situation",
+    )
+
     # Categorical
     purpose = models.CharField(max_length=20, choices=Purpose.choices, db_index=True)
     home_ownership = models.CharField(
         max_length=20,
-        choices=[("own", "Own"), ("rent", "Rent"), ("mortgage", "Mortgage")],
+        choices=HomeOwnership.choices,
     )
     has_cosigner = models.BooleanField(default=False)
 
@@ -355,7 +374,14 @@ class LoanDecision(models.Model):
         blank=True,
         help_text="Ordered list of decision gate results for ASIC RG 209 audit trail",
     )
-    model_version = models.CharField(max_length=100)
+    model_version = models.ForeignKey(
+        "ml_engine.ModelVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="decisions",
+        help_text="ML model version that produced this decision",
+    )
     reasoning = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -379,3 +405,58 @@ class FraudCheck(models.Model):
 
     def __str__(self):
         return f"FraudCheck for {self.application_id}: passed={self.passed} risk={self.risk_score:.2f}"
+
+
+class Complaint(models.Model):
+    """Customer complaint tracking per ASIC RG 271 and NCCP Act s.12CM."""
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        ACKNOWLEDGED = "acknowledged", "Acknowledged"
+        INVESTIGATING = "investigating", "Investigating"
+        RESOLVED = "resolved", "Resolved"
+        ESCALATED_AFCA = "escalated_afca", "Escalated to AFCA"
+
+    class Category(models.TextChoices):
+        DECISION = "decision", "Loan Decision"
+        SERVICE = "service", "Service Quality"
+        PRIVACY = "privacy", "Privacy Concern"
+        DISCRIMINATION = "discrimination", "Discrimination"
+        OTHER = "other", "Other"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    complainant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="complaints",
+    )
+    loan_application = models.ForeignKey(
+        "LoanApplication",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="complaints",
+    )
+    category = models.CharField(max_length=20, choices=Category.choices)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    subject = models.CharField(max_length=200)
+    description = models.TextField()
+    resolution = models.TextField(blank=True)
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    sla_deadline = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="ASIC RG 271: 21 days for credit complaints, 30 days for standard",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["complainant", "status"], name="complaint_user_status"),
+        ]
+
+    def __str__(self):
+        return f"Complaint {self.id} - {self.get_status_display()}"

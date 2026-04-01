@@ -49,6 +49,7 @@ const DRAFT_KEY = 'loan_application_draft'
 export function useApplicationForm(onSuccessPath?: string) {
   const [step, setStep] = useState(1)
   const totalSteps = STEP_LABELS.length
+  const stepRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const { user } = useAuth()
   const createApplication = useCreateApplication()
@@ -134,11 +135,17 @@ export function useApplicationForm(onSuccessPath?: string) {
     if (step === 4) fieldsToValidate = ['loan_amount', 'loan_term_months', 'purpose']
 
     const valid = fieldsToValidate.length === 0 || await trigger(fieldsToValidate)
-    if (valid) setStep(step + 1)
+    if (valid) {
+      setStep(step + 1)
+      setTimeout(() => stepRef.current?.focus(), 0)
+    }
   }
 
   const goPrev = () => {
-    if (step > 1) setStep(step - 1)
+    if (step > 1) {
+      setStep(step - 1)
+      setTimeout(() => stepRef.current?.focus(), 0)
+    }
   }
 
   const submitApplication = () => {
@@ -153,6 +160,7 @@ export function useApplicationForm(onSuccessPath?: string) {
     watch,
     step,
     setStep,
+    stepRef,
     totalSteps,
     purpose,
     profile,

@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { useAgentRun, useTaskStatus } from '@/hooks/useAgentStatus'
 import { server } from '@/test/mocks/server'
 
-const API_URL = 'http://localhost:8500/api/v1'
+const API_URL = 'http://localhost:8000/api/v1'
 
 function createWrapper() {
   const queryClient = new QueryClient({

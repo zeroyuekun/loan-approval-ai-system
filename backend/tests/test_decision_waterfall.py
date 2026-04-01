@@ -14,7 +14,8 @@ from apps.accounts.models import CustomUser
 from apps.agents.services.orchestrator import PipelineOrchestrator
 from apps.loans.models import LoanApplication, LoanDecision
 
-TEST_MODEL_VERSION_ID = str(uuid.uuid4())
+TEST_MODEL_VERSION_UUID = uuid.uuid4()
+TEST_MODEL_VERSION_ID = str(TEST_MODEL_VERSION_UUID)
 
 
 def _make_application(user, **overrides):
@@ -86,6 +87,7 @@ class DecisionWaterfallTestCase(TestCase):
 
     def setUp(self):
         from apps.accounts.models import _get_fernet
+        from apps.ml_engine.models import ModelVersion
 
         _get_fernet.cache_clear()
         self.user = CustomUser.objects.create_user(
@@ -93,6 +95,16 @@ class DecisionWaterfallTestCase(TestCase):
             password="TestPass123!",
             email="waterfall@test.com",
             role="customer",
+        )
+        # Create a ModelVersion record so the FK constraint is satisfied
+        from django.conf import settings as django_settings
+
+        ModelVersion.objects.create(
+            id=TEST_MODEL_VERSION_UUID,
+            algorithm="rf",
+            version="test-waterfall-v1",
+            file_path=str(django_settings.ML_MODELS_DIR / "test_model.joblib"),
+            is_active=True,
         )
         self.orchestrator = PipelineOrchestrator()
 
