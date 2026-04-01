@@ -77,6 +77,13 @@
 }
 
 @layer utilities {
+  .scrollbar-hidden {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
   .glass {
     @apply bg-white/70 backdrop-blur-xl;
   }
