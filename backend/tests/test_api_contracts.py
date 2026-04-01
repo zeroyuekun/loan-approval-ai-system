@@ -84,29 +84,26 @@ def auth_customer_client(db):
         last_name="Customer",
     )
     # Update the auto-created profile with complete data for loan creation validation
-    CustomerProfile.objects.update_or_create(
-        user=user,
-        defaults={
-            "date_of_birth": "1990-01-15",
-            "phone": "0412345678",
-            "address_line_1": "123 Test St",
-            "suburb": "Sydney",
-            "state": "NSW",
-            "postcode": "2000",
-            "employer_name": "Test Corp",
-            "occupation": "Engineer",
-            "industry": "Technology",
-            "employment_status": "Full-time",
-            "years_in_current_role": 5,
-            "gross_annual_income": Decimal("80000.00"),
-            "housing_situation": "renting",
-            "time_at_current_address_years": 3,
-            "residency_status": "citizen",
-            "primary_id_type": "drivers_licence",
-            "primary_id_number": "DL12345678",
-            "marital_status": "single",
-        },
-    )
+    profile = user.profile
+    profile.date_of_birth = "1990-01-15"
+    profile.phone = "0412345678"
+    profile.address_line_1 = "123 Test St"
+    profile.suburb = "Sydney"
+    profile.state = "NSW"
+    profile.postcode = "2000"
+    profile.employer_name = "Test Corp"
+    profile.occupation = "Engineer"
+    profile.industry = "Technology"
+    profile.employment_status = "payg_permanent"
+    profile.years_in_current_role = 5
+    profile.gross_annual_income = "80000.00"
+    profile.housing_situation = "renting"
+    profile.time_at_current_address_years = 3
+    profile.residency_status = "citizen"
+    profile.primary_id_type = "drivers_licence"
+    profile.primary_id_number = "DL12345678"
+    profile.marital_status = "single"
+    profile.save()
     client = APIClient()
     client.force_authenticate(user=user)
     client._user = user  # stash for tests that need the user object
