@@ -6,7 +6,6 @@ These tests check key PRESENCE and type, NOT exact values.
 They ensure the API contract between backend and frontend is not broken.
 """
 
-from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
@@ -32,7 +31,7 @@ pytestmark = skip_without_redis
 
 from django.conf import settings
 
-from apps.accounts.models import CustomerProfile, CustomUser
+from apps.accounts.models import CustomUser
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.loans.models import LoanDecision
 from apps.ml_engine.models import ModelVersion
