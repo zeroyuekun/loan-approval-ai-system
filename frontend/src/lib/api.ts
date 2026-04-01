@@ -159,6 +159,7 @@ export const loansApi = {
   delete: (id: string) => api.delete(`/loans/${id}/`),
   downloadDecisionLetter: (id: string) =>
     api.get(`/loans/${id}/decision-letter/`, { responseType: 'blob' }),
+  getDashboardStats: () => api.get('/loans/dashboard-stats/'),
 }
 
 // ML
@@ -166,6 +167,8 @@ export const mlApi = {
   predict: (loanId: string) => api.post(`/ml/predict/${loanId}/`),
   getMetrics: () => api.get('/ml/models/active/metrics/'),
   trainModel: (algorithm: string) => api.post('/ml/models/train/', { algorithm }),
+  getModelCard: () => api.get('/ml/models/active/model-card/'),
+  getDriftReports: (limit?: number) => api.get('/ml/models/active/drift-reports/', { params: { limit: limit || 12 } }),
 }
 
 // Email
@@ -173,6 +176,7 @@ export const emailApi = {
   list: (params?: PaginationParams) => api.get('/emails/', { params }),
   generate: (loanId: string) => api.post(`/emails/generate/${loanId}/`),
   get: (loanId: string) => api.get(`/emails/${loanId}/`),
+  sendLatest: (loanId: string) => api.post(`/emails/send/${loanId}/`),
 }
 
 // Agents

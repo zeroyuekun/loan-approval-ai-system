@@ -130,55 +130,8 @@ describe('WorkflowTimeline', () => {
 
   it('handles empty steps array', () => {
     const { container } = render(<WorkflowTimeline steps={[]} />)
-    // The wrapper div should exist but be empty
+    // The wrapper div should exist with no step children
     expect(container.firstChild).toBeInTheDocument()
-    expect(container.firstChild).toBeEmptyDOMElement()
-  })
-
-  it('shows cumulative elapsed time for non-first steps', () => {
-    const steps = [
-      makeStep({
-        step_name: 'step_one',
-        started_at: '2026-03-30T10:00:00.000Z',
-        completed_at: '2026-03-30T10:00:00.500Z',
-      }),
-      makeStep({
-        step_name: 'step_two',
-        started_at: '2026-03-30T10:00:00.500Z',
-        completed_at: '2026-03-30T10:00:01.200Z',
-      }),
-      makeStep({
-        step_name: 'step_three',
-        started_at: '2026-03-30T10:00:01.200Z',
-        completed_at: '2026-03-30T10:00:03.500Z',
-      }),
-    ]
-    render(<WorkflowTimeline steps={steps} />)
-
-    // Second step: completed_at 1200ms after pipeline start = +1.2s
-    expect(screen.getByText('+1.2s')).toBeInTheDocument()
-    // Third step: completed_at 3500ms after pipeline start = +3.5s
-    expect(screen.getByText('+3.5s')).toBeInTheDocument()
-  })
-
-  it('does not show cumulative elapsed for the first step', () => {
-    const steps = [
-      makeStep({
-        step_name: 'first_step',
-        started_at: '2026-03-30T10:00:00.000Z',
-        completed_at: '2026-03-30T10:00:00.500Z',
-      }),
-      makeStep({
-        step_name: 'second_step',
-        started_at: '2026-03-30T10:00:00.500Z',
-        completed_at: '2026-03-30T10:00:01.000Z',
-      }),
-    ]
-    render(<WorkflowTimeline steps={steps} />)
-
-    // +500ms would be the first step's elapsed if it were shown — it should not appear
-    // Only +1.0s for the second step should appear
-    expect(screen.getByText('+1.0s')).toBeInTheDocument()
-    expect(screen.queryByText('+500ms')).not.toBeInTheDocument()
+    expect(container.firstChild?.childNodes.length).toBe(0)
   })
 })

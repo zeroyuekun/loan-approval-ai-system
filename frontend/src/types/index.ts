@@ -215,6 +215,17 @@ export interface LoanDecision {
   model_version: string;
   reasoning: string;
   created_at: string;
+  denial_reasons?: Array<{ code: string; reason: string; feature: string; contribution: number }>;
+  reapplication_guidance?: {
+    improvement_targets: Array<{
+      feature: string;
+      current_value: string;
+      target_value: string;
+      description: string;
+    }>;
+    estimated_review_months: number;
+    message: string;
+  };
 }
 
 export interface ModelMetrics {
@@ -357,6 +368,95 @@ export interface MarketingEmail {
   generation_time_ms: number;
   attempt_number: number;
   created_at: string;
+}
+
+export interface DriftReport {
+  id: string
+  report_date: string
+  psi_score: number
+  psi_per_feature: Record<string, number>
+  mean_probability: number
+  std_probability: number
+  approval_rate: number
+  drift_detected: boolean
+  alert_level: 'none' | 'moderate' | 'significant'
+  num_predictions: number
+  period_start: string
+  period_end: string
+}
+
+export interface ModelCard {
+  model_details: {
+    name: string;
+    version: string;
+    algorithm: string;
+    created_at: string;
+    description: string;
+  };
+  intended_use: {
+    primary_use: string;
+    users: string;
+    out_of_scope: string;
+  };
+  training_data: {
+    description: string;
+    size: number;
+    features: number;
+    label_distribution: Record<string, number>;
+  };
+  performance_metrics: {
+    accuracy: number | null;
+    precision: number | null;
+    recall: number | null;
+    f1_score: number | null;
+    auc_roc: number | null;
+    gini: number | null;
+    brier_score: number | null;
+    ece: number | null;
+  };
+  fairness_analysis: {
+    protected_attributes: string[];
+    disparate_impact_ratio: Record<string, { disparate_impact_ratio: number; passes_80_percent_rule: boolean }>;
+    mitigation: string;
+  };
+  governance: {
+    decision_thresholds: {
+      approve: number | null;
+      deny: number | null;
+      human_review: number | null;
+    };
+    explainability_method: string;
+    next_review_date: string | null;
+    retired_at: string | null;
+    status: string;
+    retraining_policy: Record<string, string | number | boolean>;
+  };
+  independent_validation: {
+    status: string;
+    outcome?: string;
+    validator?: string;
+    validator_role?: string;
+    validation_date?: string;
+    methodology?: string;
+    findings_summary?: string;
+    signed_off?: boolean;
+    next_validation_due?: string | null;
+    note?: string;
+  };
+  limitations: string[];
+  synthetic_data_validation: {
+    status: string;
+    estimated_real_world_auc?: number | null;
+    estimated_auc_range?: [number, number] | null;
+    degradation_from_synthetic?: number | null;
+    synthetic_confidence_score?: number | null;
+    confidence_interpretation?: string;
+    methodology?: string;
+    references?: string[];
+    note?: string;
+  };
+  regulatory_compliance: Record<string, boolean>;
+  last_updated: string;
 }
 
 export interface TaskStatus {

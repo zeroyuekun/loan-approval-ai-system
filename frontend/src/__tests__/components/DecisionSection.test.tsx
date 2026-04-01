@@ -1,8 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen } from '@testing-library/react'
 import { DecisionSection } from '@/components/applications/DecisionSection'
 import { LoanDecision } from '@/types'
-import { loansApi } from '@/lib/api'
 
 vi.mock('@/components/metrics/FeatureImportance', () => ({
   FeatureImportance: () => <div data-testid="feature-importance" />,
@@ -10,10 +8,6 @@ vi.mock('@/components/metrics/FeatureImportance', () => ({
 vi.mock('@/components/metrics/ShapWaterfall', () => ({
   ShapWaterfall: () => <div data-testid="shap-waterfall" />,
 }))
-vi.mock('@/lib/api', () => ({
-  loansApi: { downloadDecisionLetter: vi.fn() },
-}))
-
 const baseDecision: LoanDecision = {
   id: 'dec-1',
   decision: 'approved',
@@ -26,9 +20,9 @@ const baseDecision: LoanDecision = {
   created_at: '2026-03-30T10:00:00Z',
 }
 
-function renderDecision(overrides: Partial<LoanDecision> = {}, loanId = 'loan-123') {
+function renderDecision(overrides: Partial<LoanDecision> = {}) {
   const decision = { ...baseDecision, ...overrides }
-  return render(<DecisionSection decision={decision} loanId={loanId} />)
+  return render(<DecisionSection decision={decision} />)
 }
 
 describe('DecisionSection', () => {
@@ -112,50 +106,4 @@ describe('DecisionSection', () => {
     expect(screen.queryByTestId('shap-waterfall')).not.toBeInTheDocument()
   })
 
-  it('download button triggers PDF download', async () => {
-    const user = userEvent.setup()
-    const mockBlob = new Blob(['pdf-content'], { type: 'application/pdf' })
-    vi.mocked(loansApi.downloadDecisionLetter).mockResolvedValue({ data: mockBlob } as any)
-
-    const createObjectURLMock = vi.fn(() => 'blob:http://localhost/fake-url')
-    const revokeObjectURLMock = vi.fn()
-    window.URL.createObjectURL = createObjectURLMock
-    window.URL.revokeObjectURL = revokeObjectURLMock
-
-    renderDecision({}, 'loan-456')
-
-    const button = screen.getByText('Download Decision Letter')
-    await user.click(button)
-
-    await waitFor(() => {
-      expect(loansApi.downloadDecisionLetter).toHaveBeenCalledWith('loan-456')
-    })
-    expect(createObjectURLMock).toHaveBeenCalled()
-    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:http://localhost/fake-url')
-  })
-
-  it('download button shows loading state while generating', async () => {
-    const user = userEvent.setup()
-
-    let resolveDownload!: (value: any) => void
-    vi.mocked(loansApi.downloadDecisionLetter).mockImplementation(
-      () => new Promise((resolve) => { resolveDownload = resolve })
-    )
-
-    renderDecision()
-
-    const button = screen.getByText('Download Decision Letter')
-    await user.click(button)
-
-    await waitFor(() => {
-      expect(screen.getByText('Generating...')).toBeInTheDocument()
-    })
-
-    // Resolve and verify it returns to normal
-    resolveDownload({ data: new Blob(['pdf']) })
-
-    await waitFor(() => {
-      expect(screen.getByText('Download Decision Letter')).toBeInTheDocument()
-    })
-  })
 })

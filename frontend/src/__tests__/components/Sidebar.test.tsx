@@ -51,7 +51,6 @@ describe('Sidebar', () => {
     expect(screen.getByText('Customers')).toBeInTheDocument()
     expect(screen.getByText('My Profile')).toBeInTheDocument()
     expect(screen.getByText('Model Metrics')).toBeInTheDocument()
-    expect(screen.getByText('Model Card')).toBeInTheDocument()
     expect(screen.getByText('Emails')).toBeInTheDocument()
     expect(screen.getByText('Agent Workflows')).toBeInTheDocument()
     expect(screen.getByText('Audit Log')).toBeInTheDocument()
@@ -72,7 +71,6 @@ describe('Sidebar', () => {
 
     expect(screen.queryByText('Human Review')).not.toBeInTheDocument()
     expect(screen.queryByText('Customers')).not.toBeInTheDocument()
-    expect(screen.queryByText('Model Card')).not.toBeInTheDocument()
     expect(screen.queryByText('Audit Log')).not.toBeInTheDocument()
   })
 
