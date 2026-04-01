@@ -1,36 +1,31 @@
 'use client'
 
-import dynamic from 'next/dynamic'
 import { useApplications } from '@/hooks/useApplications'
 import { StatsCards } from '@/components/dashboard/StatsCards'
+import { ApprovalRateChart } from '@/components/dashboard/ApprovalRateChart'
 import { RecentApplications } from '@/components/dashboard/RecentApplications'
-import { PipelineStats } from '@/components/dashboard/PipelineStats'
-import { useDashboardStats } from '@/hooks/useDashboardStats'
+import { useModelMetrics } from '@/hooks/useMetrics'
 import { Skeleton } from '@/components/ui/skeleton'
-
-const ApprovalRateChart = dynamic(() => import('@/components/dashboard/ApprovalRateChart').then(m => ({ default: m.ApprovalRateChart })), {
-  loading: () => <Skeleton className="h-80" />,
-  ssr: false,
-})
-const ApprovalTrendChart = dynamic(() => import('@/components/dashboard/ApprovalTrendChart').then(m => ({ default: m.ApprovalTrendChart })), {
-  loading: () => <Skeleton className="h-80" />,
-  ssr: false,
-})
 
 export default function DashboardPage() {
   const { data: applicationsData, isLoading: appsLoading } = useApplications({ page_size: 5 })
-  const { data: stats, isLoading: statsLoading } = useDashboardStats()
+  // Fetch total counts by status using page_size=1 (we only need the count field)
+  const { data: approvedData } = useApplications({ page_size: 1, status: 'approved' })
+  const { data: deniedData } = useApplications({ page_size: 1, status: 'denied' })
+  const { data: metrics } = useModelMetrics()
 
   const applications = applicationsData?.results || []
+  const totalCount = applicationsData?.count || 0
 
-  const totalCount = stats?.total_applications ?? applicationsData?.count ?? 0
-  const approvalRate = stats?.approval_rate ?? 0
-  const avgProcessingTime = stats?.avg_processing_seconds != null
-    ? `${stats.avg_processing_seconds}s`
-    : '--'
-  const activeModelName = stats?.active_model?.name ?? 'N/A'
+  const approved = approvedData?.count || 0
+  const denied = deniedData?.count || 0
+  const approvalRate = totalCount > 0 ? (approved / Math.max(approved + denied, 1)) * 100 : 0
 
-  if (appsLoading || statsLoading) {
+  const activeModelName = metrics
+    ? (metrics.algorithm === 'rf' ? 'Random Forest' : 'XGBoost')
+    : 'N/A'
+
+  if (appsLoading) {
     return (
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -46,42 +41,19 @@ export default function DashboardPage() {
     )
   }
 
-  const approved = stats?.approval_trend
-    ? stats.approval_trend.reduce((sum, d) => sum + (d.rate > 50 ? 1 : 0), 0)
-    : 0
-  const denied = stats?.approval_trend
-    ? stats.approval_trend.length - approved
-    : 0
-
-  // Use real decided counts from approval_rate if available
-  const decidedApproved = stats
-    ? Math.round((stats.approval_rate / 100) * totalCount)
-    : approved
-  const decidedDenied = stats
-    ? totalCount - decidedApproved
-    : denied
-
   return (
     <div className="space-y-6">
       <StatsCards
         totalApplications={totalCount}
         approvalRate={approvalRate}
-        avgProcessingTime={avgProcessingTime}
+        avgProcessingTime="2.3s"
         activeModel={activeModelName}
       />
 
-      {stats?.approval_trend && stats.approval_trend.length > 0 && (
-        <ApprovalTrendChart data={stats.approval_trend} />
-      )}
-
       <div className="grid gap-6 md:grid-cols-2">
-        <ApprovalRateChart approved={decidedApproved} denied={decidedDenied} />
+        <ApprovalRateChart approved={approved} denied={denied} />
         <RecentApplications applications={applications} />
       </div>
-
-      {stats?.pipeline && (
-        <PipelineStats pipeline={stats.pipeline} />
-      )}
     </div>
   )
 }

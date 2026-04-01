@@ -1,65 +1,22 @@
 'use client'
 
-import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { LoanDecision } from '@/types'
 import { formatPercent } from '@/lib/utils'
-import { loansApi } from '@/lib/api'
 import { FeatureImportance } from '@/components/metrics/FeatureImportance'
 import { ShapWaterfall } from '@/components/metrics/ShapWaterfall'
-import { Download, Loader2 } from 'lucide-react'
 
 interface DecisionSectionProps {
   decision: LoanDecision
-  loanId: string
 }
 
-export function DecisionSection({ decision, loanId }: DecisionSectionProps) {
-  const [downloading, setDownloading] = useState(false)
-
-  const handleDownload = async () => {
-    setDownloading(true)
-    try {
-      const response = await loansApi.downloadDecisionLetter(loanId)
-      const url = window.URL.createObjectURL(new Blob([response.data]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `decision-letter-${loanId}.pdf`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
-    } catch (error) {
-      console.error('Failed to download decision letter:', error)
-    } finally {
-      setDownloading(false)
-    }
-  }
-
+export function DecisionSection({ decision }: DecisionSectionProps) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-base">ML Decision</CardTitle>
-            <CardDescription>Model: {decision.model_version}</CardDescription>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDownload}
-            disabled={downloading}
-          >
-            {downloading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-2 h-4 w-4" />
-            )}
-            {downloading ? 'Generating...' : 'Download Decision Letter'}
-          </Button>
-        </div>
+        <CardTitle className="text-base">ML Decision</CardTitle>
+        <CardDescription>Model: {decision.model_version}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center gap-4">

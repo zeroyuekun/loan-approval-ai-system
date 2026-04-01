@@ -1,7 +1,7 @@
 # --- Build stage ---
 FROM node:22-alpine AS builder
 
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+ARG NEXT_PUBLIC_API_URL=http://localhost:8500/api/v1
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 WORKDIR /app

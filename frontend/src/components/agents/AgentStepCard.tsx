@@ -24,91 +24,6 @@ function getStatusBadge(status: AgentStep['status']) {
   }
 }
 
-function formatNumber(n: number): string {
-  return n.toLocaleString()
-}
-
-function TokenUsageDisplay({ summary }: { summary: any }) {
-  if (!summary || typeof summary !== 'object') return null
-
-  const inputTokens = summary.input_tokens as number | undefined
-  const outputTokens = summary.output_tokens as number | undefined
-  const totalTokens = summary.total_tokens as number | undefined
-  const genTime = summary.generation_time_ms as number | undefined
-
-  const hasTokens = inputTokens != null || outputTokens != null || totalTokens != null
-
-  if (!hasTokens) return null
-
-  return (
-    <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-border/40">
-      {totalTokens != null && (
-        <span className="text-xs text-muted-foreground flex items-center gap-1">
-          <span aria-hidden>&#x1f524;</span> {formatNumber(totalTokens)} tokens
-        </span>
-      )}
-      {inputTokens != null && totalTokens == null && (
-        <span className="text-xs text-muted-foreground flex items-center gap-1">
-          <span aria-hidden>&#x2B07;&#xFE0F;</span> {formatNumber(inputTokens)} in
-        </span>
-      )}
-      {outputTokens != null && totalTokens == null && (
-        <span className="text-xs text-muted-foreground flex items-center gap-1">
-          <span aria-hidden>&#x2B06;&#xFE0F;</span> {formatNumber(outputTokens)} out
-        </span>
-      )}
-      {inputTokens != null && outputTokens != null && totalTokens != null && (
-        <span className="text-xs text-muted-foreground">
-          ({formatNumber(inputTokens)} in / {formatNumber(outputTokens)} out)
-        </span>
-      )}
-      {genTime != null && (
-        <span className="text-xs text-muted-foreground flex items-center gap-1">
-          <span aria-hidden>&#x23F1;&#xFE0F;</span>
-          {genTime < 1000 ? `${genTime}ms` : `${(genTime / 1000).toFixed(1)}s`}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function PredictionDisplay({ summary, stepName }: { summary: any; stepName: string }) {
-  if (!summary || typeof summary !== 'object') return null
-  if (stepName !== 'ml_prediction' && stepName !== 'fraud_check') return null
-
-  const prediction = summary.prediction as string | undefined
-  const probability = summary.probability as number | undefined
-
-  if (!prediction && probability == null) return null
-
-  const isApproved = prediction?.toLowerCase() === 'approved'
-  const isDenied = prediction?.toLowerCase() === 'denied'
-
-  return (
-    <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border/40">
-      {prediction && (
-        <Badge
-          variant="outline"
-          className={
-            isApproved
-              ? 'bg-green-500/10 text-green-400 border-green-500/30'
-              : isDenied
-              ? 'bg-red-500/10 text-red-400 border-red-500/30'
-              : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
-          }
-        >
-          {prediction.charAt(0).toUpperCase() + prediction.slice(1)}
-        </Badge>
-      )}
-      {probability != null && (
-        <span className="text-xs text-muted-foreground">
-          Confidence: <span className="font-medium text-foreground/80">{(probability * 100).toFixed(1)}%</span>
-        </span>
-      )}
-    </div>
-  )
-}
-
 export function AgentStepCard({ step }: AgentStepCardProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -168,8 +83,6 @@ export function AgentStepCard({ step }: AgentStepCardProps) {
           {summaryItems.length === 0 && !step.error && (
             <p className="text-sm text-muted-foreground">No details available</p>
           )}
-          <TokenUsageDisplay summary={step.result_summary} />
-          <PredictionDisplay summary={step.result_summary} stepName={step.step_name} />
         </CardContent>
       )}
     </Card>

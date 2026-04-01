@@ -13,7 +13,6 @@ const pageTitles: Record<string, string> = {
   '/dashboard/customers': 'Customers',
   '/dashboard/profile': 'My Profile',
   '/dashboard/model-metrics': 'Model Metrics',
-  '/dashboard/model-card': 'Model Card',
   '/dashboard/emails': 'Generated Emails',
   '/dashboard/agents': 'Agent Workflows',
 }
