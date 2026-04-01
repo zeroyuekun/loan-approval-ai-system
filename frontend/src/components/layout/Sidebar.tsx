@@ -55,7 +55,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="min-h-0 flex-1 overflow-y-auto scrollbar-hidden space-y-1 px-3 py-4">
+        <div className="min-h-0 flex-1 overflow-hidden">
+        <nav className="h-full overflow-y-auto -mr-[20px] pr-[20px] space-y-1 px-3 py-4">
           <p className="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
             Menu
           </p>
@@ -90,6 +91,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             )
           })}
         </nav>
+        </div>
 
         {/* User card */}
         {user && (
