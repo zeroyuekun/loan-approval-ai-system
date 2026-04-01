@@ -89,11 +89,11 @@ services:
       - ./backend:/app
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120 --max-requests 1000 --max-requests-jitter 100 --access-logfile -
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready/')\""]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/ready/", "--connect-timeout", "5"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
     networks:
       - internal
 

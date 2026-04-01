@@ -224,12 +224,14 @@ jobs:
       - name: Start application stack
         run: |
           docker compose build
-          docker compose up -d --wait
+          docker compose up -d --wait --timeout 120
         env:
           DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
-          DJANGO_DEBUG: 'false'
+          DJANGO_DEBUG: 'true'
           DJANGO_SETTINGS_MODULE: config.settings.development
           ALLOWED_HOSTS: '*'
+          POSTGRES_DB: loan_approval
+          POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
           REDIS_PASSWORD: testpass
           FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
@@ -279,10 +281,14 @@ jobs:
       - name: Start application stack
         run: |
           docker compose build
-          docker compose up -d --wait
+          docker compose up -d --wait --timeout 120
         env:
           DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
           DJANGO_DEBUG: 'true'
+          DJANGO_SETTINGS_MODULE: config.settings.development
+          ALLOWED_HOSTS: '*'
+          POSTGRES_DB: loan_approval
+          POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
           REDIS_PASSWORD: testpass
           FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
