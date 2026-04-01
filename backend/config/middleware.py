@@ -86,8 +86,7 @@ class SecurityHeadersMiddleware:
         # Permissions-Policy — restrict unused browser features
         if "Permissions-Policy" not in response:
             response["Permissions-Policy"] = (
-                "camera=(), microphone=(), geolocation=(), "
-                "payment=(), usb=(), interest-cohort=()"
+                "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
             )
 
         return response

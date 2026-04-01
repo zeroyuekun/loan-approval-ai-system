@@ -15,7 +15,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-loan_approval}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -72,7 +73,8 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       POSTGRES_HOST: db
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
@@ -112,7 +114,8 @@ services:
       backend:
         condition: service_started
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       POSTGRES_HOST: db
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
@@ -149,7 +152,8 @@ services:
       backend:
         condition: service_started
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       POSTGRES_HOST: db
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
@@ -186,7 +190,8 @@ services:
       backend:
         condition: service_started
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       POSTGRES_HOST: db
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}

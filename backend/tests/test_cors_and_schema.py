@@ -114,8 +114,8 @@ class TestSchemaEndpoints:
         assert response.status_code == 200
 
     def test_openapi_schema_contains_key(self):
-        response = self.client.get("/api/schema/")
-        # drf-spectacular returns application/vnd.oai.openapi content type
+        response = self.client.get("/api/schema/?format=json")
+        # drf-spectacular returns JSON when format=json is requested
         import json
 
         data = json.loads(response.content)

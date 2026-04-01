@@ -239,7 +239,7 @@ class TestLoanApplicationContracts:
         # Status must be a string
         assert isinstance(data["status"], str), "status must be str"
 
-    @patch("apps.loans.views.orchestrate_pipeline_task")
+    @patch("apps.agents.tasks.orchestrate_pipeline_task.delay")
     def test_create_response_shape(self, mock_pipeline, auth_customer_client):
         """POST /api/v1/loans/ must return the created application with an id."""
         payload = {
