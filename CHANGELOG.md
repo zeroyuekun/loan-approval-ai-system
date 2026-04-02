@@ -11,16 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Optuna Bayesian hyperparameter optimization** for XGBoost, replacing RandomizedSearchCV. Uses TPE sampler with configurable trial count (`ML_OPTUNA_TRIALS`, default 50). Wider search space: max_depth 4-10, learning_rate 0.01-0.15 (log), reg_lambda 1-50 (log), plus reg_alpha and gamma
 - **4 research-backed feature interactions**: `lvr_x_property_growth` (negative equity risk), `deposit_x_income_stability` (compounding risk), `dti_x_rate_sensitivity` (rate exposure), `credit_x_employment` (profile strength)
 - **Self-healing watchdog service** running as Docker container: health endpoint polling, stuck Celery task detection and revocation, idle DB connection termination, Redis-backed health state tracking
+- **Trivy container image scanning** in CI for backend and frontend Docker images. Pinned to commit SHA (not mutable tag) after trivy-action supply-chain compromise (GHSA-69fq-xp46-6x23)
+- "What to look for in this project" recruiter section in README
 
 ### Changed
 - XGBoost hyperparameter search now uses Optuna TPE sampler instead of sklearn RandomizedSearchCV (10x faster convergence, research-backed for credit risk modeling)
 - Feature engineering module now produces 31 derived features (up from 27)
+- CI pipeline now runs 12 jobs: backend lint, backend tests, frontend lint, frontend tests, security scan, secret scan, dependency audit, Docker build, Trivy scan, DAST (ZAP), load test (k6), image push
 
 ### Fixed
 - Duplicate dictionary keys in `template_fallback.py` (ruff F601)
 - Import ordering in migration 0019 (ruff I001)
 - `test_data_export.py` hardcoded `/app/ml_models/` path replaced with `settings.ML_MODELS_DIR`
 - lodash updated to 4.18.1 (npm audit high severity vulnerability)
+- All stale GridSearchCV references updated to Optuna in UI, MODEL_CARD, workflows, and trainer comments
 
 ## [1.7.1] - 2026-04-02
 

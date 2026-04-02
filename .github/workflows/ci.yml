@@ -221,7 +221,9 @@ jobs:
         run: docker build -t loan-frontend ./frontend
 
       - name: Trivy scan backend image
-        uses: aquasecurity/trivy-action@master
+        # Pinned to v0.35.0 commit SHA — trivy-action was supply-chain compromised
+        # on 2026-03-19 (GHSA-69fq-xp46-6x23). Never use @master or mutable tags.
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
           image-ref: loan-backend
           format: table
@@ -230,7 +232,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Trivy scan frontend image
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
           image-ref: loan-frontend
           format: table
