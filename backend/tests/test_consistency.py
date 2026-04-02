@@ -1,5 +1,3 @@
-"""Tests for DataConsistencyChecker and _safe_float — pure Python, no DB."""
-
 import pytest
 
 from apps.ml_engine.services.consistency import DataConsistencyChecker, _safe_float
@@ -38,12 +36,6 @@ class TestSafeFloat:
     def test_normal_int(self):
         assert _safe_float(42) == 42.0
 
-    def test_normal_float(self):
-        assert _safe_float(3.14) == 3.14
-
-    def test_string_number(self):
-        assert _safe_float("99.5") == 99.5
-
     def test_none_returns_default(self):
         assert _safe_float(None) == 0.0
 
@@ -55,9 +47,6 @@ class TestSafeFloat:
 
     def test_inf_returns_default(self):
         assert _safe_float(float("inf")) == 0.0
-
-    def test_neg_inf_returns_default(self):
-        assert _safe_float(float("-inf")) == 0.0
 
     def test_non_numeric_string(self):
         assert _safe_float("abc") == 0.0

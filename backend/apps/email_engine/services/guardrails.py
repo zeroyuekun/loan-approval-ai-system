@@ -34,8 +34,8 @@ class GuardrailChecker:
         re.compile(r"\b(unacceptable|disgraceful|shocking)\b", re.IGNORECASE),
     ]
 
-    # AI-giveaway phrases that real bank officers never use
-    AI_GIVEAWAY_TERMS = [
+    # Phrases that don't match formal banking correspondence
+    INFORMAL_TONE_PATTERNS = [
         # "pleased to inform" and "pleased to confirm" are legitimate in formal approval letters
         # re.compile(r'\bpleased to (?:inform|advise)\b', re.IGNORECASE),
         re.compile(r"\bdelighted\b", re.IGNORECASE),
@@ -66,7 +66,7 @@ class GuardrailChecker:
         # re.compile(r'\bwe appreciate the trust\b', re.IGNORECASE),  # Removed: legitimate closing in approval letters
         re.compile(r"\bregardless of (?:this|the) outcome\b", re.IGNORECASE),
         re.compile(r"\bshould you have any questions at all\b", re.IGNORECASE),
-        # Transitional adverbs (strongest AI-tell)
+        # Transitional adverbs (strongest informal-tone signal)
         re.compile(r"\badditionally\b", re.IGNORECASE),
         re.compile(r"\bfurthermore\b", re.IGNORECASE),
         re.compile(r"\bmoreover\b", re.IGNORECASE),
@@ -242,9 +242,9 @@ class GuardrailChecker:
     ]
 
     # Psychology-informed reframes: (pattern, suggestion, research_basis)
-    # Sources: Kahneman/Tversky framing effect, Hayne Royal Commission,
+    # Sources: framing effect research, Hayne Royal Commission,
     # ABA Financial Difficulty Guideline 2025, Banking Code para 7(c),
-    # Peak-end rule (Kahneman), dual-process theory (System 1/2)
+    # peak-end rule, dual-process theory (System 1/2)
     PSYCHOLOGY_REFRAMES = {
         "negative_framing": [
             (
@@ -571,25 +571,25 @@ class GuardrailChecker:
             "details": details,
         }
 
-    def check_ai_giveaway_language(self, text):
-        """Detect AI-generated phrasing that real bank officers never use."""
+    def check_informal_tone(self, text):
+        """Detect phrasing that doesn't match formal banking correspondence."""
         text_lower = text.lower()
         found_phrases = []
 
-        for pattern in self.AI_GIVEAWAY_TERMS:
+        for pattern in self.INFORMAL_TONE_PATTERNS:
             matches = pattern.findall(text_lower)
             if matches:
                 found_phrases.extend(matches)
 
         passed = len(found_phrases) == 0
         details = (
-            f"AI-giveaway phrases detected: {', '.join(found_phrases)}"
+            f"Informal tone phrases detected: {', '.join(found_phrases)}"
             if not passed
             else "Language sounds authentically human"
         )
 
         return {
-            "check_name": "AI Giveaway Language",
+            "check_name": "Informal Tone",
             "passed": passed,
             "details": details,
         }
@@ -928,10 +928,10 @@ class GuardrailChecker:
     # These live here so both decision and marketing emails can be checked
     # by a single run_all_checks() call with email_type='decision' or 'marketing'.
 
-    # Marketing-specific AI-giveaway terms — more permissive than the decision
+    # Marketing-specific tone patterns — more permissive than the decision
     # email list because product descriptions legitimately use "comprehensive"
     # and "tailored", and customer follow-ups use "don't hesitate".
-    MARKETING_AI_GIVEAWAY_TERMS = [
+    MARKETING_TONE_PATTERNS = [
         re.compile(r"\bpleased to (?:confirm|inform|advise)\b", re.IGNORECASE),
         re.compile(r"\bdelighted\b", re.IGNORECASE),
         re.compile(r"\bthrilled\b", re.IGNORECASE),
@@ -987,21 +987,21 @@ class GuardrailChecker:
         re.compile(r"\bgoing forward\b", re.IGNORECASE),
     ]
 
-    def check_marketing_ai_giveaway_language(self, text):
-        """Detect AI-generated phrasing, with marketing-appropriate exceptions."""
+    def check_marketing_tone(self, text):
+        """Detect informal phrasing, with marketing-appropriate exceptions."""
         text_lower = text.lower()
         found_phrases = []
-        for pattern in self.MARKETING_AI_GIVEAWAY_TERMS:
+        for pattern in self.MARKETING_TONE_PATTERNS:
             matches = pattern.findall(text_lower)
             if matches:
                 found_phrases.extend(matches)
         passed = len(found_phrases) == 0
         details = (
-            f"AI-giveaway phrases detected: {', '.join(found_phrases)}"
+            f"Informal tone phrases detected: {', '.join(found_phrases)}"
             if not passed
             else "Language sounds authentically human"
         )
-        return {"check_name": "AI Giveaway Language", "passed": passed, "details": details}
+        return {"check_name": "Informal Tone", "passed": passed, "details": details}
 
     def check_marketing_format(self, text):
         """Marketing email format — plain text with Unicode bullets and en dashes allowed."""
@@ -1166,7 +1166,7 @@ class GuardrailChecker:
         """Run ALL guardrail checks on any email and return results with a quality score.
 
         Every check runs on every email type. The only differences:
-        - AI Giveaway Language: decision emails use the stricter list,
+        - Informal Tone: decision emails use the stricter list,
           marketing emails use the more permissive list (allows "comprehensive", "tailored").
         - Plain Text Format: decision emails block markdown bullets,
           marketing emails allow Unicode dividers and emoji.
@@ -1177,9 +1177,9 @@ class GuardrailChecker:
             email_text: The email body text to check.
             context: Dict with 'decision', 'loan_amount', 'pricing', etc.
             email_type: 'decision' or 'marketing' — only affects which variant
-                        of AI giveaway and format checks to use.
+                        of tone and format checks to use.
             template_mode: If True, skip LLM-specific checks (hallucinated numbers,
-                          AI giveaway language) since template content is pre-vetted.
+                          informal tone) since template content is pre-vetted.
         """
         # Guard against pathologically large input
         if len(email_text) > 100_000:
@@ -1196,9 +1196,7 @@ class GuardrailChecker:
         decision = context.get("decision", "approved")
 
         # Pick the correct variant for checks that differ by email type
-        ai_giveaway_fn = (
-            self.check_ai_giveaway_language if email_type == "decision" else self.check_marketing_ai_giveaway_language
-        )
+        tone_check_fn = self.check_informal_tone if email_type == "decision" else self.check_marketing_tone
         format_fn = self.check_plain_text_format if email_type == "decision" else self.check_marketing_format
 
         # Template mode: skip LLM-specific checks since static templates are
@@ -1230,7 +1228,7 @@ class GuardrailChecker:
                 (self.check_no_false_urgency, (email_text,), 6),
                 (self.check_no_guaranteed_approval, (email_text,), 8),
                 # ── Quality & authenticity ──
-                (ai_giveaway_fn, (email_text,), 5),
+                (tone_check_fn, (email_text,), 5),
                 (self.check_grammar_formality, (email_text,), 3),
                 (format_fn, (email_text,), 3),
                 (self.check_word_count, (email_text, decision), 3),

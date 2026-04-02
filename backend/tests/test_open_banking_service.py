@@ -262,6 +262,7 @@ class TestClassifyTransaction:
 # ---------------------------------------------------------------------------
 # 4. get_banking_profile returns None when APIs unavailable
 # ---------------------------------------------------------------------------
+# TODO: should test NaN amounts in transaction list
 class TestGetBankingProfileFallback:
     def test_returns_none_when_no_apis(self):
         svc = OpenBankingService()

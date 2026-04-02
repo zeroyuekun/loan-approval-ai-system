@@ -1,5 +1,3 @@
-"""Security tests: XSS, prompt injection, lockout, PII encryption."""
-
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model

@@ -1,5 +1,3 @@
-"""Tests for the credit bureau integration service."""
-
 import os
 from dataclasses import fields as dataclass_fields
 from unittest.mock import MagicMock, patch

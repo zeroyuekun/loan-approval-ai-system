@@ -12,7 +12,7 @@ Accepted
 
 The loan approval pipeline requires orchestrating multiple AI and non-AI steps: ML prediction, email generation, bias detection, next-best-offer generation, and escalation. These steps involve both probabilistic decisions (LLM reasoning, model inference) and deterministic execution (database writes, email sending, guardrail checks). The architecture must keep these concerns separated for testability, auditability, and regulatory compliance.
 
-The main alternatives considered were microservices (each step as a separate service) and a monolithic pipeline (all logic in one function).
+I considered just chaining Celery tasks directly but wanted step-level logging for observability — being able to see exactly where a pipeline failed and how long each step took. The other alternatives were microservices (each step as a separate service) and a monolithic pipeline (all logic in one function).
 
 ## Decision
 

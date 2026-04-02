@@ -1,5 +1,7 @@
 # Model Training Workflow
 
+<!-- TODO: update after Optuna migration — GridSearchCV for RF should probably move to Optuna too -->
+
 ## Objective
 
 Train and retrain Random Forest (RF) and XGBoost classification models on loan application data to predict approval/denial outcomes.
@@ -37,22 +39,15 @@ Train and retrain Random Forest (RF) and XGBoost classification models on loan a
 - Metrics report printed to stdout and optionally saved to `.tmp/model_report.json`
 - Preprocessor artifacts (scaler, encoders) saved alongside the model
 
-## Edge Cases
+## Watch out for
 
-### Class Imbalance
-If the approval rate is heavily skewed (>80% or <20%), apply one or more of:
-- `class_weight='balanced'` in the classifier
-- SMOTE oversampling on the training set only (never on val/test)
-- Adjust the decision threshold based on ROC curve analysis
+**Class imbalance:** If the approval rate is heavily skewed (>80% or <20%), use `class_weight='balanced'`, SMOTE on training data only, or adjust the decision threshold from the ROC curve. Never apply SMOTE to val/test sets.
 
-### Overfitting
-- Compare validation accuracy vs. test accuracy. If val is significantly higher (>5% gap), the model is likely overfit.
-- Remedies: reduce `max_depth`, increase `min_samples_split`, add regularization (XGBoost `reg_alpha`, `reg_lambda`)
-- Check feature importances - if one feature dominates (>50% importance), investigate whether it's a data leak.
+**Overfitting:** Compare validation vs test accuracy — a >5% gap means the model is overfit. Reduce `max_depth`, increase `min_samples_split`, or add regularisation (`reg_alpha`, `reg_lambda` for XGBoost). Also check feature importances: if one feature dominates (>50%), it's likely a data leak.
 
-### Data Issues
-- If CSV has fewer than 500 rows, warn that results may be unreliable.
-- If any feature has >30% missing values, log a warning and consider dropping that feature entirely.
+<!-- this threshold was tuned empirically, might need adjusting for real bank data -->
+
+**Data issues:** Fewer than 500 rows → warn that results may be unreliable. Any feature with >30% missing values → log a warning and consider dropping it.
 
 ## CLI Usage
 

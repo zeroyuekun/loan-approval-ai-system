@@ -65,7 +65,6 @@ class DataConsistencyChecker:
     # ------------------------------------------------------------------
 
     def _check_home_loan_property(self, f):
-        """Home loan must have a property value."""
         if f.get("purpose") != "home":
             return []
         prop = _safe_float(f.get("property_value"))
@@ -82,7 +81,6 @@ class DataConsistencyChecker:
         return []
 
     def _check_deposit_vs_property(self, f):
-        """Deposit should not exceed property value."""
         if f.get("purpose") != "home":
             return []
         deposit = _safe_float(f.get("deposit_amount"))
@@ -102,7 +100,6 @@ class DataConsistencyChecker:
         return []
 
     def _check_deposit_vs_loan(self, f):
-        """Deposit should not exceed loan amount (doesn't make sense)."""
         deposit = _safe_float(f.get("deposit_amount"))
         loan = _safe_float(f.get("loan_amount"))
         if deposit > 0 and loan > 0 and deposit > loan * 1.5:
@@ -120,7 +117,6 @@ class DataConsistencyChecker:
         return []
 
     def _check_lvr_sanity(self, f):
-        """For home loans, LVR above 100% means loan exceeds property value."""
         if f.get("purpose") != "home":
             return []
         loan = _safe_float(f.get("loan_amount"))
@@ -143,7 +139,6 @@ class DataConsistencyChecker:
         return []
 
     def _check_dti_sanity(self, f):
-        """Declared DTI should be roughly consistent with loan/income ratio."""
         income = _safe_float(f.get("annual_income"))
         loan = _safe_float(f.get("loan_amount"))
         declared_dti = _safe_float(f.get("debt_to_income"))
@@ -167,7 +162,6 @@ class DataConsistencyChecker:
         return []
 
     def _check_expenses_vs_income(self, f):
-        """Monthly expenses should be realistic relative to income."""
         income = _safe_float(f.get("annual_income"))
         expenses = _safe_float(f.get("monthly_expenses"))
         if income <= 0 or expenses <= 0:
@@ -207,7 +201,6 @@ class DataConsistencyChecker:
         return findings
 
     def _check_credit_card_vs_income(self, f):
-        """Credit card limits far exceeding income are suspicious."""
         income = _safe_float(f.get("annual_income"))
         cc_limit = _safe_float(f.get("existing_credit_card_limit"))
         if income <= 0 or cc_limit <= 0:
@@ -228,7 +221,6 @@ class DataConsistencyChecker:
         return []
 
     def _check_employment_consistency(self, f):
-        """Employment length should be plausible for employment type."""
         emp_type = f.get("employment_type", "")
         emp_length = _safe_float(f.get("employment_length"))
         findings = []
@@ -304,7 +296,6 @@ class DataConsistencyChecker:
         return []
 
     def _check_loan_amount_vs_income(self, f):
-        """Flag extremely high loan-to-income ratios for non-home loans."""
         purpose = f.get("purpose", "")
         income = _safe_float(f.get("annual_income"))
         loan = _safe_float(f.get("loan_amount"))
@@ -328,7 +319,6 @@ class DataConsistencyChecker:
         return []
 
     def _check_couple_income(self, f):
-        """Couple applicants with very low income may indicate single income."""
         applicant_type = f.get("applicant_type", "")
         income = _safe_float(f.get("annual_income"))
         if applicant_type == "couple" and 0 < income < 45000:

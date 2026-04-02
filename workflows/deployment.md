@@ -94,68 +94,18 @@ docker-compose exec backend python manage.py train_model --algorithm both
 
 ## Troubleshooting
 
-### Port Conflicts
+### Things that go wrong
 
-| Port | Service | Fix |
-|------|---------|-----|
-| 5432 | PostgreSQL | Stop local Postgres or change `POSTGRES_PORT` in `.env` and `docker-compose.yml` |
-| 6379 | Redis | Stop local Redis or remap in `docker-compose.yml` |
-| 8000 | Django | Change the backend port mapping in `docker-compose.yml` |
-| 3000 | Next.js | Change the frontend port mapping in `docker-compose.yml` |
+Port conflicts are the most common issue. If 5432, 6379, 8000, or 3000 are already in use, either stop the local service or remap the port in `docker-compose.yml` (and `.env` for Postgres). The backend and frontend ports are the ones most likely to collide if you're running other dev servers.
 
-### Volume Permissions
+Volume permission errors happen occasionally on Linux — `docker-compose down -v` then `up -d` fixes it, but `-v` nukes your database volumes so only do this when you want a fresh start.
 
-If you see permission errors on mounted volumes:
-```bash
-# Reset volume permissions
-docker-compose down -v
-docker-compose up -d
-```
+PostgreSQL sometimes takes 10-15 seconds to initialise. If the backend can't connect, check `docker-compose ps db` and wait for the healthcheck to pass before panicking. Same goes for Celery workers — if tasks aren't processing, check `docker-compose logs celery_worker` and verify Redis is up (`docker-compose exec redis redis-cli ping` should return PONG).
 
-Note: `-v` removes named volumes (including database data). Only use this for a fresh start.
+Build failures are usually pip dependency issues. `docker-compose build --no-cache backend` is the nuclear option but it works.
 
-### Database Connection Refused
-
-```bash
-# Check if db container is healthy
-docker-compose ps db
-
-# Check db logs
-docker-compose logs db
-
-# If the healthcheck is failing, wait 10-15 seconds and try again
-# PostgreSQL may still be initializing
-```
-
-### Celery Worker Not Processing Tasks
-
-```bash
-# Check worker logs
-docker-compose logs celery_worker
-
-# Verify Redis is accessible
-docker-compose exec redis redis-cli ping
-# Should return: PONG
-
-# Restart the worker
-docker-compose restart celery_worker
-```
-
-### Backend Build Fails
-
-```bash
-# Check for pip dependency issues
-docker-compose logs backend
-
-# Rebuild without cache
-docker-compose build --no-cache backend
-```
-
-### Frontend Cannot Reach Backend
-
-- Verify `NEXT_PUBLIC_API_URL` is set correctly in `.env`
-- Inside Docker network, frontend uses `http://backend:8000`, not `localhost`
-- From the browser, API calls go to `http://localhost:8000/api/v1/`
+<!-- the frontend→backend connection trips people up because inside Docker it's http://backend:8000, but from the browser it's localhost:8000 -->
+If the frontend can't reach the backend, check `NEXT_PUBLIC_API_URL` in `.env`. Inside the Docker network the frontend talks to `http://backend:8000`, but from the browser API calls go to `http://localhost:8000/api/v1/`.
 
 ## Stopping the System
 

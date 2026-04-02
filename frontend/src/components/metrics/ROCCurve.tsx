@@ -24,6 +24,7 @@ export function ROCCurve({ fpr, tpr, auc }: ROCCurveProps) {
         <CardDescription>AUC: {auc != null ? auc.toFixed(4) : '—'}</CardDescription>
       </CardHeader>
       <CardContent>
+        {/* TODO: add proper aria labels */}
         <ResponsiveContainer width="100%" height={350}>
           <LineChart data={data} margin={{ top: 10, right: 20, bottom: 30, left: 20 }}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} />

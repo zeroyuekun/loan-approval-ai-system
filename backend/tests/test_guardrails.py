@@ -1,5 +1,3 @@
-"""Tests for email guardrail compliance checks."""
-
 from django.test import TestCase
 
 

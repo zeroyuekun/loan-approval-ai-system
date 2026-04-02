@@ -254,7 +254,7 @@ RULES:
 - Open with acknowledgement, then naturally introduce the alternatives
 - Reference specific offer details (amounts, rates) where relevant
 - Close with a clear next step (call, visit branch, reply to email)
-- Do NOT use AI giveaway phrases ("I understand", "navigate", "journey", "leverage")
+- Do NOT use informal phrases ("I understand", "navigate", "journey", "leverage")
 - Sign off as "The AussieLoanAI Team"
 
 Respond with the marketing message text only, no JSON wrapping."""

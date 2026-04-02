@@ -55,7 +55,6 @@ class PipelineOrchestrator:
 
     @staticmethod
     def _waterfall_entry(step: str, result: str, reason_code: str, detail: str) -> dict:
-        """Create a single decision waterfall entry for ASIC RG 209 audit trail."""
         return {
             "step": step,
             "result": result,
@@ -66,17 +65,11 @@ class PipelineOrchestrator:
 
     @staticmethod
     def _save_waterfall(application, waterfall: list) -> None:
-        """Persist the decision waterfall to the LoanDecision record."""
         LoanDecision.objects.filter(application=application).update(
             decision_waterfall=waterfall,
         )
 
     def _build_profile_context(self, application):
-        """Build a dict of customer profile data for downstream services.
-
-        Returns None if the profile is not available so callers can degrade
-        gracefully.
-        """
         try:
             profile = application.applicant.profile
         except AttributeError:  # RelatedObjectDoesNotExist is a subclass
@@ -111,11 +104,7 @@ class PipelineOrchestrator:
 
     @staticmethod
     def _evaluate_conditions(application) -> list:
-        """Evaluate risk factors and return a list of condition dicts.
-
-        Only called when the ML model would approve.  Each condition is a dict
-        with keys: type, description, required, satisfied, satisfied_at.
-        """
+        """Return condition dicts for risk factors that require documentation before finalising."""
         conditions: list[dict] = []
 
         # Income verification gap
@@ -181,7 +170,6 @@ class PipelineOrchestrator:
         return conditions
 
     def orchestrate(self, application_id):
-        """Run prediction -> email -> bias check -> NBO for a loan application."""
         start_time = time.time()
         logger.info("Starting pipeline for application %s", application_id)
 
@@ -736,7 +724,6 @@ class PipelineOrchestrator:
         return agent_run
 
     def resume_after_review(self, agent_run_id, reviewer="", note=""):
-        """Pick up an escalated pipeline after a human approves or denies it."""
         start_time = time.time()
         logger.info("Resuming agent run %s after human review", agent_run_id)
 
@@ -913,10 +900,7 @@ class PipelineOrchestrator:
         return agent_run
 
     def _run_nbo_and_marketing_pipeline(self, application, agent_run, steps, denial_reasons, profile_context):
-        """Run NBO generation -> marketing message -> marketing email -> bias check -> send.
-
-        Shared by both orchestrate() and resume_after_review() for denied applications.
-        """
+        """NBO + marketing email pipeline for denied applications."""
         nbo_result = None
         nbo_generator = NextBestOfferGenerator()
 
@@ -1140,7 +1124,6 @@ class PipelineOrchestrator:
         return steps
 
     def _run_marketing_bias_check(self, email_result_marketing, application, agent_run, steps):
-        """Run bias analysis on a marketing email. Returns (steps, send_approved)."""
         marketing_context = {
             "loan_amount": float(application.loan_amount),
             "purpose": application.get_purpose_display(),
@@ -1298,7 +1281,6 @@ class PipelineOrchestrator:
         return step
 
     def _categorize_error(self, error):
-        """Classify an error string into a failure category for monitoring."""
         error_lower = str(error).lower()
         if any(term in error_lower for term in ["timeout", "rate limit", "429", "timed out"]):
             return "transient"

@@ -7,13 +7,12 @@ The CFPB requires "specific and accurate reasons" for adverse action but is
 method-agnostic — it does not mandate SHAP or any specific technique.
 
 SHAP stability caveat: Mid-ranked features may show ranking instability across
-model runs (arXiv:2508.01851). Top and bottom features are stable. We report
-the top max_reasons features which have the most stable attributions.
+model runs. Top and bottom features are stable. We report the top max_reasons
+features which have the most stable attributions.
 
 References:
     - CFPB Circular 2022-03: consumerfinance.gov/compliance/circulars/circular-2022-03
     - NCCP Act 2009 s133: legislation.gov.au
-    - SHAP stability: arXiv:2508.01851
 """
 
 import logging
@@ -50,7 +49,7 @@ AFCA_COMPLAINT_TEXT = (
 SHAP_STABILITY_NOTE = (
     "Reason rankings are derived from feature attribution analysis. "
     "Top contributing factors are stable across model evaluations; "
-    "mid-ranked factors may vary between assessments (arXiv:2508.01851)."
+    "mid-ranked factors may vary between assessments."
 )
 
 # --- US jurisdiction: FCRA / ECOA required disclosures ---
@@ -290,7 +289,7 @@ def generate_model_inventory_entry(model_version) -> dict:
             "Open banking transaction data",
         ],
         "known_limitations": [
-            "Mid-ranked SHAP feature attributions may be unstable (arXiv:2508.01851)",
+            "Mid-ranked SHAP feature attributions may be unstable across model runs",
             "Model trained on Australian lending data — not validated for other jurisdictions",
             "Does not account for macroeconomic regime changes post-training",
         ],

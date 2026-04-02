@@ -4,11 +4,6 @@
 
 Generate 10,000 realistic synthetic loan application records for model training and system testing using Australian lending standards.
 
-## Required Inputs
-
-- Number of records to generate (default: 10,000)
-- Output file path (default: `.tmp/synthetic_loans.csv`)
-
 ## Tools
 
 | Tool | Location | Purpose |
@@ -178,7 +173,4 @@ python tools/generate_synthetic_data.py --seed 123
 
 ## Edge Cases
 
-- **Output directory doesn't exist**: Create it automatically with `os.makedirs(exist_ok=True)`.
-- **Disk space**: 10,000 records is ~2.5MB CSV. 100,000 records is ~25MB. Warn if generating >1M records.
-- **Reproducibility**: Always log the random seed used, even if it was the default, so results can be reproduced.
-- **Non-home loans**: `property_value` and `deposit_amount` are 0 — LVR and genuine savings checks are skipped.
+If the output directory doesn't exist, create it with `os.makedirs(exist_ok=True)`. For disk space, 10k records is about 2.5MB and 100k is ~25MB — warn if generating over 1M. Always log the random seed used (even the default) so results can be reproduced. Non-home loans have `property_value` and `deposit_amount` set to 0, so LVR and genuine savings checks get skipped.

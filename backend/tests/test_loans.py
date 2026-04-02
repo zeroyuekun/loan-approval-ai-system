@@ -1,5 +1,3 @@
-"""Tests for loan application CRUD and role-based permissions."""
-
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework import status

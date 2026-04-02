@@ -1,5 +1,3 @@
-"""Tests for PortfolioStressTester service."""
-
 from decimal import Decimal
 
 import pytest

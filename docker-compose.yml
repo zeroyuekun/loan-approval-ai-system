@@ -2,14 +2,6 @@ services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -23,7 +15,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      interval: 15s
       timeout: 5s
       retries: 5
     networks:
@@ -32,14 +24,6 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -47,9 +31,9 @@ services:
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 10s
+      interval: 20s
       timeout: 5s
-      retries: 5
+      retries: 3
     networks:
       - internal
 
@@ -62,9 +46,6 @@ services:
         limits:
           cpus: '1.0'
           memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -109,9 +90,6 @@ services:
         limits:
           cpus: '2.0'
           memory: 4G
-        reservations:
-          cpus: '1.0'
-          memory: 2G
     entrypoint: []
     depends_on:
       db:
@@ -151,9 +129,6 @@ services:
         limits:
           cpus: '1.5'
           memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
     entrypoint: []
     depends_on:
       db:
@@ -193,9 +168,6 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
     entrypoint: []
     depends_on:
       db:
@@ -229,9 +201,6 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
     entrypoint: []
     depends_on:
       db:
@@ -261,14 +230,6 @@ services:
       context: ./frontend
       target: runner
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -291,10 +252,10 @@ services:
     command: sh -c "npm install && npm run dev"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
-      interval: 30s
+      interval: 20s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 45s
     networks:
       - internal
 
@@ -348,9 +309,6 @@ services:
         limits:
           cpus: '1.0'
           memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
     ports:
       - "127.0.0.1:3100:3100"
     volumes:
@@ -375,9 +333,6 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
     volumes:
       - ./monitoring/promtail-config.yml:/etc/promtail/config.yml
       - /var/lib/docker/containers:/var/lib/docker/containers:ro

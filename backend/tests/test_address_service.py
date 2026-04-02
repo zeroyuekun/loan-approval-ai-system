@@ -1,5 +1,3 @@
-"""Tests for AddressService — Australian address validation and geocoding."""
-
 from unittest.mock import MagicMock, patch
 
 import httpx

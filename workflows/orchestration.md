@@ -12,14 +12,7 @@ Chain all three levels of the AI loan approval system into a single agentic pipe
 
 ## Tools
 
-| Tool | Location | Purpose |
-|------|----------|---------|
-| Orchestrator service | `backend/apps/agents/services/orchestrator.py` | Chains all pipeline steps |
-| ML predictor | `backend/apps/ml_engine/services/predictor.py` | Runs model inference |
-| Email generator | `backend/apps/email_engine/services/email_generator.py` | Generates decision emails |
-| Bias detector | `backend/apps/agents/services/bias_detector.py` | Scores emails for bias |
-| NBO generator | `backend/apps/agents/services/next_best_offer.py` | Generates next-best-offer for denials |
-| Marketing agent | `backend/apps/agents/services/marketing_agent.py` | Generates follow-up marketing email with alternative offers for denied applicants |
+The orchestrator (`backend/apps/agents/services/orchestrator.py`) chains together the ML predictor, email generator, bias detector, NBO generator, and marketing agent. Each lives in its own service file under `backend/apps/` — see the individual workflow files for details on each one.
 
 ## Steps
 
@@ -92,7 +85,7 @@ AgentRun(
 )
 ```
 
-## Expected Outputs
+## Output
 
 - Updated `LoanApplication` with final decision
 - `AgentRun` record with full step history and timing

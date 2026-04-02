@@ -21,7 +21,6 @@ class MetricsService:
     """Helpers for computing classification metrics."""
 
     def compute_metrics(self, y_true, y_pred, y_prob):
-        """Compute standard classification metrics."""
         return {
             "accuracy": round(float(accuracy_score(y_true, y_pred)), 4),
             "precision": round(float(precision_score(y_true, y_pred, zero_division=0)), 4),
@@ -32,7 +31,6 @@ class MetricsService:
         }
 
     def confusion_matrix_data(self, y_true, y_pred):
-        """Return confusion matrix in a frontend-friendly format."""
         cm = confusion_matrix(y_true, y_pred)
         return {
             "true_negatives": int(cm[0][0]),
@@ -43,7 +41,6 @@ class MetricsService:
         }
 
     def roc_curve_data(self, y_true, y_prob):
-        """Return ROC curve data for frontend charting."""
         fpr, tpr, thresholds = roc_curve(y_true, y_prob)
 
         def _safe_float(x):
@@ -60,7 +57,6 @@ class MetricsService:
         }
 
     def feature_importance_data(self, model, feature_names):
-        """Return sorted feature importances."""
         if hasattr(model, "feature_importances_"):
             importances = model.feature_importances_
         else:
@@ -73,12 +69,10 @@ class MetricsService:
         return sorted(items, key=lambda x: x["importance"], reverse=True)
 
     def compute_gini(self, y_true, y_prob):
-        """Gini coefficient: 2 * AUC - 1. Primary discrimination metric for banks."""
         auc_val = roc_auc_score(y_true, y_prob)
         return round(2 * float(auc_val) - 1, 4)
 
     def compute_ks_statistic(self, y_true, y_prob):
-        """KS statistic: max separation between approved/denied distributions."""
         fpr, tpr, thresholds = roc_curve(y_true, y_prob)
         ks_values = tpr - fpr
         max_idx = np.argmax(ks_values)
@@ -88,11 +82,9 @@ class MetricsService:
         }
 
     def compute_log_loss(self, y_true, y_prob):
-        """Log loss (cross-entropy). Complements brier score."""
         return round(float(log_loss(y_true, y_prob)), 4)
 
     def compute_calibration_data(self, y_true, y_prob, n_bins=10):
-        """Calibration curve data + Expected Calibration Error (ECE)."""
         fraction_of_positives, mean_predicted_value = calibration_curve(
             y_true, y_prob, n_bins=n_bins, strategy="uniform"
         )
@@ -107,7 +99,6 @@ class MetricsService:
         }
 
     def compute_threshold_analysis(self, y_true, y_prob):
-        """Sweep thresholds 0.05-0.95 and find optimal thresholds."""
         thresholds = np.arange(0.05, 0.96, 0.01)
         sweep = []
         for t in thresholds:
@@ -164,7 +155,6 @@ class MetricsService:
         }
 
     def compute_decile_analysis(self, y_true, y_prob):
-        """Partition into 10 deciles by predicted probability."""
         y_true = np.array(y_true)
         y_prob = np.array(y_prob)
         order = np.argsort(y_prob)
@@ -202,25 +192,7 @@ class MetricsService:
         return {"deciles": deciles}
 
     def compute_psi(self, expected, actual, n_bins=10):
-        """Population Stability Index — measures distribution shift.
-
-        Used by Australian banks under APRA CPG 235 (Managing Data Risk) to
-        monitor whether the population applying for loans has shifted from the
-        population the model was trained on.
-
-        Interpretation (industry standard, also used by CBA/ANZ/Westpac/NAB):
-          PSI < 0.10: No significant shift. Model is stable.
-          0.10 <= PSI < 0.25: Moderate shift. Investigate and monitor.
-          PSI >= 0.25: Significant shift. Model retraining recommended.
-
-        Args:
-            expected: array of values from the training/reference distribution
-            actual: array of values from the current/production distribution
-            n_bins: number of bins for the histogram comparison
-
-        Returns:
-            dict with psi value, per-bin breakdown, and status classification
-        """
+        """Population Stability Index between reference and current distributions."""
         expected = np.array(expected, dtype=float)
         actual = np.array(actual, dtype=float)
 
@@ -287,10 +259,6 @@ class MetricsService:
         }
 
     def compute_feature_psi(self, train_df, current_df, numeric_cols, n_bins=10):
-        """Compute PSI for each numeric feature to identify which features drifted.
-
-        Returns dict mapping feature name to PSI result.
-        """
         results = {}
         for col in numeric_cols:
             if col in train_df.columns and col in current_df.columns:
@@ -306,7 +274,6 @@ class MetricsService:
         return results
 
     def compute_fairness_metrics(self, y_true, y_pred, y_prob, group_labels):
-        """Compute per-group fairness metrics with disparate impact and equalized odds."""
         y_true = np.array(y_true)
         y_pred = np.array(y_pred)
         y_prob = np.array(y_prob)
@@ -500,11 +467,7 @@ class MetricsService:
         }
 
     def compute_all_woe_iv(self, df, y_true, numeric_cols, n_bins=10):
-        """Compute WOE/IV for all numeric features and return sorted by IV.
-
-        This is the feature selection step in traditional scorecard development.
-        Features with IV < 0.02 are typically dropped.
-        """
+        """Compute WOE/IV for all numeric features, sorted by IV descending."""
         results = {}
         for col in numeric_cols:
             if col in df.columns:
@@ -516,18 +479,7 @@ class MetricsService:
         return sorted_results
 
     def build_woe_scorecard(self, X_train, y_train, numeric_cols, n_bins=10, X_test=None, y_test=None):
-        """Build a traditional WOE logistic regression scorecard.
-
-        This is the standard methodology used by APRA-regulated banks:
-        1. Bin each feature and compute WOE values
-        2. Replace raw features with their WOE values
-        3. Fit logistic regression on WOE-transformed features
-        4. Convert coefficients to scorecard points
-
-        Returns the fitted model, WOE lookup tables, and scorecard points.
-        The scorecard can be printed on a single page — a key regulatory
-        requirement for APRA model documentation.
-        """
+        """Build a WOE logistic regression scorecard (base 600, PDO 20)."""
         woe_tables = {}
         X_woe = pd.DataFrame(index=X_train.index)
 
@@ -695,12 +647,7 @@ class MetricsService:
     # ==================================================================
 
     def adversarial_validation(self, X_train, X_test):
-        """Check if a classifier can distinguish training from test data.
-
-        If AUC > 0.55, the distributions are measurably different, which
-        means the model may not generalise well from train to test.
-        AUC near 0.50 means the distributions are indistinguishable (good).
-        """
+        """AUC of a classifier trained to distinguish train vs test. ~0.50 = good."""
         n_train = len(X_train)
         n_test = len(X_test)
 
@@ -730,16 +677,7 @@ class MetricsService:
     # ==================================================================
 
     def compute_concentration_risk(self, df, group_col):
-        """Compute Herfindahl-Hirschman Index (HHI) for portfolio concentration.
-
-        HHI = sum(share_i^2) where share_i is the proportion in each segment.
-        HHI ranges from 1/N (perfectly diversified) to 1.0 (fully concentrated).
-
-        Industry thresholds:
-          HHI < 0.15: well-diversified
-          HHI 0.15-0.25: moderate concentration
-          HHI > 0.25: high concentration (APRA APS 221 trigger)
-        """
+        """HHI concentration index for a portfolio grouping column."""
         if group_col not in df.columns:
             return {"hhi": 0.0, "status": "column_not_found", "segments": {}}
 
@@ -776,11 +714,7 @@ class VintageAnalyser:
 
     @staticmethod
     def compute_vintage_curves(df: pd.DataFrame) -> dict:
-        """Compute cumulative default rates by origination quarter.
-
-        Expects columns: origination_quarter, months_on_book, default_flag
-        Returns dict with vintage curves and summary statistics.
-        """
+        """Cumulative default rates by origination quarter."""
         if not all(c in df.columns for c in ["origination_quarter", "months_on_book", "default_flag"]):
             return {"error": "Missing required columns: origination_quarter, months_on_book, default_flag"}
 
@@ -811,11 +745,7 @@ class VintageAnalyser:
 
     @staticmethod
     def compute_survival_metrics(df: pd.DataFrame) -> dict:
-        """Kaplan-Meier-style survival analysis for loan portfolio.
-
-        Expects columns: months_on_book, default_flag, current_status
-        Returns survival curve and median survival time.
-        """
+        """Kaplan-Meier survival curve and median survival time."""
         if not all(c in df.columns for c in ["months_on_book", "default_flag"]):
             return {"error": "Missing required columns"}
 
@@ -859,11 +789,7 @@ class VintageAnalyser:
         period_col: str = "origination_quarter",
         n_bins: int = 10,
     ) -> dict:
-        """Population Stability Index across time periods.
-
-        Compares score distribution of each period against the earliest period (base).
-        PSI < 0.10 = stable, 0.10-0.25 = moderate shift, > 0.25 = significant shift.
-        """
+        """PSI of each period's score distribution vs the earliest period."""
         if not all(c in df.columns for c in [score_col, period_col]):
             return {"error": f"Missing required columns: {score_col}, {period_col}"}
 
@@ -901,10 +827,6 @@ class VintageAnalyser:
 
     @staticmethod
     def compute_concentration_by_vintage(df: pd.DataFrame) -> dict:
-        """Analyse portfolio concentration risk across vintages.
-
-        Reports exposure distribution by origination quarter.
-        """
         if "origination_quarter" not in df.columns:
             return {"error": "Missing origination_quarter column"}
 

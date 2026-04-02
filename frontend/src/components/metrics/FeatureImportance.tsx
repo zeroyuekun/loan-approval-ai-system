@@ -32,6 +32,7 @@ export function FeatureImportance({ features, title = 'Feature Importance' }: Fe
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
       <CardContent>
+        {/* TODO: add proper aria labels */}
         <ResponsiveContainer width="100%" height={Math.max(280, data.length * 36)}>
           <BarChart data={data} layout="vertical" margin={{ top: 5, right: 30, bottom: 5, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} horizontal={false} />

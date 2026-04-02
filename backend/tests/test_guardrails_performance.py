@@ -1,5 +1,3 @@
-"""Tests verifying guardrail regex patterns are pre-compiled for performance."""
-
 import re
 
 from apps.email_engine.services.guardrails import GuardrailChecker
@@ -18,10 +16,10 @@ class TestRegexCompilation:
         for i, pattern in enumerate(checker.AGGRESSIVE_TERMS):
             assert isinstance(pattern, re.Pattern), f"AGGRESSIVE_TERMS[{i}] is {type(pattern).__name__}, not re.Pattern"
 
-    def test_ai_giveaway_terms_are_compiled(self):
-        for i, pattern in enumerate(checker.AI_GIVEAWAY_TERMS):
+    def test_informal_tone_patterns_are_compiled(self):
+        for i, pattern in enumerate(checker.INFORMAL_TONE_PATTERNS):
             assert isinstance(pattern, re.Pattern), (
-                f"AI_GIVEAWAY_TERMS[{i}] is {type(pattern).__name__}, not re.Pattern"
+                f"INFORMAL_TONE_PATTERNS[{i}] is {type(pattern).__name__}, not re.Pattern"
             )
 
     def test_unprofessional_financial_terms_are_compiled(self):
@@ -49,10 +47,10 @@ class TestRegexCompilation:
                 f"GRAMMAR_ISSUES[{i}] pattern is {type(pattern).__name__}, not re.Pattern"
             )
 
-    def test_marketing_ai_giveaway_terms_are_compiled(self):
-        for i, pattern in enumerate(checker.MARKETING_AI_GIVEAWAY_TERMS):
+    def test_marketing_tone_patterns_are_compiled(self):
+        for i, pattern in enumerate(checker.MARKETING_TONE_PATTERNS):
             assert isinstance(pattern, re.Pattern), (
-                f"MARKETING_AI_GIVEAWAY_TERMS[{i}] is {type(pattern).__name__}, not re.Pattern"
+                f"MARKETING_TONE_PATTERNS[{i}] is {type(pattern).__name__}, not re.Pattern"
             )
 
 
@@ -67,8 +65,8 @@ class TestRegexFlags:
         for pattern in checker.AGGRESSIVE_TERMS:
             assert pattern.flags & re.IGNORECASE, f"Pattern {pattern.pattern} missing IGNORECASE flag"
 
-    def test_ai_giveaway_terms_have_ignorecase(self):
-        for pattern in checker.AI_GIVEAWAY_TERMS:
+    def test_informal_tone_patterns_have_ignorecase(self):
+        for pattern in checker.INFORMAL_TONE_PATTERNS:
             assert pattern.flags & re.IGNORECASE, f"Pattern {pattern.pattern} missing IGNORECASE flag"
 
     def test_unprofessional_financial_terms_have_ignorecase(self):
@@ -90,8 +88,8 @@ class TestRegexFlags:
         for pattern, _formal in checker.GRAMMAR_ISSUES:
             assert pattern.flags & re.IGNORECASE, f"Pattern {pattern.pattern} missing IGNORECASE flag"
 
-    def test_marketing_ai_giveaway_terms_have_ignorecase(self):
-        for pattern in checker.MARKETING_AI_GIVEAWAY_TERMS:
+    def test_marketing_tone_patterns_have_ignorecase(self):
+        for pattern in checker.MARKETING_TONE_PATTERNS:
             assert pattern.flags & re.IGNORECASE, f"Pattern {pattern.pattern} missing IGNORECASE flag"
 
 
@@ -119,10 +117,10 @@ class TestRegexFunctionality:
             matches.extend(pattern.findall(text))
         assert len(matches) > 0
 
-    def test_ai_giveaway_detected(self):
+    def test_informal_tone_detected(self):
         text = "We are delighted to inform you additionally that we would like to empower you"
         matches = []
-        for pattern in checker.AI_GIVEAWAY_TERMS:
+        for pattern in checker.INFORMAL_TONE_PATTERNS:
             matches.extend(pattern.findall(text))
         assert len(matches) > 0
 
@@ -147,10 +145,10 @@ class TestRegexFunctionality:
             matches.extend(pattern.findall(text))
         assert len(matches) > 0
 
-    def test_marketing_ai_giveaway_detected(self):
+    def test_marketing_tone_detected(self):
         text = "We are delighted to share this journey with you additionally"
         matches = []
-        for pattern in checker.MARKETING_AI_GIVEAWAY_TERMS:
+        for pattern in checker.MARKETING_TONE_PATTERNS:
             matches.extend(pattern.findall(text))
         assert len(matches) > 0
 
@@ -172,9 +170,9 @@ class TestRegexFunctionality:
         result = checker.check_tone("You are stupid and incompetent")
         assert not result["passed"]
 
-    def test_full_check_ai_giveaway(self):
-        """End-to-end: check_ai_giveaway_language still works with compiled patterns."""
-        result = checker.check_ai_giveaway_language("We are delighted to empower you")
+    def test_full_check_informal_tone(self):
+        """End-to-end: check_informal_tone still works with compiled patterns."""
+        result = checker.check_informal_tone("We are delighted to empower you")
         assert not result["passed"]
 
     def test_full_check_dignity(self):

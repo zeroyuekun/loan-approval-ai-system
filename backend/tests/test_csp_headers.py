@@ -1,5 +1,3 @@
-"""Test that Content Security Policy headers are present in responses."""
-
 import pytest
 from django.test import Client
 

@@ -1,5 +1,3 @@
-"""Tests for the FraudDetectionService — individual checks and composite result."""
-
 from decimal import Decimal
 
 from django.core.cache import cache

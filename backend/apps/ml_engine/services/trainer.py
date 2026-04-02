@@ -70,7 +70,6 @@ class _CalibratedModel:
         return np.column_stack([1 - calibrated, calibrated])
 
     def get_underlying_estimator(self):
-        """Return the raw tree model for SHAP explainability."""
         return self.estimator
 
     @property
@@ -216,15 +215,7 @@ class ModelTrainer:
         self._imputation_values = {}  # stored in model bundle for predictor alignment
 
     def add_derived_features(self, df):
-        """Add engineered features: LVR, loan-to-income, credit card burden, expense-to-income.
-
-        Handles missing values (NaN) in optional fields by imputing with
-        sensible defaults before computing derived features.
-        Stores imputation values so the predictor can use the same ones.
-
-        Delegates actual feature computation to the shared
-        feature_engineering module (single source of truth).
-        """
+        """Impute missing values and compute derived features via shared module."""
         from .feature_engineering import (
             DEFAULT_IMPUTATION_VALUES,
             compute_derived_features,
@@ -246,10 +237,7 @@ class ModelTrainer:
         return df
 
     def fit_preprocess(self, df):
-        """Fit encoders/scaler on training data and transform it.
-
-        Returns (transformed DataFrame, feature column names).
-        """
+        """Fit encoders/scaler on training data. Returns (transformed df, feature cols)."""
         df = df.copy()
 
         # Add derived features before encoding/scaling
@@ -269,10 +257,7 @@ class ModelTrainer:
         return df, feature_cols
 
     def transform(self, df):
-        """Transform new data using already-fit scaler and column schema.
-
-        Must call fit_preprocess first.
-        """
+        """Transform new data using already-fit scaler. Must call fit_preprocess first."""
         if self.ohe_columns is None:
             raise RuntimeError("Must call fit_preprocess before transform")
 
@@ -301,7 +286,6 @@ class ModelTrainer:
     # ------------------------------------------------------------------
 
     def _split_data(self, df, y):
-        """Split data into train/val/test. Uses temporal split if possible."""
         if "application_quarter" in df.columns:
             result = self._temporal_split(df, y)
             if result is not None:
@@ -310,7 +294,6 @@ class ModelTrainer:
         return self._random_split(df, y)
 
     def _random_split(self, df, y):
-        """Standard 80/10/10 random stratified split."""
         df_train, df_temp, y_train, y_temp = train_test_split(df, y, test_size=0.2, random_state=42, stratify=y)
         df_val, df_test, y_val, y_test = train_test_split(
             df_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
@@ -328,11 +311,7 @@ class ModelTrainer:
         )
 
     def _temporal_split(self, df, y):
-        """Time-based split: train on earlier quarters, validate/test on later.
-
-        Returns None if temporal split is not viable (too few quarters or
-        insufficient class variety in a split).
-        """
+        """Time-based split. Returns None if not viable (< 3 quarters or single-class splits)."""
         quarters = sorted(df["application_quarter"].unique())
         n_q = len(quarters)
         if n_q < 3:
@@ -870,7 +849,6 @@ class ModelTrainer:
         return model, metrics
 
     def _train_rf(self, X_train, y_train, X_val, y_val, sample_weights=None):
-        """Train Random Forest with GridSearchCV."""
         param_grid = {
             "n_estimators": [100, 200],
             "max_depth": [10, 20, None],
@@ -889,30 +867,11 @@ class ModelTrainer:
         if sample_weights is not None:
             # sklearn 1.6+ requires fit params via set_params or direct kwargs
             fit_params["sample_weight"] = sample_weights
-        grid.fit(X_train, y_train, **fit_params)  # noqa: sklearn direct kwargs OK for non-Pipeline
+        grid.fit(X_train, y_train, **fit_params)
         return grid.best_estimator_, grid.best_params_
 
     def _build_monotonic_constraints(self, feature_cols):
-        """Build monotonic constraint vector for XGBoost.
-
-        In credit risk modelling, certain relationships MUST be monotonic:
-        - Higher credit score → higher approval probability (positive)
-        - Higher income → higher approval probability (positive)
-        - Higher debt-to-income → lower approval probability (negative)
-        - Higher employment length → higher approval probability (positive)
-        - Bankruptcy → lower approval probability (negative)
-
-        XGBoost enforces these during tree construction, preventing the
-        model from learning spurious non-monotonic patterns from noise.
-        This is a regulatory expectation: APRA and ASIC expect that a
-        model won't approve someone with a lower credit score over
-        someone identical but with a higher score.
-
-        Returns a tuple of (1, -1, 0) for each feature:
-          1 = monotonically increasing (more → more likely approved)
-         -1 = monotonically decreasing (more → less likely approved)
-          0 = unconstrained
-        """
+        """Return (1, -1, 0) tuple per feature for XGBoost monotonic constraints."""
         # Up to 21 constraints. Using max_bin=512 to compensate for the larger
         # constraint set and preserve sufficient split candidates.
         constraints = {
@@ -945,12 +904,7 @@ class ModelTrainer:
         return tuple(constraints.get(col, 0) for col in feature_cols)
 
     def _train_xgb(self, X_train, y_train, X_val, y_val, sample_weights=None):
-        """Train XGBoost with Optuna Bayesian optimization, monotonic constraints, and early stopping.
-
-        Uses Optuna's Tree-structured Parzen Estimator (TPE) sampler for
-        efficient hyperparameter search — 10x faster than GridSearchCV with
-        comparable or better results (CBA/H2O.ai approach).
-        """
+        """Train XGBoost with Optuna hyperparameter search and early stopping."""
         import optuna
         from xgboost import XGBClassifier
 
@@ -1043,7 +997,6 @@ class ModelTrainer:
         return final_model, best_params
 
     def save_model(self, model, path):
-        """Save model bundle (model, scaler, column names, reference distribution) to disk."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
         bundle = {
             "model": model,
@@ -1072,11 +1025,7 @@ class ModelTrainer:
         return path
 
     def _validate_pipeline_consistency(self, bundle):
-        """Post-training validation to catch pipeline inconsistencies.
-
-        Runs automatically before every model save. If any check fails,
-        training raises a clear error rather than saving a broken model.
-        """
+        """Sanity-check the bundle before saving. Raises ValueError on mismatch."""
         errors = []
 
         # 1. Categorical cols match between trainer and predictor

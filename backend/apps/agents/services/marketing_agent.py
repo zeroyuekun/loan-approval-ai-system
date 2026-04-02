@@ -435,14 +435,14 @@ class MarketingAgent:
             "details": details,
         }
 
-    # Marketing-specific AI-giveaway terms — excludes phrases legitimate in the
+    # Marketing-specific tone patterns — excludes phrases legitimate in the
     # new customer-service-friendly marketing format:
     # - "comprehensive"/"tailored" OK in product descriptions
     # - "don't hesitate" OK in contact sections
     # - "we value you/your" OK in customer acknowledgement
     # - "we appreciate your" OK in closing
     # - "wanted to reach out" OK in marketing follow-up context
-    MARKETING_AI_GIVEAWAY_TERMS = [
+    MARKETING_TONE_PATTERNS = [
         r"\bpleased to (?:confirm|inform|advise)\b",
         r"\bdelighted\b",
         r"\bthrilled\b",
@@ -465,7 +465,7 @@ class MarketingAgent:
         r"\bwe want to be transparent about\b",
         r"\bregardless of (?:this|the) outcome\b",
         r"\bshould you have any questions at all\b",
-        # Transitional adverbs (strongest AI-tell)
+        # Transitional adverbs (strongest informal-tone signal)
         r"\badditionally\b",
         r"\bfurthermore\b",
         r"\bmoreover\b",
@@ -503,8 +503,8 @@ class MarketingAgent:
         r"\bgoing forward\b",
     ]
 
-    def _check_marketing_ai_giveaway_language(self, text):
-        """Detect AI-generated phrasing, with marketing-appropriate exceptions.
+    def _check_marketing_tone(self, text):
+        """Detect informal phrasing, with marketing-appropriate exceptions.
 
         Unlike the general check, this allows "comprehensive" and "tailored" which
         are legitimate in product descriptions (e.g. "comprehensive insurance package").
@@ -512,20 +512,20 @@ class MarketingAgent:
         text_lower = text.lower()
         found_phrases = []
 
-        for pattern in self.MARKETING_AI_GIVEAWAY_TERMS:
+        for pattern in self.MARKETING_TONE_PATTERNS:
             matches = re.findall(pattern, text_lower)
             if matches:
                 found_phrases.extend(matches)
 
         passed = len(found_phrases) == 0
         details = (
-            f"AI-giveaway phrases detected: {', '.join(found_phrases)}"
+            f"Informal tone phrases detected: {', '.join(found_phrases)}"
             if not passed
             else "Language sounds authentically human"
         )
 
         return {
-            "check_name": "AI Giveaway Language",
+            "check_name": "Informal Tone",
             "passed": passed,
             "details": details,
         }

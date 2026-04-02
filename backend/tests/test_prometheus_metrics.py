@@ -1,5 +1,3 @@
-"""Tests for custom Prometheus ML metrics."""
-
 from apps.ml_engine.services.predictor import (
     ml_drift_warnings_total,
     ml_prediction_confidence,

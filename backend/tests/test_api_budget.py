@@ -1,5 +1,3 @@
-"""Tests for ApiBudgetGuard: daily limits, circuit breaker, and Redis failure modes."""
-
 from unittest.mock import MagicMock
 
 import pytest

@@ -25,6 +25,8 @@ def reject_labels(generator, df):
 
 
 class TestDataGenerator:
+    # TODO: test with empty dataframe (num_records=0)
+
     def test_generates_correct_number_of_records(self, df):
         assert len(df) == 2000
 

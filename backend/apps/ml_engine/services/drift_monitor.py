@@ -6,12 +6,9 @@ PSI measures overall score distribution shift.
 CSI applies the same formula per-feature to pinpoint which inputs are drifting.
 KS-test provides a distribution-free statistical significance check.
 
-References:
-  - Fiddler AI: "Measuring Data Drift with PSI"
-  - Towards Data Science: "Stop Retraining Blindly: Use PSI"
-  - Lewis (1994): Original PSI threshold proposal
-  - Yurdakul (2020): "Statistical Properties of PSI", J. Risk Model Validation
-  - Siddiqi (2023): Population Resemblance Statistic, arXiv:2307.11878
+The industry-standard PSI thresholds (0.10 / 0.25) have no statistical
+foundation — they are arbitrary convention. We supplement with KS-test
+(p-value based) for statistically grounded drift detection.
 """
 
 import logging
@@ -25,11 +22,9 @@ from scipy.stats import ks_2samp
 logger = logging.getLogger(__name__)
 
 # PSI threshold provenance (important for regulatory defensibility):
-# The industry-standard thresholds (0.10 / 0.25) originate from Lewis (1994)
-# and have NO statistical foundation — they are arbitrary industry convention.
-# See: Yurdakul (2020) "Statistical Properties of PSI", J. Risk Model Validation.
-# For statistically grounded thresholds, supplement with KS-test (p-value based)
-# or the Population Resemblance Statistic (Siddiqi, 2023, arXiv:2307.11878).
+# The industry-standard thresholds (0.10 / 0.25) have NO statistical
+# foundation — they are arbitrary industry convention.
+# For statistically grounded thresholds, supplement with KS-test (p-value based).
 PSI_STABLE = 0.10  # Heuristic: no significant shift
 PSI_INVESTIGATE = 0.25  # Heuristic: moderate shift, investigate
 # CSI uses the same thresholds applied per-feature
@@ -38,16 +33,7 @@ CSI_INVESTIGATE = 0.20  # Stricter per-feature threshold
 
 
 def compute_psi(expected, actual, bins=10):
-    """Compute Population Stability Index between two distributions.
-
-    Args:
-        expected: array-like, reference distribution (training data)
-        actual: array-like, current distribution (recent predictions)
-        bins: number of bins
-
-    Returns:
-        float: PSI value
-    """
+    """PSI between two distributions. Returns float."""
     expected = np.array(expected, dtype=float)
     actual = np.array(actual, dtype=float)
 
@@ -79,20 +65,7 @@ def compute_psi(expected, actual, bins=10):
 
 
 def compute_csi(expected_features: dict, actual_features: dict, bins: int = 10) -> dict:
-    """Compute Characteristic Stability Index per feature.
-
-    CSI applies the same PSI formula to individual features (not scores).
-    Identifies which specific features are drifting.
-
-    Args:
-        expected_features: dict mapping feature_name → array-like of reference values
-        actual_features: dict mapping feature_name → array-like of current values
-        bins: number of bins for PSI computation
-
-    Returns:
-        dict mapping feature_name → {'csi': float, 'status': str}
-        where status is 'stable', 'investigate', or 'action_required'
-    """
+    """Per-feature PSI (Characteristic Stability Index). Returns {feature: {csi, status}}."""
     results = {}
     common_keys = set(expected_features.keys()) & set(actual_features.keys())
 
@@ -120,18 +93,7 @@ def compute_csi(expected_features: dict, actual_features: dict, bins: int = 10) 
 
 
 def compute_ks_test(expected, actual):
-    """Kolmogorov-Smirnov test as supplement to PSI.
-
-    Unlike PSI (which is bin-dependent), KS-test is distribution-free
-    and provides a proper p-value for statistical significance.
-
-    Args:
-        expected: array-like, reference distribution
-        actual: array-like, current distribution
-
-    Returns:
-        dict with 'ks_statistic' (float), 'p_value' (float), 'significant' (bool)
-    """
+    """KS two-sample test. Returns {ks_statistic, p_value, significant}."""
     expected = np.array(expected, dtype=float)
     actual = np.array(actual, dtype=float)
 
@@ -148,15 +110,7 @@ def compute_ks_test(expected, actual):
 
 
 def compute_batch_drift_report(model_version, days=7):
-    """Compute PSI for all features over the last N days.
-
-    Args:
-        model_version: ModelVersion instance
-        days: number of days to look back
-
-    Returns:
-        dict with per-feature PSI, overall assessment, and label drift
-    """
+    """Full drift report (PSI + CSI + KS) for recent predictions vs training reference."""
     from apps.ml_engine.models import DriftReport, PredictionLog
 
     cutoff = timezone.now() - timedelta(days=days)

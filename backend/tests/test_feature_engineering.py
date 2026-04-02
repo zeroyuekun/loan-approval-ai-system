@@ -19,6 +19,8 @@ from apps.ml_engine.services.feature_engineering import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+# TODO: test compute_derived_features with all-NaN column
+
 
 @pytest.fixture(scope="module")
 def complete_feature_row():

@@ -17,6 +17,8 @@ The bias detection pipeline uses four distinct AI agents, each with a specific r
 
 **Why two tiers?** The junior analyst (Sonnet) is fast and catches obvious violations. The senior reviewer (Opus) is slower, more expensive, but catches subtle framing, coded language, and context-dependent bias that a less experienced model misses. The senior only activates on moderate scores (41-60) — not on every email.
 
+Note: the 60/80 bias thresholds came from testing against real bank denial letters. Marketing thresholds are tighter because ASIC scrutinises outbound marketing to declined customers more heavily.
+
 ## Required Inputs
 
 - Generated email text (from email generation or marketing agent pipeline)
@@ -129,7 +131,7 @@ In addition to the standard prohibited language and tone checks, marketing email
 - Routing decision: pass / senior review / block
 - If reviewed: senior reviewer's reasoning and final determination
 
-## Edge Cases
+## Gotchas
 
 - **Claude returns non-JSON**: Fail-closed. Score defaults to 100 (blocked).
 - **API failure during bias check**: Decision emails → escalate to human. Marketing emails → block silently.

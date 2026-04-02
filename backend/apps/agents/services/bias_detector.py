@@ -205,7 +205,7 @@ class BiasDetector:
                 "requires_human_review": True,
             }
 
-        # ── Minor findings (e.g., AI giveaway language, tone) ──
+        # ── Minor findings (e.g., informal tone, phrasing) ──
         # Score is low-to-moderate. These are style issues, not bias.
         # Real banks handle these by regenerating the email, not escalating.
         if det_score <= bias_threshold_pass:
@@ -370,7 +370,7 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             "prohibited_language": "Prohibited language",
             "tone_check": "Tone",
             "professional_financial_language": "Professional language",
-            "ai_giveaway_language": "AI giveaway language",
+            "informal_tone": "Informal tone",
         }
         triggered_names = {f["check_name"] for f in prescreen["findings"]}
         for check_name, label in checks.items():
@@ -443,7 +443,7 @@ Your junior analyst and the deterministic system have ALREADY handled the follow
 - Prohibited language patterns (regex check against Australian discrimination Acts)
 - Tone violations (aggressive or inappropriate language)
 - Professional financial language compliance
-- AI-giveaway language detection
+- Informal tone detection
 - The junior classified each flag as genuine or false positive
 
 Junior's score: {bias_result.get("score", 0)}/100
@@ -467,12 +467,12 @@ Read this email with 18 years of experience and look for what a two-year analyst
 
 6. CONTEXTUAL DIGNITY: Does the email label the PERSON rather than describe the SITUATION? BAD: "You are unemployed" / "You cannot afford this" / "Your poor credit" / "You are a high risk". GOOD: "Your employment status at the time of application" / "The requested amount exceeded our serviceability thresholds" / "Your credit profile at the time of assessment" / "The risk profile of this application". A customer who was made redundant did not "fail" at anything.
 
-7. PSYCHOLOGICAL SAFETY (Kahneman/Tversky + Hayne Commission + ABA Guideline 2025):
+7. PSYCHOLOGICAL SAFETY (Hayne Commission + ABA Guideline 2025):
    - FRAMING: Does the email frame the denial around what the customer CANNOT have, or pivot to what they CAN do? Gain-framed messages produce 15-30% better perception.
    - LOSS AVERSION: Does it use finality language ("this decision is final", "nothing more we can do")? Finality triggers 2x the emotional pain. Frame as "not yet."
    - INSTITUTIONAL COLDNESS (Hayne): Does it sound like "the bank" or like Sarah Mitchell? "The bank has determined", "per our policy", "our systems indicate" = power imbalance.
    - COGNITIVE LOAD: Are there sentences over 35 words a distressed customer would struggle with?
-   - PEAK-END RULE (Kahneman): Does the closing leave the customer feeling valued or dismissed? Generic "we wish you well" = brush-off. Strong closings use their name and offer a concrete next step.
+   - PEAK-END RULE: Does the closing leave the customer feeling valued or dismissed? Generic "we wish you well" = brush-off. Strong closings use their name and offer a concrete next step.
    Apply the "read it aloud" test: read the email as if you are the customer who just lost their job. If any sentence makes you wince, flag it.
 
 === EMAIL TEXT ===
@@ -872,7 +872,7 @@ class MarketingEmailReviewer:
 Your junior analyst and the deterministic system have ALREADY handled:
 - Prohibited language, tone violations, patronising language detection
 - Decline language references, false urgency, guaranteed approval claims
-- AI-giveaway language, professional financial language
+- Informal tone language, professional financial language
 - The junior classified each flag as genuine or false positive
 
 Junior's score: {bias_result.get("score", 0)}/100

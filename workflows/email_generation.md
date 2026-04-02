@@ -4,11 +4,6 @@
 
 Generate fair lending compliant approval and denial emails for loan applicants using the Claude API, with guardrail checks to ensure regulatory compliance and professional tone.
 
-## Required Inputs
-
-- Loan application details: applicant name, loan amount, purpose, decision (approved/denied), interest rate (if approved), denial reasons (if denied)
-- Claude API key (from `.env` as `ANTHROPIC_API_KEY`)
-
 ## Tools
 
 | Tool | Location | Purpose |
@@ -19,7 +14,7 @@ Generate fair lending compliant approval and denial emails for loan applicants u
 
 ## Steps
 
-1. **Build prompt** - Construct a system prompt and user message with the loan context:
+1. **Build prompt** - Takes the loan application details (applicant name, loan amount, purpose, decision, interest rate if approved, denial reasons if denied) and constructs a system prompt and user message:
    - System prompt defines the role (professional loan officer), tone (respectful, clear), and constraints (fair lending compliance)
    - User message includes: applicant first name, loan amount, loan purpose, decision, and decision-specific details
    - For approvals: include approved amount, interest rate, term, next steps

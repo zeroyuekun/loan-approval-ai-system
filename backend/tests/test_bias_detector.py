@@ -1,5 +1,3 @@
-"""Tests for bias detection with mocked Claude API."""
-
 import os
 from unittest.mock import MagicMock, patch
 

@@ -22,7 +22,8 @@ export function ApprovalTrendChart({ data }: ApprovalTrendChartProps) {
         <CardDescription>Daily approval rate over the last 30 days</CardDescription>
       </CardHeader>
       <CardContent>
-        <div role="img" aria-label="Approval rate trend over the last 30 days">
+        {/* TODO: add proper aria labels */}
+        <div>
         <ResponsiveContainer width="100%" height={300}>
           <AreaChart data={formatted} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
             <defs>

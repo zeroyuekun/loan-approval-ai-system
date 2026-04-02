@@ -1,5 +1,3 @@
-"""Tests for PII masking utilities and serializer mixin."""
-
 from types import SimpleNamespace
 
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency

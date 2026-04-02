@@ -1,5 +1,3 @@
-"""Tests for registration, login, lockout, JWT refresh, and logout."""
-
 from unittest.mock import patch
 
 from django.core.cache import cache

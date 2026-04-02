@@ -1,14 +1,11 @@
 """Intersectional fairness analysis — tests fairness across combined protected attributes.
 
-Single-axis fairness testing is insufficient. Kim et al. (2023) demonstrated that
-compliance along individual axes can mask amplified disparities at intersections.
+Single-axis fairness testing is insufficient: compliance along individual axes
+can mask amplified disparities at intersections. This module tests all pairwise
+combinations of protected attributes and flags when intersectional disparity
+exceeds the worst single-axis result.
 
-References:
-    - Kim et al. (2023) "Fair Models in Credit: Intersectional Discrimination"
-      arXiv:2308.02680
-    - Kleinberg, Mullainathan, Raghavan (2016) "Inherent Trade-Offs in the Fair
-      Determination of Risk Scores" arXiv:1609.05807
-    - EEOC Uniform Guidelines 29 CFR 1607.4 (four-fifths rule)
+Reference: EEOC Uniform Guidelines 29 CFR 1607.4 (four-fifths rule).
 """
 
 import logging
@@ -132,7 +129,7 @@ def compute_intersectional_fairness(
     if amplification_detected:
         summary_parts.append(
             "AMPLIFICATION DETECTED: intersectional disparity is worse than "
-            "any single-axis disparity. See Kim et al. (2023) arXiv:2308.02680."
+            "any single-axis disparity — review subgroup outcomes."
         )
     else:
         summary_parts.append("No intersectional amplification detected.")

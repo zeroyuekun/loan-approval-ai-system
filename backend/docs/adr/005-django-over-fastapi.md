@@ -23,10 +23,11 @@ Use Django 5 with Django REST Framework for the backend API layer.
 - **Mature ORM with migrations.** Django's migration framework handles schema evolution across environments. SQLAlchemy + Alembic is capable but requires more boilerplate and has rougher edges with complex model relationships (e.g., the `LoanApplication` → `LoanDecision` → `AgentRun` chain).
 - **DRF serializers provide robust validation.** The `LoanApplicationCreateSerializer` validates profile completeness, field ranges, and business rules in a declarative style. FastAPI's Pydantic models handle type validation well but business rule validation requires more manual wiring.
 
+I'd also used Django on a previous project, so the learning curve was lower — I could focus on the ML pipeline and agent orchestration instead of learning a new framework at the same time.
+
 ### Why not FastAPI
 
-- FastAPI's async-native design is advantageous for high-concurrency IO workloads, but the ML prediction path is CPU-bound (XGBoost inference + SHAP computation) and runs in Celery workers regardless. The API layer itself is not the bottleneck.
-- FastAPI's dependency injection is elegant but Django's middleware + permission classes achieve the same outcome for auth/RBAC with more ecosystem support (e.g., `djangorestframework-simplejwt`).
+FastAPI's async-native design is advantageous for high-concurrency IO workloads, but the ML prediction path is CPU-bound (XGBoost inference + SHAP computation) and runs in Celery workers regardless. The API layer itself is not the bottleneck.
 
 ## Consequences
 

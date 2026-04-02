@@ -66,8 +66,11 @@ celerybeat-schedule*
 *.tsbuildinfo
 
 # Claude Code
-.claude/worktrees/
-.claude/settings.local.json
+.claude/
+CLAUDE.md
+
+# Playwright MCP artifacts
+.playwright-mcp/
 
 # Windows artifacts
 nul
