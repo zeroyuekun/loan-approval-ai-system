@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import IsAdmin
+from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 from apps.loans.models import AuditLog, LoanApplication
 from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
@@ -43,7 +43,7 @@ class PredictView(APIView):
 
 
 class ModelMetricsView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
         """Return metrics for the active model."""
@@ -290,7 +290,7 @@ class ModelCardView(APIView):
     with APRA CPG 235 requirements.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
         from apps.ml_engine.services.model_card import ModelCardGenerator
@@ -309,7 +309,7 @@ class ModelCardView(APIView):
 class ModelVersionListView(APIView):
     """List all model versions with metrics and traffic configuration."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
         versions = ModelVersion.objects.all().order_by("-created_at")[:20]
@@ -461,7 +461,7 @@ class ModelCompareView(APIView):
 class DriftReportListView(APIView):
     """List drift reports for the active model."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
         active_model = ModelVersion.objects.filter(is_active=True).first()

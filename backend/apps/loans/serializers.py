@@ -259,6 +259,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
 class ComplaintSerializer(serializers.ModelSerializer):
     complainant_name = serializers.CharField(source="complainant.get_full_name", read_only=True)
+    description = serializers.CharField(max_length=10000)
 
     class Meta:
         model = Complaint

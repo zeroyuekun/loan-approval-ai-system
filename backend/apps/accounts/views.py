@@ -10,6 +10,7 @@ from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.agents.models import AgentRun
@@ -587,8 +588,8 @@ class LogoutView(generics.GenericAPIView):
         try:
             token = RefreshToken(refresh)
             token.blacklist()
-        except Exception:
-            pass  # Clear cookies regardless — token may already be blacklisted
+        except TokenError:
+            pass  # Clear cookies regardless — token may already be blacklisted or expired
 
         AuditLog.objects.create(
             user=request.user,
