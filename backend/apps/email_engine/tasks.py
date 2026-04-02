@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from apps.email_engine.models import GeneratedEmail, GuardrailAnalytics, GuardrailLog
 from apps.email_engine.services.persistence import EmailPersistenceService
-from apps.loans.models import LoanApplication
+from apps.loans.models import AuditLog, LoanApplication
 
 logger = logging.getLogger("email_engine.tasks")
 
@@ -56,8 +56,6 @@ def generate_email_task(self, application_id, decision):
         )
 
     # Audit trail: log email generation/delivery
-    from apps.loans.models import AuditLog
-
     AuditLog.objects.create(
         action="email_sent" if email_sent else "email_generated",
         resource_type="GeneratedEmail",
