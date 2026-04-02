@@ -1,6 +1,7 @@
 """Tests for APP 12 customer data export endpoint."""
 
 import pytest
+from django.conf import settings as django_settings
 from rest_framework.test import APIClient
 
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail
@@ -24,7 +25,7 @@ def full_application(sample_application):
     mv = ModelVersion.objects.create(
         algorithm="rf",
         version="rf-v2",
-        file_path="/app/ml_models/rf-v2.joblib",
+        file_path=str(django_settings.ML_MODELS_DIR / "rf-v2.joblib"),
         is_active=True,
     )
 

@@ -254,28 +254,23 @@ _IMPROVEMENT_STEPS = {
         "applicants, at least 2 years of trading."
     ),
     "Loan-to-income ratio above acceptable range": (
-        "Considering a reduced loan amount relative to your annual income, "
-        "or applying after a salary increase."
+        "Considering a reduced loan amount relative to your annual income, or applying after a salary increase."
     ),
     "Serviceability ratio outside acceptable range": (
-        "Reducing existing financial commitments to improve the ratio of "
-        "total repayments to income."
+        "Reducing existing financial commitments to improve the ratio of total repayments to income."
     ),
     "Expense-to-income ratio above acceptable range": (
-        "Reviewing and reducing monthly expenses to improve the proportion "
-        "of income available for loan repayments."
+        "Reviewing and reducing monthly expenses to improve the proportion of income available for loan repayments."
     ),
     "Net monthly surplus below acceptable range": (
         "Reducing monthly commitments or increasing income to ensure a "
         "larger surplus remains after all expenses and the proposed repayment."
     ),
     "Loan-to-value ratio above acceptable range": (
-        "Increasing your deposit or considering a lower loan amount to "
-        "reduce the loan-to-value ratio."
+        "Increasing your deposit or considering a lower loan amount to reduce the loan-to-value ratio."
     ),
     "Deposit contribution below acceptable range": (
-        "Saving a larger deposit over time. A higher deposit reduces the "
-        "loan amount and strengthens your application."
+        "Saving a larger deposit over time. A higher deposit reduces the loan amount and strengthens your application."
     ),
     "Savings to loan ratio below acceptable range": (
         "Building your savings over time to demonstrate a pattern of regular "
