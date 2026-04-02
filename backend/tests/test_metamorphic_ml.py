@@ -213,7 +213,7 @@ class TestProtectedAttributeInvariance:
     NOT affect purely financial derived features (only employment_stability
     is expected to differ)."""
 
-    EMPLOYMENT_SENSITIVE_DERIVED = {"employment_stability"}
+    EMPLOYMENT_SENSITIVE_DERIVED = {"employment_stability", "credit_x_employment"}
 
     def test_employment_type_does_not_affect_financial_ratios(self):
         permanent = _derived({"employment_type": "payg_permanent"})

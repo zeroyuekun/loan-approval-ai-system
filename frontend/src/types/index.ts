@@ -318,7 +318,7 @@ export interface AgentStep {
   status: 'pending' | 'running' | 'completed' | 'failed';
   started_at: string;
   completed_at: string | null;
-  result_summary: any;
+  result_summary: Record<string, unknown> | string | null;
   error: string | null;
 }
 
@@ -464,7 +464,7 @@ export interface ModelCard {
 export interface TaskStatus {
   task_id: string;
   status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE';
-  result: any;
+  result: Record<string, unknown> | string | null;
   date_done: string | null;
 }
 

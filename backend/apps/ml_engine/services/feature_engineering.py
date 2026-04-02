@@ -265,7 +265,7 @@ def compute_derived_features(df):
     # --- Research-backed feature interactions (LendingClub/Big 4 practice) ---
 
     # LVR x property growth: high LVR in falling market = negative equity risk
-    df["lvr_x_property_growth"] = df["lvr"] * (1 - df["property_growth_12m"])
+    df["lvr_x_property_growth"] = df["lvr"] * (1 - df["property_growth_12m"] / 100)
 
     # Deposit ratio x income volatility: low deposit + irregular income = compounding risk
     savings_regularity = df["salary_credit_regularity"] if "salary_credit_regularity" in df.columns else 0.8

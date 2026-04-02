@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthContext } from '@/lib/auth'
-import { authApi } from '@/lib/api'
+import { authApi, type RegisterPayload } from '@/lib/api'
 import { User } from '@/types'
 
 function setRoleCookie(role: string) {
@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.replace(data.user.role === 'customer' ? '/apply' : '/dashboard')
   }, [router])
 
-  const register = useCallback(async (formData: any) => {
+  const register = useCallback(async (formData: RegisterPayload) => {
     await authApi.getCsrfToken()
     await authApi.register(formData)
     await login(formData.username, formData.password)

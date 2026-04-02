@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AgentRun } from '@/types'
 import { useOrchestrate, useAgentRun } from '@/hooks/useAgentStatus'
 
@@ -25,6 +25,7 @@ export function usePipelineOrchestration(
   const [preRunAgentId, setPreRunAgentId] = useState<string | null>(null)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
   const [pipelineSuccess, setPipelineSuccess] = useState<string | null>(null)
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Fetch agent run with polling awareness — keeps polling while pipeline is queued
   const { data: agentRunFetched } = useAgentRun(String(applicationId), { pipelineQueued })
@@ -47,7 +48,8 @@ export function usePipelineOrchestration(
       setPipelineError(null)
       if (agentRun.status === 'completed') {
         setPipelineSuccess('Pipeline completed successfully.')
-        setTimeout(() => setPipelineSuccess(null), 5000)
+        if (successTimerRef.current) clearTimeout(successTimerRef.current)
+        successTimerRef.current = setTimeout(() => setPipelineSuccess(null), 5000)
       }
       // Refresh email + application data now that the pipeline finished
       onRefresh?.()
@@ -63,7 +65,10 @@ export function usePipelineOrchestration(
       setPipelineQueued(false)
       setPreRunAgentId(null)
     }, 300_000)
-    return () => clearTimeout(timer)
+    return () => {
+      clearTimeout(timer)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    }
   }, [pipelineQueued])
 
   const handleOrchestrate = async () => {

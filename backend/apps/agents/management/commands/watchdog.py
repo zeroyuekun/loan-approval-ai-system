@@ -65,6 +65,8 @@ class Command(BaseCommand):
         self.max_failures = options["max_consecutive_failures"]
         self.consecutive_failures = 0
         self._running = True
+        self._celery_app = Celery("config")
+        self._celery_app.config_from_object("django.conf:settings", namespace="CELERY")
 
         signal.signal(signal.SIGTERM, self._shutdown)
         signal.signal(signal.SIGINT, self._shutdown)
@@ -174,9 +176,7 @@ class Command(BaseCommand):
     def _heal_celery(self):
         """Detect and revoke stuck Celery tasks."""
         try:
-            app = Celery("config")
-            app.config_from_object("django.conf:settings", namespace="CELERY")
-            inspect = app.control.inspect(timeout=5)
+            inspect = self._celery_app.control.inspect(timeout=5)
 
             active = inspect.active()
             if not active:
@@ -208,7 +208,7 @@ class Command(BaseCommand):
                             elapsed,
                             time_limit,
                         )
-                        app.control.revoke(task_id, terminate=True, signal="SIGKILL")
+                        self._celery_app.control.revoke(task_id, terminate=True, signal="SIGKILL")
                         self._cleanup_stuck_task(task)
 
             # Check for reserved (prefetched) tasks that may be stuck
