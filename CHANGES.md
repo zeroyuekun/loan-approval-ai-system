@@ -4,6 +4,295 @@ All notable changes to this project are documented here, in reverse chronologica
 
 ---
 
+## 2026-04-02 — Sentry Observability, Data Source Expansion, Version Sync, and Test Fixes
+
+**Goal:** Close the last observability gap by adding Sentry error tracking, expand the real-world data calibration with two new Australian government sources, sync all version strings, and fix the 4 remaining test failures so the entire suite runs green.
+
+### Why these changes were needed
+
+The system had structured JSON logging, Prometheus metrics, PII masking, and correlation ID tracing — but no centralised error tracking. In production lending, silent exceptions in background Celery tasks (model prediction failures, Claude API timeouts, bias detection errors) can go unnoticed for hours. Sentry captures these with full stack traces, breadcrumbs, and user context, surfacing issues before they affect loan decisions.
+
+The `RealWorldBenchmarks` service was already fetching from 11 live sources (ABS income, APRA arrears, RBA lending rates, Equifax credit scores, etc.), but was missing two important benchmarks: RBA Table E2 household debt-to-income ratios (the standard measure of Australian household leverage) and AIHW delinquency benchmarks (an independent secondary source to cross-validate APRA's primary NPL data).
+
+Version strings had drifted — `base.py` said 1.5.0, `package.json` said 1.4.0, commit messages referenced 1.7.0. The predictor was also missing two categorical columns (`sa3_region` and `industry_anzsic`) that the trainer had added, causing 4 test failures that had been masked by running tests selectively.
+
+### Backend changes
+
+**Sentry integration (`config/settings/base.py`)**
+- Added `sentry-sdk[django,celery]==2.19.2` to requirements
+- Sentry initialises only when `SENTRY_DSN` environment variable is set (no-op in local dev)
+- `send_default_pii=False` — critical for a lending platform where request bodies contain income, credit scores, and identity documents
+- Django and Celery integrations auto-instrument views, middleware, and background tasks
+- 10% trace and profile sample rates (balances observability against Sentry quota)
+
+**RBA Table E2 household debt ratios (`real_world_benchmarks.py`)**
+- Added `get_rba_household_debt()` getter with `_fetch_rba_e2_csv()` parser
+- Downloads CSV from `rba.gov.au/statistics/tables/csv/e2-data.csv`
+- Parses column headers by keyword matching ("housing debt", "income", "assets") — robust against column reordering between quarterly releases
+- RBA publishes ratios as percentages (e.g., 99.6 = 99.6%); parser normalises to decimal ratios (0.996) to match the fallback format
+- Hardcoded fallback values from Dec Q 2025: housing debt-to-income 1.41, total debt-to-income 1.87, debt-to-assets 0.20
+- Added to `get_calibration_snapshot()` so `--use-live-data` includes it automatically
+
+**AIHW cross-validation (`calibration_validator.py`)**
+- Added `_AIHW_DELINQUENCY_BENCHMARKS` with mortgage (1.2%) and personal loan (2.5%) delinquency rates from the AIHW Housing Data Dashboard
+- Added `validate_against_aihw()` method with 1 percentage point tolerance (wider than APRA's 0.5pp because AIHW aggregates from multiple sources with different reporting dates)
+- Integrated into `generate_calibration_report()` — AIHW flags appear in `all_recommendations` when the system's default rate deviates significantly
+
+**Predictor/trainer alignment (`predictor.py`)**
+- Added `sa3_region` and `industry_anzsic` to `ModelPredictor.CATEGORICAL_COLS` to match the trainer's 9-column list
+- Without this fix, models trained with the new columns would fail validation in `_validate_bundle()` and fall back to the predictor's stale 7-column schema
+
+**Version sync**
+- `APP_VERSION` in `base.py`: 1.5.0 → 1.7.0
+- `version` in `package.json`: 1.4.0 → 1.7.0
+
+**Test fixes (`test_trainer_pipeline.py`)**
+- Numeric column count assertion: 89 → 90 (added `help_repayment_monthly`)
+- Categorical column count assertion: 7 → 9 (added `sa3_region`, `industry_anzsic`)
+- Result: 993 passed, 0 failed, 36 skipped
+
+### Frontend changes
+
+**Sentry integration**
+- Installed `@sentry/nextjs@10.47.0`
+- Created `sentry.client.config.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts` — all guarded by `NEXT_PUBLIC_SENTRY_DSN` (no-op when empty)
+- Wrapped `next.config.js` with `withSentryConfig()` conditionally — only when DSN is set, so local dev builds are unaffected
+- Session replay disabled (cost), error replay at 10%
+
+**Compliance footer removed**
+- Removed `<ComplianceFooter />` from login, register, and apply pages
+- Component file retained for potential re-use
+
+**CHANGELOG updated**
+- Added entries for v1.5.0, v1.6.0, v1.7.0, and v1.7.1 following Keep a Changelog format
+
+### Files changed
+- `backend/config/settings/base.py` — Sentry init, version sync
+- `backend/requirements.in`, `backend/requirements.txt` — sentry-sdk dependency
+- `backend/apps/ml_engine/services/real_world_benchmarks.py` — RBA E2 fetch/parse/fallback
+- `backend/apps/ml_engine/services/calibration_validator.py` — AIHW benchmarks and cross-validation
+- `backend/apps/ml_engine/services/predictor.py` — CATEGORICAL_COLS alignment
+- `backend/tests/test_trainer_pipeline.py` — count assertion fixes
+- `frontend/next.config.js` — Sentry wrapper
+- `frontend/package.json` — @sentry/nextjs, version sync
+- `frontend/sentry.client.config.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts` — new
+- `frontend/src/app/(auth)/login/page.tsx`, `register/page.tsx`, `frontend/src/app/apply/layout.tsx` — footer removal
+- `.env.example`, `frontend/.env.example` — Sentry DSN placeholders
+- `CHANGELOG.md` — v1.5.0 through v1.7.1
+
+---
+
+## 2026-04-01 — State Machine, Fairness Gate, PII Masking, CI Pipeline, and AU Compliance
+
+**Goal:** Enforce valid application lifecycle transitions with a state machine, add a fairness gate to catch demographic bias in model thresholds, mask PII in production logs, build a comprehensive CI/CD pipeline, and add Australian regulatory compliance disclosures.
+
+### Why these changes were needed
+
+Loan applications were transitioning between statuses without validation — an application could jump from "submitted" directly to "denied" without passing through "processing", or be re-processed after already being approved. In regulated lending, the audit trail must show a valid, linear progression. A state machine enforces this at the model level.
+
+The ML predictor was using a single decision threshold (0.5) for all applicants. Under the EEOC's 80% rule (disparate impact theory), if the approval rate for any protected group falls below 80% of the highest group's rate, the model may be discriminatory. Adding group-specific thresholds on employment type (the strongest demographic proxy in the feature set) ensures the system self-corrects before bias compounds.
+
+Production Django logs were capturing full request bodies and error contexts — including customer income, credit scores, and Tax File Numbers. Under the Privacy Act 1988 and APRA CPG 235, PII must not appear in application logs. A masking filter was needed at the logging layer.
+
+The project had tests but no CI pipeline — code could be pushed without running linters, security scans, or tests. A GitHub Actions workflow with 10 parallel jobs provides the safety net.
+
+### Backend changes
+
+**Application state machine**
+- Added `status` field with choices: `submitted`, `processing`, `approved`, `denied`, `withdrawn`
+- Added `transition_to()` method with valid transition map — raises `ValidationError` on illegal transitions
+- Orchestrator pipeline now calls `transition_to("processing")` before starting and `transition_to("approved"/"denied")` on completion
+
+**Fairness gate (`predictor.py`)**
+- Added `group_thresholds` dict stored in model bundle — maps employment type to adjusted decision thresholds
+- If any group's approval rate falls below 80% of the highest group's rate during training, the threshold for that group is lowered to compensate
+- Applied at prediction time: `effective_threshold = group_thresholds.get(employment_type, base_threshold)`
+
+**PII masking (`config/logging_filters.py`)**
+- Custom logging filter that redacts: TFN (regex `\d{3}\s?\d{3}\s?\d{3}`), Medicare numbers, email addresses, phone numbers, income/salary amounts, passport and driver licence numbers
+- Applied to production logging config in `config/settings/production.py`
+- Correlation ID middleware adds a unique request ID to every log entry for tracing
+
+**Repayment estimator**
+- Added monthly repayment calculation to prediction response using standard amortisation formula
+- Factors in loan amount, interest rate (from RBA F6 live data), and loan term
+
+**AU compliance**
+- NCCP Act disclosure: responsible lending obligation notice
+- AFCA membership reference with link
+- Privacy Policy page stub
+
+**CI pipeline (`.github/workflows/ci.yml`)**
+- 10 parallel jobs: backend-test (pytest + 60% coverage), backend-lint (ruff), frontend-lint (eslint + tsc), frontend-test (vitest), security (bandit SAST), dependency-audit (pip-audit + npm audit), secret-scan (gitleaks), docker-build, dast-scan (OWASP ZAP, main only), load-test (k6, main only)
+- Deploy job pushes Docker images to GitHub Container Registry
+
+### Frontend changes
+
+**WCAG accessibility**
+- Focus ring styles on all interactive elements
+- ARIA labels on form inputs, buttons, and navigation
+- Skip navigation link for keyboard users
+
+**Repayment estimator component**
+- Displays estimated monthly repayment on application detail page
+- Positioned above ML decision section for user context
+
+### Files changed
+- `backend/apps/loans/models.py` — state machine on LoanApplication
+- `backend/apps/ml_engine/services/predictor.py` — fairness gate, group thresholds
+- `backend/config/logging_filters.py` — PII masking filter (new)
+- `backend/config/middleware.py` — correlation ID middleware
+- `backend/config/settings/production.py` — structured JSON logging config
+- `.github/workflows/ci.yml` — 10-job CI pipeline (new)
+- `frontend/src/components/applications/RepaymentEstimator.tsx` — new
+- `frontend/src/app/apply/layout.tsx` — compliance disclosures
+- Various sidebar scroll and Docker env fixes
+
+---
+
+## 2026-03-31 — Real-World Australian Lending Calibration (v1.6.0)
+
+**Goal:** Transform the synthetic data generator from a simple random number generator into a statistically credible simulation of Australian lending, calibrated against published government data from ABS, APRA, RBA, and Equifax.
+
+### Why these changes were needed
+
+The original data generator produced ~20 features with uniform or normal distributions and arbitrary ranges. An interviewer or auditor could immediately spot that the data didn't match real Australian lending patterns: income distributions were flat instead of log-normal, LVR (Loan-to-Value Ratio) values didn't cluster around the 80% threshold where LMI kicks in, and default rates were uncorrelated with credit scores.
+
+For a portfolio project targeting Australian fintech roles, the synthetic data needs to be defensible. That means citing real sources (ABS Taxation Statistics, APRA Quarterly ADI Property Exposures, RBA Statistical Tables, Equifax published scorecards) and producing distributions that a lending professional would recognise.
+
+### Backend changes
+
+**Data generator overhaul (`data_generator.py`, ~1800 lines)**
+- Expanded from ~20 to 65+ features across 10 feature groups:
+  - Core demographics (age, income, employment — log-normal distributions calibrated to ABS/ATO)
+  - Loan details (amount, term, purpose — multiplier-based on income per sub-population)
+  - Property and home ownership (property value, deposit, existing properties)
+  - Credit bureau data (credit score, enquiries, defaults, arrears — Equifax-calibrated)
+  - Behavioural/existing customer data (savings, salary regularity, dishonours)
+  - Fraud detection signals (2% flagged — income verification gap, document consistency)
+  - Open Banking/CDR features (savings trends, discretionary spend, gambling flags)
+  - CCR features (late payments, credit utilization, hardship flags)
+  - BNPL-specific features (NCCP Act regulation alignment)
+  - Macroeconomic context (36-month window: 2023Q3–2026Q2)
+
+**Sub-population mixture model**
+- 6 borrower segments with realistic weights: First Home Buyer (15%), Upgrader (20%), Refinancer (10%), Personal Borrower (35%), Business Borrower (12%), Investor (8%)
+- Each segment has distinct income, credit score, LVR, and loan multiplier distributions
+- Segments produce the bimodal distributions seen in real lending data
+
+**Gaussian copula correlation matrix**
+- 8 core features (age, income, credit score, expenses, tenure, CC limit, dependants, employment length) correlated via copula
+- Preserves marginal distributions while introducing realistic joint patterns (e.g., income ↔ credit score r=0.30, age ↔ tenure r=0.55)
+
+**State-specific profiles**
+- 8 states/territories with calibrated median house prices (CoreLogic Dec 2025), income multipliers (ABS), and credit score adjustments
+- NSW: $1.65M median, 1.08x income | TAS: $620K median, 0.88x income | ACT: $950K, 1.25x income
+
+**RealWorldBenchmarks service (`real_world_benchmarks.py`)**
+- Fetches distribution-level data from 11 public Australian sources
+- ABS Data API (SDMX): income percentiles by state, lending indicators by purpose
+- APRA Quarterly ADI Statistics: arrears rates, LVR/DTI band distributions (XLSX parsing)
+- RBA Statistical Tables: lending rates (F5, F6 CSV), household debt ratios (E2)
+- Equifax: credit score distributions by age bracket (hardcoded from published reports)
+- Every method has hardcoded fallback values so generation never breaks if APIs are unreachable
+- 7-day cache TTL (data updates quarterly)
+- `get_calibration_snapshot()` assembles all benchmarks for `DataGenerator(benchmarks=snapshot)`
+
+**CalibrationValidator (`calibration_validator.py`)**
+- Three-way calibration: predicted vs actual default rate (internal), actual vs APRA benchmark (external), combined assessment
+- State-level validation against APRA by-state benchmarks
+- Portfolio composition check: LVR ≥ 80% share and DTI ≥ 6 share against APRA published figures
+- Actionable recommendations with APRA quarter citations
+
+**Measurement noise and missing data**
+- Income noise: ±8% (self-reported vs verified)
+- Expense under-reporting: 30–50% (known behavioural pattern)
+- Credit score drift: ±40 points between bureau pulls
+- Missing data: 5–12% across different feature groups
+- Thin-file segment: 25% of applicants with < 36 months credit history
+
+### Files changed
+- `backend/apps/ml_engine/services/data_generator.py` — complete rewrite (~1800 lines)
+- `backend/apps/ml_engine/services/real_world_benchmarks.py` — new (11 data sources)
+- `backend/apps/ml_engine/services/calibration_validator.py` — new (APRA validation)
+- `backend/apps/ml_engine/services/macro_data_service.py` — RBA cash rate, unemployment, property growth
+- `backend/apps/ml_engine/services/feature_engineering.py` — 28 derived features
+- `backend/apps/ml_engine/services/property_data_service.py` — SA3-level property data (~50 regions)
+
+---
+
+## 2026-03-27 — Pipeline Auto-Completion, Champion/Challenger, Conformal Prediction, and Testing (v1.4.0–v1.5.0)
+
+**Goal:** Make the orchestrator pipeline run end-to-end in a single invocation (prediction → email → bias detection → NBO), add ML model governance features (champion/challenger scoring, conformal prediction intervals, stress testing, counterfactual explanations), and build a comprehensive test suite with load testing.
+
+### Why these changes were needed
+
+The orchestrator required manual step-by-step triggering — a loan officer had to click "Run Pipeline", then "Generate Email", then "Check Bias" separately. In production, the pipeline should complete autonomously once triggered, with each step feeding into the next.
+
+For ML model governance (APRA CPG 235, SR 11-7), a production system needs more than just a prediction: it needs uncertainty quantification (how confident is the model?), stress testing (what happens under adverse conditions?), counterfactual explanations (what would the applicant need to change?), and challenger model comparison (is a newer model performing better?).
+
+The project also lacked load testing — an interviewer might ask "how many concurrent applications can this handle?" Without benchmarks, there's no answer.
+
+### Backend changes
+
+**Pipeline auto-completion (`orchestrator.py`)**
+- Single `orchestrate(application_id)` Celery task chains all steps: prediction → email generation → bias detection → NBO (if denied)
+- Each step's output feeds into the next via the `AgentRun` record
+- Failure in any step is logged but doesn't block subsequent independent steps
+
+**Champion/challenger scoring (`predictor.py`)**
+- Active model (champion) produces the decision
+- If a challenger model exists (`ModelVersion` with `is_challenger=True`), it runs a shadow prediction in parallel
+- Both scores are logged to `PredictionLog` for offline comparison
+- No production impact — challenger score is stored but not used for decisions
+
+**Conformal prediction intervals**
+- Split conformal method: calibration set nonconformity scores stored in model bundle
+- At inference, produces prediction intervals with guaranteed coverage (default 95%)
+- Example: "Approval probability: 0.72, 95% CI: [0.65, 0.79]"
+
+**Stress testing**
+- 4 adverse scenarios applied to each prediction:
+  1. Income shock: -15%
+  2. Property value decline: -20%
+  3. Credit score deterioration: -50 points
+  4. Combined: all three simultaneously
+- Returns probability under each scenario — shows model resilience
+
+**Counterfactual explanations (denials only)**
+- For each denied application, finds the top 3 features where the smallest change would flip the decision
+- Example: "If annual_income increased from $52,000 to $61,400, the prediction would change to approved"
+- Uses feature importance + gradient-based search
+
+**PSI drift detection**
+- Population Stability Index computed per feature at prediction time
+- Compares incoming application's feature distribution against training data reference
+- PSI > 0.1 triggers a warning; PSI > 0.25 triggers a `requires_human_review` flag
+
+**Monotonic constraints**
+- All XGBoost features have monotonic constraint direction defined
+- Higher income → higher approval probability (positive constraint)
+- Higher debt-to-income → lower approval probability (negative constraint)
+- Prevents the model from learning spurious non-monotonic relationships
+
+**Testing expansion**
+- k6 load test suite with SLA assertions (P95 latency thresholds for health, login, list, pipeline endpoints)
+- Schemathesis contract tests against OpenAPI spec
+- Frontend component tests: BiasScoreBadge, DecisionSection, EmailPreview, ErrorBoundary, PipelineControls, Sidebar, WorkflowTimeline
+- Frontend hook tests: useAgentStatus, useApplicationForm, useApplications, useAuth, useHumanReview, useMetrics, usePipelineOrchestration
+- Coverage thresholds enforced: 60% backend, 40% frontend
+
+### Files changed
+- `backend/apps/agents/services/orchestrator.py` — pipeline auto-completion
+- `backend/apps/ml_engine/services/predictor.py` — champion/challenger, conformal, stress test, counterfactuals, drift, monotonic
+- `backend/apps/ml_engine/services/trainer.py` — monotonic constraint definitions, conformal calibration scores
+- `.github/workflows/ci.yml` — k6 load test job, security scanning
+- `backend/tests/` — expanded to 61 test files
+- `frontend/src/__tests__/` — expanded to 31 test files
+- `frontend/vitest.config.ts` — coverage thresholds
+
+---
+
 ## 2026-03-20 — Customer Profile Flow, Edit Profile, and UI/UX Improvements
 
 **Goal:** Fix the customer-facing loan application flow so customers see empty profile fields (not pre-filled fake data), can complete their own profile including identity documents, and get properly redirected to the loan application. Add a restricted "Edit Profile" page with fraud-prevention field locking, a customer account dropdown menu, Docker live reload, and various UI fixes.
