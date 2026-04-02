@@ -23,6 +23,7 @@ def admin_user(db):
         role="admin",
         first_name="Admin",
         last_name="User",
+        is_staff=True,
     )
     return user
 
