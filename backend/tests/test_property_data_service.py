@@ -30,9 +30,7 @@ class TestPropertyDataService:
         for state in ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]:
             regions = service.get_state_sa3s(state)
             total = sum(r["population_weight"] for r in regions)
-            assert abs(total - 1.0) < 0.02, (
-                f"{state} population weights sum to {total:.3f}, expected ~1.0"
-            )
+            assert abs(total - 1.0) < 0.02, f"{state} population weights sum to {total:.3f}, expected ~1.0"
 
     def test_assign_sa3_returns_valid_tuple(self, service, rng):
         """assign_sa3 returns (code, name, property_mult, rental_mult)."""
@@ -77,9 +75,7 @@ class TestPropertyDataService:
             for r in regions:
                 # Rental mult should be within 50% of property mult
                 ratio = r["rental_mult"] / r["property_mult"]
-                assert 0.5 <= ratio <= 1.5, (
-                    f"{r['name']}: rental/property ratio {ratio:.2f} outside 0.5-1.5"
-                )
+                assert 0.5 <= ratio <= 1.5, f"{r['name']}: rental/property ratio {ratio:.2f} outside 0.5-1.5"
 
     def test_get_sa3_data_by_code(self, service):
         """get_sa3_data returns correct data for a known code."""
@@ -114,9 +110,9 @@ class TestPropertyDataService:
 
     def test_apply_growth_modifies_multipliers(self, service):
         """apply_growth should adjust property multipliers."""
-        # Get initial NSW multipliers
+        # Snapshot originals for exact restore
         nsw_regions = service.get_state_sa3s("NSW")
-        orig_mults = {r["code"]: r["property_mult"] for r in nsw_regions}
+        orig_snapshot = {r["code"]: (r["property_mult"], r["rental_mult"]) for r in nsw_regions}
 
         # Apply 5% growth to Sydney
         service.apply_growth({"Sydney": 0.05})
@@ -125,8 +121,11 @@ class TestPropertyDataService:
         nsw_regions_after = service.get_state_sa3s("NSW")
         new_mults = {r["code"]: r["property_mult"] for r in nsw_regions_after}
 
-        changed = sum(1 for code in orig_mults if abs(new_mults[code] - orig_mults[code]) > 0.001)
+        changed = sum(1 for code in orig_snapshot if abs(new_mults[code] - orig_snapshot[code][0]) > 0.001)
         assert changed > 0, "apply_growth did not change any NSW multipliers"
 
-        # Revert: apply -5% to restore
-        service.apply_growth({"Sydney": -0.05})
+        # Restore exact originals (not multiplicative inverse which is lossy)
+        for r in nsw_regions_after:
+            if r["code"] in orig_snapshot:
+                r["property_mult"] = orig_snapshot[r["code"]][0]
+                r["rental_mult"] = orig_snapshot[r["code"]][1]

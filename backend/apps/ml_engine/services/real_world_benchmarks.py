@@ -145,25 +145,25 @@ _FALLBACK_SA4_UNEMPLOYMENT = {
 
 _FALLBACK_INDUSTRY_INCOME_MULTIPLIERS = {
     # ABS Average Weekly Earnings by ANZSIC division, relative to national median
-    "A": 0.78,   # Agriculture, Forestry and Fishing
-    "B": 1.85,   # Mining
-    "C": 0.95,   # Manufacturing
-    "D": 1.25,   # Electricity, Gas, Water and Waste Services
-    "E": 1.10,   # Construction
-    "F": 1.05,   # Wholesale Trade
-    "G": 0.68,   # Retail Trade
-    "H": 0.58,   # Accommodation and Food Services
-    "I": 1.05,   # Transport, Postal and Warehousing
-    "J": 1.40,   # Information Media and Telecommunications
-    "K": 1.45,   # Financial and Insurance Services
-    "L": 1.00,   # Rental, Hiring and Real Estate Services
-    "M": 1.35,   # Professional, Scientific and Technical Services
-    "N": 0.75,   # Administrative and Support Services
-    "O": 1.20,   # Public Administration and Safety
-    "P": 0.92,   # Education and Training
-    "Q": 0.88,   # Health Care and Social Assistance
-    "R": 0.72,   # Arts and Recreation Services
-    "S": 0.80,   # Other Services
+    "A": 0.78,  # Agriculture, Forestry and Fishing
+    "B": 1.85,  # Mining
+    "C": 0.95,  # Manufacturing
+    "D": 1.25,  # Electricity, Gas, Water and Waste Services
+    "E": 1.10,  # Construction
+    "F": 1.05,  # Wholesale Trade
+    "G": 0.68,  # Retail Trade
+    "H": 0.58,  # Accommodation and Food Services
+    "I": 1.05,  # Transport, Postal and Warehousing
+    "J": 1.40,  # Information Media and Telecommunications
+    "K": 1.45,  # Financial and Insurance Services
+    "L": 1.00,  # Rental, Hiring and Real Estate Services
+    "M": 1.35,  # Professional, Scientific and Technical Services
+    "N": 0.75,  # Administrative and Support Services
+    "O": 1.20,  # Public Administration and Safety
+    "P": 0.92,  # Education and Training
+    "Q": 0.88,  # Health Care and Social Assistance
+    "R": 0.72,  # Arts and Recreation Services
+    "S": 0.80,  # Other Services
     "source": "fallback (ABS AWE by ANZSIC 2025)",
 }
 
@@ -703,12 +703,23 @@ class RealWorldBenchmarks:
                 logger.info("No APRA XLSX links found on page — using fallback")
                 return None
 
-            # Download the most recent XLSX
+            # Download the most recent XLSX (capped at 50MB to prevent DoS)
             xlsx_url = xlsx_links[0]
+            # Validate URL domain before fetching
+            from urllib.parse import urlparse
+
+            parsed = urlparse(xlsx_url)
+            if parsed.hostname and not parsed.hostname.endswith(".gov.au"):
+                logger.warning("APRA XLSX URL has non-gov.au domain: %s", parsed.hostname)
+                return None
             logger.info("Downloading APRA XLSX: %s", xlsx_url)
+            _MAX_XLSX_SIZE = 50 * 1024 * 1024  # 50 MB
             with httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0), follow_redirects=True) as client:
                 xlsx_response = client.get(xlsx_url)
                 xlsx_response.raise_for_status()
+                if len(xlsx_response.content) > _MAX_XLSX_SIZE:
+                    logger.warning("APRA XLSX too large (%d bytes) — skipped", len(xlsx_response.content))
+                    return None
 
             return self._parse_apra_xlsx(xlsx_response.content)
 
@@ -727,9 +738,11 @@ class RealWorldBenchmarks:
             # Property exposures are usually in "Table 1b" or similar
             result = dict(_FALLBACK_APRA_ARREARS)  # start with fallback structure
 
+            matched_sheet = None
             for sheet_name in wb.sheetnames:
                 sheet_lower = sheet_name.lower()
                 if "property" in sheet_lower or "housing" in sheet_lower:
+                    matched_sheet = sheet_name
                     ws = wb[sheet_name]
                     # Scan for NPL rate, arrears, LVR distribution
                     for row in ws.iter_rows(min_row=1, max_row=100, values_only=True):
@@ -749,13 +762,18 @@ class RealWorldBenchmarks:
                                     result["total_arrears_rate"] = round(cell, 4)
                                     break
 
-            result["source"] = f"APRA XLSX ({sheet_name})"
-            wb.close()
+            result["source"] = f"APRA XLSX ({matched_sheet or 'unknown sheet'})"
             return result
 
         except Exception as exc:
-            logger.warning("APRA XLSX parse failed: %s", exc)
+            logger.warning("APRA XLSX parse failed: %s", type(exc).__name__)
             return None
+
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass
 
     def _fetch_lending_rates(self) -> dict | None:
         """Fetch lending rates from RBA Table F5 (CSV download).
@@ -897,8 +915,8 @@ class RealWorldBenchmarks:
                         result[sa4_code] = round(rate, 4)
 
             if result:
-                result["source"] = f"ABS Labour Force cat 6202.0 ({len(result) - 1} SA4 regions)"
-                logger.info("Fetched SA4 unemployment for %d regions", len(result) - 1)
+                result["source"] = f"ABS Labour Force cat 6202.0 ({len(result)} SA4 regions)"
+                logger.info("Fetched SA4 unemployment for %d regions", len(result))
                 return result
 
         except Exception as exc:
@@ -979,10 +997,25 @@ class RealWorldBenchmarks:
             result = {}
             # Map ABS industry codes to ANZSIC division letters
             anzsic_map = {
-                "A": "A", "B": "B", "C": "C", "D": "D", "E": "E",
-                "F": "F", "G": "G", "H": "H", "I": "I", "J": "J",
-                "K": "K", "L": "L", "M": "M", "N": "N", "O": "O",
-                "P": "P", "Q": "Q", "R": "R", "S": "S",
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D",
+                "E": "E",
+                "F": "F",
+                "G": "G",
+                "H": "H",
+                "I": "I",
+                "J": "J",
+                "K": "K",
+                "L": "L",
+                "M": "M",
+                "N": "N",
+                "O": "O",
+                "P": "P",
+                "Q": "Q",
+                "R": "R",
+                "S": "S",
             }
 
             for code, earnings in earnings_by_industry.items():
@@ -992,8 +1025,8 @@ class RealWorldBenchmarks:
                     result[division] = multiplier
 
             if result:
-                result["source"] = f"ABS AWE cat 6302.0 ({len(result) - 1} ANZSIC divisions)"
-                logger.info("Fetched industry income multipliers for %d divisions", len(result) - 1)
+                result["source"] = f"ABS AWE cat 6302.0 ({len(result)} ANZSIC divisions)"
+                logger.info("Fetched industry income multipliers for %d divisions", len(result))
                 return result
 
         except Exception as exc:
@@ -1151,17 +1184,18 @@ class RealWorldBenchmarks:
             if header_idx is None and title_idx is None:
                 return None
 
+            # Initialise column indices before conditional block to avoid
+            # UnboundLocalError when title_idx is None but header_idx is set
+            housing_dti_col = None
+            total_dti_col = None
+            dta_col = None
+            interest_col = None
+
             # Use title row to identify columns by name
             if title_idx is not None:
                 title_reader = csv.reader([lines[title_idx]])
                 titles = next(title_reader)
                 titles_lower = [t.lower().strip() for t in titles]
-
-                # Find relevant columns
-                housing_dti_col = None
-                total_dti_col = None
-                dta_col = None
-                interest_col = None
 
                 for j, title in enumerate(titles_lower):
                     if "housing" in title and "debt" in title and "income" in title:
@@ -1253,14 +1287,22 @@ class RealWorldBenchmarks:
                 logger.info("No ATO HELP XLSX links found on page — using fallback")
                 return None
 
-            # Download the most recent XLSX
+            # Download the most recent XLSX (capped at 50MB to prevent DoS)
             xlsx_url = xlsx_links[0]
+            from urllib.parse import urlparse
+
+            parsed = urlparse(xlsx_url)
+            if parsed.hostname and not parsed.hostname.endswith(".gov.au"):
+                logger.warning("ATO XLSX URL has non-gov.au domain: %s", parsed.hostname)
+                return None
             logger.info("Downloading ATO HELP XLSX: %s", xlsx_url)
-            with httpx.Client(
-                timeout=httpx.Timeout(30.0, connect=10.0), follow_redirects=True
-            ) as client:
+            _MAX_XLSX_SIZE = 50 * 1024 * 1024
+            with httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0), follow_redirects=True) as client:
                 xlsx_response = client.get(xlsx_url)
                 xlsx_response.raise_for_status()
+                if len(xlsx_response.content) > _MAX_XLSX_SIZE:
+                    logger.warning("ATO XLSX too large (%d bytes) — skipped", len(xlsx_response.content))
+                    return None
 
             return self._parse_help_debt_xlsx(xlsx_response.content)
 
@@ -1273,18 +1315,18 @@ class RealWorldBenchmarks:
         try:
             import openpyxl
 
-            wb = openpyxl.load_workbook(
-                io.BytesIO(xlsx_bytes), read_only=True, data_only=True
-            )
+            wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
 
             # Start with fallback structure, overlay any parsed values
             result = dict(_FALLBACK_HELP_DEBT_STATS)
             result["by_age"] = dict(_FALLBACK_HELP_DEBT_STATS["by_age"])
 
             # ATO XLSX typically has sheets with HELP debt data by age
+            matched_help_sheet = None
             for sheet_name in wb.sheetnames:
                 sheet_lower = sheet_name.lower()
                 if "help" in sheet_lower or "hecs" in sheet_lower or "debt" in sheet_lower:
+                    matched_help_sheet = sheet_name
                     ws = wb[sheet_name]
                     for row in ws.iter_rows(min_row=1, max_row=200, values_only=True):
                         if not row or not row[0]:
@@ -1314,18 +1356,23 @@ class RealWorldBenchmarks:
                                 if len(numeric_vals) >= 2:
                                     prevalence = numeric_vals[0]
                                     mean_bal = numeric_vals[1]
-                                    # Validate ranges
-                                    if prevalence <= 1.0:
+                                    # Validate ranges (security: bound mean_balance)
+                                    if 0 < prevalence <= 1.0 and 0 < mean_bal < 200_000:
                                         result["by_age"][age_key] = {
                                             "prevalence": round(prevalence, 2),
                                             "mean_balance": round(mean_bal),
                                         }
                                 break
 
-            result["source"] = f"ATO HELP Statistics ({sheet_name})"
-            wb.close()
+            result["source"] = f"ATO HELP Statistics ({matched_help_sheet or 'unknown sheet'})"
             return result
 
         except Exception as exc:
-            logger.warning("ATO HELP XLSX parse failed: %s", exc)
+            logger.warning("ATO HELP XLSX parse failed: %s", type(exc).__name__)
             return None
+
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass

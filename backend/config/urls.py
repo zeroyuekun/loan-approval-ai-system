@@ -218,5 +218,9 @@ urlpatterns = [
     path("api/v1/tasks/<str:task_id>/status/", TaskStatusView.as_view(), name="task-status"),
     # API Documentation
     path("api/schema/", SpectacularAPIView.as_view(permission_classes=[IsAdminUser]), name="schema"),
-    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema", permission_classes=[IsAdminUser]), name="swagger-ui"),
+    path(
+        "api/docs/",
+        SpectacularSwaggerView.as_view(url_name="schema", permission_classes=[IsAdminUser]),
+        name="swagger-ui",
+    ),
 ]

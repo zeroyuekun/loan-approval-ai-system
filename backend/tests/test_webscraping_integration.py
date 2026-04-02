@@ -46,9 +46,7 @@ class TestSA3GeographyIntegration:
         nsw_homes = df[(df["state"] == "NSW") & (df["purpose"] == "home")]
         if len(nsw_homes) > 10:
             cv = nsw_homes["property_value"].std() / nsw_homes["property_value"].mean()
-            assert cv > 0.2, (
-                f"NSW property value CV {cv:.3f} too low — SA3 variation not working"
-            )
+            assert cv > 0.2, f"NSW property value CV {cv:.3f} too low — SA3 variation not working"
 
     def test_different_sa3_have_different_property_values(self, df):
         """Different SA3 regions within NSW should have different median property values."""
@@ -56,9 +54,7 @@ class TestSA3GeographyIntegration:
         if len(nsw_homes) > 50:
             by_sa3 = nsw_homes.groupby("sa3_region")["property_value"].median()
             if len(by_sa3) >= 2:
-                assert by_sa3.max() / by_sa3.min() > 1.3, (
-                    "SA3 property value medians not differentiated enough"
-                )
+                assert by_sa3.max() / by_sa3.min() > 1.3, "SA3 property value medians not differentiated enough"
 
 
 class TestIndustryIntegration:
@@ -80,18 +76,14 @@ class TestIndustryIntegration:
         if len(wa) > 50 and len(nsw) > 50:
             wa_mining = (wa["industry_anzsic"] == "B").mean()
             nsw_mining = (nsw["industry_anzsic"] == "B").mean()
-            assert wa_mining > nsw_mining, (
-                f"WA mining ({wa_mining:.3f}) should exceed NSW ({nsw_mining:.3f})"
-            )
+            assert wa_mining > nsw_mining, f"WA mining ({wa_mining:.3f}) should exceed NSW ({nsw_mining:.3f})"
 
     def test_act_has_more_public_admin(self, df):
         """ACT should have the highest public administration share."""
         act = df[df["state"] == "ACT"]
         if len(act) > 20:
             act_pubadmin = (act["industry_anzsic"] == "O").mean()
-            assert act_pubadmin > 0.10, (
-                f"ACT public admin share {act_pubadmin:.3f} too low"
-            )
+            assert act_pubadmin > 0.10, f"ACT public admin share {act_pubadmin:.3f} too low"
 
     def test_industry_risk_tier_correlated_with_industry(self, df):
         """Finance/healthcare should have more 'low' risk tiers than mining/construction."""
@@ -101,8 +93,7 @@ class TestIndustryIntegration:
             safe_low = (safe["industry_risk_tier"] == "low").mean()
             risky_low = (risky["industry_risk_tier"] == "low").mean()
             assert safe_low > risky_low, (
-                f"Safe industries low tier ({safe_low:.3f}) should exceed "
-                f"risky industries ({risky_low:.3f})"
+                f"Safe industries low tier ({safe_low:.3f}) should exceed risky industries ({risky_low:.3f})"
             )
 
 
@@ -115,18 +106,14 @@ class TestHELPDebtIntegration:
     def test_help_repayment_zero_without_hecs(self, df):
         """Applicants without HECS should have zero HELP repayment."""
         no_hecs = df[df["has_hecs"] == 0]
-        assert (no_hecs["help_repayment_monthly"] == 0).all(), (
-            "Some non-HECS applicants have HELP repayment > 0"
-        )
+        assert (no_hecs["help_repayment_monthly"] == 0).all(), "Some non-HECS applicants have HELP repayment > 0"
 
     def test_help_repayment_positive_for_high_income_hecs(self, df):
         """High-income HECS holders should have positive repayment."""
         high_income_hecs = df[(df["has_hecs"] == 1) & (df["annual_income"] > 60000)]
         if len(high_income_hecs) > 10:
             pct_positive = (high_income_hecs["help_repayment_monthly"] > 0).mean()
-            assert pct_positive > 0.5, (
-                f"Only {pct_positive:.1%} of high-income HECS holders have repayment"
-            )
+            assert pct_positive > 0.5, f"Only {pct_positive:.1%} of high-income HECS holders have repayment"
 
     def test_help_repayment_below_threshold_is_zero(self, df):
         """Incomes below $54,435 should have zero HELP repayment rate."""

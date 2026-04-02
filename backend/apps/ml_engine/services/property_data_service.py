@@ -15,7 +15,9 @@ avoids double-counting: the state median sets the baseline, and the SA3
 multiplier adjusts within that state.
 """
 
+import copy
 import logging
+import math
 from datetime import datetime, timedelta
 
 import httpx
@@ -40,112 +42,381 @@ _CACHE_TTL_HOURS = 168  # 7 days — RPPI updates quarterly
 
 _SA3_SEED_DATA: list[dict] = [
     # --- NSW (pop weights sum to 1.00) ---
-    {"code": "11703", "name": "Sydney City and Inner South", "state": "NSW",
-     "population_weight": 0.08, "property_mult": 1.85, "rental_mult": 1.75},
-    {"code": "11602", "name": "Eastern Suburbs - North", "state": "NSW",
-     "population_weight": 0.05, "property_mult": 2.10, "rental_mult": 1.90},
-    {"code": "11501", "name": "Inner West", "state": "NSW",
-     "population_weight": 0.06, "property_mult": 1.45, "rental_mult": 1.35},
-    {"code": "11201", "name": "North Sydney - Mosman", "state": "NSW",
-     "population_weight": 0.07, "property_mult": 1.70, "rental_mult": 1.55},
-    {"code": "11801", "name": "Parramatta", "state": "NSW",
-     "population_weight": 0.09, "property_mult": 0.85, "rental_mult": 0.90},
-    {"code": "11101", "name": "Blacktown - North", "state": "NSW",
-     "population_weight": 0.10, "property_mult": 0.65, "rental_mult": 0.70},
-    {"code": "10201", "name": "Central Coast - Gosford", "state": "NSW",
-     "population_weight": 0.08, "property_mult": 0.55, "rental_mult": 0.60},
-    {"code": "11301", "name": "Newcastle", "state": "NSW",
-     "population_weight": 0.09, "property_mult": 0.60, "rental_mult": 0.65},
-    {"code": "10401", "name": "Illawarra", "state": "NSW",
-     "population_weight": 0.07, "property_mult": 0.65, "rental_mult": 0.70},
-    {"code": "19999", "name": "Rest of NSW", "state": "NSW",
-     "population_weight": 0.31, "property_mult": 0.50, "rental_mult": 0.55},
-
+    {
+        "code": "11703",
+        "name": "Sydney City and Inner South",
+        "state": "NSW",
+        "population_weight": 0.08,
+        "property_mult": 1.85,
+        "rental_mult": 1.75,
+    },
+    {
+        "code": "11602",
+        "name": "Eastern Suburbs - North",
+        "state": "NSW",
+        "population_weight": 0.05,
+        "property_mult": 2.10,
+        "rental_mult": 1.90,
+    },
+    {
+        "code": "11501",
+        "name": "Inner West",
+        "state": "NSW",
+        "population_weight": 0.06,
+        "property_mult": 1.45,
+        "rental_mult": 1.35,
+    },
+    {
+        "code": "11201",
+        "name": "North Sydney - Mosman",
+        "state": "NSW",
+        "population_weight": 0.07,
+        "property_mult": 1.70,
+        "rental_mult": 1.55,
+    },
+    {
+        "code": "11801",
+        "name": "Parramatta",
+        "state": "NSW",
+        "population_weight": 0.09,
+        "property_mult": 0.85,
+        "rental_mult": 0.90,
+    },
+    {
+        "code": "11101",
+        "name": "Blacktown - North",
+        "state": "NSW",
+        "population_weight": 0.10,
+        "property_mult": 0.65,
+        "rental_mult": 0.70,
+    },
+    {
+        "code": "10201",
+        "name": "Central Coast - Gosford",
+        "state": "NSW",
+        "population_weight": 0.08,
+        "property_mult": 0.55,
+        "rental_mult": 0.60,
+    },
+    {
+        "code": "11301",
+        "name": "Newcastle",
+        "state": "NSW",
+        "population_weight": 0.09,
+        "property_mult": 0.60,
+        "rental_mult": 0.65,
+    },
+    {
+        "code": "10401",
+        "name": "Illawarra",
+        "state": "NSW",
+        "population_weight": 0.07,
+        "property_mult": 0.65,
+        "rental_mult": 0.70,
+    },
+    {
+        "code": "19999",
+        "name": "Rest of NSW",
+        "state": "NSW",
+        "population_weight": 0.31,
+        "property_mult": 0.50,
+        "rental_mult": 0.55,
+    },
     # --- VIC (pop weights sum to 1.00) ---
-    {"code": "20604", "name": "Melbourne City", "state": "VIC",
-     "population_weight": 0.10, "property_mult": 1.80, "rental_mult": 1.70},
-    {"code": "20901", "name": "Boroondara", "state": "VIC",
-     "population_weight": 0.08, "property_mult": 1.90, "rental_mult": 1.65},
-    {"code": "21001", "name": "Stonnington - West", "state": "VIC",
-     "population_weight": 0.07, "property_mult": 1.65, "rental_mult": 1.55},
-    {"code": "21201", "name": "Maroondah - Ringwood", "state": "VIC",
-     "population_weight": 0.12, "property_mult": 0.85, "rental_mult": 0.80},
-    {"code": "21401", "name": "Melton - Bacchus Marsh", "state": "VIC",
-     "population_weight": 0.14, "property_mult": 0.65, "rental_mult": 0.65},
-    {"code": "20201", "name": "Geelong", "state": "VIC",
-     "population_weight": 0.10, "property_mult": 0.60, "rental_mult": 0.60},
-    {"code": "29999", "name": "Rest of VIC", "state": "VIC",
-     "population_weight": 0.39, "property_mult": 0.50, "rental_mult": 0.50},
-
+    {
+        "code": "20604",
+        "name": "Melbourne City",
+        "state": "VIC",
+        "population_weight": 0.10,
+        "property_mult": 1.80,
+        "rental_mult": 1.70,
+    },
+    {
+        "code": "20901",
+        "name": "Boroondara",
+        "state": "VIC",
+        "population_weight": 0.08,
+        "property_mult": 1.90,
+        "rental_mult": 1.65,
+    },
+    {
+        "code": "21001",
+        "name": "Stonnington - West",
+        "state": "VIC",
+        "population_weight": 0.07,
+        "property_mult": 1.65,
+        "rental_mult": 1.55,
+    },
+    {
+        "code": "21201",
+        "name": "Maroondah - Ringwood",
+        "state": "VIC",
+        "population_weight": 0.12,
+        "property_mult": 0.85,
+        "rental_mult": 0.80,
+    },
+    {
+        "code": "21401",
+        "name": "Melton - Bacchus Marsh",
+        "state": "VIC",
+        "population_weight": 0.14,
+        "property_mult": 0.65,
+        "rental_mult": 0.65,
+    },
+    {
+        "code": "20201",
+        "name": "Geelong",
+        "state": "VIC",
+        "population_weight": 0.10,
+        "property_mult": 0.60,
+        "rental_mult": 0.60,
+    },
+    {
+        "code": "29999",
+        "name": "Rest of VIC",
+        "state": "VIC",
+        "population_weight": 0.39,
+        "property_mult": 0.50,
+        "rental_mult": 0.50,
+    },
     # --- QLD (pop weights sum to 1.00) ---
-    {"code": "30101", "name": "Brisbane Inner City", "state": "QLD",
-     "population_weight": 0.08, "property_mult": 1.40, "rental_mult": 1.35},
-    {"code": "30301", "name": "Brisbane South", "state": "QLD",
-     "population_weight": 0.10, "property_mult": 0.90, "rental_mult": 0.90},
-    {"code": "30201", "name": "Brisbane North", "state": "QLD",
-     "population_weight": 0.10, "property_mult": 0.95, "rental_mult": 0.92},
-    {"code": "31001", "name": "Gold Coast - North", "state": "QLD",
-     "population_weight": 0.12, "property_mult": 1.10, "rental_mult": 1.05},
-    {"code": "31601", "name": "Sunshine Coast", "state": "QLD",
-     "population_weight": 0.08, "property_mult": 1.05, "rental_mult": 1.00},
-    {"code": "30601", "name": "Cairns", "state": "QLD",
-     "population_weight": 0.06, "property_mult": 0.55, "rental_mult": 0.55},
-    {"code": "31801", "name": "Townsville", "state": "QLD",
-     "population_weight": 0.06, "property_mult": 0.50, "rental_mult": 0.50},
-    {"code": "39999", "name": "Rest of QLD", "state": "QLD",
-     "population_weight": 0.40, "property_mult": 0.45, "rental_mult": 0.45},
-
+    {
+        "code": "30101",
+        "name": "Brisbane Inner City",
+        "state": "QLD",
+        "population_weight": 0.08,
+        "property_mult": 1.40,
+        "rental_mult": 1.35,
+    },
+    {
+        "code": "30301",
+        "name": "Brisbane South",
+        "state": "QLD",
+        "population_weight": 0.10,
+        "property_mult": 0.90,
+        "rental_mult": 0.90,
+    },
+    {
+        "code": "30201",
+        "name": "Brisbane North",
+        "state": "QLD",
+        "population_weight": 0.10,
+        "property_mult": 0.95,
+        "rental_mult": 0.92,
+    },
+    {
+        "code": "31001",
+        "name": "Gold Coast - North",
+        "state": "QLD",
+        "population_weight": 0.12,
+        "property_mult": 1.10,
+        "rental_mult": 1.05,
+    },
+    {
+        "code": "31601",
+        "name": "Sunshine Coast",
+        "state": "QLD",
+        "population_weight": 0.08,
+        "property_mult": 1.05,
+        "rental_mult": 1.00,
+    },
+    {
+        "code": "30601",
+        "name": "Cairns",
+        "state": "QLD",
+        "population_weight": 0.06,
+        "property_mult": 0.55,
+        "rental_mult": 0.55,
+    },
+    {
+        "code": "31801",
+        "name": "Townsville",
+        "state": "QLD",
+        "population_weight": 0.06,
+        "property_mult": 0.50,
+        "rental_mult": 0.50,
+    },
+    {
+        "code": "39999",
+        "name": "Rest of QLD",
+        "state": "QLD",
+        "population_weight": 0.40,
+        "property_mult": 0.45,
+        "rental_mult": 0.45,
+    },
     # --- WA (pop weights sum to 1.00) ---
-    {"code": "50302", "name": "Perth City", "state": "WA",
-     "population_weight": 0.10, "property_mult": 1.50, "rental_mult": 1.40},
-    {"code": "50402", "name": "Stirling", "state": "WA",
-     "population_weight": 0.15, "property_mult": 1.10, "rental_mult": 1.05},
-    {"code": "50601", "name": "Gosnells", "state": "WA",
-     "population_weight": 0.15, "property_mult": 0.75, "rental_mult": 0.75},
-    {"code": "50101", "name": "Mandurah", "state": "WA",
-     "population_weight": 0.10, "property_mult": 0.60, "rental_mult": 0.60},
-    {"code": "59999", "name": "Rest of WA", "state": "WA",
-     "population_weight": 0.50, "property_mult": 0.50, "rental_mult": 0.50},
-
+    {
+        "code": "50302",
+        "name": "Perth City",
+        "state": "WA",
+        "population_weight": 0.10,
+        "property_mult": 1.50,
+        "rental_mult": 1.40,
+    },
+    {
+        "code": "50402",
+        "name": "Stirling",
+        "state": "WA",
+        "population_weight": 0.15,
+        "property_mult": 1.10,
+        "rental_mult": 1.05,
+    },
+    {
+        "code": "50601",
+        "name": "Gosnells",
+        "state": "WA",
+        "population_weight": 0.15,
+        "property_mult": 0.75,
+        "rental_mult": 0.75,
+    },
+    {
+        "code": "50101",
+        "name": "Mandurah",
+        "state": "WA",
+        "population_weight": 0.10,
+        "property_mult": 0.60,
+        "rental_mult": 0.60,
+    },
+    {
+        "code": "59999",
+        "name": "Rest of WA",
+        "state": "WA",
+        "population_weight": 0.50,
+        "property_mult": 0.50,
+        "rental_mult": 0.50,
+    },
     # --- SA (pop weights sum to 1.00) ---
-    {"code": "40101", "name": "Adelaide City", "state": "SA",
-     "population_weight": 0.10, "property_mult": 1.40, "rental_mult": 1.35},
-    {"code": "40201", "name": "Adelaide Hills", "state": "SA",
-     "population_weight": 0.10, "property_mult": 1.30, "rental_mult": 1.15},
-    {"code": "40501", "name": "Charles Sturt", "state": "SA",
-     "population_weight": 0.15, "property_mult": 0.85, "rental_mult": 0.85},
-    {"code": "40601", "name": "Salisbury", "state": "SA",
-     "population_weight": 0.15, "property_mult": 0.65, "rental_mult": 0.65},
-    {"code": "49999", "name": "Rest of SA", "state": "SA",
-     "population_weight": 0.50, "property_mult": 0.50, "rental_mult": 0.50},
-
+    {
+        "code": "40101",
+        "name": "Adelaide City",
+        "state": "SA",
+        "population_weight": 0.10,
+        "property_mult": 1.40,
+        "rental_mult": 1.35,
+    },
+    {
+        "code": "40201",
+        "name": "Adelaide Hills",
+        "state": "SA",
+        "population_weight": 0.10,
+        "property_mult": 1.30,
+        "rental_mult": 1.15,
+    },
+    {
+        "code": "40501",
+        "name": "Charles Sturt",
+        "state": "SA",
+        "population_weight": 0.15,
+        "property_mult": 0.85,
+        "rental_mult": 0.85,
+    },
+    {
+        "code": "40601",
+        "name": "Salisbury",
+        "state": "SA",
+        "population_weight": 0.15,
+        "property_mult": 0.65,
+        "rental_mult": 0.65,
+    },
+    {
+        "code": "49999",
+        "name": "Rest of SA",
+        "state": "SA",
+        "population_weight": 0.50,
+        "property_mult": 0.50,
+        "rental_mult": 0.50,
+    },
     # --- TAS (pop weights sum to 1.00) ---
-    {"code": "60101", "name": "Hobart Inner", "state": "TAS",
-     "population_weight": 0.15, "property_mult": 1.35, "rental_mult": 1.30},
-    {"code": "60102", "name": "Hobart - South and West", "state": "TAS",
-     "population_weight": 0.15, "property_mult": 1.00, "rental_mult": 1.00},
-    {"code": "60201", "name": "Launceston", "state": "TAS",
-     "population_weight": 0.15, "property_mult": 0.70, "rental_mult": 0.70},
-    {"code": "69999", "name": "Rest of TAS", "state": "TAS",
-     "population_weight": 0.55, "property_mult": 0.55, "rental_mult": 0.55},
-
+    {
+        "code": "60101",
+        "name": "Hobart Inner",
+        "state": "TAS",
+        "population_weight": 0.15,
+        "property_mult": 1.35,
+        "rental_mult": 1.30,
+    },
+    {
+        "code": "60102",
+        "name": "Hobart - South and West",
+        "state": "TAS",
+        "population_weight": 0.15,
+        "property_mult": 1.00,
+        "rental_mult": 1.00,
+    },
+    {
+        "code": "60201",
+        "name": "Launceston",
+        "state": "TAS",
+        "population_weight": 0.15,
+        "property_mult": 0.70,
+        "rental_mult": 0.70,
+    },
+    {
+        "code": "69999",
+        "name": "Rest of TAS",
+        "state": "TAS",
+        "population_weight": 0.55,
+        "property_mult": 0.55,
+        "rental_mult": 0.55,
+    },
     # --- ACT (pop weights sum to 1.00) ---
-    {"code": "80101", "name": "North Canberra", "state": "ACT",
-     "population_weight": 0.20, "property_mult": 1.20, "rental_mult": 1.15},
-    {"code": "80102", "name": "South Canberra", "state": "ACT",
-     "population_weight": 0.20, "property_mult": 1.10, "rental_mult": 1.10},
-    {"code": "80103", "name": "Woden Valley", "state": "ACT",
-     "population_weight": 0.15, "property_mult": 1.05, "rental_mult": 1.05},
-    {"code": "80104", "name": "Tuggeranong", "state": "ACT",
-     "population_weight": 0.25, "property_mult": 0.80, "rental_mult": 0.80},
-    {"code": "80105", "name": "Belconnen", "state": "ACT",
-     "population_weight": 0.20, "property_mult": 0.85, "rental_mult": 0.85},
-
+    {
+        "code": "80101",
+        "name": "North Canberra",
+        "state": "ACT",
+        "population_weight": 0.20,
+        "property_mult": 1.20,
+        "rental_mult": 1.15,
+    },
+    {
+        "code": "80102",
+        "name": "South Canberra",
+        "state": "ACT",
+        "population_weight": 0.20,
+        "property_mult": 1.10,
+        "rental_mult": 1.10,
+    },
+    {
+        "code": "80103",
+        "name": "Woden Valley",
+        "state": "ACT",
+        "population_weight": 0.15,
+        "property_mult": 1.05,
+        "rental_mult": 1.05,
+    },
+    {
+        "code": "80104",
+        "name": "Tuggeranong",
+        "state": "ACT",
+        "population_weight": 0.25,
+        "property_mult": 0.80,
+        "rental_mult": 0.80,
+    },
+    {
+        "code": "80105",
+        "name": "Belconnen",
+        "state": "ACT",
+        "population_weight": 0.20,
+        "property_mult": 0.85,
+        "rental_mult": 0.85,
+    },
     # --- NT (pop weights sum to 1.00) ---
-    {"code": "70101", "name": "Darwin City", "state": "NT",
-     "population_weight": 0.45, "property_mult": 1.10, "rental_mult": 1.10},
-    {"code": "79999", "name": "Rest of NT", "state": "NT",
-     "population_weight": 0.55, "property_mult": 0.60, "rental_mult": 0.60},
+    {
+        "code": "70101",
+        "name": "Darwin City",
+        "state": "NT",
+        "population_weight": 0.45,
+        "property_mult": 1.10,
+        "rental_mult": 1.10,
+    },
+    {
+        "code": "79999",
+        "name": "Rest of NT",
+        "state": "NT",
+        "population_weight": 0.55,
+        "property_mult": 0.60,
+        "rental_mult": 0.60,
+    },
 ]
 
 
@@ -159,61 +430,54 @@ _SA3_SEED_DATA: list[dict] = [
 
 _SA4_TO_SA3: dict[str, list[str]] = {
     # NSW
-    "117": ["11703"],                    # Sydney - City and Inner South
-    "116": ["11602"],                    # Sydney - Eastern Suburbs
-    "115": ["11501"],                    # Sydney - Inner West
-    "112": ["11201"],                    # Sydney - Northern Beaches / North Sydney
-    "118": ["11801"],                    # Sydney - Parramatta
-    "111": ["11101"],                    # Sydney - South West / Blacktown
-    "102": ["10201"],                    # Central Coast
-    "113": ["11301"],                    # Hunter Valley exc Newcastle / Newcastle
-    "104": ["10401"],                    # Illawarra
-    "199": ["19999"],                    # Rest of NSW (regional)
-
+    "117": ["11703"],  # Sydney - City and Inner South
+    "116": ["11602"],  # Sydney - Eastern Suburbs
+    "115": ["11501"],  # Sydney - Inner West
+    "112": ["11201"],  # Sydney - Northern Beaches / North Sydney
+    "118": ["11801"],  # Sydney - Parramatta
+    "111": ["11101"],  # Sydney - South West / Blacktown
+    "102": ["10201"],  # Central Coast
+    "113": ["11301"],  # Hunter Valley exc Newcastle / Newcastle
+    "104": ["10401"],  # Illawarra
+    "199": ["19999"],  # Rest of NSW (regional)
     # VIC
-    "206": ["20604"],                    # Melbourne - Inner
-    "209": ["20901"],                    # Melbourne - Inner East
-    "210": ["21001"],                    # Melbourne - Inner South
-    "212": ["21201"],                    # Melbourne - Outer East
-    "214": ["21401"],                    # Melbourne - West
-    "202": ["20201"],                    # Geelong
-    "299": ["29999"],                    # Rest of VIC (regional)
-
+    "206": ["20604"],  # Melbourne - Inner
+    "209": ["20901"],  # Melbourne - Inner East
+    "210": ["21001"],  # Melbourne - Inner South
+    "212": ["21201"],  # Melbourne - Outer East
+    "214": ["21401"],  # Melbourne - West
+    "202": ["20201"],  # Geelong
+    "299": ["29999"],  # Rest of VIC (regional)
     # QLD
-    "301": ["30101"],                    # Brisbane Inner City
-    "303": ["30301"],                    # Brisbane - South
-    "302": ["30201"],                    # Brisbane - North
-    "310": ["31001"],                    # Gold Coast
-    "316": ["31601"],                    # Sunshine Coast
-    "306": ["30601"],                    # Cairns
-    "318": ["31801"],                    # Townsville
-    "399": ["39999"],                    # Rest of QLD (regional)
-
+    "301": ["30101"],  # Brisbane Inner City
+    "303": ["30301"],  # Brisbane - South
+    "302": ["30201"],  # Brisbane - North
+    "310": ["31001"],  # Gold Coast
+    "316": ["31601"],  # Sunshine Coast
+    "306": ["30601"],  # Cairns
+    "318": ["31801"],  # Townsville
+    "399": ["39999"],  # Rest of QLD (regional)
     # WA
-    "503": ["50302"],                    # Perth - Inner
-    "504": ["50402"],                    # Perth - North West
-    "506": ["50601"],                    # Perth - South East
-    "501": ["50101"],                    # Mandurah
-    "599": ["59999"],                    # Rest of WA (regional)
-
+    "503": ["50302"],  # Perth - Inner
+    "504": ["50402"],  # Perth - North West
+    "506": ["50601"],  # Perth - South East
+    "501": ["50101"],  # Mandurah
+    "599": ["59999"],  # Rest of WA (regional)
     # SA
-    "401": ["40101"],                    # Adelaide - Central and Hills
-    "402": ["40201"],                    # Adelaide - North
-    "405": ["40501"],                    # Adelaide - West
-    "406": ["40601"],                    # Adelaide - South
-    "499": ["49999"],                    # Rest of SA (regional)
-
+    "401": ["40101"],  # Adelaide - Central and Hills
+    "402": ["40201"],  # Adelaide - North
+    "405": ["40501"],  # Adelaide - West
+    "406": ["40601"],  # Adelaide - South
+    "499": ["49999"],  # Rest of SA (regional)
     # TAS
-    "601": ["60101", "60102"],           # Greater Hobart
-    "602": ["60201"],                    # Launceston and North East
-    "699": ["69999"],                    # Rest of TAS (regional)
-
+    "601": ["60101", "60102"],  # Greater Hobart
+    "602": ["60201"],  # Launceston and North East
+    "699": ["69999"],  # Rest of TAS (regional)
     # ACT
     "801": ["80101", "80102", "80103", "80104", "80105"],  # Australian Capital Territory
-
     # NT
-    "701": ["70101"],                    # Darwin
-    "799": ["79999"],                    # Rest of NT (regional)
+    "701": ["70101"],  # Darwin
+    "799": ["79999"],  # Rest of NT (regional)
 }
 
 
@@ -255,8 +519,12 @@ class PropertyDataService:
         self._sa3_by_state: dict[str, list[dict]] = {}
 
         for entry in _SA3_SEED_DATA:
-            self._sa3_by_code[entry["code"]] = entry
-            self._sa3_by_state.setdefault(entry["state"], []).append(entry)
+            entry_copy = copy.copy(entry)  # shallow copy — all values are scalars
+            self._sa3_by_code[entry_copy["code"]] = entry_copy
+            self._sa3_by_state.setdefault(entry_copy["state"], []).append(entry_copy)
+
+        # Expose SA4→SA3 mapping as instance attribute for data_generator access
+        self._sa4_to_sa3: dict[str, list[str]] = dict(_SA4_TO_SA3)
 
     # ------------------------------------------------------------------
     # Caching (same pattern as RealWorldBenchmarks / MacroDataService)
@@ -404,27 +672,32 @@ class PropertyDataService:
 
             result = {}
             for series_key, series_data in series.items():
-                # Series key format: "0:region_idx:0" (varies by dimension)
+                # Series key format: "measure_idx:region_idx:freq_idx"
+                # Region is always dimension position 1 in ABS RPPI dataflow
                 parts = series_key.split(":")
-                # Find the region index — try each position
-                for part in parts:
-                    try:
-                        idx = int(part)
-                        if idx in city_index_map:
-                            observations = series_data.get("observations", {})
-                            if observations:
-                                # Get the most recent observation
-                                last_key = max(
-                                    observations.keys(),
-                                    key=lambda k: int(k.split(":")[-1]),
-                                )
-                                value = observations[last_key]
-                                if value and value[0] is not None:
-                                    # Convert percentage to decimal
-                                    result[city_index_map[idx]] = float(value[0]) / 100.0
-                            break
-                    except (ValueError, TypeError):
-                        continue
+                if len(parts) < 2:
+                    continue
+                try:
+                    idx = int(parts[1])
+                except (ValueError, TypeError):
+                    continue
+                if idx not in city_index_map:
+                    continue
+                observations = series_data.get("observations", {})
+                if observations:
+                    last_key = max(observations.keys(), key=lambda k: int(k.split(":")[-1]))
+                    value = observations[last_key]
+                    if value and value[0] is not None:
+                        growth = float(value[0]) / 100.0
+                        # Security: clamp to ±15% quarterly to prevent poisoned data
+                        if math.isfinite(growth) and -0.15 <= growth <= 0.15:
+                            result[city_index_map[idx]] = growth
+                        else:
+                            logger.warning(
+                                "RPPI growth %.4f for %s outside ±15%% — skipped",
+                                growth,
+                                city_index_map.get(idx, idx),
+                            )
 
             return result if result else None
 
@@ -454,13 +727,9 @@ class PropertyDataService:
             regions = self._sa3_by_state.get(state, [])
             for region in regions:
                 # Apply growth proportionally — higher-value areas move more
-                region["property_mult"] = round(
-                    region["property_mult"] * (1.0 + growth_rate), 4
-                )
+                region["property_mult"] = round(region["property_mult"] * (1.0 + growth_rate), 4)
                 # Rents lag property prices — apply 60% of growth
-                region["rental_mult"] = round(
-                    region["rental_mult"] * (1.0 + growth_rate * 0.6), 4
-                )
+                region["rental_mult"] = round(region["rental_mult"] * (1.0 + growth_rate * 0.6), 4)
 
             if regions:
                 logger.info(

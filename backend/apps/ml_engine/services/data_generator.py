@@ -300,9 +300,21 @@ class DataGenerator:
 
     # Fallback income multipliers by ANZSIC division (ABS AWE Aug 2025)
     _FALLBACK_INDUSTRY_INCOME_MULT = {
-        "A": 0.78, "B": 1.85, "C": 0.95, "E": 1.10, "G": 0.68,
-        "H": 0.58, "I": 1.05, "J": 1.40, "K": 1.45, "M": 1.35,
-        "N": 0.75, "O": 1.20, "P": 0.92, "Q": 0.88, "S": 0.80,
+        "A": 0.78,
+        "B": 1.85,
+        "C": 0.95,
+        "E": 1.10,
+        "G": 0.68,
+        "H": 0.58,
+        "I": 1.05,
+        "J": 1.40,
+        "K": 1.45,
+        "M": 1.35,
+        "N": 0.75,
+        "O": 1.20,
+        "P": 0.92,
+        "Q": 0.88,
+        "S": 0.80,
     }
 
     # FHB grants by state (2025-26 rates, no scraping needed)
@@ -310,20 +322,34 @@ class DataGenerator:
         "NSW": {"amount": 10_000, "new_home_cap": 600_000, "house_land_cap": 750_000},
         "VIC": {"amount": 10_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
         "QLD": {"amount": 30_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
-        "WA":  {"amount": 10_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
-        "SA":  {"amount": 15_000, "new_home_cap": 650_000, "house_land_cap": 650_000},
+        "WA": {"amount": 10_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
+        "SA": {"amount": 15_000, "new_home_cap": 650_000, "house_land_cap": 650_000},
         "TAS": {"amount": 30_000, "new_home_cap": 400_000, "house_land_cap": 400_000},
-        "ACT": {"amount": 0,      "new_home_cap": 0,       "house_land_cap": 0},  # stamp duty concession only
-        "NT":  {"amount": 10_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
+        "ACT": {"amount": 0, "new_home_cap": 0, "house_land_cap": 0},  # stamp duty concession only
+        "NT": {"amount": 10_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
     }
 
     # HELP repayment thresholds 2025-26 (ATO)
     HELP_REPAYMENT_THRESHOLDS = [
-        (54_435, 0.00), (62_851, 0.01), (66_621, 0.02), (70_619, 0.025),
-        (74_856, 0.03), (79_347, 0.035), (84_108, 0.04), (89_155, 0.045),
-        (94_504, 0.05), (100_175, 0.055), (106_186, 0.06), (112_560, 0.065),
-        (119_320, 0.07), (126_491, 0.075), (134_099, 0.08), (142_173, 0.085),
-        (150_741, 0.09), (159_834, 0.095), (169_486, 0.10),
+        (54_435, 0.00),
+        (62_851, 0.01),
+        (66_621, 0.02),
+        (70_619, 0.025),
+        (74_856, 0.03),
+        (79_347, 0.035),
+        (84_108, 0.04),
+        (89_155, 0.045),
+        (94_504, 0.05),
+        (100_175, 0.055),
+        (106_186, 0.06),
+        (112_560, 0.065),
+        (119_320, 0.07),
+        (126_491, 0.075),
+        (134_099, 0.08),
+        (142_173, 0.085),
+        (150_741, 0.09),
+        (159_834, 0.095),
+        (169_486, 0.10),
     ]
 
     # ===================================================================
@@ -644,18 +670,21 @@ class DataGenerator:
 
         if self._benchmarks and "f6_rates" in self._benchmarks:
             f6 = self._benchmarks["f6_rates"]
-            oo_var = f6.get("owner_occupier_variable", rba_cash_rate[0] + base_spread)
-            inv_var = f6.get("investor_variable", rba_cash_rate[0] + base_spread + 0.31)
+            oo_var = f6.get("owner_occupier_variable")
+            inv_var = f6.get("investor_variable")
+            # Fall back to per-record arrays if F6 keys missing
+            if oo_var is None:
+                oo_var = rba_cash_rate + base_spread
+            if inv_var is None:
+                inv_var = rba_cash_rate + base_spread + 0.31
 
             # Investor loans get higher rates
             is_investor = sub_pop == "investor"
-            rates = np.where(
-                is_investor,
-                np.full(n, inv_var),
-                np.full(n, oo_var),
-            )
+            rates = np.where(is_investor, inv_var, oo_var)
+            if np.ndim(rates) == 0:
+                rates = np.full(n, float(rates))
             # Personal/business loans: higher margin
-            is_non_home = (purpose != "home")
+            is_non_home = purpose != "home"
             rates[is_non_home] = rba_cash_rate[is_non_home] + base_spread + 1.5
             return rates
 
@@ -1064,12 +1093,24 @@ class DataGenerator:
         sa3_names = np.empty(n, dtype="<U50")
         sa3_property_mult = np.ones(n)
         sa3_rental_mult = np.ones(n)
-        for i in range(n):
-            code, name, p_mult, r_mult = self._property_service.assign_sa3(state[i], rng)
-            sa3_codes[i] = code
-            sa3_names[i] = name
-            sa3_property_mult[i] = p_mult
-            sa3_rental_mult[i] = r_mult
+        # Vectorized: one rng.choice per state instead of per record
+        for st in self.STATES:
+            st_mask = state == st
+            count = st_mask.sum()
+            if count == 0:
+                continue
+            regions = self._property_service._sa3_by_state.get(st, [])
+            if not regions:
+                sa3_codes[st_mask] = "00000"
+                sa3_names[st_mask] = f"Unknown ({st})"
+                continue
+            weights = np.array([r["population_weight"] for r in regions])
+            weights /= weights.sum()
+            idxs = rng.choice(len(regions), size=count, p=weights)
+            sa3_codes[st_mask] = [regions[i]["code"] for i in idxs]
+            sa3_names[st_mask] = [regions[i]["name"] for i in idxs]
+            sa3_property_mult[st_mask] = [regions[i]["property_mult"] for i in idxs]
+            sa3_rental_mult[st_mask] = [regions[i]["rental_mult"] for i in idxs]
 
         # --- ANZSIC industry assignment (correlated with state) ---
         industry_anzsic = np.empty(n, dtype="<U1")
@@ -1078,7 +1119,9 @@ class DataGenerator:
             if st_mask.sum() > 0:
                 weights = self._get_state_industry_weights(st)
                 industry_anzsic[st_mask] = rng.choice(
-                    self.ANZSIC_DIVISIONS, size=st_mask.sum(), p=weights,
+                    self.ANZSIC_DIVISIONS,
+                    size=st_mask.sum(),
+                    p=weights,
                 )
 
         # Industry income multiplier
@@ -1348,7 +1391,16 @@ class DataGenerator:
         # ABS 2025: national median weekly rent ~$580 ($2,515/month)
         # Sydney ~$750/wk ($3,250/mo), regional ~$400/wk ($1,735/mo)
         # Use SA3-level rental multipliers (falls back to state-level if SA3 mult is 1.0)
-        _state_rent_base = {"NSW": 1.30, "VIC": 1.10, "QLD": 1.00, "WA": 1.05, "SA": 0.85, "TAS": 0.80, "ACT": 1.15, "NT": 0.90}
+        _state_rent_base = {
+            "NSW": 1.30,
+            "VIC": 1.10,
+            "QLD": 1.00,
+            "WA": 1.05,
+            "SA": 0.85,
+            "TAS": 0.80,
+            "ACT": 1.15,
+            "NT": 0.90,
+        }
         state_rent_mult = np.array([_state_rent_base[s] for s in state])
         # Blend SA3 rental mult: if SA3 data available, it modulates the state base
         state_rent_mult = state_rent_mult * sa3_rental_mult
@@ -1374,10 +1426,12 @@ class DataGenerator:
 
         # HELP compulsory repayment (affects serviceability)
         # ATO 2025-26: threshold-based repayment from $54,435
-        help_repayment_annual = np.array([
-            self._get_help_repayment_rate(inc) * inc if hecs else 0.0
-            for inc, hecs in zip(annual_income, has_hecs, strict=False)
-        ])
+        help_repayment_annual = np.array(
+            [
+                self._get_help_repayment_rate(inc) * inc if hecs else 0.0
+                for inc, hecs in zip(annual_income, has_hecs, strict=False)
+            ]
+        )
         help_repayment_monthly = (help_repayment_annual / 12).round(2)
 
         # --- Bankruptcy (hard disqualifier) ---
@@ -1693,31 +1747,33 @@ class DataGenerator:
             sa4_unemp = self._benchmarks["sa4_unemployment"]
             # National avg unemployment ~4.0%. Higher unemployment → higher defaults.
             national_avg_unemp = 0.040
+            # Build reverse map SA3→SA4 once instead of O(n * num_SA4)
+            _sa3_to_sa4 = {sa3: sa4 for sa4, sa3_list in self._property_service._sa4_to_sa3.items() for sa3 in sa3_list}
             for i in range(n):
-                # Find SA4 for this SA3 via property service mapping
-                sa4_map = self._property_service._sa4_to_sa3
-                for sa4_code, sa3_list in sa4_map.items():
-                    if sa3_codes[i] in sa3_list:
-                        local_unemp = sa4_unemp.get(sa4_code, national_avg_unemp)
-                        # Scale default rate: +50% default rate per 1pp above avg unemployment
-                        unemp_factor = 1.0 + 0.5 * (local_unemp - national_avg_unemp) / national_avg_unemp
-                        base_default_rate[i] *= max(unemp_factor, 0.5)
-                        break
+                sa4_code = _sa3_to_sa4.get(sa3_codes[i])
+                if sa4_code:
+                    local_unemp = sa4_unemp.get(sa4_code, national_avg_unemp)
+                    # Scale default rate: +50% default rate per 1pp above avg unemployment
+                    unemp_factor = 1.0 + 0.5 * (local_unemp - national_avg_unemp) / national_avg_unemp
+                    base_default_rate[i] *= max(unemp_factor, 0.5)
         geo_postcode_default_rate = base_default_rate + rng.normal(0, 0.003, size=n)
         geo_postcode_default_rate = np.clip(geo_postcode_default_rate, 0.002, 0.05).round(4)
 
         # Industry risk tier — now correlated with ANZSIC division
+        # Industry risk tier — vectorized by risk group (3 rng.choice calls total)
         _high_risk_industries = {"A", "B", "E", "H"}  # agriculture, mining, construction, hospitality
         _low_risk_industries = {"K", "O", "P", "Q"}  # finance, public admin, education, healthcare
+        _tiers = ["low", "medium", "high", "very_high"]
         geo_industry_risk_tier = np.empty(n, dtype="<U9")
-        for i in range(n):
-            div = industry_anzsic[i]
-            if div in _low_risk_industries:
-                geo_industry_risk_tier[i] = rng.choice(["low", "medium", "high", "very_high"], p=[0.55, 0.30, 0.12, 0.03])
-            elif div in _high_risk_industries:
-                geo_industry_risk_tier[i] = rng.choice(["low", "medium", "high", "very_high"], p=[0.20, 0.35, 0.30, 0.15])
-            else:
-                geo_industry_risk_tier[i] = rng.choice(["low", "medium", "high", "very_high"], p=[0.40, 0.35, 0.18, 0.07])
+        _low_mask = np.isin(industry_anzsic, list(_low_risk_industries))
+        _high_mask = np.isin(industry_anzsic, list(_high_risk_industries))
+        _other_mask = ~(_low_mask | _high_mask)
+        if _low_mask.sum() > 0:
+            geo_industry_risk_tier[_low_mask] = rng.choice(_tiers, size=_low_mask.sum(), p=[0.55, 0.30, 0.12, 0.03])
+        if _high_mask.sum() > 0:
+            geo_industry_risk_tier[_high_mask] = rng.choice(_tiers, size=_high_mask.sum(), p=[0.20, 0.35, 0.30, 0.15])
+        if _other_mask.sum() > 0:
+            geo_industry_risk_tier[_other_mask] = rng.choice(_tiers, size=_other_mask.sum(), p=[0.40, 0.35, 0.18, 0.07])
 
         # =============================================================
         # Phase 2: Behavioral realism features
