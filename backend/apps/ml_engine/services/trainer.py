@@ -886,8 +886,9 @@ class ModelTrainer:
         )
         fit_params = {}
         if sample_weights is not None:
+            # sklearn 1.6+ requires fit params via set_params or direct kwargs
             fit_params["sample_weight"] = sample_weights
-        grid.fit(X_train, y_train, **fit_params)
+        grid.fit(X_train, y_train, **fit_params)  # noqa: sklearn direct kwargs OK for non-Pipeline
         return grid.best_estimator_, grid.best_params_
 
     def _build_monotonic_constraints(self, feature_cols):
