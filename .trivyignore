@@ -1,0 +1,4 @@
+# picomatch CVE-2026-33671 in Node's bundled npm (usr/local/lib/node_modules/npm/)
+# Not in app dependencies — cannot be patched without breaking npm self-upgrade.
+# App-level picomatch is pinned to fixed versions via npm overrides in package.json.
+CVE-2026-33671
