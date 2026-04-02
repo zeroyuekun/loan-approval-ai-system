@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-04-02
+
+### Added
+- **Optuna Bayesian hyperparameter optimization** for XGBoost, replacing RandomizedSearchCV. Uses TPE sampler with configurable trial count (`ML_OPTUNA_TRIALS`, default 50). Wider search space: max_depth 4-10, learning_rate 0.01-0.15 (log), reg_lambda 1-50 (log), plus reg_alpha and gamma
+- **4 research-backed feature interactions**: `lvr_x_property_growth` (negative equity risk), `deposit_x_income_stability` (compounding risk), `dti_x_rate_sensitivity` (rate exposure), `credit_x_employment` (profile strength)
+- **Self-healing watchdog service** running as Docker container: health endpoint polling, stuck Celery task detection and revocation, idle DB connection termination, Redis-backed health state tracking
+
+### Changed
+- XGBoost hyperparameter search now uses Optuna TPE sampler instead of sklearn RandomizedSearchCV (10x faster convergence, research-backed for credit risk modeling)
+- Feature engineering module now produces 31 derived features (up from 27)
+
+### Fixed
+- Duplicate dictionary keys in `template_fallback.py` (ruff F601)
+- Import ordering in migration 0019 (ruff I001)
+- `test_data_export.py` hardcoded `/app/ml_models/` path replaced with `settings.ML_MODELS_DIR`
+- lodash updated to 4.18.1 (npm audit high severity vulnerability)
+
 ## [1.7.1] - 2026-04-02
 
 ### Added

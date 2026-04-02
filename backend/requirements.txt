@@ -33,3 +33,4 @@ django-otp>=1.5
 qrcode>=8.0
 schemathesis>=3.36
 reportlab>=4.0
+optuna>=4.0

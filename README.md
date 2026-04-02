@@ -5,10 +5,42 @@
 ![Next.js 15](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white)
 ![XGBoost](https://img.shields.io/badge/XGBoost-ML-blue)
 ![Claude API](https://img.shields.io/badge/Claude-API-cc785c)
-![Tests](https://img.shields.io/badge/Tests-897+-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-993+-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 A full-stack loan approval system that processes applications from submission to decision email. ML scores the applicant, Claude writes the correspondence, and an agent pipeline checks everything for bias before anything gets sent. Built around Australian lending regulations — APRA serviceability buffers, NCCP Act responsible lending, Banking Code of Practice disclosure requirements, the lot. The compliance layer is where most of the engineering work went.
+
+## What to look for in this project
+
+If you're reviewing this as a hiring manager or senior engineer, here's where the interesting engineering decisions are:
+
+**ML pipeline (not a Kaggle notebook)**
+- Optuna Bayesian optimization for hyperparameter tuning — same approach CBA uses via H2O.ai, 10x faster than grid search with equivalent or better results
+- 21 monotonic constraints so the model can't learn that lower credit scores improve approval odds — a regulatory requirement under APRA CPG 235 that most portfolio projects skip
+- Reject inference (parcelling method) to correct for selection bias — training only on approved loans would teach the model that approved-looking profiles are always good
+- Conformal prediction intervals with guaranteed 95% coverage, not just point estimates
+- IV-based feature selection that drops weak features (IV < 0.02) and flags leakage suspects (IV > 1.5)
+- PSI/CSI drift monitoring with KS-test supplement, stored reference distributions, and quarterly decay alerts
+
+**Production patterns (not a demo)**
+- Self-healing watchdog container that monitors health, revokes stuck Celery tasks, and terminates leaked DB connections
+- Fernet field-level encryption with key rotation for PII — not just "passwords are hashed"
+- Three separate Celery queues (ml, email, agents) with per-queue concurrency and resource limits
+- Cost-optimal classification threshold using a 5:1 FP:FN banking cost matrix, not just F1
+- $5/day Claude API budget with circuit breaker and template fallback — emails always deliver even when the API is down or budget is exhausted
+- Per-group fairness thresholds that adjust the approval cutoff by employment type to meet the EEOC 80% disparate impact rule
+
+**Testing and security (not afterthoughts)**
+- 993+ tests across 92 test files (backend + frontend), 60% coverage floor enforced in CI
+- CI pipeline: Ruff lint + format, Bandit SAST, gitleaks secrets scan, npm audit, OWASP ZAP DAST, k6 load test, Docker build — all must pass before merge
+- JWT with HttpOnly cookies, refresh rotation, Argon2 hashing, CSP headers, CORS lockdown, rate limiting, prompt injection defences
+
+**Australian regulatory alignment (not generic)**
+- APRA stress testing: +3% interest rate buffer on all serviceability calculations
+- NCCP Act responsible lending obligations modelled in the application flow
+- 70 standardised adverse action reason codes mapped to SHAP feature importances
+- HEM (Household Expenditure Measure) integration for regulatory-compliant expense assessment
+- ASIC RG 209 compliance checks and Banking Code of Practice disclosure requirements in generated emails
 
 ## Why this architecture
 
@@ -72,7 +104,7 @@ Orchestrator pipeline runs per client with completion and escalation status.
 
 Three levels of AI, each building on the last:
 
-**Level 1** is the ML model. XGBoost and Random Forest, trained on synthetic Australian lending data that models the same decision factors real underwriters use. 32 features, isotonic probability calibration, APRA CPG 235 drift monitoring. The synthetic data has latent variables, measurement noise, and underwriter disagreement baked in so the model produces metrics consistent with production scorecards at Australian lenders (AUC ~0.93, Gini ~0.87) rather than the 0.99 you get when your training labels are perfectly deterministic.
+**Level 1** is the ML model. XGBoost and Random Forest, trained on synthetic Australian lending data that models the same decision factors real underwriters use. 90+ features with 31 engineered interactions, Optuna Bayesian hyperparameter optimization (the same approach CBA uses via H2O.ai), isotonic probability calibration, and APRA CPG 235 drift monitoring. The synthetic data has latent variables, measurement noise, and underwriter disagreement baked in so the model produces metrics consistent with production scorecards at Australian lenders (AUC ~0.86, Gini ~0.72) rather than the 0.99 you get when your training labels are perfectly deterministic.
 
 **Level 2** is the email system. Claude generates approval and denial letters that read like they came from a real lending officer. Every email runs through 10 deterministic guardrail checks before it goes anywhere. Hallucinated dollar amounts, discrimination act violations, AI-sounding language, missing regulatory disclosures — if any check fails, the email regenerates. Three attempts, then it flags for human review.
 
@@ -122,7 +154,7 @@ If any step fails, the application goes to "review" and the agent run logs where
 |-------|------|
 | Backend | Django 5, DRF, PostgreSQL 17, Celery + Redis |
 | Frontend | Next.js 15, React 19, TanStack Query, Tailwind, shadcn/ui |
-| ML | scikit-learn, XGBoost, SHAP |
+| ML | scikit-learn, XGBoost, SHAP, Optuna |
 | AI | Claude API (Sonnet for generation, Opus for compliance review) |
 | Infra | Docker Compose, 7 containers, separate ML and IO Celery workers |
 

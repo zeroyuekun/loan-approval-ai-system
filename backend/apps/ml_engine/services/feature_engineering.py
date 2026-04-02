@@ -37,6 +37,11 @@ DERIVED_FEATURE_NAMES = [
     "stress_index",
     "log_annual_income",
     "log_loan_amount",
+    # Research-backed interactions (LendingClub/Big 4 practice)
+    "lvr_x_property_growth",
+    "deposit_x_income_stability",
+    "dti_x_rate_sensitivity",
+    "credit_x_employment",
 ]
 
 # Default imputation values for optional/nullable fields.
@@ -256,6 +261,21 @@ def compute_derived_features(df):
 
     # Credit score x employment tenure
     df["credit_score_x_tenure"] = (df["credit_score"] / 1200) * np.log1p(df["employment_length"])
+
+    # --- Research-backed feature interactions (LendingClub/Big 4 practice) ---
+
+    # LVR x property growth: high LVR in falling market = negative equity risk
+    df["lvr_x_property_growth"] = df["lvr"] * (1 - df["property_growth_12m"])
+
+    # Deposit ratio x income volatility: low deposit + irregular income = compounding risk
+    savings_regularity = df["salary_credit_regularity"] if "salary_credit_regularity" in df.columns else 0.8
+    df["deposit_x_income_stability"] = df["deposit_ratio"] * savings_regularity
+
+    # DTI x RBA cash rate: high-DTI borrowers are more exposed to rate rises
+    df["dti_x_rate_sensitivity"] = df["debt_to_income"] * df["rba_cash_rate"]
+
+    # Credit score x employment type: permanent + high credit = strongest profile
+    df["credit_x_employment"] = (df["credit_score"] / 1200) * emp_type_weight
 
     # --- Bureau-derived features ---
 
