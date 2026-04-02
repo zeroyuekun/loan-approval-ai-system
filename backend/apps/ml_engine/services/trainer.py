@@ -89,6 +89,8 @@ class ModelTrainer:
         "state",
         "savings_trend_3m",
         "industry_risk_tier",
+        "sa3_region",
+        "industry_anzsic",
     ]
     NUMERIC_COLS = [
         "annual_income",
@@ -196,6 +198,8 @@ class ModelTrainer:
         "cash_advance_count_12m",
         "monthly_rent",
         "gambling_spend_ratio",
+        # Sub-state geography and industry (webscraping enhancement)
+        "help_repayment_monthly",
     ]
 
     def __init__(self):

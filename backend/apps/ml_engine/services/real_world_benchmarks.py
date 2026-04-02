@@ -115,6 +115,110 @@ _FALLBACK_APPROVAL_RATES = {
     "source": "fallback (APRA/ABS derived)",
 }
 
+_FALLBACK_SA4_UNEMPLOYMENT = {
+    # ABS Labour Force Survey SA4-level unemployment rates (2025)
+    # SA4 code → unemployment rate (proportion)
+    "101": 0.034,  # Sydney - City and Inner South
+    "102": 0.038,  # Sydney - Eastern Suburbs
+    "104": 0.042,  # Sydney - Ryde
+    "106": 0.042,  # Hunter Valley exc Newcastle
+    "110": 0.045,  # Sydney - Outer South West
+    "116": 0.048,  # Sydney - South West
+    "117": 0.039,  # Sydney - Parramatta
+    "201": 0.036,  # Melbourne - Inner
+    "202": 0.040,  # Geelong
+    "206": 0.044,  # Melbourne - North East
+    "210": 0.046,  # Melbourne - Outer East
+    "213": 0.052,  # Melbourne - West
+    "301": 0.038,  # Brisbane Inner City
+    "305": 0.041,  # Brisbane - South
+    "309": 0.045,  # Gold Coast
+    "313": 0.043,  # Sunshine Coast
+    "315": 0.039,  # Sunshine Coast (hinterland)
+    "401": 0.041,  # Adelaide - Central and Hills
+    "501": 0.032,  # Perth - Inner
+    "601": 0.040,  # Hobart
+    "701": 0.035,  # Darwin
+    "801": 0.028,  # Australian Capital Territory
+    "source": "fallback (ABS Labour Force 2025)",
+}
+
+_FALLBACK_INDUSTRY_INCOME_MULTIPLIERS = {
+    # ABS Average Weekly Earnings by ANZSIC division, relative to national median
+    "A": 0.78,   # Agriculture, Forestry and Fishing
+    "B": 1.85,   # Mining
+    "C": 0.95,   # Manufacturing
+    "D": 1.25,   # Electricity, Gas, Water and Waste Services
+    "E": 1.10,   # Construction
+    "F": 1.05,   # Wholesale Trade
+    "G": 0.68,   # Retail Trade
+    "H": 0.58,   # Accommodation and Food Services
+    "I": 1.05,   # Transport, Postal and Warehousing
+    "J": 1.40,   # Information Media and Telecommunications
+    "K": 1.45,   # Financial and Insurance Services
+    "L": 1.00,   # Rental, Hiring and Real Estate Services
+    "M": 1.35,   # Professional, Scientific and Technical Services
+    "N": 0.75,   # Administrative and Support Services
+    "O": 1.20,   # Public Administration and Safety
+    "P": 0.92,   # Education and Training
+    "Q": 0.88,   # Health Care and Social Assistance
+    "R": 0.72,   # Arts and Recreation Services
+    "S": 0.80,   # Other Services
+    "source": "fallback (ABS AWE by ANZSIC 2025)",
+}
+
+_FALLBACK_F6_RATES = {
+    # RBA Table F6 — Housing Lending Rates (approx 2025/2026)
+    "owner_occupier_variable": 6.27,
+    "owner_occupier_fixed_3yr": 5.89,
+    "investor_variable": 6.58,
+    "investor_fixed_3yr": 6.15,
+    "source": "fallback (RBA F6 approx 2025/2026)",
+}
+
+_FALLBACK_RBA_HOUSEHOLD_DEBT = {
+    # RBA Table E2 — Household Finances: Selected Ratios (Dec Q 2025)
+    "housing_debt_to_income": 1.41,
+    "total_debt_to_income": 1.87,
+    "debt_to_assets": 0.20,
+    "interest_payments_to_income": 0.098,
+    "quarter": "Q4_2025",
+    "source": "fallback (RBA E2 Dec Q 2025)",
+}
+
+_FALLBACK_HELP_DEBT_STATS = {
+    # ATO Taxation Statistics 2025-26 — HELP/HECS debt
+    "by_age": {
+        "under_25": {"prevalence": 0.35, "mean_balance": 18_500},
+        "25_34": {"prevalence": 0.55, "mean_balance": 26_000},
+        "35_44": {"prevalence": 0.30, "mean_balance": 22_000},
+        "45_54": {"prevalence": 0.12, "mean_balance": 15_000},
+        "55_plus": {"prevalence": 0.05, "mean_balance": 10_000},
+    },
+    "repayment_thresholds": {
+        54_435: 0.00,
+        62_851: 0.01,
+        66_621: 0.02,
+        70_619: 0.025,
+        74_856: 0.03,
+        79_347: 0.035,
+        84_108: 0.04,
+        89_155: 0.045,
+        94_504: 0.05,
+        100_175: 0.055,
+        106_186: 0.06,
+        112_560: 0.065,
+        119_320: 0.07,
+        126_491: 0.075,
+        134_099: 0.08,
+        142_173: 0.085,
+        150_741: 0.09,
+        159_834: 0.095,
+        169_486: 0.10,
+    },
+    "source": "fallback (ATO 2025-26 HELP thresholds)",
+}
+
 
 class RealWorldBenchmarks:
     """Fetches distribution-level lending benchmarks from Australian public sources.
@@ -305,6 +409,68 @@ class RealWorldBenchmarks:
         """
         return _FALLBACK_APPROVAL_RATES
 
+    def get_sa4_unemployment(self) -> dict:
+        """Fetch SA4-level unemployment rates from ABS Labour Force Survey.
+
+        Source: ABS Labour Force (cat 6202.0) via SDMX API — SA4 regions.
+        Falls back to hardcoded ~20 key SA4 regions covering all states.
+        """
+        return self._fetch_with_cache(
+            "sa4_unemployment",
+            self._fetch_sa4_unemployment,
+            _FALLBACK_SA4_UNEMPLOYMENT,
+        )
+
+    def get_industry_income_multipliers(self) -> dict:
+        """Fetch income multipliers by ANZSIC industry division.
+
+        Source: ABS Average Weekly Earnings (cat 6302.0) via SDMX API.
+        Returns multipliers relative to national median income.
+        Falls back to ABS AWE 2025 derived values.
+        """
+        return self._fetch_with_cache(
+            "industry_income_multipliers",
+            self._fetch_industry_income_multipliers,
+            _FALLBACK_INDUSTRY_INCOME_MULTIPLIERS,
+        )
+
+    def get_rba_f6_rates(self) -> dict:
+        """Fetch housing lending rates from RBA Statistical Table F6.
+
+        Source: RBA Table F6 — Housing Lending Rates (CSV download).
+        Falls back to approximate 2025/2026 values.
+        """
+        return self._fetch_with_cache(
+            "f6_rates",
+            self._fetch_rba_f6_rates,
+            _FALLBACK_F6_RATES,
+        )
+
+    def get_help_debt_statistics(self) -> dict:
+        """Fetch HELP/HECS debt statistics from ATO Taxation Statistics.
+
+        Source: ATO Taxation Statistics (XLSX download) — HELP debt by
+        age bracket and repayment thresholds for 2025-26.
+        Falls back to ATO 2025-26 published thresholds.
+        """
+        return self._fetch_with_cache(
+            "help_debt_stats",
+            self._fetch_help_debt_statistics,
+            _FALLBACK_HELP_DEBT_STATS,
+        )
+
+    def get_rba_household_debt(self) -> dict:
+        """Fetch household debt ratios from RBA Table E2 (CSV download).
+
+        Source: RBA Statistical Table E2 — Household Finances: Selected Ratios.
+        Falls back to RBA Dec Q 2025 values.
+        """
+        return self._fetch_with_cache(
+            "rba_household_debt",
+            self._fetch_rba_e2_csv,
+            _FALLBACK_RBA_HOUSEHOLD_DEBT,
+        )
+
     def get_calibration_snapshot(self) -> dict:
         """Fetch all benchmarks in one call.
 
@@ -321,6 +487,11 @@ class RealWorldBenchmarks:
             "lending_rates": self.get_lending_rates(),
             "credit_score_distributions": self.get_credit_score_distributions(),
             "approval_rates": self.get_approval_rates(),
+            "sa4_unemployment": self.get_sa4_unemployment(),
+            "industry_income_multipliers": self.get_industry_income_multipliers(),
+            "f6_rates": self.get_rba_f6_rates(),
+            "help_debt_stats": self.get_help_debt_statistics(),
+            "rba_household_debt": self.get_rba_household_debt(),
             "fetched_at": datetime.utcnow().isoformat(),
         }
         logger.info(
@@ -661,3 +832,500 @@ class RealWorldBenchmarks:
         except Exception as exc:
             logger.warning("RBA F5 CSV parse failed: %s", exc)
         return None
+
+    def _fetch_sa4_unemployment(self) -> dict | None:
+        """Fetch SA4-level unemployment rates from ABS Labour Force (cat 6202.0).
+
+        ABS Labour Force dataflow: ABS,LF
+        Key structure: MEASURE.REGION.SEX.AGE.ADJUSTMENT.FREQ
+        We fetch unemployment rate (UNR_RATE) by SA4 region.
+        """
+        try:
+            # Fetch unemployment rate by SA4 region
+            # 14 = Unemployment rate, SA4 regions, 3 = Persons, 999 = All ages,
+            # 20 = Seasonally adjusted, M = Monthly
+            data = self._fetch_abs_data("ABS,LF", "14.*.3.999.20.M")
+            datasets = data.get("data", {}).get("dataSets", [])
+            if not datasets:
+                return None
+
+            series = datasets[0].get("series", {})
+            if not series:
+                return None
+
+            # Extract SA4 codes and their latest unemployment rates
+            # The dimension structure maps series keys to SA4 region codes
+            structures = data.get("data", {}).get("structure", {}).get("dimensions", {})
+            series_dims = structures.get("series", []) if structures else []
+
+            # Find the region dimension (usually index 1)
+            region_dim = None
+            for dim in series_dims:
+                if "region" in dim.get("id", "").lower() or "sa4" in dim.get("name", "").lower():
+                    region_dim = dim
+                    break
+
+            if not region_dim:
+                logger.warning("Could not find SA4 region dimension in ABS LF response")
+                return None
+
+            region_values = region_dim.get("values", [])
+            result = {}
+
+            for series_key, series_data in series.items():
+                observations = series_data.get("observations", {})
+                if not observations:
+                    continue
+
+                # Get latest observation
+                last_key = max(observations.keys(), key=lambda k: int(k.split(":")[-1]))
+                value_array = observations[last_key]
+                if not value_array or value_array[0] is None:
+                    continue
+
+                # Extract region index from the series key
+                key_parts = series_key.split(":")
+                if len(key_parts) < 2:
+                    continue
+                region_idx = int(key_parts[1])
+
+                if region_idx < len(region_values):
+                    sa4_code = region_values[region_idx].get("id", "")
+                    # Convert percentage to proportion
+                    rate = float(value_array[0]) / 100.0
+                    if 0 < rate < 0.30:  # plausible unemployment rate range
+                        result[sa4_code] = round(rate, 4)
+
+            if result:
+                result["source"] = f"ABS Labour Force cat 6202.0 ({len(result) - 1} SA4 regions)"
+                logger.info("Fetched SA4 unemployment for %d regions", len(result) - 1)
+                return result
+
+        except Exception as exc:
+            logger.warning("ABS SA4 unemployment fetch failed: %s", exc)
+        return None
+
+    def _fetch_industry_income_multipliers(self) -> dict | None:
+        """Fetch Average Weekly Earnings by ANZSIC division from ABS (cat 6302.0).
+
+        ABS AWE dataflow: AWE
+        Key structure: MEASURE.ESTIMATE_TYPE.SEX.SECTOR.INDUSTRY.TSEST.REGION.FREQ
+        We fetch earnings by industry division and compute multipliers relative
+        to the national median.
+        """
+        try:
+            # Fetch all-employees avg weekly total earnings by industry
+            # 1 = Avg weekly total earnings, 1 = Earnings, 3 = Persons,
+            # 7 = Private+Public, * = All industries, 10 = Original,
+            # AUS = National, S = Half-yearly
+            data = self._fetch_abs_data("AWE", "1.1.3.7.*.10.AUS.S")
+            datasets = data.get("data", {}).get("dataSets", [])
+            if not datasets:
+                return None
+
+            series = datasets[0].get("series", {})
+            if not series:
+                return None
+
+            # Extract ANZSIC dimension values
+            structures = data.get("data", {}).get("structure", {}).get("dimensions", {})
+            series_dims = structures.get("series", []) if structures else []
+
+            # Find the industry dimension (usually index 4)
+            industry_dim = None
+            for dim in series_dims:
+                if "industry" in dim.get("id", "").lower():
+                    industry_dim = dim
+                    break
+
+            if not industry_dim:
+                logger.warning("Could not find industry dimension in ABS AWE response")
+                return None
+
+            industry_values = industry_dim.get("values", [])
+            earnings_by_industry = {}
+
+            for series_key, series_data in series.items():
+                observations = series_data.get("observations", {})
+                if not observations:
+                    continue
+
+                # Get latest observation
+                last_key = max(observations.keys(), key=lambda k: int(k.split(":")[-1]))
+                value_array = observations[last_key]
+                if not value_array or value_array[0] is None:
+                    continue
+
+                # Extract industry index from the series key
+                key_parts = series_key.split(":")
+                if len(key_parts) < 5:
+                    continue
+                industry_idx = int(key_parts[4])
+
+                if industry_idx < len(industry_values):
+                    industry_id = industry_values[industry_idx].get("id", "")
+                    earnings_by_industry[industry_id] = float(value_array[0])
+
+            if not earnings_by_industry:
+                return None
+
+            # Find the "TOT" (all industries) value as the national median baseline
+            national_earnings = earnings_by_industry.pop("TOT", None)
+            if national_earnings is None:
+                # Use mean of all industries as baseline
+                national_earnings = sum(earnings_by_industry.values()) / len(earnings_by_industry)
+
+            # Compute multipliers relative to national
+            result = {}
+            # Map ABS industry codes to ANZSIC division letters
+            anzsic_map = {
+                "A": "A", "B": "B", "C": "C", "D": "D", "E": "E",
+                "F": "F", "G": "G", "H": "H", "I": "I", "J": "J",
+                "K": "K", "L": "L", "M": "M", "N": "N", "O": "O",
+                "P": "P", "Q": "Q", "R": "R", "S": "S",
+            }
+
+            for code, earnings in earnings_by_industry.items():
+                division = anzsic_map.get(code, code)
+                multiplier = round(earnings / national_earnings, 2)
+                if 0.2 < multiplier < 5.0:  # plausible range
+                    result[division] = multiplier
+
+            if result:
+                result["source"] = f"ABS AWE cat 6302.0 ({len(result) - 1} ANZSIC divisions)"
+                logger.info("Fetched industry income multipliers for %d divisions", len(result) - 1)
+                return result
+
+        except Exception as exc:
+            logger.warning("ABS industry income multipliers fetch failed: %s", exc)
+        return None
+
+    def _fetch_rba_f6_rates(self) -> dict | None:
+        """Fetch housing lending rates from RBA Table F6 (CSV download).
+
+        RBA publishes CSV files at: https://www.rba.gov.au/statistics/tables/
+        Table F6: Housing Lending Rates
+        """
+        try:
+            url = "https://www.rba.gov.au/statistics/tables/csv/f06hist.csv"
+            with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+                response = client.get(url)
+                response.raise_for_status()
+
+            return self._parse_rba_f6_csv(response.text)
+        except Exception as exc:
+            logger.warning("RBA F6 CSV fetch failed: %s", exc)
+            return None
+
+    def _parse_rba_f6_csv(self, csv_text: str) -> dict | None:
+        """Parse RBA Table F6 CSV for housing lending rate data."""
+        try:
+            # RBA CSVs have header rows before the data starts
+            lines = csv_text.strip().split("\n")
+
+            # Find the header row (contains 'Series ID' or 'Title')
+            header_idx = None
+            for i, line in enumerate(lines):
+                if "series id" in line.lower() or "title" in line.lower():
+                    header_idx = i
+                    break
+
+            if header_idx is None:
+                return None
+
+            # Parse as CSV from the header row
+            reader = csv.reader(lines[header_idx:])
+            headers = next(reader)
+
+            # Find columns for owner-occupier and investor rates
+            oo_var_col = None
+            oo_fixed_col = None
+            inv_var_col = None
+            inv_fixed_col = None
+
+            for idx, header in enumerate(headers):
+                header_lower = header.lower()
+                if "owner" in header_lower and "variable" in header_lower:
+                    oo_var_col = idx
+                elif "owner" in header_lower and "fixed" in header_lower and "3" in header_lower:
+                    oo_fixed_col = idx
+                elif "investor" in header_lower and "variable" in header_lower:
+                    inv_var_col = idx
+                elif "investor" in header_lower and "fixed" in header_lower and "3" in header_lower:
+                    inv_fixed_col = idx
+
+            # Get the last data row
+            last_data_row = None
+            for row in reader:
+                if row and row[0] and len(row) > 1:
+                    try:
+                        float(row[1])
+                        last_data_row = row
+                    except (ValueError, IndexError):
+                        continue
+
+            if last_data_row is None:
+                return None
+
+            # Extract rates — use column indices if found, otherwise positional
+            def _safe_float(row, col_idx):
+                if col_idx is not None and col_idx < len(row):
+                    try:
+                        val = float(row[col_idx])
+                        if 2.0 < val < 15.0:  # plausible lending rate range
+                            return val
+                    except (ValueError, TypeError):
+                        pass
+                return None
+
+            # Collect all plausible rates as positional fallback
+            rates = []
+            for cell in last_data_row[1:]:
+                try:
+                    val = float(cell)
+                    if 2.0 < val < 15.0:
+                        rates.append(val)
+                except (ValueError, TypeError):
+                    continue
+
+            oo_var = _safe_float(last_data_row, oo_var_col)
+            oo_fixed = _safe_float(last_data_row, oo_fixed_col)
+            inv_var = _safe_float(last_data_row, inv_var_col)
+            inv_fixed = _safe_float(last_data_row, inv_fixed_col)
+
+            # Fall back to positional if column matching failed
+            if oo_var is None and len(rates) >= 1:
+                oo_var = rates[0]
+            if oo_fixed is None and len(rates) >= 2:
+                oo_fixed = rates[1]
+            if inv_var is None and len(rates) >= 3:
+                inv_var = rates[2]
+            if inv_fixed is None and len(rates) >= 4:
+                inv_fixed = rates[3]
+
+            if oo_var is not None:
+                return {
+                    "owner_occupier_variable": oo_var,
+                    "owner_occupier_fixed_3yr": oo_fixed or round(oo_var - 0.38, 2),
+                    "investor_variable": inv_var or round(oo_var + 0.31, 2),
+                    "investor_fixed_3yr": inv_fixed or round(oo_var - 0.12, 2),
+                    "source": "RBA Table F6 (live)",
+                }
+
+        except Exception as exc:
+            logger.warning("RBA F6 CSV parse failed: %s", exc)
+        return None
+
+    def _fetch_rba_e2_csv(self) -> dict | None:
+        """Fetch household debt ratios from RBA Table E2 (CSV download).
+
+        RBA publishes CSV files at: https://www.rba.gov.au/statistics/tables/
+        Table E2: Household Finances — Selected Ratios
+        """
+        try:
+            url = "https://www.rba.gov.au/statistics/tables/csv/e2-data.csv"
+            with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+                response = client.get(url)
+                response.raise_for_status()
+
+            return self._parse_rba_e2_csv(response.text)
+        except Exception as exc:
+            logger.warning("RBA E2 CSV fetch failed: %s", exc)
+            return None
+
+    def _parse_rba_e2_csv(self, csv_text: str) -> dict | None:
+        """Parse RBA Table E2 CSV for household debt ratio data."""
+        try:
+            lines = csv_text.strip().split("\n")
+
+            # Find header row (contains 'Series ID' or 'Title')
+            header_idx = None
+            title_idx = None
+            for i, line in enumerate(lines):
+                lower = line.lower()
+                if "series id" in lower:
+                    header_idx = i
+                elif "title" in lower and title_idx is None:
+                    title_idx = i
+
+            if header_idx is None and title_idx is None:
+                return None
+
+            # Use title row to identify columns by name
+            if title_idx is not None:
+                title_reader = csv.reader([lines[title_idx]])
+                titles = next(title_reader)
+                titles_lower = [t.lower().strip() for t in titles]
+
+                # Find relevant columns
+                housing_dti_col = None
+                total_dti_col = None
+                dta_col = None
+                interest_col = None
+
+                for j, title in enumerate(titles_lower):
+                    if "housing" in title and "debt" in title and "income" in title:
+                        housing_dti_col = j
+                    elif "total" in title and "debt" in title and "income" in title:
+                        total_dti_col = j
+                    elif "debt" in title and "assets" in title:
+                        dta_col = j
+                    elif "interest" in title and "income" in title:
+                        interest_col = j
+
+            # Find last data row
+            start = (header_idx or title_idx or 0) + 1
+            reader = csv.reader(lines[start:])
+            last_data_row = None
+            for row in reader:
+                if row and row[0] and len(row) > 1:
+                    try:
+                        float(row[1])
+                        last_data_row = row
+                    except (ValueError, IndexError):
+                        continue
+
+            if last_data_row is None:
+                return None
+
+            def _safe(row, col):
+                if col is not None and col < len(row):
+                    try:
+                        return float(row[col])
+                    except (ValueError, TypeError):
+                        pass
+                return None
+
+            housing_dti = _safe(last_data_row, housing_dti_col)
+            total_dti = _safe(last_data_row, total_dti_col)
+            dta = _safe(last_data_row, dta_col)
+            interest_ratio = _safe(last_data_row, interest_col)
+
+            # Need at least one ratio to be useful
+            if housing_dti is None and total_dti is None:
+                return None
+
+            # RBA E2 uses percentage format (e.g. 141.0 = 141%).
+            # Normalize to ratio format (1.41) to match our fallback values.
+            def _pct_to_ratio(val, fallback):
+                if val is None:
+                    return fallback
+                return val / 100.0 if val > 5.0 else val
+
+            return {
+                "housing_debt_to_income": _pct_to_ratio(housing_dti, 1.41),
+                "total_debt_to_income": _pct_to_ratio(total_dti, 1.87),
+                "debt_to_assets": _pct_to_ratio(dta, 0.20),
+                "interest_payments_to_income": _pct_to_ratio(interest_ratio, 0.098),
+                "quarter": last_data_row[0] if last_data_row else "unknown",
+                "source": "RBA Table E2 (live)",
+            }
+
+        except Exception as exc:
+            logger.warning("RBA E2 CSV parse failed: %s", exc)
+        return None
+
+    def _fetch_help_debt_statistics(self) -> dict | None:
+        """Fetch HELP/HECS debt statistics from ATO Taxation Statistics.
+
+        ATO publishes XLSX files with HELP debt data. We try to download
+        the latest statistics, but fall back to hardcoded values if the
+        download or parse fails.
+        """
+        try:
+            # Try to fetch the ATO Taxation Statistics page for HELP data
+            url = "https://www.ato.gov.au/about-ato/research-and-statistics/in-detail/taxation-statistics"
+            with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+                response = client.get(url)
+                response.raise_for_status()
+                html = response.text
+
+            # Look for XLSX download links related to HELP debt
+            import re
+
+            xlsx_links = re.findall(
+                r'href="(https?://[^"]*(?:help|hecs|higher-education)[^"]*\.xlsx)"',
+                html,
+                re.IGNORECASE,
+            )
+
+            if not xlsx_links:
+                logger.info("No ATO HELP XLSX links found on page — using fallback")
+                return None
+
+            # Download the most recent XLSX
+            xlsx_url = xlsx_links[0]
+            logger.info("Downloading ATO HELP XLSX: %s", xlsx_url)
+            with httpx.Client(
+                timeout=httpx.Timeout(30.0, connect=10.0), follow_redirects=True
+            ) as client:
+                xlsx_response = client.get(xlsx_url)
+                xlsx_response.raise_for_status()
+
+            return self._parse_help_debt_xlsx(xlsx_response.content)
+
+        except Exception as exc:
+            logger.warning("ATO HELP debt fetch failed: %s — using fallback", exc)
+            return None
+
+    def _parse_help_debt_xlsx(self, xlsx_bytes: bytes) -> dict | None:
+        """Parse ATO HELP debt statistics XLSX for debt by age bracket."""
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(
+                io.BytesIO(xlsx_bytes), read_only=True, data_only=True
+            )
+
+            # Start with fallback structure, overlay any parsed values
+            result = dict(_FALLBACK_HELP_DEBT_STATS)
+            result["by_age"] = dict(_FALLBACK_HELP_DEBT_STATS["by_age"])
+
+            # ATO XLSX typically has sheets with HELP debt data by age
+            for sheet_name in wb.sheetnames:
+                sheet_lower = sheet_name.lower()
+                if "help" in sheet_lower or "hecs" in sheet_lower or "debt" in sheet_lower:
+                    ws = wb[sheet_name]
+                    for row in ws.iter_rows(min_row=1, max_row=200, values_only=True):
+                        if not row or not row[0]:
+                            continue
+                        label = str(row[0]).lower().strip()
+
+                        # Try to match age brackets
+                        age_mapping = {
+                            "under 25": "under_25",
+                            "25-34": "25_34",
+                            "25 to 34": "25_34",
+                            "35-44": "35_44",
+                            "35 to 44": "35_44",
+                            "45-54": "45_54",
+                            "45 to 54": "45_54",
+                            "55+": "55_plus",
+                            "55 and over": "55_plus",
+                        }
+
+                        for pattern, age_key in age_mapping.items():
+                            if pattern in label:
+                                # Look for prevalence and mean balance values
+                                numeric_vals = []
+                                for cell in row[1:]:
+                                    if isinstance(cell, (int, float)) and cell > 0:
+                                        numeric_vals.append(cell)
+                                if len(numeric_vals) >= 2:
+                                    prevalence = numeric_vals[0]
+                                    mean_bal = numeric_vals[1]
+                                    # Validate ranges
+                                    if prevalence <= 1.0:
+                                        result["by_age"][age_key] = {
+                                            "prevalence": round(prevalence, 2),
+                                            "mean_balance": round(mean_bal),
+                                        }
+                                break
+
+            result["source"] = f"ATO HELP Statistics ({sheet_name})"
+            wb.close()
+            return result
+
+        except Exception as exc:
+            logger.warning("ATO HELP XLSX parse failed: %s", exc)
+            return None

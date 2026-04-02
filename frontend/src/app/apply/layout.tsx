@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
 import { LogOut, FileText, UserCircle, ChevronDown } from 'lucide-react'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
-import { ComplianceFooter } from '@/components/layout/ComplianceFooter'
 import { LogoIcon } from '@/components/ui/logo'
 import Link from 'next/link'
 
@@ -112,7 +111,6 @@ export default function CustomerLayout({
           {children}
         </ErrorBoundary>
       </main>
-      <ComplianceFooter />
     </div>
   )
 }

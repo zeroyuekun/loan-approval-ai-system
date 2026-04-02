@@ -1,3 +1,5 @@
+const { withSentryConfig } = require('@sentry/nextjs')
+
 /** @type {import('next').NextConfig} */
 const isDev = process.env.NODE_ENV !== 'production'
 const apiOrigin = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1').replace(/\/api\/v1\/?$/, '')
@@ -49,4 +51,9 @@ const nextConfig = {
     ]
   },
 }
-module.exports = nextConfig
+module.exports = process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? withSentryConfig(nextConfig, {
+      silent: true,
+      disableLogger: true,
+    })
+  : nextConfig

@@ -6,6 +6,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+import sentry_sdk
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application version (synced with CHANGELOG.md)
@@ -300,6 +302,17 @@ SPECTACULAR_SETTINGS = {
         {"name": "System", "description": "Health checks and monitoring"},
     ],
 }
+
+# Sentry error tracking (no-op when SENTRY_DSN is empty)
+_sentry_dsn = os.environ.get("SENTRY_DSN", "")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        traces_sample_rate=0.1,
+        profiles_sample_rate=0.1,
+        send_default_pii=False,
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
+    )
 
 # Validate environment variables on startup (fail fast if required vars are missing).
 # Skipped during tests and when SKIP_ENV_VALIDATION=1.

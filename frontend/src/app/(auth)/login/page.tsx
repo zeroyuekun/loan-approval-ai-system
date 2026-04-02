@@ -6,7 +6,6 @@ import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ComplianceFooter } from '@/components/layout/ComplianceFooter'
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -78,9 +77,6 @@ export default function LoginPage() {
             Create one
           </Link>
         </p>
-      </div>
-      <div className="w-full mt-8">
-        <ComplianceFooter />
       </div>
     </div>
   )

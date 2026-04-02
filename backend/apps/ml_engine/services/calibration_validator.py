@@ -23,6 +23,14 @@ logger = logging.getLogger(__name__)
 # Acceptable variance from APRA benchmark before flagging
 DEFAULT_ACCEPTABLE_VARIANCE = 0.005  # +/- 0.5 percentage points
 
+# AIHW Housing Data Dashboard — secondary delinquency benchmarks
+# Source: housingdata.gov.au (aggregates ABS, CoreLogic, APRA data)
+_AIHW_DELINQUENCY_BENCHMARKS = {
+    "mortgage_delinquency_rate": 0.012,  # AIHW Housing Data Dashboard 2025
+    "personal_loan_delinquency_rate": 0.025,
+    "source": "fallback (AIHW Housing Data Dashboard 2025)",
+}
+
 
 class CalibrationValidator:
     """Validates model calibration against APRA aggregate benchmarks."""
@@ -306,6 +314,60 @@ class CalibrationValidator:
         )
         return result
 
+    def validate_against_aihw(
+        self,
+        system_default_rate: float,
+        loan_purpose: str = "mortgage",
+    ) -> dict:
+        """Cross-validate system default rate against AIHW delinquency benchmarks.
+
+        AIHW Housing Data Dashboard aggregates data from ABS, CoreLogic, and APRA.
+        This provides an independent secondary check beyond the primary APRA
+        arrears comparison.
+
+        Args:
+            system_default_rate: Observed default rate in the system (0-1 scale).
+            loan_purpose: 'mortgage' or 'personal' to select the benchmark.
+
+        Returns:
+            dict with AIHW comparison details.
+        """
+        if loan_purpose == "personal":
+            benchmark = _AIHW_DELINQUENCY_BENCHMARKS["personal_loan_delinquency_rate"]
+        else:
+            benchmark = _AIHW_DELINQUENCY_BENCHMARKS["mortgage_delinquency_rate"]
+
+        gap = system_default_rate - benchmark
+        # Use 1 percentage point tolerance for AIHW (secondary, less granular)
+        aihw_tolerance = 0.01
+
+        if abs(gap) <= aihw_tolerance:
+            status = "aligned"
+        elif gap > 0:
+            status = "above_benchmark"
+        else:
+            status = "below_benchmark"
+
+        result = {
+            "system_default_rate": round(system_default_rate, 6),
+            "aihw_benchmark_rate": round(benchmark, 6),
+            "gap": round(gap, 6),
+            "status": status,
+            "loan_purpose": loan_purpose,
+            "source": _AIHW_DELINQUENCY_BENCHMARKS["source"],
+        }
+
+        if status != "aligned":
+            logger.info(
+                "AIHW cross-validation (%s): system=%.4f vs AIHW=%.4f (gap=%.4f)",
+                loan_purpose,
+                system_default_rate,
+                benchmark,
+                gap,
+            )
+
+        return result
+
     def generate_calibration_report(
         self,
         system_default_rate: float,
@@ -359,6 +421,12 @@ class CalibrationValidator:
                 dti_6_plus_pct=dti_6_plus_pct,
             )
 
+        # AIHW cross-validation (secondary benchmark)
+        report["aihw_cross_validation"] = self.validate_against_aihw(
+            system_default_rate=system_default_rate,
+            loan_purpose="mortgage",
+        )
+
         # Aggregate recommendations from all sections
         all_recommendations = list(report["prediction_calibration"].get("recommendations", []))
         if "state_calibration" in report:
@@ -373,6 +441,14 @@ class CalibrationValidator:
                     )
         if "portfolio_composition" in report:
             all_recommendations.extend(report["portfolio_composition"].get("recommendations", []))
+        aihw = report.get("aihw_cross_validation", {})
+        if aihw.get("status") == "above_benchmark":
+            all_recommendations.append(
+                f"System default rate ({aihw['system_default_rate']:.4f}) exceeds "
+                f"AIHW benchmark ({aihw['aihw_benchmark_rate']:.4f}) by "
+                f"{abs(aihw['gap']):.4f}pp "
+                f"({aihw['source']}) — secondary cross-validation flag."
+            )
 
         report["all_recommendations"] = all_recommendations
 

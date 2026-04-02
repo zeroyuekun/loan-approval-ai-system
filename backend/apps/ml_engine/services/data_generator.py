@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from .property_data_service import PropertyDataService
+
 
 class DataGenerator:
     """Creates synthetic loan data calibrated against official Australian sources.
@@ -235,6 +237,94 @@ class DataGenerator:
             "investor_pct": 0.22,
         },
     }
+
+    # ===================================================================
+    # ANZSIC INDUSTRY DISTRIBUTION BY STATE
+    #
+    # Different states have different industry mixes. WA has more mining,
+    # ACT more public admin, QLD more agriculture/tourism, NSW/VIC more
+    # finance and professional services.
+    #
+    # Source: ABS Census 2021 + ABS Labour Force by State Aug 2025.
+    # Weights sum to 1.0 per state. Only top industries shown;
+    # "other" absorbs remainder.
+    # ===================================================================
+    ANZSIC_DIVISIONS = [
+        "A",  # Agriculture
+        "B",  # Mining
+        "C",  # Manufacturing
+        "E",  # Construction
+        "G",  # Retail Trade
+        "H",  # Accommodation/Food
+        "I",  # Transport/Postal
+        "J",  # Info/Media/Telecom
+        "K",  # Financial/Insurance
+        "M",  # Professional/Scientific
+        "N",  # Administrative
+        "O",  # Public Administration
+        "P",  # Education/Training
+        "Q",  # Healthcare/Social
+        "S",  # Other Services
+    ]
+
+    # Baseline national industry weights (ABS Labour Force Aug 2025)
+    _NATIONAL_INDUSTRY_WEIGHTS = [
+        0.025,  # A Agriculture
+        0.020,  # B Mining
+        0.055,  # C Manufacturing
+        0.095,  # E Construction
+        0.091,  # G Retail
+        0.065,  # H Accommodation/Food
+        0.050,  # I Transport
+        0.025,  # J Info/Media
+        0.040,  # K Finance
+        0.090,  # M Professional
+        0.035,  # N Administrative
+        0.060,  # O Public Admin
+        0.085,  # P Education
+        0.145,  # Q Healthcare
+        0.019,  # S Other Services
+    ]
+
+    # State-specific adjustments (multipliers applied to national weights)
+    _STATE_INDUSTRY_ADJUSTMENTS = {
+        "NSW": {"K": 1.6, "M": 1.4, "J": 1.5, "A": 0.5, "B": 0.3},
+        "VIC": {"K": 1.3, "M": 1.3, "P": 1.2, "A": 0.6, "B": 0.2},
+        "QLD": {"A": 1.8, "B": 1.5, "H": 1.4, "E": 1.2, "K": 0.7},
+        "WA": {"B": 4.0, "E": 1.4, "A": 1.3, "K": 0.6, "M": 0.7},
+        "SA": {"C": 1.4, "A": 1.5, "Q": 1.1, "B": 0.8, "K": 0.7},
+        "TAS": {"A": 2.0, "H": 1.5, "Q": 1.2, "K": 0.5, "B": 0.3},
+        "ACT": {"O": 3.5, "P": 1.5, "M": 1.3, "A": 0.1, "B": 0.1, "C": 0.2},
+        "NT": {"O": 2.0, "B": 2.5, "A": 1.5, "Q": 1.3, "K": 0.4},
+    }
+
+    # Fallback income multipliers by ANZSIC division (ABS AWE Aug 2025)
+    _FALLBACK_INDUSTRY_INCOME_MULT = {
+        "A": 0.78, "B": 1.85, "C": 0.95, "E": 1.10, "G": 0.68,
+        "H": 0.58, "I": 1.05, "J": 1.40, "K": 1.45, "M": 1.35,
+        "N": 0.75, "O": 1.20, "P": 0.92, "Q": 0.88, "S": 0.80,
+    }
+
+    # FHB grants by state (2025-26 rates, no scraping needed)
+    FHB_GRANTS = {
+        "NSW": {"amount": 10_000, "new_home_cap": 600_000, "house_land_cap": 750_000},
+        "VIC": {"amount": 10_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
+        "QLD": {"amount": 30_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
+        "WA":  {"amount": 10_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
+        "SA":  {"amount": 15_000, "new_home_cap": 650_000, "house_land_cap": 650_000},
+        "TAS": {"amount": 30_000, "new_home_cap": 400_000, "house_land_cap": 400_000},
+        "ACT": {"amount": 0,      "new_home_cap": 0,       "house_land_cap": 0},  # stamp duty concession only
+        "NT":  {"amount": 10_000, "new_home_cap": 750_000, "house_land_cap": 750_000},
+    }
+
+    # HELP repayment thresholds 2025-26 (ATO)
+    HELP_REPAYMENT_THRESHOLDS = [
+        (54_435, 0.00), (62_851, 0.01), (66_621, 0.02), (70_619, 0.025),
+        (74_856, 0.03), (79_347, 0.035), (84_108, 0.04), (89_155, 0.045),
+        (94_504, 0.05), (100_175, 0.055), (106_186, 0.06), (112_560, 0.065),
+        (119_320, 0.07), (126_491, 0.075), (134_099, 0.08), (142_173, 0.085),
+        (150_741, 0.09), (159_834, 0.095), (169_486, 0.10),
+    ]
 
     # ===================================================================
     # GAUSSIAN COPULA: correlation structure for numeric features.
@@ -522,6 +612,55 @@ class DataGenerator:
         self._use_live_macro = use_live_macro
         self._macro_cache: dict = {}
         self.reject_inference_labels = None
+        self._property_service = PropertyDataService()
+
+    # ------------------------------------------------------------------
+    # Industry / geography helpers
+    # ------------------------------------------------------------------
+
+    def _get_state_industry_weights(self, state_code: str) -> np.ndarray:
+        """Return normalized industry probability weights for a state."""
+        base = np.array(self._NATIONAL_INDUSTRY_WEIGHTS, dtype=float)
+        adjustments = self._STATE_INDUSTRY_ADJUSTMENTS.get(state_code, {})
+        for i, div in enumerate(self.ANZSIC_DIVISIONS):
+            if div in adjustments:
+                base[i] *= adjustments[div]
+        base /= base.sum()
+        return base
+
+    def _get_help_repayment_rate(self, income: float) -> float:
+        """Return HELP repayment rate for given income (ATO 2025-26 thresholds)."""
+        rate = 0.0
+        for threshold, r in self.HELP_REPAYMENT_THRESHOLDS:
+            if income >= threshold:
+                rate = r
+            else:
+                break
+        return rate
+
+    def _compute_product_rates(self, rba_cash_rate, purpose, sub_pop, n):
+        """Compute product rates using F6 rate tiering when available."""
+        base_spread = self.RATE_SPREAD_OVER_CASH  # ~2.15%
+
+        if self._benchmarks and "f6_rates" in self._benchmarks:
+            f6 = self._benchmarks["f6_rates"]
+            oo_var = f6.get("owner_occupier_variable", rba_cash_rate[0] + base_spread)
+            inv_var = f6.get("investor_variable", rba_cash_rate[0] + base_spread + 0.31)
+
+            # Investor loans get higher rates
+            is_investor = sub_pop == "investor"
+            rates = np.where(
+                is_investor,
+                np.full(n, inv_var),
+                np.full(n, oo_var),
+            )
+            # Personal/business loans: higher margin
+            is_non_home = (purpose != "home")
+            rates[is_non_home] = rba_cash_rate[is_non_home] + base_spread + 1.5
+            return rates
+
+        # Fallback: existing flat rate calculation
+        return rba_cash_rate + base_spread
 
     # ------------------------------------------------------------------
     # Benchmark resolution methods
@@ -918,6 +1057,39 @@ class DataGenerator:
         # Assign state/territory based on population-weighted distribution
         state = rng.choice(self.STATES, size=n, p=self.STATE_WEIGHTS)
 
+        # --- SA3 sub-state geography assignment ---
+        # Assigns each applicant to an SA3 region within their state,
+        # providing sub-state property price and rental cost variation.
+        sa3_codes = np.empty(n, dtype="<U5")
+        sa3_names = np.empty(n, dtype="<U50")
+        sa3_property_mult = np.ones(n)
+        sa3_rental_mult = np.ones(n)
+        for i in range(n):
+            code, name, p_mult, r_mult = self._property_service.assign_sa3(state[i], rng)
+            sa3_codes[i] = code
+            sa3_names[i] = name
+            sa3_property_mult[i] = p_mult
+            sa3_rental_mult[i] = r_mult
+
+        # --- ANZSIC industry assignment (correlated with state) ---
+        industry_anzsic = np.empty(n, dtype="<U1")
+        for st in self.STATES:
+            st_mask = state == st
+            if st_mask.sum() > 0:
+                weights = self._get_state_industry_weights(st)
+                industry_anzsic[st_mask] = rng.choice(
+                    self.ANZSIC_DIVISIONS, size=st_mask.sum(), p=weights,
+                )
+
+        # Industry income multiplier
+        industry_income_mult_map = self._FALLBACK_INDUSTRY_INCOME_MULT.copy()
+        if self._benchmarks and "industry_income_multipliers" in self._benchmarks:
+            live = self._benchmarks["industry_income_multipliers"]
+            for div in self.ANZSIC_DIVISIONS:
+                if div in live:
+                    industry_income_mult_map[div] = live[div]
+        industry_income_mult = np.array([industry_income_mult_map.get(d, 1.0) for d in industry_anzsic])
+
         # =============================================================
         # STEP 0b: Temporal dimension — 36-month application window
         # Uses monthly seasonal weights (ABS Lending Indicators) for
@@ -991,6 +1163,8 @@ class DataGenerator:
         # State income multipliers from ABS Employee Earnings Aug 2025:
         # e.g., WA 1.12x (mining), ACT 1.25x (public service), TAS 0.88x
         state_income_mult = np.array([self.STATE_PROFILES[s]["income_mult"] for s in state])
+        # Apply industry-specific income adjustment
+        combined_income_mult = state_income_mult * industry_income_mult
         annual_income = np.zeros(n)
         for pop_name in pop_names:
             mask = sub_pop == pop_name
@@ -998,7 +1172,7 @@ class DataGenerator:
             inc_mean, inc_sigma = self._resolve_income_params(
                 pop_name,
                 is_couple,
-                state_income_mult[mask],
+                combined_income_mult[mask],
             )
             annual_income[mask] = np.exp(stats.norm.ppf(copula["income"][mask], loc=np.log(inc_mean), scale=inc_sigma))
         annual_income = np.clip(annual_income.round(2), 30000, 600000)
@@ -1126,11 +1300,23 @@ class DataGenerator:
         lvr_targets[~is_home] = 0.0
         safe_lvr = np.where(lvr_targets > 0, lvr_targets, 1.0)
         property_value[is_home] = (loan_amount[is_home] / safe_lvr[is_home]).round(2)
+        # Apply SA3 sub-state property price variation
+        # Adjust property values to reflect local market conditions
+        property_value[is_home] = (property_value[is_home] * sa3_property_mult[is_home]).round(2)
         property_value = np.clip(property_value, 0, 10000000)
-
-        # Deposit
+        # Recalculate deposit after SA3 adjustment
         deposit_amount = np.zeros(n)
         deposit_amount[is_home] = np.maximum(property_value[is_home] - loan_amount[is_home], 0).round(2)
+
+        # Apply First Home Buyer grants (state-specific)
+        fhb_mask = (sub_pop == "first_home_buyer") & is_home
+        for st in self.STATES:
+            grant_info = self.FHB_GRANTS.get(st, {})
+            grant_amount = grant_info.get("amount", 0)
+            cap = grant_info.get("new_home_cap", 0)
+            if grant_amount > 0:
+                eligible = fhb_mask & (state == st) & (property_value <= cap)
+                deposit_amount[eligible] += grant_amount
 
         # Monthly declared expenses: copula-correlated with income
         # Higher copula value → higher expenses (correlated with income)
@@ -1161,12 +1347,11 @@ class DataGenerator:
         # Monthly rent paid (for renters) — demonstrates repayment capacity
         # ABS 2025: national median weekly rent ~$580 ($2,515/month)
         # Sydney ~$750/wk ($3,250/mo), regional ~$400/wk ($1,735/mo)
-        state_rent_mult = np.array(
-            [
-                {"NSW": 1.30, "VIC": 1.10, "QLD": 1.00, "WA": 1.05, "SA": 0.85, "TAS": 0.80, "ACT": 1.15, "NT": 0.90}[s]
-                for s in state
-            ]
-        )
+        # Use SA3-level rental multipliers (falls back to state-level if SA3 mult is 1.0)
+        _state_rent_base = {"NSW": 1.30, "VIC": 1.10, "QLD": 1.00, "WA": 1.05, "SA": 0.85, "TAS": 0.80, "ACT": 1.15, "NT": 0.90}
+        state_rent_mult = np.array([_state_rent_base[s] for s in state])
+        # Blend SA3 rental mult: if SA3 data available, it modulates the state base
+        state_rent_mult = state_rent_mult * sa3_rental_mult
         monthly_rent = np.where(
             home_ownership == "rent",
             np.clip(rng.lognormal(mean=np.log(2200), sigma=0.3, size=n) * state_rent_mult, 800, 6000).round(0),
@@ -1186,6 +1371,14 @@ class DataGenerator:
             np.clip(rng.lognormal(mean=np.log(22000), sigma=0.6, size=n), 5000, 120000).round(0),
             0.0,
         )
+
+        # HELP compulsory repayment (affects serviceability)
+        # ATO 2025-26: threshold-based repayment from $54,435
+        help_repayment_annual = np.array([
+            self._get_help_repayment_rate(inc) * inc if hecs else 0.0
+            for inc, hecs in zip(annual_income, has_hecs, strict=False)
+        ])
+        help_repayment_monthly = (help_repayment_annual / 12).round(2)
 
         # --- Bankruptcy (hard disqualifier) ---
         # AFSA 2024-25: ~12,000 personal insolvencies/yr on ~20M adults ≈ 0.06%.
@@ -1494,13 +1687,37 @@ class DataGenerator:
             "ACT": 0.008,
             "NT": 0.020,
         }
-        geo_postcode_default_rate = np.array([state_default_rates.get(s, 0.015) for s in state]) + rng.normal(
-            0, 0.003, size=n
-        )
+        # Use SA4 unemployment to modulate postcode default rates when available
+        base_default_rate = np.array([state_default_rates.get(s, 0.015) for s in state])
+        if self._benchmarks and "sa4_unemployment" in self._benchmarks:
+            sa4_unemp = self._benchmarks["sa4_unemployment"]
+            # National avg unemployment ~4.0%. Higher unemployment → higher defaults.
+            national_avg_unemp = 0.040
+            for i in range(n):
+                # Find SA4 for this SA3 via property service mapping
+                sa4_map = self._property_service._sa4_to_sa3
+                for sa4_code, sa3_list in sa4_map.items():
+                    if sa3_codes[i] in sa3_list:
+                        local_unemp = sa4_unemp.get(sa4_code, national_avg_unemp)
+                        # Scale default rate: +50% default rate per 1pp above avg unemployment
+                        unemp_factor = 1.0 + 0.5 * (local_unemp - national_avg_unemp) / national_avg_unemp
+                        base_default_rate[i] *= max(unemp_factor, 0.5)
+                        break
+        geo_postcode_default_rate = base_default_rate + rng.normal(0, 0.003, size=n)
         geo_postcode_default_rate = np.clip(geo_postcode_default_rate, 0.002, 0.05).round(4)
 
-        # Industry risk tier
-        geo_industry_risk_tier = rng.choice(["low", "medium", "high", "very_high"], size=n, p=[0.40, 0.35, 0.18, 0.07])
+        # Industry risk tier — now correlated with ANZSIC division
+        _high_risk_industries = {"A", "B", "E", "H"}  # agriculture, mining, construction, hospitality
+        _low_risk_industries = {"K", "O", "P", "Q"}  # finance, public admin, education, healthcare
+        geo_industry_risk_tier = np.empty(n, dtype="<U9")
+        for i in range(n):
+            div = industry_anzsic[i]
+            if div in _low_risk_industries:
+                geo_industry_risk_tier[i] = rng.choice(["low", "medium", "high", "very_high"], p=[0.55, 0.30, 0.12, 0.03])
+            elif div in _high_risk_industries:
+                geo_industry_risk_tier[i] = rng.choice(["low", "medium", "high", "very_high"], p=[0.20, 0.35, 0.30, 0.15])
+            else:
+                geo_industry_risk_tier[i] = rng.choice(["low", "medium", "high", "very_high"], p=[0.40, 0.35, 0.18, 0.07])
 
         # =============================================================
         # Phase 2: Behavioral realism features
@@ -1538,6 +1755,8 @@ class DataGenerator:
         # 2F. Life event triggers
         loan_trigger_event = self._assign_life_event_trigger(purpose, sub_pop, behavioral_rngs[5])
 
+        product_rate = self._compute_product_rates(rba_cash_rate, purpose, sub_pop, n)
+
         data = {
             "annual_income": annual_income,
             "credit_score": credit_score,
@@ -1558,16 +1777,23 @@ class DataGenerator:
             "applicant_type": applicant_type,
             "has_hecs": has_hecs,
             "hecs_debt_balance": hecs_debt_balance,
+            # HELP repayment (serviceability impact)
+            "help_repayment_monthly": help_repayment_monthly,
             "has_bankruptcy": has_bankruptcy,
             "existing_property_count": existing_property_count,
             "state": state,
+            # Sub-state geography
+            "sa3_region": sa3_codes,
+            "sa3_name": sa3_names,
+            # Industry
+            "industry_anzsic": industry_anzsic,
             # Temporal dimension
             "application_date": application_date,
             "application_quarter": application_quarter,
             "origination_quarter": pd.to_datetime(application_date).to_period("Q").astype(str),
             "cash_rate": rba_cash_rate,
-            "product_rate": rba_cash_rate + self.RATE_SPREAD_OVER_CASH,
-            "stress_test_rate": rba_cash_rate + self.RATE_SPREAD_OVER_CASH + self.STRESS_TEST_BUFFER,
+            "product_rate": product_rate,
+            "stress_test_rate": product_rate + self.STRESS_TEST_BUFFER,
             "rba_cash_rate": rba_cash_rate,
             "unemployment_rate": unemployment_rate,
             "property_growth_12m": property_growth_12m,

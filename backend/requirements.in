@@ -22,6 +22,7 @@ python-json-logger>=3.2
 httpx>=0.28
 openpyxl>=3.1
 django-prometheus>=2.3
+sentry-sdk[django,celery]>=2.19
 drf-spectacular>=0.28
 django-csp>=4.0
 hypothesis>=6.100
