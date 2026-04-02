@@ -4,6 +4,87 @@ All notable changes to this project are documented here, in reverse chronologica
 
 ---
 
+## 2026-04-02 — Optuna Bayesian Optimization, Self-Healing Watchdog, Security Hardening, and Code Review Fixes (v1.8.0)
+
+**Goal:** Replace the brute-force hyperparameter search with Bayesian optimization, add a self-healing watchdog for production resilience, fix all findings from a 3-agent code review (security, frontend quality, ML pipeline), and add research-backed feature interactions.
+
+### Why these changes were needed
+
+The XGBoost hyperparameter search was using `RandomizedSearchCV` with 90 random combinations — a lottery approach that often misses optimal regions of the search space. Optuna's TPE (Tree-structured Parzen Estimator) sampler uses Bayesian optimization to intelligently explore the hyperparameter space, converging on good configurations 10x faster. This is the standard approach in production credit risk modeling (see: Probst et al., 2019; Shwartz-Ziv & Armon, 2022).
+
+The system had no automated recovery from common production failures: stuck Celery tasks, unhealthy services, or idle database connections accumulating. A self-healing watchdog running as a Docker sidecar monitors health every 30 seconds and automatically remediates issues before they cascade.
+
+A 3-agent code review (backend security, frontend quality, ML pipeline) found 24 issues — 6 critical, 18 high. The most impactful were: an unauthenticated deep health check leaking infrastructure details, 6 training features never provided at inference (causing systematic scoring bias), imputation values contaminated by test data before model serialization, and a regex bug causing non-deterministic rendering in the email preview.
+
+### Backend changes
+
+**Optuna Bayesian optimization (`trainer.py`)**
+- Replaced `RandomizedSearchCV` with `optuna.create_study(direction="maximize", sampler=TPESampler(seed=42))`
+- Configurable trial count via `settings.ML_OPTUNA_TRIALS` (default 50)
+- Wider search space: `max_depth` 4–10, `learning_rate` 0.01–0.15 (log-uniform), `reg_lambda` 1–50 (log), plus `reg_alpha` and `gamma`
+- AUC-ROC as objective function with 3-fold cross-validation
+- Falls back to default XGBoost params if Optuna unavailable
+
+**4 research-backed feature interactions (`feature_engineering.py`)**
+- `lvr_x_property_growth`: LVR × property growth — captures negative equity risk when high LVR meets falling property values
+- `deposit_x_income_stability`: deposit ratio × salary credit regularity — compounding risk signal
+- `dti_x_rate_sensitivity`: DTI × (interest rate / 5.0) — rate exposure for highly leveraged borrowers
+- `credit_x_employment`: credit score × employment length — profile strength interaction
+
+**Self-healing watchdog (`management/commands/watchdog.py`)**
+- Runs as Docker container polling every 30 seconds
+- Health monitor: tracks consecutive failures in Redis, triggers alerts after 3 failures
+- Celery healer: detects tasks stuck beyond 2× their time limit, revokes and resets stuck loan applications to "review" status
+- DB watchdog: terminates idle connections >10 minutes, warns at 80% connection pool usage
+- All actions logged with structured JSON output
+
+**Security fixes (from code review)**
+- `/health/deep/` now requires `X-Health-Token` header when `HEALTH_CHECK_TOKEN` env var is set
+- Swagger UI restricted to `IsAdminUser` permission
+- K8s ConfigMap no longer contains unauthenticated Redis URLs (moved to Secrets)
+- `train_model_task` now has `autoretry_for`, `retry_backoff`, `max_retries`, and absolute path default
+- `generate_email_task` catches non-retriable exceptions with audit logging
+- `.env.example` updated with authenticated Redis URL pattern
+
+**ML pipeline fixes (from code review)**
+- Added 6 missing inference features: `hecs_debt_balance`, `existing_property_count`, `cash_advance_count_12m`, `monthly_rent`, `gambling_spend_ratio`, `help_repayment_monthly`
+- Fixed imputation leakage: `_train_imputation` snapshot taken after `fit_preprocess`, restored after val/test `transform()` calls
+- `MetricsService` moved to `__init__` (was allocating per prediction)
+- Trainer/predictor `CATEGORICAL_COLS` synced (8 columns, `sa3_region` excluded due to OHE explosion)
+
+### Frontend changes
+
+**Code quality fixes (from code review)**
+- Fixed global regex `g` flag bug in `EmailPreview.tsx` — was causing non-deterministic bold rendering on percentage figures
+- Added `componentDidCatch` to `ErrorBoundary` — errors now reported to Sentry with component stack traces
+- `WorkflowTimeline` uses `step.step_name` as React key instead of array index
+- Replaced all `any` types with proper interfaces (`RegisterPayload`, `LoanPayload`) — zero TypeScript `any` escapes in public contracts
+- Exported `RegisterPayload` and `LoanPayload` from `api.ts`
+
+**README recruiter section**
+- Added "What to look for" section highlighting key engineering decisions for reviewers
+
+### Files changed
+- `backend/apps/ml_engine/services/trainer.py` — Optuna integration, imputation fix
+- `backend/apps/ml_engine/services/feature_engineering.py` — 4 feature interactions
+- `backend/apps/agents/management/commands/watchdog.py` — new (338 lines)
+- `backend/config/urls.py` — health check auth, Swagger restriction
+- `backend/config/settings/base.py` — HEALTH_CHECK_TOKEN, ML_OPTUNA_TRIALS
+- `backend/apps/ml_engine/services/predictor.py` — 6 missing features, MetricsService init
+- `backend/apps/ml_engine/tasks.py` — retry logic, absolute path
+- `backend/apps/email_engine/tasks.py` — error handling
+- `backend/apps/agents/tasks.py` — noqa fix
+- `k8s/configmap.yaml` — removed Redis URLs
+- `docker-compose.yml` — watchdog service
+- `frontend/src/components/emails/EmailPreview.tsx` — regex fix
+- `frontend/src/components/ui/error-boundary.tsx` — componentDidCatch
+- `frontend/src/components/agents/WorkflowTimeline.tsx` — React key fix
+- `frontend/src/lib/auth.ts`, `api.ts`, `hooks/useApplications.ts` — TypeScript types
+- `README.md` — recruiter section
+- `CHANGELOG.md` — v1.8.0 entry
+
+---
+
 ## 2026-04-02 — Sentry Observability, Data Source Expansion, Version Sync, and Test Fixes
 
 **Goal:** Close the last observability gap by adding Sentry error tracking, expand the real-world data calibration with two new Australian government sources, sync all version strings, and fix the 4 remaining test failures so the entire suite runs green.
