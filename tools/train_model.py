@@ -2,7 +2,7 @@
 """Train Random Forest and/or XGBoost models on loan application data.
 
 Loads a CSV dataset, preprocesses features, performs hyperparameter tuning
-with GridSearchCV, and saves the best model(s) with joblib.
+with Optuna (XGBoost) or GridSearchCV (RF), and saves the best model(s) with joblib.
 
 Usage:
     python tools/train_model.py
@@ -198,7 +198,7 @@ def train_random_forest(X_train, y_train, preprocessor) -> Pipeline:
 
 
 def train_xgboost(X_train, y_train, preprocessor) -> Pipeline:
-    """Train an XGBoost model with GridSearchCV.
+    """Train an XGBoost model with Optuna Bayesian optimization.
 
     Args:
         X_train: Training features.
@@ -206,7 +206,7 @@ def train_xgboost(X_train, y_train, preprocessor) -> Pipeline:
         preprocessor: Fitted ColumnTransformer.
 
     Returns:
-        Best pipeline from grid search.
+        Best pipeline from Optuna optimization.
     """
     try:
         from xgboost import XGBClassifier
@@ -214,45 +214,69 @@ def train_xgboost(X_train, y_train, preprocessor) -> Pipeline:
         print("ERROR: xgboost is not installed. Install with: pip install xgboost")
         sys.exit(1)
 
-    print("\n--- Training XGBoost ---")
+    try:
+        import optuna
+
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+    except ImportError:
+        print("ERROR: optuna is not installed. Install with: pip install optuna")
+        sys.exit(1)
+
+    print("\n--- Training XGBoost (Optuna Bayesian optimization) ---")
 
     # Calculate scale_pos_weight for class imbalance
     neg_count = (y_train == 0).sum()
     pos_count = (y_train == 1).sum()
     scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1.0
 
+    # Preprocess training data once
+    X_train_processed = preprocessor.transform(X_train)
+
+    from sklearn.model_selection import StratifiedKFold, cross_val_score
+
+    def objective(trial):
+        params = {
+            "n_estimators": trial.suggest_int("n_estimators", 100, 300),
+            "max_depth": trial.suggest_int("max_depth", 4, 10),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.15, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1.0, 50.0, log=True),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True),
+            "gamma": trial.suggest_float("gamma", 0.0, 5.0),
+            "random_state": 42,
+            "scale_pos_weight": scale_pos_weight,
+            "eval_metric": "logloss",
+            "n_jobs": 1,
+        }
+        model = XGBClassifier(**params)
+        cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+        scores = cross_val_score(model, X_train_processed, y_train, cv=cv, scoring="roc_auc")
+        return scores.mean()
+
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=42),
+    )
+    study.optimize(objective, n_trials=50, timeout=1200, show_progress_bar=False)
+
+    print(f"Best Optuna AUC-ROC: {study.best_value:.4f}")
+    print(f"Best params: {study.best_params}")
+
+    # Refit with best params
+    best_model = XGBClassifier(
+        **study.best_params,
+        random_state=42,
+        scale_pos_weight=scale_pos_weight,
+        eval_metric="logloss",
+        n_jobs=-1,
+    )
+    best_model.fit(X_train_processed, y_train)
+
     pipeline = Pipeline([
         ("preprocessor", preprocessor),
-        ("classifier", XGBClassifier(
-            random_state=42,
-            scale_pos_weight=scale_pos_weight,
-            eval_metric="logloss",
-            use_label_encoder=False,
-            n_jobs=1,  # Prevent thread oversubscription inside GridSearchCV n_jobs=-1
-        )),
+        ("classifier", best_model),
     ])
 
-    param_grid = {
-        "classifier__n_estimators": [100, 200],
-        "classifier__max_depth": [3, 6, 9],
-        "classifier__learning_rate": [0.01, 0.1, 0.3],
-    }
-
-    grid_search = GridSearchCV(
-        pipeline,
-        param_grid,
-        cv=5,
-        scoring="f1_weighted",
-        n_jobs=-1,
-        verbose=1,
-    )
-
-    grid_search.fit(X_train, y_train)
-
-    print(f"Best params: {grid_search.best_params_}")
-    print(f"Best CV F1 (weighted): {grid_search.best_score_:.4f}")
-
-    return grid_search.best_estimator_
+    return pipeline
 
 
 def evaluate_model(model, X, y, dataset_name: str = "test") -> dict:

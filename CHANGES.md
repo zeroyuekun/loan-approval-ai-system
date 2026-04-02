@@ -922,7 +922,7 @@ A denial is a lost customer. If they don't qualify for a $600K home loan, they m
 
 **Infrastructure:** Docker Compose (7 containers), PostgreSQL 17, Redis, separate ML/IO workers
 
-**ML Pipeline:** XGBoost + Random Forest, synthetic data generator, GridSearchCV, model versioning
+**ML Pipeline:** XGBoost + Random Forest, synthetic data generator, Optuna (XGBoost) / GridSearchCV (RF), model versioning
 
 ### Files created
 - Full project structure: ~50 Python files, ~20 TypeScript/React files, 7 Docker configs
