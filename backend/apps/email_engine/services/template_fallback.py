@@ -163,11 +163,6 @@ _REASON_EXPLANATIONS = {
         "loan amount was below what we require, as savings demonstrate "
         "capacity to manage repayments."
     ),
-    "Bureau risk score outside acceptable range": (
-        "Credit history: The information in your credit file, including "
-        "enquiries, repayment history, and existing accounts, did not meet "
-        "our requirements for a loan of this type."
-    ),
     "Credit utilisation ratio above acceptable range": (
         "Credit utilisation: The proportion of your available credit that "
         "is currently in use exceeded our acceptable threshold."
@@ -175,11 +170,6 @@ _REASON_EXPLANATIONS = {
     "Recent credit enquiry frequency above acceptable range": (
         "Credit enquiries: The number of credit enquiries on your file in "
         "the recent period exceeded the threshold we apply for this product."
-    ),
-    "Debt service coverage outside acceptable range": (
-        "Debt servicing capacity: Based on your income, existing debts, and "
-        "living expenses, the total repayments required would exceed what we "
-        "consider manageable for your current financial position."
     ),
 }
 
@@ -290,11 +280,6 @@ _IMPROVEMENT_STEPS = {
     "Savings to loan ratio below acceptable range": (
         "Building your savings over time to demonstrate a pattern of regular "
         "saving. A higher deposit or savings balance strengthens your application."
-    ),
-    "Bureau risk score outside acceptable range": (
-        "Reviewing your credit report for accuracy and taking steps to "
-        "strengthen your credit profile. Paying all bills on time and "
-        "limiting new credit applications for 6\u201312 months will help."
     ),
     "Credit utilisation ratio above acceptable range": (
         "Reducing balances on existing credit cards and revolving credit "
