@@ -8,6 +8,7 @@ from django.contrib import admin
 from django.http import HttpResponse, JsonResponse
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from rest_framework.permissions import IsAdminUser
 from rest_framework import status as http_status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -97,7 +98,19 @@ def health_check(request):
 
 
 def deep_health_check(request):
-    """Deep health check verifying DB, Redis, and ML model availability."""
+    """Deep health check verifying DB, Redis, and ML model availability.
+
+    Restricted: requires HEALTH_CHECK_TOKEN header or staff session.
+    """
+    from django.conf import settings as django_settings
+
+    token = getattr(django_settings, "HEALTH_CHECK_TOKEN", "")
+    if token:
+        provided = request.headers.get("X-Health-Token", "")
+        is_staff = getattr(request.user, "is_staff", False)
+        if provided != token and not is_staff:
+            return JsonResponse({"error": "unauthorized"}, status=403)
+
     checks = {}
 
     # Database
@@ -190,6 +203,8 @@ def deep_health_check(request):
 
 
 urlpatterns = [
+    # Prometheus metrics — restrict in production via reverse proxy or firewall.
+    # Only expose on internal network; do not route through public ingress.
     path("", include("django_prometheus.urls")),
     path(".well-known/security.txt", security_txt, name="security-txt"),
     path("api/v1/health/", health_check, name="health-check"),
@@ -203,6 +218,6 @@ urlpatterns = [
     path("api/v1/agents/", include("apps.agents.urls")),
     path("api/v1/tasks/<str:task_id>/status/", TaskStatusView.as_view(), name="task-status"),
     # API Documentation
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    path("api/schema/", SpectacularAPIView.as_view(permission_classes=[IsAdminUser]), name="schema"),
+    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema", permission_classes=[IsAdminUser]), name="swagger-ui"),
 ]

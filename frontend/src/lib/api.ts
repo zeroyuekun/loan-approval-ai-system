@@ -11,10 +11,11 @@ interface PaginationParams {
   [key: string]: string | number | boolean | undefined
 }
 
-interface RegisterPayload {
+export interface RegisterPayload {
   username: string
   email: string
   password: string
+  password2?: string
   first_name: string
   last_name: string
   role?: string
@@ -36,7 +37,7 @@ interface CustomerProfilePayload {
   [key: string]: string | number | boolean | string[] | null | undefined
 }
 
-interface LoanPayload {
+export interface LoanPayload {
   annual_income?: number
   credit_score?: number
   loan_amount?: number

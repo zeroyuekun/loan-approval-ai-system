@@ -89,7 +89,8 @@ class ModelTrainer:
         "state",
         "savings_trend_3m",
         "industry_risk_tier",
-        "sa3_region",
+        # sa3_region excluded: ~50 categories causes OHE explosion; geographic
+        # signal is carried by postcode_default_rate and derived LVR features
         "industry_anzsic",
     ]
     NUMERIC_COLS = [
@@ -505,6 +506,7 @@ class ModelTrainer:
 
         # Fit preprocessing on training data only
         df_train, feature_cols = self.fit_preprocess(df_train)
+        _train_imputation = dict(self._imputation_values)  # snapshot train-only values
         X_train = df_train[feature_cols]
 
         # Transform val and test using already-fit encoders/scaler
@@ -513,6 +515,9 @@ class ModelTrainer:
 
         df_test, _ = self.transform(df_test)
         X_test = df_test[feature_cols]
+
+        # Restore train-based imputation values (transform may have overwritten)
+        self._imputation_values = _train_imputation
 
         # Fairness reweighting: compute sample weights to reduce employment
         # type disparate impact (DI). Without this, DI ~0.38 (failing EEOC 80%

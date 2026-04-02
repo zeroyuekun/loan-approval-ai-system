@@ -26,7 +26,19 @@ def generate_email_task(self, application_id, decision):
     application = LoanApplication.objects.select_related("applicant", "decision").get(pk=application_id)
 
     generator = EmailGenerator()
-    result = generator.generate(application, decision)
+    try:
+        result = generator.generate(application, decision)
+    except (ConnectionError, TimeoutError, OSError):
+        raise  # let Celery autoretry handle infrastructure errors
+    except Exception as exc:
+        logger.exception("Email generation failed for application %s", application_id)
+        AuditLog.objects.create(
+            action="email_generation_failed",
+            resource_type="LoanApplication",
+            resource_id=str(application_id),
+            details={"error": str(exc), "decision": decision},
+        )
+        raise
 
     # Save email record and guardrail logs
     email = EmailPersistenceService.save_generated_email(application, decision, result)

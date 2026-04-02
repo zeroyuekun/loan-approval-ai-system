@@ -236,6 +236,9 @@ class ModelPredictor:
         self.group_thresholds = bundle.get("group_thresholds", {})
         self.conformal_scores = bundle.get("conformal_scores", np.array([]))
         self.consistency_checker = DataConsistencyChecker()
+        from .metrics import MetricsService
+
+        self._metrics_service = MetricsService()
 
     @staticmethod
     def _add_derived_features(df):
@@ -429,6 +432,13 @@ class ModelPredictor:
             # Geographic risk
             "postcode_default_rate": _num("postcode_default_rate", 0.015),
             "industry_risk_tier": _cat("industry_risk_tier", "medium"),
+            # Training features not on LoanApplication — imputed at inference
+            "hecs_debt_balance": _num("hecs_debt_balance", 0.0),
+            "existing_property_count": _num("existing_property_count", 0, int),
+            "cash_advance_count_12m": _num("cash_advance_count_12m", 0, int),
+            "monthly_rent": _num("monthly_rent", 0.0),
+            "gambling_spend_ratio": _num("gambling_spend_ratio", 0.0),
+            "help_repayment_monthly": _num("help_repayment_monthly", 0.0),
         }
 
         # Validate inputs
@@ -517,12 +527,9 @@ class ModelPredictor:
             requires_human_review = True
 
         # Expected Loss (EL = PD x LGD x EAD) — Basel III / APRA APS 113
-        from .metrics import MetricsService
-
-        _ms = MetricsService()
         property_val = float(features.get("property_value") or 0)
         lvr = (float(features.get("loan_amount", 0)) / property_val) if property_val > 0 else 0.0
-        expected_loss = _ms.compute_expected_loss(
+        expected_loss = self._metrics_service.compute_expected_loss(
             pd_value=1.0 - probability,  # PD = probability of denial/default
             loan_amount=features.get("loan_amount", 0),
             purpose=features.get("purpose", "personal"),

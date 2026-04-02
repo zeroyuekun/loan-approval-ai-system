@@ -303,6 +303,9 @@ SPECTACULAR_SETTINGS = {
     ],
 }
 
+# Health check token (restricts /health/deep/ when set)
+HEALTH_CHECK_TOKEN = os.environ.get("HEALTH_CHECK_TOKEN", "")
+
 # Sentry error tracking (no-op when SENTRY_DSN is empty)
 _sentry_dsn = os.environ.get("SENTRY_DSN", "")
 if _sentry_dsn:

@@ -12,8 +12,8 @@ _DEDUP_LOCK_TTL = 600
 def _cleanup_stuck_application(application_id):
     """Reset application status if it's stuck at 'processing' after a task failure."""
     try:
-        from apps.agents.models import AgentRun  # noqa: F401, F841 — local import for Celery
-        from apps.loans.models import LoanApplication  # noqa: F401, F841 — local import for Celery
+        from apps.agents.models import AgentRun  # noqa: F401 — local import for Celery
+        from apps.loans.models import LoanApplication  # noqa: F401 — local import for Celery
 
         LoanApplication.objects.filter(
             pk=application_id,

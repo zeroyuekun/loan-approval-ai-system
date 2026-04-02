@@ -96,8 +96,8 @@ class TestTrainerPipeline:
         assert len(trainer.NUMERIC_COLS) == 90, f"Expected 90 numeric columns, got {len(trainer.NUMERIC_COLS)}"
 
     def test_categorical_cols_count(self, trainer):
-        assert len(trainer.CATEGORICAL_COLS) == 9, (
-            f"Expected 9 categorical columns, got {len(trainer.CATEGORICAL_COLS)}"
+        assert len(trainer.CATEGORICAL_COLS) == 8, (
+            f"Expected 8 categorical columns, got {len(trainer.CATEGORICAL_COLS)}"
         )
 
     def test_imputation_values_complete(self, trainer, small_dataset):

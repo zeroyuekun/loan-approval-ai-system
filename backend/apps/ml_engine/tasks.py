@@ -14,14 +14,22 @@ from apps.ml_engine.services.drift_monitor import compute_psi as _compute_psi
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, name="apps.ml_engine.tasks.train_model_task", time_limit=1800)
+@shared_task(
+    bind=True,
+    name="apps.ml_engine.tasks.train_model_task",
+    time_limit=1800,
+    soft_time_limit=1740,
+    autoretry_for=(ConnectionError, TimeoutError, OSError),
+    retry_backoff=True,
+    max_retries=2,
+)
 def train_model_task(self, algorithm="xgb", data_path=None):
     """Train a model asynchronously via Celery."""
     from apps.ml_engine.services.predictor import clear_model_cache
     from apps.ml_engine.services.trainer import ModelTrainer
 
     if data_path is None:
-        data_path = ".tmp/synthetic_loans.csv"
+        data_path = str(settings.BASE_DIR / ".tmp" / "synthetic_loans.csv")
 
     trainer = ModelTrainer()
     model, metrics = trainer.train(data_path, algorithm=algorithm)

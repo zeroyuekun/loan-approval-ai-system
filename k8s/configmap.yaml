@@ -8,8 +8,8 @@ metadata:
     app.kubernetes.io/part-of: aussieloanai
 data:
   DJANGO_SETTINGS_MODULE: config.settings.production
-  CELERY_BROKER_URL: redis://redis:6379/0
-  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  # CELERY_BROKER_URL and CELERY_RESULT_BACKEND moved to k8s/secrets.yaml
+  # Use authenticated Redis URLs: redis://:$(REDIS_PASSWORD)@redis:6379/0
   POSTGRES_DB: loan_approval_db
   POSTGRES_HOST: postgres
   POSTGRES_PORT: "5432"

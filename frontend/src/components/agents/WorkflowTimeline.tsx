@@ -68,7 +68,7 @@ export function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
   return (
     <div className="space-y-0">
       {steps.map((step, index) => (
-        <div key={index} className="flex gap-3">
+        <div key={step.step_name || index} className="flex gap-3">
           <div className="flex flex-col items-center">
             {getStepIcon(step.status)}
             {index < steps.length - 1 && (

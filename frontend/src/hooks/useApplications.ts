@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { loansApi } from '@/lib/api'
+import { loansApi, type LoanPayload } from '@/lib/api'
 import { LoanApplication, PaginatedResponse } from '@/types'
 
 export function useApplications(params?: Record<string, any>) {
@@ -29,7 +29,7 @@ export function useCreateApplication() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (formData: any) => {
+    mutationFn: async (formData: LoanPayload) => {
       const { data } = await loansApi.create(formData)
       return data
     },
@@ -43,7 +43,7 @@ export function useUpdateApplication() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ id, data: updateData }: { id: string; data: any }) => {
+    mutationFn: async ({ id, data: updateData }: { id: string; data: Partial<LoanPayload> }) => {
       const { data } = await loansApi.update(id, updateData)
       return data
     },

@@ -27,7 +27,7 @@ const CLOSINGS = [
 const OPTION_PATTERN = /^Option\s+\d+[\s:.\-–—]/
 
 // Inline patterns for key figures: interest rates and percentage figures
-const INLINE_BOLD_PATTERN = /(\d+\.\d+%\s*p\.a\.|\d+\.\d+%)/g
+const INLINE_BOLD_PATTERN = /(\d+\.\d+%\s*p\.a\.|\d+\.\d+%)/
 
 function renderLineWithInlineBold(line: string, key: number) {
   const parts = line.split(INLINE_BOLD_PATTERN)
@@ -48,9 +48,6 @@ function renderLineWithInlineBold(line: string, key: number) {
 
 export function FormattedEmailBody({ body }: { body: string }) {
   const lines = body.split('\n')
-  // Reset regex lastIndex between renders
-  INLINE_BOLD_PATTERN.lastIndex = 0
-
   return (
     <>
       {lines.map((line, i) => {
