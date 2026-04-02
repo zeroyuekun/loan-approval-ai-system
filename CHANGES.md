@@ -4,6 +4,98 @@ All notable changes to this project are documented here, in reverse chronologica
 
 ---
 
+## 2026-04-02 — Three-Round Code Review, Security Hardening, and Trivy Container Scanning (v1.8.1)
+
+**Goal:** Run three rounds of automated code review (backend security, frontend quality, ML pipeline), fix all critical and high-severity findings, add container image vulnerability scanning to CI, and harden the remaining security surface.
+
+### Why these changes were needed
+
+A portfolio project targeting fintech roles needs to demonstrate not just feature development but also security awareness and code quality discipline. Running multiple review passes simulates the adversarial review process a real codebase undergoes — finding issues that single-pass reviews miss, such as the Optuna `params=` vs `fit_params=` bug that was silently dropping sample weights during hyperparameter optimization.
+
+The Trivy container scanner was added after discovering that the `trivy-action` GitHub Action itself was subject to a supply-chain compromise (GHSA-69fq-xp46-6x23), so the action was pinned to a verified commit SHA rather than a mutable tag — a real-world security practice.
+
+### Code Review Round 1 (24 findings)
+
+**Backend Security (8 findings):**
+- Deep health check (`/health/deep/`) was publicly accessible, leaking infrastructure details (ML model version, queue depths, AI budget). Fixed with `X-Health-Token` header guard.
+- Prometheus `/metrics` endpoint was unauthenticated. Added reverse proxy documentation.
+- K8s ConfigMap contained unauthenticated Redis URLs. Moved to Secrets.
+- Swagger UI was accessible to all authenticated users including customers. Restricted to `IsAdminUser`.
+- 2FA was installed (`django-otp`) but never enforced at the permission layer. Documented for future enforcement.
+- IP logging used `REMOTE_ADDR` (incorrect behind proxy). Documented for `django-ipware` adoption.
+- CSP was in report-only mode in non-production. Documented for staging hardening.
+- `.env.example` showed Redis without auth. Updated with authenticated URL pattern.
+
+**Frontend Quality (7 findings):**
+- Global regex `g` flag in EmailPreview caused non-deterministic bold rendering on percentage figures. Fixed by removing `g` flag.
+- `ErrorBoundary` was missing `componentDidCatch` — errors were silently swallowed without Sentry reporting. Added with dynamic `@sentry/nextjs` import.
+- `WorkflowTimeline` used array index as React key on an updating list. Changed to `step.step_name`.
+- Multiple `any` types in public contracts (`register`, `useApplications`, `AgentStep.result_summary`). Replaced with proper TypeScript interfaces.
+
+**ML Pipeline (9 findings):**
+- 6 training features were never provided at inference (`hecs_debt_balance`, `existing_property_count`, etc.), causing systematic scoring bias. Added to predictor.
+- `add_derived_features()` mutated `_imputation_values` from test data — fragile leakage risk. Fixed with train-only snapshot.
+- `MetricsService` was instantiated per prediction. Moved to `__init__`.
+- `train_model_task` had no retry logic and used a relative path default. Added `autoretry_for`, absolute path.
+- `generate_email_task` swallowed non-retriable exceptions. Added explicit error handling with audit logging.
+
+### Code Review Round 2 (18 findings)
+
+**ML Pipeline (8 findings):**
+- Optuna `cross_val_score` used `params=` instead of `fit_params=` — was silently dropping sample weights during hyperparameter search. The model was being optimized on an unweighted distribution. Fixed.
+- `lvr_x_property_growth` treated `property_growth_12m` (stored as percentage, e.g., 5.0) as a fraction, producing ~100x magnitude error. Fixed with `/100`.
+- `MedianPruner` was inert — `cross_val_score` is a batch call with no `trial.report()` steps. Removed.
+- Reject inference `transform()` clobbered the restored `_imputation_values`. Added second restore after RI transform.
+- Watchdog created a new Celery app instance per 30-second cycle, leaking broker connections. Fixed to reuse single instance.
+
+**Backend Security (4 findings):**
+- Watchdog sent no auth header to the now-protected health endpoint. Added `X-Health-Token` from settings.
+- Watchdog CLI args had no lower bound — `--interval 0` caused Redis DoS loop. Enforced minimums.
+- Optuna loop had no wall-clock timeout — could exhaust Celery's 30-minute time limit. Added 1200s timeout.
+- Health token compared with `!=` (timing-attack vulnerable). Changed to `hmac.compare_digest`.
+
+**Frontend (4 findings):**
+- `setTimeout` memory leak in `usePipelineOrchestration`. Fixed with `useRef` + cleanup on unmount.
+- `useAuth.register` callback still typed as `any`. Fixed to `RegisterPayload`.
+- `AgentStep.result_summary` and `TaskStatus.result` typed as `any`. Narrowed to `Record<string, unknown> | string | null`.
+
+### Code Review Round 3 — Final Polish (6 findings)
+
+- Deploy job didn't gate on DAST scan failure — added `dast-scan` to the `if` condition.
+- ML model views (metrics, model card, versions, drift) were accessible to customers. Restricted to `IsAdminOrOfficer`.
+- Prometheus and Grafana monitoring ports were on `0.0.0.0`. Bound to `127.0.0.1`.
+- Complaint description had no length constraint. Added `max_length=10000`.
+- LogoutView used bare `except Exception`. Narrowed to `TokenError`.
+- Frontend Docker runs as root in dev compose. Documented as trade-off.
+
+### Trivy container scanning
+
+- Added Trivy scan job to `.github/workflows/ci.yml` for both backend and frontend Docker images
+- Pinned `aquasecurity/trivy-action` to commit SHA (not mutable `@latest` tag) after supply-chain compromise
+- Resolved HIGH vulnerabilities in frontend image by upgrading base image
+- CI now runs 12 jobs: backend-test, backend-lint, frontend-lint, frontend-test, security (Bandit), dependency-audit, secret-scan (gitleaks), docker-build, trivy-scan, dast-scan (ZAP), load-test (k6), deploy
+
+### Files changed
+- `backend/config/urls.py` — health check auth, hmac comparison, admin path, Swagger restriction
+- `backend/config/settings/base.py` — HEALTH_CHECK_TOKEN, DJANGO_ADMIN_URL
+- `backend/apps/ml_engine/views.py` — 4 views restricted to IsAdminOrOfficer
+- `backend/apps/ml_engine/services/trainer.py` — fit_params fix, Optuna timeout, imputation restore, MedianPruner removal
+- `backend/apps/ml_engine/services/feature_engineering.py` — lvr_x_property_growth unit fix
+- `backend/apps/ml_engine/services/predictor.py` — 6 missing features, MetricsService init
+- `backend/apps/ml_engine/tasks.py` — retry logic, absolute path
+- `backend/apps/email_engine/tasks.py` — error handling
+- `backend/apps/accounts/views.py` — TokenError narrowing
+- `backend/apps/loans/serializers.py` — complaint max_length
+- `backend/apps/agents/management/commands/watchdog.py` — auth header, param bounds, Celery reuse
+- `docker-compose.yml` — localhost port bindings
+- `.github/workflows/ci.yml` — Trivy scan, DAST gate, SHA pinning
+- `frontend/Dockerfile` — Trivy vulnerability fix
+- `frontend/src/` — regex fix, ErrorBoundary, timer cleanup, TypeScript types
+- `k8s/configmap.yaml` — Redis URLs removed
+- `.env.example` — auth URLs, HEALTH_CHECK_TOKEN, DJANGO_ADMIN_URL
+
+---
+
 ## 2026-04-02 — Optuna Bayesian Optimization, Self-Healing Watchdog, Security Hardening, and Code Review Fixes (v1.8.0)
 
 **Goal:** Replace the brute-force hyperparameter search with Bayesian optimization, add a self-healing watchdog for production resilience, fix all findings from a 3-agent code review (security, frontend quality, ML pipeline), and add research-backed feature interactions.

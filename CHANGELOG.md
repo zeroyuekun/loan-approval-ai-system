@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-04-02
+
+### Security
+- Restrict ML model views (metrics, model card, versions, drift) to admin/officer only — were accessible to customers
+- Bind Prometheus and Grafana monitoring ports to `127.0.0.1` — were on `0.0.0.0`
+- Use `hmac.compare_digest` for health check token comparison (timing-attack safe)
+- Randomize Django admin URL via `DJANGO_ADMIN_URL` env var
+- Narrow LogoutView exception handler to `TokenError` — was bare `except Exception`
+- Add `dast-scan` failure check to CI deploy gate condition
+- Pin Trivy GitHub Action to commit SHA after supply-chain compromise (GHSA-69fq-xp46-6x23)
+- Add `max_length=10000` to complaint description serializer (was unbounded)
+
+### Fixed
+- Optuna `cross_val_score` uses `fit_params=` instead of `params=` — was silently dropping sample weights
+- `lvr_x_property_growth` feature interaction: normalize percentage to fraction (`/ 100`) — was ~100x magnitude error
+- Remove inert `MedianPruner` from Optuna study (no `trial.report()` calls in batch cross-validation)
+- Add 1200s wall-clock timeout to Optuna `study.optimize` — prevents exceeding Celery task time limit
+- Fix reject inference `transform()` clobbering train imputation values after restore
+- Fix watchdog Celery app connection leak — reuse single instance across cycles
+- Watchdog sends `X-Health-Token` header when polling `/health/deep/`
+- Watchdog CLI args enforce minimum bounds (interval>=5s, idle>=1m, failures>=1)
+- Fix `setTimeout` memory leak in `usePipelineOrchestration` — cleanup on unmount
+- Fix `useAuth.register` callback type: `any` → `RegisterPayload`
+- Narrow `AgentStep.result_summary` and `TaskStatus.result` from `any` to typed union
+- Resolve Trivy HIGH vulnerabilities in frontend Docker image
+- Update numeric cols test assertion (90 → 94) and metamorphic test for `credit_x_employment`
+
 ## [1.8.0] - 2026-04-02
 
 ### Added
