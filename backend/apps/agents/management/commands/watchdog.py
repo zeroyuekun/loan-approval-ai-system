@@ -60,9 +60,9 @@ class Command(BaseCommand):
             logger.addHandler(handler)
             logger.setLevel(logging.INFO)
 
-        interval = options["interval"]
-        self.max_idle_minutes = options["max_idle_conn_minutes"]
-        self.max_failures = options["max_consecutive_failures"]
+        interval = max(options["interval"], 5)
+        self.max_idle_minutes = max(options["max_idle_conn_minutes"], 1)
+        self.max_failures = max(options["max_consecutive_failures"], 1)
         self.consecutive_failures = 0
         self._running = True
         self._celery_app = Celery("config")
@@ -104,9 +104,13 @@ class Command(BaseCommand):
 
     def _check_health(self):
         """Poll the deep health endpoint and track failures."""
+        from django.conf import settings as django_settings
+
         backend_url = "http://backend:8000/api/v1/health/deep/"
+        token = getattr(django_settings, "HEALTH_CHECK_TOKEN", "")
+        headers = {"X-Health-Token": token} if token else {}
         try:
-            resp = requests.get(backend_url, timeout=10)
+            resp = requests.get(backend_url, timeout=10, headers=headers)
             data = resp.json()
 
             db_ok = data.get("database") == "ok"

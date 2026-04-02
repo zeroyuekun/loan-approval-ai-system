@@ -1004,7 +1004,11 @@ class ModelTrainer:
             # MedianPruner removed: cross_val_score is a batch call with no
             # intermediate trial.report() steps, so the pruner has no effect.
         )
-        study.optimize(objective, n_trials=n_optuna_trials, show_progress_bar=False)
+        # Reserve 600s for final refit, calibration, saving, and DB writes
+        study.optimize(objective, n_trials=n_optuna_trials, timeout=1200, show_progress_bar=False)
+
+        if not study.best_trial:
+            raise RuntimeError("Optuna completed no trials within time budget")
 
         best_params = study.best_params
         logger.info(

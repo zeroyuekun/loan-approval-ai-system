@@ -2,8 +2,10 @@
 URL configuration for loan approval AI system.
 """
 
+import hmac
 import json
 
+from django.conf import settings
 from django.contrib import admin
 from django.http import HttpResponse, JsonResponse
 from django.urls import include, path
@@ -107,7 +109,7 @@ def deep_health_check(request):
     if token:
         provided = request.headers.get("X-Health-Token", "")
         is_staff = getattr(request.user, "is_staff", False)
-        if provided != token and not is_staff:
+        if not hmac.compare_digest(provided.encode(), token.encode()) and not is_staff:
             return JsonResponse({"error": "unauthorized"}, status=403)
 
     checks = {}
@@ -209,7 +211,7 @@ urlpatterns = [
     path("api/v1/health/", health_check, name="health-check"),
     path("api/v1/health/deep/", deep_health_check, name="deep-health-check"),
     path("api/v1/health/ready/", deep_health_check, name="readiness-probe"),
-    path("admin/", admin.site.urls),
+    path(settings.DJANGO_ADMIN_URL, admin.site.urls),
     path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/loans/", include("apps.loans.urls")),
     path("api/v1/ml/", include("apps.ml_engine.urls")),

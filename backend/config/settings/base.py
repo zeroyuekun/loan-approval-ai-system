@@ -306,6 +306,9 @@ SPECTACULAR_SETTINGS = {
 # Health check token (restricts /health/deep/ when set)
 HEALTH_CHECK_TOKEN = os.environ.get("HEALTH_CHECK_TOKEN", "")
 
+# Django admin URL path (randomize in production to prevent brute-force targeting)
+DJANGO_ADMIN_URL = os.environ.get("DJANGO_ADMIN_URL", "admin/")
+
 # Sentry error tracking (no-op when SENTRY_DSN is empty)
 _sentry_dsn = os.environ.get("SENTRY_DSN", "")
 if _sentry_dsn:
