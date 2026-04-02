@@ -85,7 +85,7 @@
     @apply backdrop-blur-lg border border-white/40 shadow-lg shadow-black/[0.04];
   }
   .gradient-primary {
-    background: #1e40af;
+    background: rgba(30, 64, 175, 0.85);
   }
   .gradient-sidebar {
     background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 40%, #1e293b 100%);
