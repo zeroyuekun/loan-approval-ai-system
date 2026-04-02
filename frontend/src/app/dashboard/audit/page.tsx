@@ -72,7 +72,7 @@ export default function AuditPage() {
   if (actionFilter) params.action = actionFilter
   if (resourceTypeFilter) params.resource_type = resourceTypeFilter
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['audit-logs', params],
     queryFn: () => auditApi.list(params).then((res) => res.data),
   })
@@ -129,6 +129,8 @@ export default function AuditPage() {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
+          ) : isError ? (
+            <div className="text-center py-12 text-destructive">Failed to load audit logs. Please refresh.</div>
           ) : results.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">No audit log entries found.</div>
           ) : (

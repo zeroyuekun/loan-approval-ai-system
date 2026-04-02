@@ -439,7 +439,24 @@ class AdminCustomerProfileUpdateSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "total_assets", "total_monthly_liabilities", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "total_assets",
+            "total_monthly_liabilities",
+            "created_at",
+            "updated_at",
+            # Banking fields — managed by the bank, not editable via profile endpoint
+            "account_tenure_years",
+            "loyalty_tier",
+            "num_products",
+            "savings_balance",
+            "checking_balance",
+            "has_credit_card",
+            "has_mortgage",
+            "has_auto_loan",
+            "on_time_payment_pct",
+            "previous_loans_repaid",
+        )
         extra_kwargs = {
             "primary_id_number": {"write_only": True, "required": False},
             "secondary_id_number": {"write_only": True, "required": False},

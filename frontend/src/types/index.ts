@@ -288,6 +288,7 @@ export interface GuardrailCheck {
   check_name: string;
   passed: boolean;
   details: string;
+  quality_score?: number;
 }
 
 export interface AgentRun {

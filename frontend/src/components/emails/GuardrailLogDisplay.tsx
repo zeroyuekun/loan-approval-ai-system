@@ -55,9 +55,7 @@ export function GuardrailLogDisplay({ checks }: GuardrailLogDisplayProps) {
   const passedChecks = checks.filter((c) => c.passed).length
   const failedChecks = totalChecks - passedChecks
   const allPassed = failedChecks === 0
-  const qualityScore = checks[0] && 'quality_score' in checks[0]
-    ? (checks[0] as any).quality_score
-    : null
+  const qualityScore = checks[0]?.quality_score ?? null
 
   return (
     <div className="space-y-3">

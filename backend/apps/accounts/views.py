@@ -103,10 +103,18 @@ class CookieTokenRefreshView(generics.GenericAPIView):
             response = Response({"detail": "Token refreshed."})
             _set_jwt_cookies(response, new_access, refresh)
             return response
-        except Exception:
+        except TokenError:
             response = Response(
                 {"detail": "Token is invalid or expired."},
                 status=status.HTTP_401_UNAUTHORIZED,
+            )
+            _clear_jwt_cookies(response)
+            return response
+        except Exception:
+            logger.exception("Unexpected error during token refresh")
+            response = Response(
+                {"detail": "Token refresh failed."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
             _clear_jwt_cookies(response)
             return response
