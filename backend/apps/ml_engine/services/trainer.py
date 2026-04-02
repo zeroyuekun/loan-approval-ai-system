@@ -509,6 +509,9 @@ class ModelTrainer:
         # only assembles the selected features
         self.NUMERIC_COLS = selected_numeric
 
+        # Snapshot employment_type BEFORE OHE for fairness reweighting
+        _emp_type_raw = df_train["employment_type"].copy() if "employment_type" in df_train.columns else None
+
         # Fit preprocessing on training data only
         df_train, feature_cols = self.fit_preprocess(df_train)
         _train_imputation = dict(self._imputation_values)  # snapshot train-only values
@@ -531,8 +534,8 @@ class ModelTrainer:
         # See: MATLAB bias mitigation methodology (mathworks.com/help/risk/
         # bias-mitigation-for-credit-scoring-model-by-reweighting.html)
         sample_weights = None
-        if "employment_type" in df_train.columns:
-            emp_groups = df_train["employment_type"]
+        if _emp_type_raw is not None:
+            emp_groups = _emp_type_raw
             group_counts = emp_groups.value_counts()
             total = len(emp_groups)
             n_groups = len(group_counts)
@@ -560,11 +563,9 @@ class ModelTrainer:
             ri_available = denied_indices.intersection(reject_inference_labels.index)
             if len(ri_available) > 0:
                 ri_labels = reject_inference_labels.loc[ri_available]
-                # Preprocess denied rows through the already-fit pipeline
-                df_denied = df_train.loc[ri_available].copy()
-                df_denied_transformed, _ = self.transform(df_denied)
-                self._imputation_values = _train_imputation  # restore after RI transform
-                X_denied = df_denied_transformed[feature_cols]
+                # Use already-preprocessed rows from X_train (df_train is post-OHE+scaled).
+                # Do NOT re-transform — that would double-scale the features.
+                X_denied = X_train.loc[X_train.index.intersection(ri_available)]
 
                 # Augment training data
                 X_train = pd.concat([X_train, X_denied], ignore_index=True)

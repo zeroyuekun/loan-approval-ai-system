@@ -782,7 +782,7 @@ class RealWorldBenchmarks:
         Table F5: Indicator Lending Rates
         """
         try:
-            url = "https://www.rba.gov.au/statistics/tables/csv/f05hist.csv"
+            url = "https://www.rba.gov.au/statistics/tables/csv/f5-data.csv"
             with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
                 response = client.get(url)
                 response.raise_for_status()
@@ -1040,7 +1040,7 @@ class RealWorldBenchmarks:
         Table F6: Housing Lending Rates
         """
         try:
-            url = "https://www.rba.gov.au/statistics/tables/csv/f06hist.csv"
+            url = "https://www.rba.gov.au/statistics/tables/csv/f6-data.csv"
             with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
                 response = client.get(url)
                 response.raise_for_status()

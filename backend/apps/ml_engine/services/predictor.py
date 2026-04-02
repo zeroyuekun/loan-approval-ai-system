@@ -456,8 +456,7 @@ class ModelPredictor:
         # Transform using saved preprocessing artifacts
         df = self._transform(df)
 
-        # Predict
-        self.model.predict(df[self.feature_cols])[0]
+        # Predict (probability-based — label derived from threshold comparison)
         probabilities = self.model.predict_proba(df[self.feature_cols])[0]
 
         # Global feature importances
