@@ -4,8 +4,6 @@ These tests verify that the new data sources integrate correctly into
 the DataGenerator and produce more realistic synthetic loan data.
 """
 
-import numpy as np
-import pandas as pd
 import pytest
 
 from apps.ml_engine.services.data_generator import DataGenerator
