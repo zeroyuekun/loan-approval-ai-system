@@ -107,7 +107,7 @@ export default function ModelMetricsPage() {
                 <div className="text-left">
                   <p className="font-medium text-blue-900">Training {activeTrainingLabel} model...</p>
                   <p className="text-sm text-blue-600">
-                    Running GridSearchCV with cross-validation. Elapsed: <ElapsedTimer />
+                    Running Optuna Bayesian optimization with cross-validation. Elapsed: <ElapsedTimer />
                   </p>
                   <p className="text-xs text-blue-500 mt-1">Typically 3-5 minutes. You can navigate away — training continues in the background.</p>
                 </div>
@@ -156,7 +156,7 @@ export default function ModelMetricsPage() {
                 Training {activeTrainingLabel} model...
               </p>
               <p className="text-sm text-blue-700 mt-0.5">
-                Running GridSearchCV with 3-fold cross-validation on 10,000 samples
+                Running Optuna Bayesian optimization with 3-fold cross-validation
               </p>
               <div className="flex items-center gap-4 mt-2">
                 <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">

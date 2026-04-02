@@ -99,9 +99,9 @@ The data generator uses a 6-component mixture model to produce realistic applica
 ### Primary Model
 
 - **Algorithm**: XGBoost (`XGBClassifier`)
-- **Hyperparameter search**: `RandomizedSearchCV` with 50 iterations, 3-fold cross-validation, scoring on F1
-- **Search space**: n_estimators {100, 200, 300}, max_depth {3, 6, 9}, learning_rate {0.01, 0.1}, subsample {0.8, 1.0}, min_child_weight {1, 5}, colsample_bytree {0.8, 1.0}, reg_alpha {0, 0.1}, reg_lambda {1, 5}
-- **Early stopping**: 20 rounds on validation set (refitted after search)
+- **Hyperparameter search**: Optuna Bayesian optimization (TPE sampler) with 50 trials, 3-fold cross-validation, scoring on AUC-ROC
+- **Search space**: n_estimators [200-600], max_depth [4-10], learning_rate [0.01-0.15 log], subsample [0.6-1.0], min_child_weight [1-10], colsample_bytree [0.6-1.0], reg_lambda [1-50 log], reg_alpha [0.01-10 log], gamma [0-5]
+- **Early stopping**: 30 rounds on validation set (refitted after search)
 - **Class imbalance**: `scale_pos_weight` = (count of denied) / (count of approved)
 
 ### Probability Calibration

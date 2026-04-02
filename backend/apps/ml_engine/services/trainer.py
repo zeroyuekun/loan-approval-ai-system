@@ -379,7 +379,7 @@ class ModelTrainer:
         )
 
     def train(self, data_path, algorithm="xgb", use_reject_inference=True, reject_inference_labels=None):
-        """Train model with GridSearchCV and return model + metrics.
+        """Train model with Optuna (XGBoost) or GridSearchCV (RF) and return model + metrics.
 
         Parameters
         ----------
@@ -563,6 +563,7 @@ class ModelTrainer:
                 # Preprocess denied rows through the already-fit pipeline
                 df_denied = df_train.loc[ri_available].copy()
                 df_denied_transformed, _ = self.transform(df_denied)
+                self._imputation_values = _train_imputation  # restore after RI transform
                 X_denied = df_denied_transformed[feature_cols]
 
                 # Augment training data
@@ -656,7 +657,7 @@ class ModelTrainer:
             raw_model, best_params = self._train_rf(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
 
         # Probability calibration on validation set only (avoids data leakage
-        # since GridSearchCV already used cross-validation on the training set).
+        # since Optuna/GridSearchCV already used cross-validation on the training set).
         # Adaptive method: isotonic for >= 1000 samples, Platt scaling otherwise.
         model = _CalibratedModel(raw_model, X_val, y_val)
 
@@ -675,7 +676,7 @@ class ModelTrainer:
         y_val_prob = model.predict_proba(X_val)[:, 1]
         self._conformal_scores = np.sort(np.abs(y_val_prob - y_val.values))
 
-        # Evaluate on test set only (val was used implicitly via GridSearchCV)
+        # Evaluate on test set only (val was used for calibration and early stopping)
         y_pred = model.predict(X_test)
         y_prob = model.predict_proba(X_test)[:, 1]
 
@@ -994,13 +995,14 @@ class ModelTrainer:
             if sample_weights is not None:
                 cv_fit_params["sample_weight"] = sample_weights
 
-            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
+            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", fit_params=cv_fit_params)
             return scores.mean()
 
         study = optuna.create_study(
             direction="maximize",
             sampler=optuna.samplers.TPESampler(seed=42),
-            pruner=optuna.pruners.MedianPruner(),
+            # MedianPruner removed: cross_val_score is a batch call with no
+            # intermediate trial.report() steps, so the pruner has no effect.
         )
         study.optimize(objective, n_trials=n_optuna_trials, show_progress_bar=False)
 
