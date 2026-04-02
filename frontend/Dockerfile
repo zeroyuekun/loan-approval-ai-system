@@ -16,8 +16,9 @@ RUN npm run build
 # --- Production stage ---
 FROM node:22-alpine AS runner
 
-# Patch Alpine base packages (zlib CVE-2026-22184)
-RUN apk update && apk upgrade --no-cache
+# Patch Alpine base packages (zlib CVE-2026-22184) and
+# update npm to fix picomatch CVE-2026-33671 in bundled npm
+RUN apk update && apk upgrade --no-cache && npm install -g npm@latest
 
 WORKDIR /app
 
