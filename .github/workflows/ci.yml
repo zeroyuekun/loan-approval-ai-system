@@ -220,6 +220,24 @@ jobs:
       - name: Build frontend image
         run: docker build -t loan-frontend ./frontend
 
+      - name: Trivy scan backend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: loan-backend
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Trivy scan frontend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: loan-frontend
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
   dast-scan:
     name: OWASP ZAP DAST Scan
     runs-on: ubuntu-latest
