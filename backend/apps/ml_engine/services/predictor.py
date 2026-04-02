@@ -208,6 +208,8 @@ class ModelPredictor:
         "state",
         "savings_trend_3m",
         "industry_risk_tier",
+        # sa3_region excluded: ~50 categories causes OHE explosion
+        "industry_anzsic",
     ]
 
     def __init__(self, model_version=None):
