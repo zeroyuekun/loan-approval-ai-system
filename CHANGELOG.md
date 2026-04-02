@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-04-02
+
+### Added
+- Sentry error tracking on backend (Django + Celery) and frontend (Next.js), guarded by DSN env vars
+- RBA Table E2 live fetch for household debt-to-income ratios with percentage normalization
+- AIHW Housing Data Dashboard delinquency benchmarks as secondary cross-validation in `CalibrationValidator`
+- SA3-level property data service with population-weighted region assignment (~50 seeded regions)
+
+### Fixed
+- Version strings synced to 1.7.0 across `base.py` and `package.json`
+- Predictor `CATEGORICAL_COLS` mismatch with trainer (added `sa3_region`, `industry_anzsic`)
+- Test count assertions updated (89 to 90 numeric, 7 to 9 categorical columns)
+- All 993 tests now passing (0 failures)
+
+### Removed
+- Compliance footer from login, register, and apply pages
+
+## [1.7.0] - 2026-04-01
+
+### Added
+- Application state machine (submitted, processing, approved, denied, withdrawn)
+- Fairness gate with EEOC 80% rule threshold on employment type
+- Repayment estimator component on application detail page
+- AU regulatory compliance disclosures (NCCP Act, AFCA, Privacy Policy)
+- WCAG accessibility improvements (focus rings, ARIA labels)
+
+### Changed
+- Reordered application detail cards (repayment estimator above ML decision)
+- Pipeline state transitions enforce valid state machine paths
+- Console email backend fallback when SMTP not configured
+
+### Fixed
+- DecisionSection test assertions for updated pipeline states
+- Ruff format and import sorting violations
+- `.env` loading via python-dotenv in manage.py, wsgi.py, celery.py
+
+## [1.6.0] - 2026-03-31
+
+### Added
+- Real-world Australian lending calibration with 65+ synthetic features
+- Gaussian copula correlation matrix for realistic feature joint distributions
+- Sub-population mixture model (6 borrower segments: FHB, upgrader, refinancer, personal, business, investor)
+- State-specific profiles (median house prices, income multipliers, credit score adjustments)
+- Macroeconomic context features (RBA cash rate history, unemployment, property growth, CCI)
+- Behavioural realism features (optimism bias, financial literacy, application channels)
+- CDR/Open Banking features (savings trends, gambling flags, BNPL tracking)
+- Comprehensive Credit Reporting (CCR) features
+- `RealWorldBenchmarks` service with live data from ABS, APRA, RBA, Equifax (7-day cache, hardcoded fallbacks)
+- `CalibrationValidator` for APRA benchmark comparison (SR 11-7 outcomes analysis)
+
+## [1.5.0] - 2026-03-27
+
+### Added
+- Pipeline auto-completion (prediction, email, bias detection in single orchestrator run)
+- Champion/challenger model scoring with shadow predictions
+- Conformal prediction intervals with coverage guarantees
+- Stress testing (4 adverse scenarios: income, property, credit, combined)
+- Counterfactual explanations for denied applications
+- Drift detection using PSI (Population Stability Index)
+- Monotonic constraints on all XGBoost features
+
+### Changed
+- Email generation improved with HTML bold headers and marketing delivery tracking
+- Denial emails streamlined (no assessment details, clearer adverse action reasons)
+
 ## [1.4.0] - 2026-03-27
 
 ### Added
