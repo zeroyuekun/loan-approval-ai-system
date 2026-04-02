@@ -105,6 +105,100 @@ const mockLoanApplication = {
   updated_at: '2024-06-01T00:00:00Z',
 }
 
+const mockDashboardStats = {
+  total_applications: 150,
+  approval_rate: 68.5,
+  avg_processing_seconds: 12.3,
+  active_model: { name: 'xgboost_v1', auc: 0.87 },
+  daily_volume: [
+    { date: '2026-03-27', count: 12 },
+    { date: '2026-03-28', count: 15 },
+  ],
+  approval_trend: [
+    { date: '2026-03-27', rate: 65.0 },
+    { date: '2026-03-28', rate: 70.0 },
+  ],
+  pipeline: {
+    total: 150,
+    completed: 130,
+    failed: 10,
+    escalated: 10,
+    success_rate: 86.7,
+  },
+}
+
+const mockModelCard = {
+  model_details: {
+    name: 'XGBoost Loan Approval',
+    version: '1.0.0',
+    algorithm: 'xgboost',
+    created_at: '2026-03-01T00:00:00Z',
+    description: 'Loan approval prediction model',
+  },
+  intended_use: {
+    primary_use: 'Loan approval decisions',
+    users: 'Loan officers',
+    out_of_scope: 'Commercial lending',
+  },
+  training_data: {
+    description: 'Synthetic Australian lending data',
+    size: 10000,
+    features: 65,
+    label_distribution: { approved: 0.68, denied: 0.32 },
+  },
+  performance_metrics: {
+    accuracy: 0.85,
+    precision: 0.83,
+    recall: 0.80,
+    f1_score: 0.81,
+    auc_roc: 0.87,
+    gini: 0.74,
+    brier_score: 0.12,
+    ece: 0.05,
+  },
+  fairness_analysis: {
+    protected_attributes: ['gender', 'age_group'],
+    disparate_impact_ratio: {
+      gender: { disparate_impact_ratio: 0.92, passes_80_percent_rule: true },
+    },
+    mitigation: 'Reweighting applied',
+  },
+  governance: {
+    decision_thresholds: { approve: 0.6, deny: 0.3, human_review: null },
+    explainability_method: 'SHAP TreeExplainer',
+    next_review_date: '2026-06-01',
+    retired_at: null,
+    status: 'active',
+    retraining_policy: { frequency: 'quarterly', trigger: 'psi > 0.2' },
+  },
+  independent_validation: { status: 'pending', note: 'Awaiting independent validation' },
+  limitations: ['Synthetic data only', 'Australian market only'],
+  synthetic_data_validation: { status: 'validated' },
+  regulatory_compliance: {
+    apra_cpg_235: true,
+    nccp_act: true,
+    banking_code: true,
+  },
+  last_updated: '2026-03-28T10:00:00Z',
+}
+
+const mockDriftReports = [
+  {
+    id: 'drift-1',
+    report_date: '2026-03-28',
+    psi_score: 0.08,
+    psi_per_feature: { credit_score: 0.02, annual_income: 0.04 },
+    mean_probability: 0.62,
+    std_probability: 0.18,
+    approval_rate: 67.5,
+    drift_detected: false,
+    alert_level: 'none' as const,
+    num_predictions: 500,
+    period_start: '2026-03-01',
+    period_end: '2026-03-28',
+  },
+]
+
 export const handlers = [
   // Auth: CSRF token
   http.get(`${API_URL}/auth/csrf/`, () => {
@@ -158,6 +252,21 @@ export const handlers = [
   http.get(`${API_URL}/loans/:id/`, () => {
     return HttpResponse.json(mockLoanApplication)
   }),
+
+  // Loans: Dashboard stats
+  http.get(`${API_URL}/loans/dashboard-stats/`, () => {
+    return HttpResponse.json(mockDashboardStats)
+  }),
+
+  // ML: Model card
+  http.get(`${API_URL}/ml/models/active/model-card/`, () => {
+    return HttpResponse.json({ model_card: mockModelCard })
+  }),
+
+  // ML: Drift reports
+  http.get(`${API_URL}/ml/models/active/drift-reports/`, () => {
+    return HttpResponse.json(mockDriftReports)
+  }),
 ]
 
-export { mockUser, mockCustomerUser, mockCustomerProfile, mockLoanApplication }
+export { mockUser, mockCustomerUser, mockCustomerProfile, mockLoanApplication, mockDashboardStats, mockModelCard, mockDriftReports }

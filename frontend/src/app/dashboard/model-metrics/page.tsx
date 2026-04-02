@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useModelMetrics, useTrainModel } from '@/hooks/useMetrics'
+import { useDriftReports } from '@/hooks/useDriftReports'
 import { useAuth } from '@/lib/auth'
 import { ConfusionMatrix } from '@/components/metrics/ConfusionMatrix'
 import { ROCCurve } from '@/components/metrics/ROCCurve'
@@ -10,6 +11,8 @@ import { CalibrationChart } from '@/components/metrics/CalibrationChart'
 import { ThresholdChart } from '@/components/metrics/ThresholdChart'
 import { FairnessCard } from '@/components/metrics/FairnessCard'
 import { DecileChart } from '@/components/metrics/DecileChart'
+import { DriftOverview } from '@/components/metrics/DriftOverview'
+import { DriftPsiChart } from '@/components/metrics/DriftPsiChart'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectItem } from '@/components/ui/select'
@@ -34,6 +37,7 @@ function ElapsedTimer() {
 
 export default function ModelMetricsPage() {
   const { data: metrics, isLoading, isError } = useModelMetrics()
+  const { data: driftReports } = useDriftReports(6)
   const { user } = useAuth()
   const { trainingStatus, trainingAlgorithm, ...trainModel } = useTrainModel()
   const [selectedAlgorithm, setSelectedAlgorithm] = useState('xgb')
@@ -263,6 +267,17 @@ export default function ModelMetricsPage() {
         <>
           <h3 className="text-lg font-semibold pt-2">Fairness Analysis</h3>
           <FairnessCard fairnessMetrics={metrics.fairness_metrics} />
+        </>
+      )}
+
+      {/* Drift Monitoring */}
+      {driftReports && driftReports.length > 0 && (
+        <>
+          <h3 className="text-lg font-semibold pt-2">Drift Monitoring</h3>
+          <div className="grid gap-6 md:grid-cols-2">
+            <DriftOverview reports={driftReports} />
+            <DriftPsiChart reports={driftReports} />
+          </div>
         </>
       )}
 
