@@ -49,51 +49,58 @@ class EmailGenerator:
         self._consecutive_failures = 0
         self._circuit_open_until = 0
 
-    # Map ML feature names to plain-language lending criteria (Banking Code para 81)
+    # Map ML feature names to plain-language denial reasons
     DENIAL_REASON_MAP = {
-        "credit_score": "Credit score below our lending threshold",
-        "debt_to_income": "Debt-to-income ratio above acceptable range",
-        "employment_length": "Employment tenure below minimum requirement",
-        "annual_income": "Income insufficient for requested loan amount",
-        "loan_amount": "Requested loan amount exceeds serviceable limit",
-        "home_ownership": "Property ownership status did not meet lending criteria",
-        "loan_grade": "Assessed risk grade outside lending policy",
-        "loan_percent_income": "Loan repayments would exceed serviceable share of income",
-        "default_history": "Previous default history on file",
-        "num_open_accounts": "Number of open credit accounts above policy threshold",
-        "derogatory_records": "Derogatory records present on credit file",
-        "credit_utilization": "Credit utilisation ratio above acceptable range",
-        "total_accounts": "Total credit account history below minimum requirement",
-        "num_mortgages": "Mortgage exposure above policy threshold",
-        "revolving_balance": "Revolving credit balance above acceptable range",
-        "revolving_utilization": "Revolving credit utilisation above acceptable range",
-        # APRA stress test / serviceability
-        "rate_stress_buffer": "Rate stress buffer outside acceptable range",
-        "stressed_repayment": "Stressed repayment capacity outside acceptable range",
-        "stressed_dsr": "Debt service ratio under stress outside acceptable range",
-        "stress_index": "Financial stress indicators above acceptable range",
-        "hem_surplus": "Household expenditure surplus below acceptable range",
-        "uncommitted_monthly_income": "Uncommitted monthly income below acceptable range",
+        "credit_score": "Your credit score didn't meet the minimum we need for this loan",
+        "debt_to_income": "You've got too much existing debt relative to your income for us to comfortably approve this",
+        "employment_length": "You haven't been in your current role long enough for us to approve a loan of this size",
+        "annual_income": "Your income doesn't quite support the loan amount you've asked for",
+        "loan_amount": "The amount you've asked for is more than we can offer based on your current finances",
+        "home_ownership": "Your current housing situation didn't meet our requirements for this loan type",
+        "loan_grade": "Your overall financial profile fell outside what we can approve for this product",
+        "loan_percent_income": "The repayments would take up too large a share of your income",
+        "default_history": "There are previous defaults on your credit file that affected this decision",
+        "num_open_accounts": "You've got too many open credit accounts for us to take on this loan right now",
+        "derogatory_records": "There are some adverse entries on your credit file that we couldn't look past for this one",
+        "credit_utilization": "You're using too much of your available credit at the moment",
+        "total_accounts": "Your credit history isn't long enough for us to approve this loan",
+        "num_mortgages": "You've already got too many mortgage commitments for us to add another",
+        "revolving_balance": "Your credit card and revolving loan balances are too high right now",
+        "revolving_utilization": "You're carrying too much on your revolving credit lines at the moment",
+        # Stress testing & serviceability
+        "rate_stress_buffer": "If interest rates were to rise, your finances may not comfortably handle the higher repayments",
+        "stressed_repayment": "If interest rates go up, the repayments on this loan could become hard to manage",
+        "stressed_dsr": "Your debt commitments would be too high to manage comfortably if interest rates rise",
+        "stress_index": "Your financial position may not hold up well if economic conditions change",
+        "hem_surplus": "After your living expenses, there isn't enough income left over to comfortably cover repayments",
+        "uncommitted_monthly_income": "After your existing commitments, there isn't enough spare income each month to take on this loan",
         # Employment & stability
-        "employment_stability": "Employment stability outside acceptable range",
-        "employment_type_payg_casual": "Employment type outside acceptable range",
-        "employment_type_contract": "Employment type outside acceptable range",
-        "employment_type_self_employed": "Employment type outside acceptable range",
+        "employment_stability": "Your employment history doesn't show enough stability for a loan of this size",
+        "employment_type_payg_casual": "Casual employment doesn't meet what we need for this loan type",
+        "employment_type_contract": "Contract employment doesn't meet what we need for this loan type",
+        "employment_type_self_employed": "Your self-employment history isn't long enough for us to approve this loan",
         # Affordability
-        "debt_service_coverage": "Debt service coverage outside acceptable range",
-        "loan_to_income": "Loan-to-income ratio above acceptable range",
-        "serviceability_ratio": "Serviceability ratio outside acceptable range",
-        "expense_to_income": "Expense-to-income ratio above acceptable range",
-        "monthly_repayment_ratio": "Monthly repayment ratio outside acceptable range",
-        "net_monthly_surplus": "Net monthly surplus below acceptable range",
+        "debt_service_coverage": "Based on your income and current commitments, the repayments would stretch your budget beyond what we're comfortable approving right now",
+        "loan_to_income": "The loan amount is too large for your income to comfortably support",
+        "serviceability_ratio": "Your income can't comfortably cover the total repayments needed for this loan",
+        "expense_to_income": "Your living expenses are too high relative to your income for us to approve this",
+        "monthly_repayment_ratio": "The monthly repayments would eat up too much of your income",
+        "net_monthly_surplus": "After all your expenses and debts, there isn't enough left over each month to take this on",
         # Credit bureau
-        "bureau_risk_score": "Bureau risk score outside acceptable range",
-        "credit_utilization_pct": "Credit utilisation ratio above acceptable range",
-        "num_credit_enquiries_6m": "Recent credit enquiry frequency above acceptable range",
+        "bureau_risk_score": "Your credit bureau score didn't meet the minimum we need for this loan",
+        "credit_utilization_pct": "You're using too much of your available credit at the moment",
+        "num_credit_enquiries_6m": "There have been too many credit enquiries on your file recently",
         # Loan structure
-        "lvr": "Loan-to-value ratio above acceptable range",
-        "deposit_ratio": "Deposit contribution below acceptable range",
-        "savings_to_loan_ratio": "Savings to loan ratio below acceptable range",
+        "lvr": "The deposit isn't large enough relative to the property value for this loan",
+        "deposit_ratio": "Your deposit is too small for what you're looking to borrow",
+        "savings_to_loan_ratio": "Your savings are too low relative to the loan amount you've requested",
+        # Combined factors
+        "lvr_x_dti": "The combination of your deposit size and existing debt levels falls outside our lending criteria for this product",
+        "lvr_x_property_growth": "Given the deposit amount relative to the property value and the growth outlook for the area, this loan doesn't meet our risk settings at the moment",
+        "credit_score_x_tenure": "Your credit history combined with your time in your current role doesn't quite meet what we need for this product",
+        "deposit_x_income_stability": "Your deposit size and income stability together don't meet our lending requirements right now",
+        "dti_x_rate_sensitivity": "Your existing debt level means repayments could become difficult if interest rates were to rise",
+        "credit_x_employment": "Your credit history and employment type together don't meet our criteria for this product",
     }
 
     def _format_denial_reasons(self, feature_importances):
@@ -105,7 +112,7 @@ class EmailGenerator:
         for feature_name, _score in top_factors:
             readable = self.DENIAL_REASON_MAP.get(
                 feature_name,
-                feature_name.replace("_", " ").capitalize() + " outside acceptable range",
+                "Part of your financial profile didn't meet our lending criteria",
             )
             reasons.append(readable)
         return "; ".join(reasons)

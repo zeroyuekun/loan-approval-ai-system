@@ -67,6 +67,9 @@ export function useOrchestrate() {
         const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
         throw new Error(`Rate limited — try again in ${waitSec}s`)
       }
+      if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
+        throw new Error('Request timed out — the backend may be starting up. Please try again.')
+      }
       throw error
     },
   })

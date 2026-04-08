@@ -180,8 +180,8 @@ export const emailApi = {
 
 // Agents
 export const agentsApi = {
-  orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/?force=true`),
-  orchestrateAll: (recheck?: boolean) => api.post(`/agents/orchestrate-all/${recheck ? '?recheck=true' : ''}`),
+  orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/?force=true`, null, { timeout: 60000 }),
+  orchestrateAll: (recheck?: boolean) => api.post(`/agents/orchestrate-all/${recheck ? '?recheck=true' : ''}`, null, { timeout: 60000 }),
   getRuns: (params?: PaginationParams) => api.get('/agents/runs/', { params }),
   getRun: (loanId: string) => api.get(`/agents/runs/${loanId}/`),
   submitReview: (runId: string, data: { action: 'approve' | 'deny' | 'regenerate'; note?: string }) =>

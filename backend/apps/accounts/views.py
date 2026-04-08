@@ -346,6 +346,8 @@ class StaffCustomerActivityView(generics.GenericAPIView):
                 {"check_name": log.check_name, "passed": log.passed, "details": log.details}
                 for log in email.guardrail_checks.all()
             ]
+            from apps.email_engine.services.sender import _plain_text_to_html
+
             emails.append(
                 {
                     "id": str(email.id),
@@ -353,6 +355,7 @@ class StaffCustomerActivityView(generics.GenericAPIView):
                     "decision": email.decision,
                     "subject": escape(email.subject),
                     "body": escape(email.body),
+                    "html_body": _plain_text_to_html(email.body),
                     "model_used": email.model_used,
                     "generation_time_ms": email.generation_time_ms,
                     "attempt_number": email.attempt_number,

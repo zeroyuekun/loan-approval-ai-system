@@ -25,6 +25,28 @@ logger = logging.getLogger(__name__)
 )
 def train_model_task(self, algorithm="xgb", data_path=None):
     """Train a model asynchronously via Celery."""
+    import redis as _redis
+
+    from apps.ml_engine.services.predictor import clear_model_cache
+    from apps.ml_engine.services.trainer import ModelTrainer
+
+    # Prevent concurrent training — acquire a Redis lock for 30 minutes
+    redis_url = settings.CELERY_BROKER_URL
+    redis_client = _redis.from_url(redis_url)
+    lock = redis_client.lock("train_model_lock", timeout=1800, blocking=False)
+    if not lock.acquire(blocking=False):
+        logger.warning("Training already in progress — skipping duplicate task %s", self.request.id)
+        return {"status": "skipped", "reason": "training_already_in_progress"}
+
+    try:
+        return _do_train(self, algorithm, data_path, lock)
+    except Exception:
+        lock.release()
+        raise
+
+
+def _do_train(task, algorithm, data_path, lock):
+    """Inner training logic — called with lock held."""
     from apps.ml_engine.services.predictor import clear_model_cache
     from apps.ml_engine.services.trainer import ModelTrainer
 
@@ -111,6 +133,12 @@ def train_model_task(self, algorithm="xgb", data_path=None):
     # Invalidate cached models so workers pick up the new version
     clear_model_cache()
 
+    # Release the training lock
+    try:
+        lock.release()
+    except Exception:
+        pass  # Lock may have expired — safe to ignore
+
     return {"model_version_id": str(mv.id), "metrics": metrics}
 
 
@@ -182,7 +210,7 @@ def run_prediction_task(self, application_id):
     }
 
 
-@shared_task(bind=True, name="apps.ml_engine.tasks.check_fairness_violations", time_limit=300)
+@shared_task(bind=True, name="apps.ml_engine.tasks.check_fairness_violations", time_limit=300, soft_time_limit=280)
 def check_fairness_violations(self):
     """Weekly check of disparate impact ratios against the EEOC 80% rule.
 
@@ -238,7 +266,7 @@ def check_fairness_violations(self):
     }
 
 
-@shared_task(bind=True, name="apps.ml_engine.tasks.compute_weekly_drift_report", time_limit=600)
+@shared_task(bind=True, name="apps.ml_engine.tasks.compute_weekly_drift_report", time_limit=600, soft_time_limit=580)
 def compute_weekly_drift_report(self):
     """Compute weekly drift report comparing recent predictions to training distribution."""
     active_version = ModelVersion.objects.filter(is_active=True).first()

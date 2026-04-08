@@ -49,11 +49,12 @@ def generate_email_task(self, application_id, decision):
     if result["passed_guardrails"] and application.applicant.email:
         from apps.email_engine.services.sender import send_decision_email
 
-        email_sent = send_decision_email(
+        send_result = send_decision_email(
             recipient_email=application.applicant.email,
             subject=result["subject"],
             body=result["body"],
         )
+        email_sent = send_result.get("sent", False)
 
     # Audit trail: log email generation/delivery
     AuditLog.objects.create(

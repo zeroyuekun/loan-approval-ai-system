@@ -59,7 +59,7 @@ export function useApplicationForm(onSuccessPath?: string) {
     try {
       const saved = localStorage.getItem(DRAFT_KEY)
       if (saved) return JSON.parse(saved)
-    } catch { /* ignore parse errors */ }
+    } catch (e) { console.warn('[useApplicationForm] Failed to parse draft from localStorage:', e) }
     return null
   }, [])
 
@@ -96,7 +96,7 @@ export function useApplicationForm(onSuccessPath?: string) {
     const subscription = watch((values) => {
       try {
         localStorage.setItem(DRAFT_KEY, JSON.stringify(values))
-      } catch { /* ignore quota errors */ }
+      } catch (e) { console.warn('[useApplicationForm] Failed to save draft to localStorage:', e) }
     })
     return () => subscription.unsubscribe()
   }, [watch])

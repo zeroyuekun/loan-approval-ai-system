@@ -276,6 +276,7 @@ export interface GeneratedEmail {
   decision: string;
   subject: string;
   body: string;
+  html_body?: string;
   model_used: string;
   passed_guardrails: boolean;
   attempt_number: number;
@@ -366,6 +367,7 @@ export interface MarketingEmail {
   id: string;
   subject: string;
   body: string;
+  html_body?: string;
   passed_guardrails: boolean;
   guardrail_results: GuardrailCheck[];
   generation_time_ms: number;

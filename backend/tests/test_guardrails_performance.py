@@ -170,9 +170,9 @@ class TestRegexFunctionality:
         result = checker.check_tone("You are stupid and incompetent")
         assert not result["passed"]
 
-    def test_full_check_informal_tone(self):
-        """End-to-end: check_informal_tone still works with compiled patterns."""
-        result = checker.check_informal_tone("We are delighted to empower you")
+    def test_full_check_ai_giveaway_language(self):
+        """End-to-end: check_ai_giveaway_language still works with compiled patterns."""
+        result = checker.check_ai_giveaway_language("We are delighted to empower you")
         assert not result["passed"]
 
     def test_full_check_dignity(self):

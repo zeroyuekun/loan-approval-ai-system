@@ -205,7 +205,10 @@ CELERY_TASK_ROUTES = {
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0").replace("/0", "/1"),
+        "LOCATION": os.environ.get(
+            "DJANGO_CACHE_URL",
+            CELERY_BROKER_URL.rsplit("/", 1)[0] + "/1" if CELERY_BROKER_URL else "redis://localhost:6379/1",
+        ),
         "TIMEOUT": 300,  # 5 minutes default TTL
     }
 }

@@ -951,7 +951,7 @@ class ModelTrainer:
             if sample_weights is not None:
                 cv_fit_params["sample_weight"] = sample_weights
 
-            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", fit_params=cv_fit_params)
+            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
             return scores.mean()
 
         study = optuna.create_study(

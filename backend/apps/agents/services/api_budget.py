@@ -148,8 +148,8 @@ class ApiBudgetGuard:
         try:
             r = self._get_redis()
             r.delete("ai_budget:consecutive_failures")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to reset failure counter: %s", e)
 
     def record_failure(self):
         """Increment consecutive failure counter. Trip circuit breaker after threshold."""
@@ -185,7 +185,8 @@ class ApiBudgetGuard:
                 "call_limit": getattr(settings, "AI_DAILY_CALL_LIMIT", 500),
                 "circuit_breaker_open": bool(r.exists("ai_budget:circuit_breaker")),
             }
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to fetch daily stats from Redis: %s", e)
             return {
                 "calls": 0,
                 "tokens": 0,

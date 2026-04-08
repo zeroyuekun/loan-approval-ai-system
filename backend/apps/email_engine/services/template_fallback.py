@@ -69,9 +69,14 @@ _REASON_EXPLANATIONS = {
         "on your current financial position."
     ),
     "Debt service coverage outside acceptable range": (
-        "Debt servicing capacity: Based on your income, existing debts, and "
-        "living expenses, the total repayments required would exceed what we "
-        "consider manageable for your current financial position."
+        "Debt servicing capacity: Based on your income and current commitments, "
+        "the repayments on this loan would stretch your budget beyond what "
+        "we're comfortable approving right now."
+    ),
+    "Based on your income and current commitments, the repayments would stretch your budget beyond what we're comfortable approving right now": (
+        "Debt servicing capacity: Based on your income and current commitments, "
+        "the repayments on this loan would stretch your budget beyond what "
+        "we're comfortable approving right now."
     ),
     "Employment stability outside acceptable range": (
         "Employment stability: Your current employment type or length of time "
@@ -171,6 +176,33 @@ _REASON_EXPLANATIONS = {
         "Credit enquiries: The number of credit enquiries on your file in "
         "the recent period exceeded the threshold we apply for this product."
     ),
+    # Combined factors — keyed by DENIAL_REASON_MAP values from email_generator.py
+    "The combination of your deposit size and existing debt levels falls outside our lending criteria for this product": (
+        "Deposit and debt levels: The combination of your deposit size and "
+        "existing debt levels falls outside our lending criteria for this product."
+    ),
+    "Given the deposit amount relative to the property value and the growth outlook for the area, this loan doesn't meet our risk settings at the moment": (
+        "Deposit and property outlook: Given the deposit amount relative to "
+        "the property value and the growth outlook for the area, this loan "
+        "doesn't meet our risk settings at the moment."
+    ),
+    "Your credit history combined with your time in your current role doesn't quite meet what we need for this product": (
+        "Credit history and employment tenure: Your credit history combined "
+        "with your time in your current role doesn't quite meet what we need "
+        "for this product."
+    ),
+    "Your deposit size and income stability together don't meet our lending requirements right now": (
+        "Deposit and income stability: Your deposit size and income stability "
+        "together don't meet our lending requirements right now."
+    ),
+    "Your existing debt level means repayments could become difficult if interest rates were to rise": (
+        "Debt and rate sensitivity: Your existing debt level means repayments "
+        "could become difficult if interest rates were to rise."
+    ),
+    "Your credit history and employment type together don't meet our criteria for this product": (
+        "Credit and employment type: Your credit history and employment type "
+        "together don't meet our criteria for this product."
+    ),
 }
 
 # Improvement steps matched to denial reasons
@@ -199,6 +231,11 @@ _IMPROVEMENT_STEPS = {
         "Reducing your existing debt obligations before reapplying. "
         "Paying down credit cards, personal loans, or BNPL balances will "
         "improve your debt servicing capacity."
+    ),
+    "Based on your income and current commitments, the repayments would stretch your budget beyond what we're comfortable approving right now": (
+        "Reducing your existing debt obligations before reapplying. "
+        "Paying down credit cards, personal loans, or BNPL balances will "
+        "free up more of your income for loan repayments."
     ),
     "Employment stability outside acceptable range": (
         "Establishing a longer period in your current role. For permanent "
@@ -283,6 +320,31 @@ _IMPROVEMENT_STEPS = {
     "Recent credit enquiry frequency above acceptable range": (
         "Limiting new credit applications for the next 6\u201312 months to "
         "reduce the number of enquiries on your credit file."
+    ),
+    # Combined factors — keyed by DENIAL_REASON_MAP values from email_generator.py
+    "The combination of your deposit size and existing debt levels falls outside our lending criteria for this product": (
+        "Increasing your deposit or reducing existing debts before reapplying. "
+        "Either change would improve how this combination is assessed."
+    ),
+    "Given the deposit amount relative to the property value and the growth outlook for the area, this loan doesn't meet our risk settings at the moment": (
+        "Saving a larger deposit to reduce the loan-to-value ratio, or "
+        "considering properties in areas with a stronger growth outlook."
+    ),
+    "Your credit history combined with your time in your current role doesn't quite meet what we need for this product": (
+        "Building a longer tenure in your current role while maintaining "
+        "on-time payments on all existing credit accounts."
+    ),
+    "Your deposit size and income stability together don't meet our lending requirements right now": (
+        "Building a larger deposit over time while establishing a stable, "
+        "consistent income history \u2013 both will strengthen a future application."
+    ),
+    "Your existing debt level means repayments could become difficult if interest rates were to rise": (
+        "Reducing your existing debts so that your repayments remain "
+        "manageable even if interest rates were to rise by 2\u20133 percentage points."
+    ),
+    "Your credit history and employment type together don't meet our criteria for this product": (
+        "Strengthening your credit profile over the next 6\u201312 months while "
+        "building a longer history in your current employment arrangement."
     ),
 }
 

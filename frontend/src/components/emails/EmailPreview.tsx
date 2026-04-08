@@ -1,10 +1,13 @@
 'use client'
 
+import { useState } from 'react'
+import DOMPurify from 'dompurify'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { GeneratedEmail } from '@/types'
 import { GuardrailLogDisplay } from './GuardrailLogDisplay'
-import { CheckCircle, XCircle, Clock } from 'lucide-react'
+import { CheckCircle, XCircle, Clock, Code, Mail } from 'lucide-react'
 
 const SECTION_LABELS = [
   'Loan Details:',
@@ -54,11 +57,8 @@ export function FormattedEmailBody({ body }: { body: string }) {
         const trimmed = line.trim()
         const isSection = SECTION_LABELS.includes(trimmed)
         const isDear = trimmed.startsWith('Dear ')
-        const isSignName = trimmed === 'Sarah Mitchell'
-        const isSignTitle = trimmed === 'Senior Lending Officer'
         const isSubject = trimmed.startsWith('Subject:')
         const isOption = OPTION_PATTERN.test(trimmed)
-        const isClosing = CLOSINGS.includes(trimmed)
 
         // Full-line bold: section headers, greeting, options
         if (isSection || isDear || isSubject || isOption) {
@@ -68,7 +68,6 @@ export function FormattedEmailBody({ body }: { body: string }) {
             </span>
           )
         }
-
 
         // Bullet-point lines: render plain (no bold)
         if (trimmed.startsWith('•') || trimmed.startsWith('\u2022')) {
@@ -82,17 +81,55 @@ export function FormattedEmailBody({ body }: { body: string }) {
   )
 }
 
+function HtmlEmailBody({ html }: { html: string }) {
+  const sanitized = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['div', 'p', 'strong', 'em', 'br', 'hr', 'table', 'tr', 'td', 'th', 'span', 'b', 'i', 'u'],
+    ALLOWED_ATTR: ['style'],
+  })
+
+  return (
+    <div
+      className="email-html-preview"
+      dangerouslySetInnerHTML={{ __html: sanitized }}
+    />
+  )
+}
+
 interface EmailPreviewProps {
   email: GeneratedEmail
 }
 
 export function EmailPreview({ email }: EmailPreviewProps) {
+  const [viewMode, setViewMode] = useState<'html' | 'plain'>(email.html_body ? 'html' : 'plain')
+
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">Generated Email</CardTitle>
           <div className="flex items-center gap-2">
+            {email.html_body && (
+              <div className="flex items-center rounded-md border p-0.5">
+                <Button
+                  variant={viewMode === 'html' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setViewMode('html')}
+                >
+                  <Mail className="mr-1 h-3 w-3" />
+                  Preview
+                </Button>
+                <Button
+                  variant={viewMode === 'plain' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setViewMode('plain')}
+                >
+                  <Code className="mr-1 h-3 w-3" />
+                  Plain Text
+                </Button>
+              </div>
+            )}
             {email.passed_guardrails ? (
               <Badge className="bg-green-100 text-green-800" variant="outline">
                 <CheckCircle className="mr-1 h-3 w-3" />
@@ -123,8 +160,14 @@ export function EmailPreview({ email }: EmailPreviewProps) {
           <hr className="mb-5" />
           <div>
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Body</span>
-            <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">
-              <FormattedEmailBody body={email.body} />
+            <div className="mt-2 text-sm leading-relaxed">
+              {viewMode === 'html' && email.html_body ? (
+                <HtmlEmailBody html={email.html_body} />
+              ) : (
+                <div className="whitespace-pre-wrap">
+                  <FormattedEmailBody body={email.body} />
+                </div>
+              )}
             </div>
           </div>
         </div>

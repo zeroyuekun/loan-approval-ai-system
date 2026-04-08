@@ -52,6 +52,8 @@ class EmailListView(APIView):
                 for log in email.guardrail_checks.all()
             ]
             applicant = email.application.applicant
+            from apps.email_engine.services.sender import _plain_text_to_html
+
             results.append(
                 {
                     "id": str(email.id),
@@ -61,6 +63,7 @@ class EmailListView(APIView):
                     "decision": email.decision,
                     "subject": email.subject,
                     "body": email.body,
+                    "html_body": _plain_text_to_html(email.body),
                     "model_used": email.model_used,
                     "generation_time_ms": email.generation_time_ms,
                     "attempt_number": email.attempt_number,
@@ -188,6 +191,8 @@ class EmailDetailView(APIView):
             for log in email.guardrail_checks.all()
         ]
 
+        from apps.email_engine.services.sender import _plain_text_to_html
+
         applicant = email.application.applicant
         return Response(
             {
@@ -198,6 +203,7 @@ class EmailDetailView(APIView):
                 "decision": email.decision,
                 "subject": email.subject,
                 "body": email.body,
+                "html_body": _plain_text_to_html(email.body),
                 "model_used": email.model_used,
                 "generation_time_ms": email.generation_time_ms,
                 "attempt_number": email.attempt_number,

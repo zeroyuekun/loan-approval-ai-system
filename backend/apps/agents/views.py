@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsAdminOrOfficer
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
+from apps.email_engine.services.sender import _plain_text_to_html
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 from apps.loans.permissions import check_loan_access
 
@@ -112,6 +113,7 @@ class AgentRunListView(APIView):
                     "id": str(me.id),
                     "subject": me.subject,
                     "body": me.body,
+                    "html_body": _plain_text_to_html(me.body),
                     "passed_guardrails": me.passed_guardrails,
                     "guardrail_results": me.guardrail_results,
                     "generation_time_ms": me.generation_time_ms,
@@ -259,7 +261,7 @@ class AgentRunView(APIView):
 
         # If the latest run is missing marketing emails, check if an older
         # run has them (e.g. the latest run's marketing step hit circuit breaker).
-        if agent_run and agent_run.marketing_emails.count() == 0:
+        if agent_run and not agent_run.marketing_emails.exists():
             better_run = (
                 AgentRun.objects.filter(
                     application_id=loan_id,

@@ -43,15 +43,15 @@ export default function LoginPage() {
             </div>
           )}
           <div className="space-y-2">
-            <Label htmlFor="username">Email</Label>
+            <Label htmlFor="username">Username</Label>
             <Input
               id="username"
-              type="email"
+              type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              autoComplete="email"
-              placeholder="Enter your email"
+              autoComplete="username"
+              placeholder="Enter your username"
             />
           </div>
           <div className="space-y-2">

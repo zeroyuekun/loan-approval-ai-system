@@ -159,7 +159,7 @@ class DashboardStatsView(APIView):
     def _compute_stats(self):
         from datetime import timedelta
 
-        from django.db.models import Avg, Count
+        from django.db.models import Avg, Count, Q
         from django.db.models.functions import TruncDate
         from django.utils import timezone
 
@@ -209,11 +209,17 @@ class DashboardStatsView(APIView):
             for d in daily_approvals
         ]
 
-        # Pipeline stats
-        pipeline_total = AgentRun.objects.count()
-        pipeline_completed = AgentRun.objects.filter(status="completed").count()
-        pipeline_failed = AgentRun.objects.filter(status="failed").count()
-        pipeline_escalated = AgentRun.objects.filter(status="escalated").count()
+        # Pipeline stats (single query instead of 4)
+        pipeline_stats = AgentRun.objects.aggregate(
+            total=Count("id"),
+            completed=Count("id", filter=Q(status="completed")),
+            failed=Count("id", filter=Q(status="failed")),
+            escalated=Count("id", filter=Q(status="escalated")),
+        )
+        pipeline_total = pipeline_stats["total"]
+        pipeline_completed = pipeline_stats["completed"]
+        pipeline_failed = pipeline_stats["failed"]
+        pipeline_escalated = pipeline_stats["escalated"]
 
         return {
             "total_applications": total,

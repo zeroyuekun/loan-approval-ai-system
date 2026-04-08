@@ -433,6 +433,7 @@ class ModelPredictor:
             "postcode_default_rate": _num("postcode_default_rate", 0.015),
             "industry_risk_tier": _cat("industry_risk_tier", "medium"),
             # Training features not on LoanApplication — imputed at inference
+            "industry_anzsic": _cat("industry_anzsic", "N"),  # ANZSIC division (default: Administrative)
             "hecs_debt_balance": _num("hecs_debt_balance", 0.0),
             "existing_property_count": _num("existing_property_count", 0, int),
             "cash_advance_count_12m": _num("cash_advance_count_12m", 0, int),

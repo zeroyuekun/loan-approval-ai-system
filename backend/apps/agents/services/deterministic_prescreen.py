@@ -38,7 +38,7 @@ class DeterministicBiasPreScreen:
             score += 15
             findings.append(result)
 
-        result = self.checker.check_informal_tone(email_text)
+        result = self.checker.check_ai_giveaway_language(email_text)
         if not result["passed"]:
             score += 5
             findings.append(result)
