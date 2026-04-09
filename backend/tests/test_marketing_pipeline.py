@@ -9,6 +9,8 @@ from apps.agents.models import MarketingEmail
 from apps.ml_engine.models import ModelVersion
 
 ORCH = "apps.agents.services.orchestrator"
+EMAIL_PIPE = "apps.agents.services.email_pipeline"
+MKT_PIPE = "apps.agents.services.marketing_pipeline"
 SENDER = "apps.email_engine.services.sender.send_decision_email"
 
 CACHE_OVERRIDE = override_settings(
@@ -110,20 +112,18 @@ def mkt_model_version(db, settings):
 def mkt_mocks(mkt_model_version):
     with (
         patch(f"{ORCH}.ModelPredictor") as mp,
-        patch(f"{ORCH}.EmailGenerator") as eg,
-        patch(f"{ORCH}.BiasDetector") as bd,
-        patch(f"{ORCH}.AIEmailReviewer") as air,
-        patch(f"{ORCH}.MarketingBiasDetector") as mbd,
-        patch(f"{ORCH}.MarketingEmailReviewer") as mer,
-        patch(f"{ORCH}.NextBestOfferGenerator") as nbo,
-        patch(f"{ORCH}.MarketingAgent") as ma,
+        patch(f"{EMAIL_PIPE}.EmailGenerator") as eg,
+        patch(f"{EMAIL_PIPE}.BiasDetector") as bd,
+        patch(f"{MKT_PIPE}.MarketingBiasDetector") as mbd,
+        patch(f"{MKT_PIPE}.MarketingEmailReviewer") as mer,
+        patch(f"{MKT_PIPE}.NextBestOfferGenerator") as nbo,
+        patch(f"{MKT_PIPE}.MarketingAgent") as ma,
         patch(SENDER, return_value={"sent": True}) as sd,
     ):
         yield {
             "predictor": mp,
             "email_gen": eg,
             "bias": bd,
-            "ai_reviewer": air,
             "mkt_bias": mbd,
             "mkt_reviewer": mer,
             "nbo": nbo,

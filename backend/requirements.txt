@@ -1,7 +1,7 @@
 # Pinned dependencies — generated from requirements.in
 # To update: pip-compile requirements.in --output-file=requirements.txt
 # To add a dependency: add it to requirements.in, then recompile
-Django[argon2]==5.2.12
+Django[argon2]==5.2.13
 djangorestframework==3.16.1
 django-cors-headers==4.9.0
 django-filter==25.2
@@ -9,7 +9,7 @@ djangorestframework-simplejwt==5.5.1
 psycopg[binary]==3.3.3
 celery[redis]==5.6.2
 django-celery-results==2.6.0
-cryptography==46.0.6
+cryptography==46.0.7
 scikit-learn==1.8.0
 xgboost==3.2.0
 shap==0.51.0

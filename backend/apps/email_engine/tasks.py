@@ -24,9 +24,9 @@ def generate_email_task(self, application_id, decision):
     from apps.email_engine.services.email_generator import EmailGenerator
 
     # Idempotency: if email already generated for this application+decision, return it
-    existing = GeneratedEmail.objects.filter(
-        application_id=application_id, decision=decision
-    ).order_by("-created_at").first()
+    existing = (
+        GeneratedEmail.objects.filter(application_id=application_id, decision=decision).order_by("-created_at").first()
+    )
     if existing:
         logger.info("Email already exists for application %s (%s), skipping generation", application_id, decision)
         return {

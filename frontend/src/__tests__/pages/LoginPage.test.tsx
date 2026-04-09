@@ -23,10 +23,10 @@ function renderPage() {
 describe('LoginPage', () => {
   beforeEach(() => { mockLogin.mockReset() })
 
-  it('renders the login form with email and password fields', () => {
+  it('renders the login form with username and password fields', () => {
     renderPage()
     expect(screen.getByText('Welcome back')).toBeInTheDocument()
-    expect(screen.getByLabelText('Email')).toBeInTheDocument()
+    expect(screen.getByLabelText('Username')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument()
   })
@@ -35,17 +35,17 @@ describe('LoginPage', () => {
     const user = userEvent.setup()
     mockLogin.mockResolvedValue(undefined)
     renderPage()
-    await user.type(screen.getByLabelText('Email'), 'test@example.com')
+    await user.type(screen.getByLabelText('Username'), 'testuser')
     await user.type(screen.getByLabelText('Password'), 'password123')
     await user.click(screen.getByRole('button', { name: 'Sign In' }))
-    await waitFor(() => { expect(mockLogin).toHaveBeenCalledWith('test@example.com', 'password123') })
+    await waitFor(() => { expect(mockLogin).toHaveBeenCalledWith('testuser', 'password123') })
   })
 
   it('displays error message when login fails', async () => {
     const user = userEvent.setup()
     mockLogin.mockRejectedValue({ response: { data: { detail: 'Invalid credentials' } } })
     renderPage()
-    await user.type(screen.getByLabelText('Email'), 'bad@example.com')
+    await user.type(screen.getByLabelText('Username'), 'baduser')
     await user.type(screen.getByLabelText('Password'), 'wrong')
     await user.click(screen.getByRole('button', { name: 'Sign In' }))
     await waitFor(() => { expect(screen.getByText('Invalid credentials')).toBeInTheDocument() })
@@ -55,7 +55,7 @@ describe('LoginPage', () => {
     const user = userEvent.setup()
     mockLogin.mockRejectedValue(new Error('Network error'))
     renderPage()
-    await user.type(screen.getByLabelText('Email'), 'test@example.com')
+    await user.type(screen.getByLabelText('Username'), 'testuser')
     await user.type(screen.getByLabelText('Password'), 'pass')
     await user.click(screen.getByRole('button', { name: 'Sign In' }))
     await waitFor(() => { expect(screen.getByText('Invalid credentials. Please try again.')).toBeInTheDocument() })

@@ -4,11 +4,13 @@ from unittest.mock import patch
 
 from apps.agents.exceptions import FailureCategory, PipelineStepError
 from apps.agents.services.orchestrator import STEP_TIMEOUT_BUDGETS_MS, PipelineOrchestrator
+from apps.agents.services.step_tracker import StepTracker
 
 
 class TestStepHelpers:
     def setup_method(self):
         self.orchestrator = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        self.orchestrator._step_tracker = StepTracker()
 
     def test_start_step_includes_new_fields(self):
         step = self.orchestrator._start_step("ml_prediction")

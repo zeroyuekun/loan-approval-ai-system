@@ -6,21 +6,26 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0019_loanapplication_consumer_objectives_and_more'),
+        ("loans", "0019_loanapplication_consumer_objectives_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='complaint',
-            name='complainant',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='complaints', to=settings.AUTH_USER_MODEL),
+            model_name="complaint",
+            name="complainant",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT, related_name="complaints", to=settings.AUTH_USER_MODEL
+            ),
         ),
         migrations.AlterField(
-            model_name='loanapplication',
-            name='applicant',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='loan_applications', to=settings.AUTH_USER_MODEL),
+            model_name="loanapplication",
+            name="applicant",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="loan_applications",
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
     ]

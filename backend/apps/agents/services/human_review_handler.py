@@ -88,9 +88,7 @@ class HumanReviewHandler:
                 )
 
                 generated_email = EmailPersistenceService.save_generated_email(application, "approved", email_result)
-                EmailPersistenceService.save_guardrail_logs(
-                    generated_email, email_result.get("guardrail_results", [])
-                )
+                EmailPersistenceService.save_guardrail_logs(generated_email, email_result.get("guardrail_results", []))
 
                 step = self.tracker.complete_step(
                     step,
@@ -116,9 +114,7 @@ class HumanReviewHandler:
 
             # Guardrail failure on resume -> re-escalate for human review
             if email_result and not email_result.get("passed_guardrails"):
-                failed_checks = [
-                    r["check_name"] for r in email_result.get("guardrail_results", []) if not r["passed"]
-                ]
+                failed_checks = [r["check_name"] for r in email_result.get("guardrail_results", []) if not r["passed"]]
                 logger.warning(
                     "Agent run %s: approval email guardrails failed on resume — re-escalating. Failed checks: %s",
                     agent_run_id,

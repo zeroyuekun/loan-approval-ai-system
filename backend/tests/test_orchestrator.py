@@ -15,6 +15,8 @@ from apps.ml_engine.models import ModelVersion
 # ---------------------------------------------------------------------------
 
 ORCH = "apps.agents.services.orchestrator"
+EMAIL_PIPE = "apps.agents.services.email_pipeline"
+MKT_PIPE = "apps.agents.services.marketing_pipeline"
 SENDER = "apps.email_engine.services.sender.send_decision_email"
 
 CACHE_OVERRIDE = override_settings(
@@ -142,20 +144,18 @@ def orch_mocks(model_version):
     """
     with (
         patch(f"{ORCH}.ModelPredictor") as mock_predictor,
-        patch(f"{ORCH}.EmailGenerator") as mock_email_gen,
-        patch(f"{ORCH}.BiasDetector") as mock_bias,
-        patch(f"{ORCH}.AIEmailReviewer") as mock_ai_reviewer,
-        patch(f"{ORCH}.MarketingBiasDetector") as mock_mkt_bias,
-        patch(f"{ORCH}.MarketingEmailReviewer") as mock_mkt_reviewer,
-        patch(f"{ORCH}.NextBestOfferGenerator") as mock_nbo,
-        patch(f"{ORCH}.MarketingAgent") as mock_marketing_agent,
+        patch(f"{EMAIL_PIPE}.EmailGenerator") as mock_email_gen,
+        patch(f"{EMAIL_PIPE}.BiasDetector") as mock_bias,
+        patch(f"{MKT_PIPE}.MarketingBiasDetector") as mock_mkt_bias,
+        patch(f"{MKT_PIPE}.MarketingEmailReviewer") as mock_mkt_reviewer,
+        patch(f"{MKT_PIPE}.NextBestOfferGenerator") as mock_nbo,
+        patch(f"{MKT_PIPE}.MarketingAgent") as mock_marketing_agent,
         patch(SENDER, return_value={"sent": True}) as mock_send,
     ):
         yield {
             "predictor": mock_predictor,
             "email_gen": mock_email_gen,
             "bias": mock_bias,
-            "ai_reviewer": mock_ai_reviewer,
             "mkt_bias": mock_mkt_bias,
             "mkt_reviewer": mock_mkt_reviewer,
             "nbo": mock_nbo,
@@ -256,7 +256,6 @@ def test_severe_bias_escalation(sample_application, orch_mocks):
     assert run.status == "escalated"
     sample_application.refresh_from_db()
     assert sample_application.status == "review"
-    orch_mocks["ai_reviewer"].return_value.review.assert_not_called()
 
 
 @CACHE_OVERRIDE
@@ -277,7 +276,6 @@ def test_moderate_bias_reviewer_rejects(sample_application, orch_mocks):
     assert run.status == "escalated"
     sample_application.refresh_from_db()
     assert sample_application.status == "review"
-    orch_mocks["ai_reviewer"].return_value.review.assert_not_called()
 
 
 @CACHE_OVERRIDE

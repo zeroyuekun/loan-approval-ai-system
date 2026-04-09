@@ -4,12 +4,12 @@ from django.conf import settings
 from django.db import transaction
 
 from apps.agents.exceptions import LLMServiceError
-from apps.agents.models import AgentRun, BiasReport
+from apps.agents.models import BiasReport
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.persistence import EmailPersistenceService
 from apps.loans.models import LoanApplication
 
-from .bias_detector import AIEmailReviewer, BiasDetector
+from .bias_detector import BiasDetector
 from .step_tracker import StepTracker
 
 logger = logging.getLogger("agents.orchestrator")

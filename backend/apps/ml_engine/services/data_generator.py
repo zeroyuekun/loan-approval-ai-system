@@ -438,9 +438,7 @@ class DataGenerator:
         return self._underwriting.compute_approval(df, rng)
 
     def _calibrate_default_probability(self, df, rng):
-        return self._underwriting.calibrate_default_probability(
-            df, rng, self._benchmark.resolve_default_base_rate
-        )
+        return self._underwriting.calibrate_default_probability(df, rng, self._benchmark.resolve_default_base_rate)
 
     def _simulate_loan_performance(self, df):
         return self._performance.simulate_loan_performance(df)

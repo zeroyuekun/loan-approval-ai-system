@@ -190,16 +190,14 @@ _REASON_EXPLANATIONS = {
         "the past five years that affected this assessment."
     ),
     "There are financial hardship indicators on your credit file": (
-        "Hardship indicators: Financial hardship indicators on your credit "
-        "file were noted during this assessment."
+        "Hardship indicators: Financial hardship indicators on your credit file were noted during this assessment."
     ),
     "There have been dishonoured transactions on your accounts in the last 12 months": (
         "Dishonoured transactions: Dishonoured transactions on your accounts "
         "in the last 12 months affected this assessment."
     ),
     "Gambling transactions were detected in your account history": (
-        "Transaction patterns: Certain transaction patterns in your account "
-        "history fell outside our lending criteria."
+        "Transaction patterns: Certain transaction patterns in your account history fell outside our lending criteria."
     ),
     "Your account has been in negative balance too frequently in recent months": (
         "Account conduct: Your transaction account has been in negative "
@@ -566,10 +564,11 @@ def generate_denial_template(
 
     factor_bullets = []
     for reason in reason_list:
-        explanation = _REASON_EXPLANATIONS.get(
-            reason,
-            reason.replace("_", " ").capitalize(),
-        )
+        explanation = _REASON_EXPLANATIONS.get(reason)
+        if not explanation:
+            # Reason is already customer-facing text from DENIAL_REASON_MAP —
+            # use it directly, ensuring it ends with a period.
+            explanation = reason if reason.endswith(".") else f"{reason}."
         factor_bullets.append(f"  \u2022  {explanation}")
 
     if not factor_bullets:
@@ -583,10 +582,12 @@ def generate_denial_template(
 
     # Build improvement step bullets
     step_bullets = []
+    seen_steps = set()
     for reason in reason_list:
         step = _IMPROVEMENT_STEPS.get(reason)
-        if step:
+        if step and step not in seen_steps:
             step_bullets.append(f"  \u2022  {step}")
+            seen_steps.add(step)
 
     if not step_bullets:
         step_bullets = [

@@ -27,9 +27,6 @@ def train_model_task(self, algorithm="xgb", data_path=None):
     """Train a model asynchronously via Celery."""
     import redis as _redis
 
-    from apps.ml_engine.services.predictor import clear_model_cache
-    from apps.ml_engine.services.trainer import ModelTrainer
-
     # Prevent concurrent training — acquire a Redis lock for 30 minutes
     redis_url = settings.CELERY_BROKER_URL
     redis_client = _redis.from_url(redis_url)

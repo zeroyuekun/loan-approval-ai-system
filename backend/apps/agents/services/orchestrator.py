@@ -1,16 +1,12 @@
 import logging
 import time
 
-from django.conf import settings
 from django.db import transaction
 
 from apps.agents.exceptions import (
-    LLMServiceError,
     MLPredictionError,
 )
-from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
-from apps.email_engine.services.email_generator import EmailGenerator
-from apps.email_engine.services.persistence import EmailPersistenceService
+from apps.agents.models import AgentRun
 from apps.loans.models import FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
@@ -20,9 +16,7 @@ from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector,
 from .context_builder import ApplicationContextBuilder
 from .email_pipeline import EmailPipelineService
 from .human_review_handler import HumanReviewHandler
-from .marketing_agent import MarketingAgent
 from .marketing_pipeline import MarketingPipelineService
-from .next_best_offer import NextBestOfferGenerator
 from .step_tracker import STEP_TIMEOUT_BUDGETS_MS, StepTracker  # noqa: F401 — re-exported
 
 logger = logging.getLogger("agents.orchestrator")
@@ -339,7 +333,13 @@ class PipelineOrchestrator:
 
         # Steps 2-4: Email generation, bias check, delivery (delegated)
         steps, email_result, generated_email, bias_result, escalated = self._email_pipeline.run(
-            application, agent_run, profile_context, prediction_result, decision, steps, waterfall,
+            application,
+            agent_run,
+            profile_context,
+            prediction_result,
+            decision,
+            steps,
+            waterfall,
         )
 
         if escalated:

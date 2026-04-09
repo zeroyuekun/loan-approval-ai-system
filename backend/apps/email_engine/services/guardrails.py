@@ -843,10 +843,12 @@ class GuardrailChecker:
                 matches = pattern.findall(text_lower)
                 if matches:
                     found_issues.append({"category": category, "phrase": matches[0], "suggestion": suggestion})
-        # Cognitive load: sentences over 40 words (exclude regulatory footer)
+        # Cognitive load: sentences over 40 words (exclude regulatory footer and bullet lists)
         separator = "\u2500" * 5
         body_text = text.split(separator)[0] if separator in text else text
-        for sentence in re.split(r"[.!?]\s+|\n\s*\n", body_text):
+        # Also split on newlines followed by bullet characters so bullet lists
+        # aren't merged into a single "sentence"
+        for sentence in re.split(r"[.!?]\s+|\n\s*\n|\n\s*[\u2022•]\s*", body_text):
             wc = len(sentence.split())
             if wc > 40:
                 found_issues.append(

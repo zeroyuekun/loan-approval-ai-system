@@ -8,6 +8,8 @@ from django.test import override_settings
 from apps.agents.models import AgentRun
 
 ORCH = "apps.agents.services.orchestrator"
+HUMAN_REVIEW = "apps.agents.services.human_review_handler"
+MKT_PIPE = "apps.agents.services.marketing_pipeline"
 SENDER = "apps.email_engine.services.sender.send_decision_email"
 
 CACHE_OVERRIDE = override_settings(
@@ -76,14 +78,12 @@ def _noop_select_for_update(self, **kwargs):
 def resume_mocks():
     with (
         patch(f"{ORCH}.ModelPredictor") as mp,
-        patch(f"{ORCH}.EmailGenerator") as eg,
-        patch(f"{ORCH}.EmailPersistenceService") as eps,
-        patch(f"{ORCH}.BiasDetector") as bd,
-        patch(f"{ORCH}.AIEmailReviewer") as air,
-        patch(f"{ORCH}.MarketingBiasDetector") as mbd,
-        patch(f"{ORCH}.MarketingEmailReviewer") as mer,
-        patch(f"{ORCH}.NextBestOfferGenerator") as nbo,
-        patch(f"{ORCH}.MarketingAgent") as ma,
+        patch(f"{HUMAN_REVIEW}.EmailGenerator") as eg,
+        patch(f"{HUMAN_REVIEW}.EmailPersistenceService") as eps,
+        patch(f"{MKT_PIPE}.MarketingBiasDetector") as mbd,
+        patch(f"{MKT_PIPE}.MarketingEmailReviewer") as mer,
+        patch(f"{MKT_PIPE}.NextBestOfferGenerator") as nbo,
+        patch(f"{MKT_PIPE}.MarketingAgent") as ma,
         patch(SENDER, return_value={"sent": True}) as sd,
         patch("django.db.models.QuerySet.select_for_update", _noop_select_for_update),
     ):
@@ -91,8 +91,6 @@ def resume_mocks():
             "predictor": mp,
             "email_gen": eg,
             "persistence": eps,
-            "bias": bd,
-            "ai_reviewer": air,
             "mkt_bias": mbd,
             "mkt_reviewer": mer,
             "nbo": nbo,

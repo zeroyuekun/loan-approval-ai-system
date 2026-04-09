@@ -17,9 +17,9 @@ class TestRegexCompilation:
             assert isinstance(pattern, re.Pattern), f"AGGRESSIVE_TERMS[{i}] is {type(pattern).__name__}, not re.Pattern"
 
     def test_informal_tone_patterns_are_compiled(self):
-        for i, pattern in enumerate(checker.INFORMAL_TONE_PATTERNS):
+        for i, pattern in enumerate(checker.AI_GIVEAWAY_TERMS):
             assert isinstance(pattern, re.Pattern), (
-                f"INFORMAL_TONE_PATTERNS[{i}] is {type(pattern).__name__}, not re.Pattern"
+                f"AI_GIVEAWAY_TERMS[{i}] is {type(pattern).__name__}, not re.Pattern"
             )
 
     def test_unprofessional_financial_terms_are_compiled(self):
@@ -48,9 +48,9 @@ class TestRegexCompilation:
             )
 
     def test_marketing_tone_patterns_are_compiled(self):
-        for i, pattern in enumerate(checker.MARKETING_TONE_PATTERNS):
+        for i, pattern in enumerate(checker.MARKETING_AI_GIVEAWAY_TERMS):
             assert isinstance(pattern, re.Pattern), (
-                f"MARKETING_TONE_PATTERNS[{i}] is {type(pattern).__name__}, not re.Pattern"
+                f"MARKETING_AI_GIVEAWAY_TERMS[{i}] is {type(pattern).__name__}, not re.Pattern"
             )
 
 
@@ -66,7 +66,7 @@ class TestRegexFlags:
             assert pattern.flags & re.IGNORECASE, f"Pattern {pattern.pattern} missing IGNORECASE flag"
 
     def test_informal_tone_patterns_have_ignorecase(self):
-        for pattern in checker.INFORMAL_TONE_PATTERNS:
+        for pattern in checker.AI_GIVEAWAY_TERMS:
             assert pattern.flags & re.IGNORECASE, f"Pattern {pattern.pattern} missing IGNORECASE flag"
 
     def test_unprofessional_financial_terms_have_ignorecase(self):
@@ -89,7 +89,7 @@ class TestRegexFlags:
             assert pattern.flags & re.IGNORECASE, f"Pattern {pattern.pattern} missing IGNORECASE flag"
 
     def test_marketing_tone_patterns_have_ignorecase(self):
-        for pattern in checker.MARKETING_TONE_PATTERNS:
+        for pattern in checker.MARKETING_AI_GIVEAWAY_TERMS:
             assert pattern.flags & re.IGNORECASE, f"Pattern {pattern.pattern} missing IGNORECASE flag"
 
 
@@ -120,7 +120,7 @@ class TestRegexFunctionality:
     def test_informal_tone_detected(self):
         text = "We are delighted to inform you additionally that we would like to empower you"
         matches = []
-        for pattern in checker.INFORMAL_TONE_PATTERNS:
+        for pattern in checker.AI_GIVEAWAY_TERMS:
             matches.extend(pattern.findall(text))
         assert len(matches) > 0
 
@@ -148,7 +148,7 @@ class TestRegexFunctionality:
     def test_marketing_tone_detected(self):
         text = "We are delighted to share this journey with you additionally"
         matches = []
-        for pattern in checker.MARKETING_TONE_PATTERNS:
+        for pattern in checker.MARKETING_AI_GIVEAWAY_TERMS:
             matches.extend(pattern.findall(text))
         assert len(matches) > 0
 
