@@ -36,7 +36,7 @@ class TestStepHelpers:
     def test_complete_step_warns_on_timeout(self):
         step = self.orchestrator._start_step("ml_prediction")
         step["started_at"] = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
-        with patch("apps.agents.services.orchestrator.logger") as mock_logger:
+        with patch("apps.agents.services.step_tracker.logger") as mock_logger:
             self.orchestrator._complete_step(step)
             mock_logger.warning.assert_called_once()
 
