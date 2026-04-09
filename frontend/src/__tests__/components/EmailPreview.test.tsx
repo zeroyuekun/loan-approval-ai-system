@@ -32,11 +32,11 @@ describe('EmailPreview', () => {
     vi.clearAllMocks()
   })
 
-  it('renders subject in email header, attempt number, and generation time', () => {
+  it('renders subject in email header, sender name, and generation time', () => {
     render(<EmailPreview email={baseEmail} />)
 
     expect(screen.getByText('Your Loan Has Been Approved')).toBeInTheDocument()
-    expect(screen.getByText('Attempt #2')).toBeInTheDocument()
+    expect(screen.getByText('Sarah Mitchell')).toBeInTheDocument()
     expect(screen.getByText('1450ms')).toBeInTheDocument()
   })
 
@@ -46,19 +46,18 @@ describe('EmailPreview', () => {
     expect(screen.getByText(/decisions@aussieloanai\.com\.au/)).toBeInTheDocument()
   })
 
-  it('shows "Passed Guardrails" badge when passed_guardrails is true', () => {
+  it('shows "Passed" badge when passed_guardrails is true', () => {
     render(<EmailPreview email={baseEmail} />)
 
-    expect(screen.getByText('Passed Guardrails')).toBeInTheDocument()
-    expect(screen.queryByText('Failed Guardrails')).not.toBeInTheDocument()
+    expect(screen.getByText('Passed')).toBeInTheDocument()
+    expect(screen.queryByText('Failed')).not.toBeInTheDocument()
   })
 
-  it('shows "Failed Guardrails" badge when passed_guardrails is false', () => {
+  it('shows "Failed" badge when passed_guardrails is false', () => {
     const failedEmail = { ...baseEmail, passed_guardrails: false }
     render(<EmailPreview email={failedEmail} />)
 
-    expect(screen.getByText('Failed Guardrails')).toBeInTheDocument()
-    expect(screen.queryByText('Passed Guardrails')).not.toBeInTheDocument()
+    expect(screen.getByText('Failed')).toBeInTheDocument()
   })
 
   it('renders guardrail checks via GuardrailLogDisplay', () => {

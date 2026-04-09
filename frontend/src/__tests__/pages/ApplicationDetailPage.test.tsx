@@ -84,7 +84,7 @@ describe('ApplicationDetailPage', () => {
     })
   })
 
-  it('shows "Application not found" for missing application', async () => {
+  it('shows error state for missing application', async () => {
     server.use(
       http.get(`${API_URL}/loans/:id/`, () => {
         return HttpResponse.json({ error: 'Not found' }, { status: 404 })
@@ -94,7 +94,7 @@ describe('ApplicationDetailPage', () => {
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('Application not found')).toBeInTheDocument()
+      expect(screen.getByText('Failed to load application')).toBeInTheDocument()
     })
   })
 

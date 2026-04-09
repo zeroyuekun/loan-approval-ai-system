@@ -318,6 +318,7 @@ class AgentRunView(APIView):
                 "id": str(me.id),
                 "subject": me.subject,
                 "body": me.body,
+                "html_body": _plain_text_to_html(me.body),
                 "passed_guardrails": me.passed_guardrails,
                 "guardrail_results": me.guardrail_results,
                 "generation_time_ms": me.generation_time_ms,

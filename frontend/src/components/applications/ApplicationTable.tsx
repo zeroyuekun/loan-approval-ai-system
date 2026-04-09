@@ -76,7 +76,7 @@ export function ApplicationTable({
           {applications.length === 0 && (
             <TableRow>
               <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                No applications found
+                {totalCount === 0 ? 'No applications yet' : 'No results match your current filters'}
               </TableCell>
             </TableRow>
           )}

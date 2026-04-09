@@ -4,36 +4,65 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { authApi } from '@/lib/api'
-import { CustomerActivity, GeneratedEmail } from '@/types'
+import { CustomerActivity, GeneratedEmail, MarketingEmail } from '@/types'
 import { EmailPreview } from '@/components/emails/EmailPreview'
+import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, Mail, FileText, ChevronRight } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
+type AnyEmail =
+  | { kind: 'decision'; email: GeneratedEmail }
+  | { kind: 'marketing'; email: MarketingEmail }
+
 interface ApplicationGroup {
   application_id: string
-  emails: GeneratedEmail[]
+  items: AnyEmail[]
   latestDate: string
   passedCount: number
   failedCount: number
 }
 
-function groupByApplication(emails: GeneratedEmail[]): ApplicationGroup[] {
+function groupByApplication(
+  emails: GeneratedEmail[],
+  marketingByApp: Map<string, MarketingEmail[]>,
+): ApplicationGroup[] {
   const map = new Map<string, ApplicationGroup>()
+
   for (const email of emails) {
     const appId = email.application_id
     if (!map.has(appId)) {
-      map.set(appId, { application_id: appId, emails: [], latestDate: email.created_at, passedCount: 0, failedCount: 0 })
+      map.set(appId, { application_id: appId, items: [], latestDate: email.created_at, passedCount: 0, failedCount: 0 })
     }
     const group = map.get(appId)!
-    group.emails.push(email)
+    group.items.push({ kind: 'decision', email })
     if (email.passed_guardrails) group.passedCount++
     else group.failedCount++
     if (email.created_at > group.latestDate) group.latestDate = email.created_at
   }
-  // Sort by latest date descending
+
+  // Append marketing emails to their application group
+  for (const [appId, mktEmails] of marketingByApp) {
+    if (!map.has(appId)) {
+      const first = mktEmails[0]
+      map.set(appId, { application_id: appId, items: [], latestDate: first.created_at, passedCount: 0, failedCount: 0 })
+    }
+    const group = map.get(appId)!
+    for (const me of mktEmails) {
+      group.items.push({ kind: 'marketing', email: me })
+      if (me.passed_guardrails) group.passedCount++
+      else group.failedCount++
+      if (me.created_at > group.latestDate) group.latestDate = me.created_at
+    }
+  }
+
+  // Sort items within each group by created_at
+  for (const group of map.values()) {
+    group.items.sort((a, b) => a.email.created_at.localeCompare(b.email.created_at))
+  }
+
   return Array.from(map.values()).sort((a, b) => b.latestDate.localeCompare(a.latestDate))
 }
 
@@ -64,7 +93,19 @@ export default function CustomerEmailsPage() {
 
   const emails = activity?.emails || []
   const customerName = activity?.customer_name || 'Unknown'
-  const applicationGroups = groupByApplication(emails)
+
+  // Extract marketing emails from agent runs, keyed by application_id
+  const marketingByApp = new Map<string, MarketingEmail[]>()
+  for (const run of activity?.agent_runs || []) {
+    if (run.marketing_emails && run.marketing_emails.length > 0) {
+      const appId = run.application_id
+      if (!marketingByApp.has(appId)) marketingByApp.set(appId, [])
+      marketingByApp.get(appId)!.push(...run.marketing_emails)
+    }
+  }
+
+  const applicationGroups = groupByApplication(emails, marketingByApp)
+  const totalEmails = emails.length + Array.from(marketingByApp.values()).reduce((n, arr) => n + arr.length, 0)
   const hasMultipleApplications = applicationGroups.length > 1
 
   return (
@@ -80,13 +121,13 @@ export default function CustomerEmailsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{customerName}</h1>
           <p className="text-muted-foreground">
-            {emails.length} generated email{emails.length !== 1 ? 's' : ''}
+            {totalEmails} email{totalEmails !== 1 ? 's' : ''}
             {hasMultipleApplications && ` across ${applicationGroups.length} applications`}
           </p>
         </div>
       </div>
 
-      {emails.length === 0 ? (
+      {totalEmails === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Mail className="h-10 w-10 mb-3" />
@@ -115,7 +156,7 @@ export default function CustomerEmailsPage() {
                       </Link>
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      {group.emails.length} email{group.emails.length !== 1 ? 's' : ''} &middot; Last: {formatDate(group.latestDate)}
+                      {group.items.length} email{group.items.length !== 1 ? 's' : ''} &middot; Last: {formatDate(group.latestDate)}
                     </CardDescription>
                   </div>
                 </div>
@@ -132,18 +173,26 @@ export default function CustomerEmailsPage() {
               </div>
             </CardHeader>
             <CardContent className="pt-0 space-y-4">
-              {group.emails.map((email) => (
-                <EmailPreview key={email.id} email={email} />
-              ))}
+              {group.items.map((item) =>
+                item.kind === 'decision' ? (
+                  <EmailPreview key={item.email.id} email={item.email} />
+                ) : (
+                  <MarketingEmailCard key={item.email.id} email={item.email} />
+                )
+              )}
             </CardContent>
           </Card>
         ))
       ) : (
         // Single application — no extra grouping needed
         <div className="space-y-4">
-          {emails.map((email) => (
-            <EmailPreview key={email.id} email={email} />
-          ))}
+          {applicationGroups[0]?.items.map((item) =>
+            item.kind === 'decision' ? (
+              <EmailPreview key={item.email.id} email={item.email} />
+            ) : (
+              <MarketingEmailCard key={item.email.id} email={item.email} />
+            )
+          )}
         </div>
       )}
     </div>

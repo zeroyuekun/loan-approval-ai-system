@@ -36,4 +36,7 @@ USER appuser
 
 EXPOSE 3000
 
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=45s \
+  CMD wget -q --spider http://localhost:3000 || exit 1
+
 CMD ["npm", "run", "start"]

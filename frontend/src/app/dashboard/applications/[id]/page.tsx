@@ -20,7 +20,7 @@ export default function ApplicationDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const isAdmin = user?.role === 'admin'
 
-  const { data: application, isLoading: appLoading } = useApplication(id)
+  const { data: application, isLoading: appLoading, isError, error } = useApplication(id)
 
   const { data: email } = useQuery<GeneratedEmail>({
     queryKey: ['email', id],
@@ -56,6 +56,23 @@ export default function ApplicationDetailPage() {
       <div className="space-y-6">
         <Skeleton className="h-48 w-full" />
         <Skeleton className="h-48 w-full" />
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-3">
+        <p className="font-medium text-destructive">Failed to load application</p>
+        <p className="text-sm text-muted-foreground">
+          {error instanceof Error ? error.message : 'An unexpected error occurred'}
+        </p>
+        <button
+          className="mt-2 rounded-md border px-4 py-2 text-sm hover:bg-muted"
+          onClick={() => router.back()}
+        >
+          Go Back
+        </button>
       </div>
     )
   }

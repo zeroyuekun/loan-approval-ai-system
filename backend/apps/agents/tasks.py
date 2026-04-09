@@ -2,6 +2,7 @@ import logging
 
 from celery import shared_task
 from django.core.cache import cache
+from django.db import transaction
 
 logger = logging.getLogger("agents.tasks")
 
@@ -15,15 +16,16 @@ def _cleanup_stuck_application(application_id):
         from apps.agents.models import AgentRun  # noqa: F401 — local import for Celery
         from apps.loans.models import LoanApplication  # noqa: F401 — local import for Celery
 
-        LoanApplication.objects.filter(
-            pk=application_id,
-            status=LoanApplication.Status.PROCESSING,
-        ).update(status=LoanApplication.Status.REVIEW)
+        with transaction.atomic():
+            LoanApplication.objects.filter(
+                pk=application_id,
+                status=LoanApplication.Status.PROCESSING,
+            ).update(status=LoanApplication.Status.REVIEW)
 
-        AgentRun.objects.filter(
-            application_id=application_id,
-            status__in=("pending", "running"),
-        ).update(status=AgentRun.Status.FAILED, error="Task failed unexpectedly — application reset to review")
+            AgentRun.objects.filter(
+                application_id=application_id,
+                status__in=("pending", "running"),
+            ).update(status=AgentRun.Status.FAILED, error="Task failed unexpectedly — application reset to review")
 
         logger.warning("Application %s: cleaned up stuck processing status", application_id)
     except Exception as e:

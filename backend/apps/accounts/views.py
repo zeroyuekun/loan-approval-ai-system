@@ -71,10 +71,15 @@ def _clear_jwt_cookies(response):
     return response
 
 
+class RefreshRateThrottle(AnonRateThrottle):
+    rate = "30/min"
+
+
 class CookieTokenRefreshView(generics.GenericAPIView):
     """Refresh JWT tokens using the HttpOnly refresh cookie."""
 
     permission_classes = (AllowAny,)
+    throttle_classes = (RefreshRateThrottle,)
 
     def post(self, request, *args, **kwargs):
         refresh_name = getattr(django_settings, "JWT_REFRESH_COOKIE_NAME", "refresh_token")
@@ -406,6 +411,7 @@ class StaffCustomerActivityView(generics.GenericAPIView):
                     "id": str(me.id),
                     "subject": escape(me.subject),
                     "body": escape(me.body),
+                    "html_body": _plain_text_to_html(me.body),
                     "passed_guardrails": me.passed_guardrails,
                     "guardrail_results": me.guardrail_results,
                     "generation_time_ms": me.generation_time_ms,

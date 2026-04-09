@@ -42,7 +42,7 @@ describe('ApplicationTable', () => {
       />,
     )
 
-    expect(screen.getByText('No applications found')).toBeInTheDocument()
+    expect(screen.getByText('No applications yet')).toBeInTheDocument()
   })
 
   it('shows loading skeletons', () => {

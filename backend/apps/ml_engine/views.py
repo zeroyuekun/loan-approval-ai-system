@@ -85,8 +85,13 @@ class ModelMetricsView(APIView):
         )
 
 
+class TrainModelThrottle(UserRateThrottle):
+    rate = "3/hour"
+
+
 class TrainModelView(APIView):
     permission_classes = [IsAdmin]
+    throttle_classes = [TrainModelThrottle]
 
     def post(self, request):
         """Trigger model training (admin only)."""
@@ -183,6 +188,8 @@ class ModelDriftView(APIView):
                 continue
 
             ref = ref_dist[col]
+            if not isinstance(ref, dict):
+                continue
             hist_counts = ref.get("histogram_counts", [])
             hist_edges = ref.get("histogram_edges", [])
 

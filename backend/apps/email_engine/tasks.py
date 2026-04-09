@@ -23,6 +23,20 @@ def generate_email_task(self, application_id, decision):
     """Generate a decision email for a loan application."""
     from apps.email_engine.services.email_generator import EmailGenerator
 
+    # Idempotency: if email already generated for this application+decision, return it
+    existing = GeneratedEmail.objects.filter(
+        application_id=application_id, decision=decision
+    ).order_by("-created_at").first()
+    if existing:
+        logger.info("Email already exists for application %s (%s), skipping generation", application_id, decision)
+        return {
+            "email_id": str(existing.id),
+            "subject": existing.subject,
+            "passed_guardrails": existing.passed_guardrails,
+            "attempt_number": existing.attempt_number,
+            "email_sent": False,
+        }
+
     application = LoanApplication.objects.select_related("applicant", "decision").get(pk=application_id)
 
     generator = EmailGenerator()

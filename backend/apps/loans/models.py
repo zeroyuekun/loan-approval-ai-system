@@ -78,7 +78,7 @@ class LoanApplication(SoftDeleteModel):
         NT = "NT", "Northern Territory"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    applicant = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="loan_applications")
+    applicant = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="loan_applications")
 
     # Financial info
     annual_income = models.DecimalField(
@@ -427,7 +427,7 @@ class Complaint(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     complainant = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="complaints",
     )
     loan_application = models.ForeignKey(

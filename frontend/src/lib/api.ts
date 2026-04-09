@@ -123,6 +123,16 @@ api.interceptors.response.use(
         refreshPromise = null
       }
     }
+    // Retry transient failures (429 Too Many Requests, 503 Service Unavailable)
+    const retryableStatus = [429, 503]
+    const retryCount = originalRequest._retryCount || 0
+    if (retryableStatus.includes(error.response?.status) && retryCount < 2) {
+      originalRequest._retryCount = retryCount + 1
+      const delay = Math.pow(2, retryCount) * 1000 // 1s, 2s
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      return api(originalRequest)
+    }
+
     // Show toast for non-401 errors (401s handled by refresh logic)
     if (error.response?.status && error.response.status !== 401) {
       const message = error.response?.data?.detail

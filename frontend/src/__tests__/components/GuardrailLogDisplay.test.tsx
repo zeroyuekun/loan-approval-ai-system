@@ -33,14 +33,14 @@ describe('GuardrailLogDisplay', () => {
     expect(screen.queryByText('Professional tone detected')).not.toBeInTheDocument()
   })
 
-  it('displays quality score when present on first check', () => {
-    const checksWithScore = [
-      { check_name: 'Tone Check', passed: true, details: 'Good', quality_score: 92 },
+  it('shows all-passed styling when every check passes', () => {
+    const allPassed: GuardrailCheck[] = [
+      { check_name: 'Tone Check', passed: true, details: 'Good' },
       { check_name: 'PII Check', passed: true, details: 'Clean' },
-    ] as (GuardrailCheck & { quality_score?: number })[]
+    ]
 
-    render(<GuardrailLogDisplay checks={checksWithScore as GuardrailCheck[]} />)
+    render(<GuardrailLogDisplay checks={allPassed} />)
 
-    expect(screen.getByText('92/100')).toBeInTheDocument()
+    expect(screen.getByText('2/2 passed')).toBeInTheDocument()
   })
 })

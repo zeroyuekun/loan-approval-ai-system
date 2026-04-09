@@ -7,9 +7,12 @@ all keys are tried for decryption).
 """
 
 import functools
+import logging
 
 from cryptography.fernet import Fernet, MultiFernet
 from django.conf import settings
+
+logger = logging.getLogger("accounts.encryption")
 
 
 @functools.lru_cache(maxsize=1)
@@ -58,6 +61,10 @@ def decrypt_field(value):
     try:
         f = get_fernet()
         return f.decrypt(value.encode()).decode()
-    except Exception:
-        # Value may be unencrypted (pre-migration data) or key mismatch
+    except Exception as exc:
+        logger.warning(
+            "decrypt_field failed (length=%d): %s",
+            len(value),
+            type(exc).__name__,
+        )
         return value
