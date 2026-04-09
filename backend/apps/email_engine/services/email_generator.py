@@ -101,13 +101,39 @@ class EmailGenerator:
         "deposit_x_income_stability": "Your deposit size and income stability together don't meet our lending requirements right now",
         "dti_x_rate_sensitivity": "Your existing debt level means repayments could become difficult if interest rates were to rise",
         "credit_x_employment": "Your credit history and employment type together don't meet our criteria for this product",
+        # CCR / payment history
+        "num_late_payments_24m": "You've had late payments on your credit accounts in the last 24 months",
+        "worst_late_payment_days": "You've had overdue payments on your credit file that exceeded our acceptable threshold",
+        # Bureau / behavioural
+        "num_defaults_5yr": "There are default records on your credit file from the past five years",
+        "num_hardship_flags": "There are financial hardship indicators on your credit file",
+        "num_dishonours_12m": "There have been dishonoured transactions on your accounts in the last 12 months",
+        "gambling_transaction_flag": "Gambling transactions were detected in your account history",
+        "days_negative_balance_90d": "Your account has been in negative balance too frequently in recent months",
+        "bnpl_monthly_commitment": "Your buy-now-pay-later commitments reduce the amount we can lend",
     }
 
-    def _format_denial_reasons(self, feature_importances):
-        """Convert ML feature importances to plain-language denial reasons."""
-        if not feature_importances:
+    def _format_denial_reasons(self, feature_importances, shap_values=None):
+        """Convert per-applicant SHAP values to plain-language denial reasons.
+
+        Prefers SHAP values (per-applicant, explains why THIS person was denied)
+        over global feature importances (model-wide weights, same for everyone).
+        Falls back to global importances when SHAP values are unavailable.
+        """
+        if not feature_importances and not shap_values:
             return "Credit assessment criteria not met"
-        top_factors = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]
+
+        if shap_values:
+            # Use negative SHAP values — these are the features that pushed
+            # this specific applicant toward denial
+            negative_shap = {k: abs(v) for k, v in shap_values.items() if v < 0}
+            if negative_shap:
+                top_factors = sorted(negative_shap.items(), key=lambda x: x[1], reverse=True)[:3]
+            else:
+                top_factors = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]
+        else:
+            top_factors = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]
+
         reasons = []
         for feature_name, _score in top_factors:
             readable = self.DENIAL_REASON_MAP.get(
@@ -216,10 +242,10 @@ class EmailGenerator:
             # Store pricing in context for guardrail validation
             context["pricing"] = pricing
         else:
+            decision_obj = getattr(application, "decision", None)
             reasons = self._format_denial_reasons(
-                application.decision.feature_importances
-                if hasattr(application, "decision") and application.decision
-                else None
+                decision_obj.feature_importances if decision_obj else None,
+                shap_values=decision_obj.shap_values if decision_obj else None,
             )
             prompt = DENIAL_EMAIL_PROMPT.format(
                 applicant_name=applicant_name,
@@ -512,10 +538,12 @@ class EmailGenerator:
         else:
             # Gather rich denial context
             feature_importances = None
+            shap_values = None
             if hasattr(application, "decision") and application.decision:
                 feature_importances = application.decision.feature_importances
+                shap_values = application.decision.shap_values
 
-            denial_reasons = self._format_denial_reasons(feature_importances)
+            denial_reasons = self._format_denial_reasons(feature_importances, shap_values=shap_values)
 
             credit_score = getattr(application, "credit_score", None)
             debt_to_income = getattr(application, "debt_to_income", None)

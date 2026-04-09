@@ -1,27 +1,20 @@
 'use client'
 
-import { useState } from 'react'
-import DOMPurify from 'dompurify'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { MarketingEmail } from '@/types'
-import { Mail, ShieldCheck, ShieldAlert, Clock, RefreshCw, Code } from 'lucide-react'
+import { Mail, ShieldCheck, ShieldAlert, Clock, RefreshCw } from 'lucide-react'
 import { GuardrailLogDisplay } from '@/components/emails/GuardrailLogDisplay'
-import { FormattedEmailBody } from '@/components/emails/EmailPreview'
+import { HtmlEmailBody } from '@/components/emails/EmailPreview'
 
-function HtmlEmailBody({ html }: { html: string }) {
-  const sanitized = DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: ['div', 'p', 'strong', 'em', 'br', 'hr', 'table', 'tr', 'td', 'th', 'span', 'b', 'i', 'u'],
-    ALLOWED_ATTR: ['style'],
-  })
-
-  return (
-    <div
-      className="email-html-preview"
-      dangerouslySetInnerHTML={{ __html: sanitized }}
-    />
-  )
+/** Fallback: convert plain text to basic HTML paragraphs when no html_body exists */
+function plainTextToHtml(body: string): string {
+  const escaped = body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return '<div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">'
+    + escaped.split('\n\n').map(block =>
+        `<p style="margin: 0 0 16px 0;">${block.replace(/\n/g, '<br>')}</p>`
+      ).join('')
+    + '</div>'
 }
 
 interface MarketingEmailCardProps {
@@ -29,7 +22,7 @@ interface MarketingEmailCardProps {
 }
 
 export function MarketingEmailCard({ email }: MarketingEmailCardProps) {
-  const [viewMode, setViewMode] = useState<'html' | 'plain'>(email.html_body ? 'html' : 'plain')
+  const htmlContent = email.html_body || plainTextToHtml(email.body)
 
   return (
     <Card>
@@ -50,28 +43,6 @@ export function MarketingEmailCard({ email }: MarketingEmailCardProps) {
               </Badge>
             )}
           </CardTitle>
-          {email.html_body && (
-            <div className="flex items-center rounded-md border p-0.5">
-              <Button
-                variant={viewMode === 'html' ? 'default' : 'ghost'}
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setViewMode('html')}
-              >
-                <Mail className="mr-1 h-3 w-3" />
-                Preview
-              </Button>
-              <Button
-                variant={viewMode === 'plain' ? 'default' : 'ghost'}
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setViewMode('plain')}
-              >
-                <Code className="mr-1 h-3 w-3" />
-                Plain Text
-              </Button>
-            </div>
-          )}
         </div>
         <CardDescription className="flex items-center gap-4 text-xs">
           <span className="flex items-center gap-1">
@@ -87,25 +58,18 @@ export function MarketingEmailCard({ email }: MarketingEmailCardProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Email Preview */}
-        <div className="rounded-lg border bg-purple-50/30 p-5">
-          <div className="mb-3 pb-3 border-b border-purple-200/50">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground font-medium">Subject:</span>
-              <span className="font-semibold text-purple-900">{email.subject}</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-              <span>From: The AussieLoanAI Retention Team &lt;alternatives@aussieloanai.com.au&gt;</span>
-            </div>
+        {/* Gmail-style email preview */}
+        <div className="rounded-lg border bg-white shadow-soft overflow-hidden">
+          {/* Email header bar */}
+          <div className="border-b bg-purple-50/80 px-6 py-3">
+            <p className="text-sm font-semibold text-purple-900">{email.subject}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              From: AussieLoanAI Retention Team &lt;alternatives@aussieloanai.com.au&gt;
+            </p>
           </div>
-          <div className="text-sm text-foreground/90 leading-relaxed">
-            {viewMode === 'html' && email.html_body ? (
-              <HtmlEmailBody html={email.html_body} />
-            ) : (
-              <div className="whitespace-pre-line">
-                <FormattedEmailBody body={email.body} />
-              </div>
-            )}
+          {/* Email body */}
+          <div className="px-6 py-5 text-sm leading-relaxed">
+            <HtmlEmailBody html={htmlContent} />
           </div>
         </div>
 

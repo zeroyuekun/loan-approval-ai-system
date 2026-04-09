@@ -55,7 +55,6 @@ export function GuardrailLogDisplay({ checks }: GuardrailLogDisplayProps) {
   const passedChecks = checks.filter((c) => c.passed).length
   const failedChecks = totalChecks - passedChecks
   const allPassed = failedChecks === 0
-  const qualityScore = checks[0]?.quality_score ?? null
 
   return (
     <div className="space-y-3">
@@ -66,15 +65,6 @@ export function GuardrailLogDisplay({ checks }: GuardrailLogDisplayProps) {
           <h4 className="text-sm font-semibold">Compliance &amp; Guardrail Checks</h4>
         </div>
         <div className="flex items-center gap-3">
-          {qualityScore !== null && (
-            <span className={`text-xs font-mono px-2 py-0.5 rounded ${
-              qualityScore >= 90 ? 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-400' :
-              qualityScore >= 70 ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400' :
-              'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-400'
-            }`}>
-              {qualityScore}/100
-            </span>
-          )}
           <span className={`flex items-center gap-1 text-xs font-medium ${allPassed ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
             {allPassed ? (
               <><ShieldCheck className="h-3.5 w-3.5" />{passedChecks}/{totalChecks} passed</>

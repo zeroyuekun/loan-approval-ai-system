@@ -359,7 +359,14 @@ class PipelineOrchestrator:
         # Step 5: NBO + Marketing pipeline (if denied)
         if decision == "denied":
             denial_reasons = ""
-            if prediction_result and prediction_result.get("feature_importances"):
+            shap_vals = prediction_result.get("shap_values") if prediction_result else None
+            if shap_vals:
+                # Use per-applicant SHAP values — negative values are denial drivers
+                negative = {k: abs(v) for k, v in shap_vals.items() if v < 0}
+                if negative:
+                    top_factors = sorted(negative.items(), key=lambda x: x[1], reverse=True)[:3]
+                    denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
+            if not denial_reasons and prediction_result and prediction_result.get("feature_importances"):
                 top_factors = sorted(
                     prediction_result["feature_importances"].items(), key=lambda x: x[1], reverse=True
                 )[:3]

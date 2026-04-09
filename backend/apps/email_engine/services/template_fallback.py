@@ -176,6 +176,40 @@ _REASON_EXPLANATIONS = {
         "Credit enquiries: The number of credit enquiries on your file in "
         "the recent period exceeded the threshold we apply for this product."
     ),
+    # CCR / payment history — keyed by DENIAL_REASON_MAP values from email_generator.py
+    "You've had late payments on your credit accounts in the last 24 months": (
+        "Payment history: Your credit file shows late payments within the "
+        "last 24 months, which affected the outcome of this assessment."
+    ),
+    "You've had overdue payments on your credit file that exceeded our acceptable threshold": (
+        "Payment history: The severity of overdue payments recorded on your "
+        "credit file exceeded the threshold we apply for a loan of this type."
+    ),
+    "There are default records on your credit file from the past five years": (
+        "Credit defaults: There are default records on your credit file from "
+        "the past five years that affected this assessment."
+    ),
+    "There are financial hardship indicators on your credit file": (
+        "Hardship indicators: Financial hardship indicators on your credit "
+        "file were noted during this assessment."
+    ),
+    "There have been dishonoured transactions on your accounts in the last 12 months": (
+        "Dishonoured transactions: Dishonoured transactions on your accounts "
+        "in the last 12 months affected this assessment."
+    ),
+    "Gambling transactions were detected in your account history": (
+        "Transaction patterns: Certain transaction patterns in your account "
+        "history fell outside our lending criteria."
+    ),
+    "Your account has been in negative balance too frequently in recent months": (
+        "Account conduct: Your transaction account has been in negative "
+        "balance too frequently in recent months for us to proceed."
+    ),
+    "Your buy-now-pay-later commitments reduce the amount we can lend": (
+        "Buy-now-pay-later commitments: Your existing BNPL commitments are "
+        "included in our serviceability assessment and reduced the amount "
+        "we are able to lend."
+    ),
     # Combined factors — keyed by DENIAL_REASON_MAP values from email_generator.py
     "The combination of your deposit size and existing debt levels falls outside our lending criteria for this product": (
         "Deposit and debt levels: The combination of your deposit size and "
@@ -320,6 +354,43 @@ _IMPROVEMENT_STEPS = {
     "Recent credit enquiry frequency above acceptable range": (
         "Limiting new credit applications for the next 6\u201312 months to "
         "reduce the number of enquiries on your credit file."
+    ),
+    # CCR / payment history — keyed by DENIAL_REASON_MAP values from email_generator.py
+    "You've had late payments on your credit accounts in the last 24 months": (
+        "Ensuring all bills and credit commitments are paid on or before "
+        "the due date for the next 12\u201324 months to build a clean payment history."
+    ),
+    "You've had overdue payments on your credit file that exceeded our acceptable threshold": (
+        "Bringing any overdue accounts up to date and maintaining on-time "
+        "payments for at least 12 months before reapplying."
+    ),
+    "There are default records on your credit file from the past five years": (
+        "Allowing time for default records to age on your credit file. "
+        "Defaults are listed for five years; a stronger application can be "
+        "made once they have aged or been removed."
+    ),
+    "There are financial hardship indicators on your credit file": (
+        "Completing any current hardship arrangements and demonstrating "
+        "a period of stable repayments before reapplying."
+    ),
+    "There have been dishonoured transactions on your accounts in the last 12 months": (
+        "Ensuring sufficient funds are available in your accounts to cover "
+        "all direct debits and scheduled payments, and maintaining a clean "
+        "transaction history for at least 12 months."
+    ),
+    "Gambling transactions were detected in your account history": (
+        "Reviewing your spending patterns and ensuring your transaction "
+        "history demonstrates responsible financial management over a "
+        "sustained period before reapplying."
+    ),
+    "Your account has been in negative balance too frequently in recent months": (
+        "Maintaining a positive account balance consistently for at least "
+        "three months and building a small buffer to cover unexpected expenses."
+    ),
+    "Your buy-now-pay-later commitments reduce the amount we can lend": (
+        "Paying down or closing some of your buy-now-pay-later accounts "
+        "before reapplying. BNPL commitments are included in our "
+        "serviceability assessment and reduce your borrowing capacity."
     ),
     # Combined factors — keyed by DENIAL_REASON_MAP values from email_generator.py
     "The combination of your deposit size and existing debt levels falls outside our lending criteria for this product": (

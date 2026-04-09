@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { EmailPreview, FormattedEmailBody } from '@/components/emails/EmailPreview'
+import { EmailPreview, HtmlEmailBody } from '@/components/emails/EmailPreview'
 import { GeneratedEmail } from '@/types'
 
 vi.mock('@/components/emails/GuardrailLogDisplay', () => ({
@@ -15,6 +15,7 @@ const baseEmail: GeneratedEmail = {
   decision: 'approved',
   subject: 'Your Loan Has Been Approved',
   body: 'Dear Jane,\n\nCongratulations on your approval.\n\nLoan Details:\n  Loan Amount:  $50,000.00\n\nNext Steps:\n• Submit your ID\n• Sign the contract\n\nKind regards,\nSarah Mitchell\nSenior Lending Officer',
+  html_body: '<div style="font-family: Arial; font-size: 14px;"><p><strong>Dear Jane,</strong></p><p>Congratulations on your approval.</p></div>',
   model_used: 'claude-sonnet-4-20250514',
   passed_guardrails: true,
   attempt_number: 2,
@@ -31,12 +32,18 @@ describe('EmailPreview', () => {
     vi.clearAllMocks()
   })
 
-  it('renders subject, attempt number, and generation time', () => {
+  it('renders subject in email header, attempt number, and generation time', () => {
     render(<EmailPreview email={baseEmail} />)
 
     expect(screen.getByText('Your Loan Has Been Approved')).toBeInTheDocument()
     expect(screen.getByText('Attempt #2')).toBeInTheDocument()
     expect(screen.getByText('1450ms')).toBeInTheDocument()
+  })
+
+  it('renders the from address in email header', () => {
+    render(<EmailPreview email={baseEmail} />)
+
+    expect(screen.getByText(/decisions@aussieloanai\.com\.au/)).toBeInTheDocument()
   })
 
   it('shows "Passed Guardrails" badge when passed_guardrails is true', () => {
@@ -66,70 +73,40 @@ describe('EmailPreview', () => {
 
     expect(screen.queryByTestId('guardrail-log')).not.toBeInTheDocument()
   })
+
+  it('renders HTML preview when html_body is provided', () => {
+    const { container } = render(<EmailPreview email={baseEmail} />)
+
+    const preview = container.querySelector('.email-html-preview')
+    expect(preview).toBeInTheDocument()
+    expect(preview?.innerHTML).toContain('Dear Jane,')
+  })
+
+  it('falls back to paragraph HTML when no html_body', () => {
+    const plainOnly = { ...baseEmail, html_body: undefined }
+    const { container } = render(<EmailPreview email={plainOnly} />)
+
+    const preview = container.querySelector('.email-html-preview')
+    expect(preview).toBeInTheDocument()
+  })
 })
 
-describe('FormattedEmailBody', () => {
-  it('bolds "Dear " greeting lines', () => {
-    render(<FormattedEmailBody body="Dear Jane," />)
-
-    const strong = screen.getByText('Dear Jane,')
-    expect(strong.tagName).toBe('STRONG')
+describe('HtmlEmailBody', () => {
+  it('sanitizes and renders HTML content', () => {
+    const { container } = render(
+      <HtmlEmailBody html='<p>Hello <strong>World</strong></p>' />
+    )
+    const preview = container.querySelector('.email-html-preview')
+    expect(preview).toBeInTheDocument()
+    expect(preview?.querySelector('strong')?.textContent).toBe('World')
   })
 
-  it('bolds section headers like "Loan Details:" and "Next Steps:"', () => {
-    render(<FormattedEmailBody body={'Loan Details:\nNext Steps:'} />)
-
-    const loanDetails = screen.getByText('Loan Details:')
-    expect(loanDetails.tagName).toBe('STRONG')
-
-    const nextSteps = screen.getByText('Next Steps:')
-    expect(nextSteps.tagName).toBe('STRONG')
-  })
-
-  it('renders bullet points as plain text', () => {
-    render(<FormattedEmailBody body="• Submit your ID" />)
-
-    expect(screen.getByText('• Submit your ID')).toBeInTheDocument()
-  })
-
-  it('renders bullet points with key:value as plain text', () => {
-    render(<FormattedEmailBody body="• Amount: $50,000" />)
-
-    expect(screen.getByText('• Amount: $50,000')).toBeInTheDocument()
-  })
-
-  it('renders closing lines like "Kind regards," as plain text', () => {
-    render(<FormattedEmailBody body="Kind regards," />)
-
-    const closing = screen.getByText('Kind regards,')
-    expect(closing.tagName).toBe('SPAN')
-  })
-
-  it('renders "Warm regards," closing as plain text', () => {
-    render(<FormattedEmailBody body="Warm regards," />)
-
-    const closing = screen.getByText('Warm regards,')
-    expect(closing.tagName).toBe('SPAN')
-  })
-
-  it('renders empty lines as spans', () => {
-    const { container } = render(<FormattedEmailBody body={'Line one\n\nLine two'} />)
-
-    // The empty line renders as a span via renderLineWithInlineBold
-    const allSpans = container.querySelectorAll('span')
-    // Should have at least 3 spans: "Line one", empty line, "Line two"
-    expect(allSpans.length).toBeGreaterThanOrEqual(3)
-  })
-
-  it('renders signature lines without bold', () => {
-    render(<FormattedEmailBody body={'Sarah Mitchell\nSenior Lending Officer'} />)
-
-    const name = screen.getByText('Sarah Mitchell')
-    expect(name.tagName).toBe('SPAN')
-    expect(name.querySelector('strong')).toBeNull()
-
-    const title = screen.getByText('Senior Lending Officer')
-    expect(title.tagName).toBe('SPAN')
-    expect(title.querySelector('strong')).toBeNull()
+  it('strips disallowed tags', () => {
+    const { container } = render(
+      <HtmlEmailBody html='<p>Safe</p><script>alert("xss")</script>' />
+    )
+    const preview = container.querySelector('.email-html-preview')
+    expect(preview?.innerHTML).not.toContain('script')
+    expect(preview?.textContent).toContain('Safe')
   })
 })
