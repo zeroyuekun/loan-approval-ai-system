@@ -2,6 +2,7 @@
 
 ![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
 ![Django 5](https://img.shields.io/badge/Django-5-092E20?logo=django&logoColor=white)
+[![codecov](https://codecov.io/gh/zeroyuekun/loan-approval-ai-system/branch/master/graph/badge.svg)](https://codecov.io/gh/zeroyuekun/loan-approval-ai-system)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 Full-stack loan approval system built for Australian lending. ML scores applicants (XGBoost), Claude writes the decision emails, and an agent pipeline checks everything for bias before it goes out. The compliance layer — APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure requirements — is where most of the work went.

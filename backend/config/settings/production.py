@@ -37,6 +37,21 @@ CELERY_TASK_SOFT_TIME_LIMIT = 540
 CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
 CELERY_RESULT_EXPIRES = 3600
 
+# Tighter rate limits in production — the base settings use 20/min anon for
+# browsable-API friendliness in dev. For a public demo a hostile script can
+# burn through $5/day of Claude budget in under a minute at that rate, so
+# cap anonymous traffic at 10/min. Authenticated users stay at 60/min.
+# Note: the AI_DAILY_BUDGET_LIMIT_USD cap in base.py is also enforced by
+# ApiBudgetGuard on every Claude call — these throttles are the first line,
+# the budget cap is the circuit breaker.
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,  # type: ignore[has-type]  # inherited from base via star import
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "10/min",
+        "user": "60/min",
+    },
+}
+
 # Enforce Content Security Policy in production (base.py has REPORT_ONLY=True for dev)
 CONTENT_SECURITY_POLICY = {
     "REPORT_ONLY": False,

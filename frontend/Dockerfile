@@ -1,6 +1,11 @@
 # --- Build stage ---
 FROM node:22-alpine AS builder
 
+# IMPORTANT: NEXT_PUBLIC_* vars are baked into the client bundle at BUILD time,
+# not runtime. When deploying to Railway, Render, Fly, etc., the build step
+# MUST pass --build-arg NEXT_PUBLIC_API_URL=https://<your-api-domain>/api/v1
+# or the deployed frontend will silently point at localhost and fail.
+# See backend/docs/DEPLOYMENT.md for the full deploy checklist.
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 

@@ -73,7 +73,16 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: pytest tests/ -v --tb=short --cov=apps --cov-report=term-missing --cov-fail-under=60
+        run: pytest tests/ -v --tb=short --cov=apps --cov-report=term-missing --cov-report=xml --cov-fail-under=60
+
+      - name: Upload backend coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: backend/coverage.xml
+          flags: backend
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   backend-lint:
     name: Backend Lint
@@ -151,6 +160,15 @@ jobs:
           name: frontend-coverage
           path: frontend/coverage/
           retention-days: 14
+
+      - name: Upload frontend coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   security:
     name: Security Scan
