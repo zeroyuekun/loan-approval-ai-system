@@ -47,9 +47,7 @@ class Command(BaseCommand):
 
         # Identify protected versions: any active model and any version
         # referenced by a ModelValidationReport (champion or challenger).
-        protected_ids: set = set(
-            ModelVersion.objects.filter(is_active=True).values_list("id", flat=True)
-        )
+        protected_ids: set = set(ModelVersion.objects.filter(is_active=True).values_list("id", flat=True))
 
         try:
             from apps.ml_engine.models import ModelValidationReport
@@ -78,9 +76,7 @@ class Command(BaseCommand):
             pass
 
         # Candidates: every non-protected model, ordered newest first.
-        candidates = list(
-            ModelVersion.objects.exclude(id__in=protected_ids).order_by("-created_at")
-        )
+        candidates = list(ModelVersion.objects.exclude(id__in=protected_ids).order_by("-created_at"))
 
         keep = candidates[:keep_last]
         delete = candidates[keep_last:]
@@ -120,7 +116,5 @@ class Command(BaseCommand):
             deleted_rows += 1
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"Done. Deleted {deleted_rows} ModelVersion rows and {deleted_files} joblib files."
-            )
+            self.style.SUCCESS(f"Done. Deleted {deleted_rows} ModelVersion rows and {deleted_files} joblib files.")
         )
