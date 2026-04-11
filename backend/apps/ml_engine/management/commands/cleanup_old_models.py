@@ -13,12 +13,10 @@ Usage:
     python manage.py cleanup_old_models --keep-last 5 --apply
 """
 
-import os
 import uuid
 from pathlib import Path
 
 from django.core.management.base import BaseCommand
-from django.db.models import Q
 
 from apps.ml_engine.models import ModelVersion
 

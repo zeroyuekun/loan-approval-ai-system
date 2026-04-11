@@ -107,8 +107,8 @@ class TrainModelView(APIView):
         # Reject duplicate training requests at the API layer. The Celery task
         # also holds this same Redis lock as a backstop, but checking here
         # prevents recording misleading audit events for no-op runs.
-        from django.conf import settings as dj_settings
         import redis as _redis
+        from django.conf import settings as dj_settings
 
         try:
             redis_client = _redis.from_url(dj_settings.CELERY_BROKER_URL)
