@@ -111,6 +111,7 @@ export default function ApplicationsPage() {
             variant="outline"
             onClick={handleCheckAll}
             disabled={checkAllState === 'loading'}
+            className="shadow-md shadow-blue-900/25 hover:shadow-lg hover:shadow-blue-900/30"
           >
             {checkAllState === 'loading' ? (
               <>

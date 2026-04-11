@@ -321,13 +321,13 @@ Denial letters are the most psychologically sensitive communication a bank sends
 
 4. DECISION + TRANSITION (2 sentences): State the decline clearly ("we have carefully reviewed your application and are unable to approve it at this time"). Transition immediately to what comes next: "Here is what we looked at and what you can do from here." Do NOT tell the customer how they feel or perform empathy. Respect them by getting straight to useful information. Follow with a blank line.
 
-5. ASSESSMENT FACTORS: Introduce with "This decision was based on a thorough review of your financial profile, specifically:" then leave a blank line, then list each denial reason as a bulleted item (\u2022) with a short label (e.g., "Employment type and tenure:") followed by a contextual explanation. Follow with a blank line.
+5. ASSESSMENT FACTORS: Introduce with "This decision was based on a thorough review of your financial profile, specifically:" then leave a blank line, then list each denial reason as a bulleted item (\u2022) with a short label (e.g., "Employment type and tenure:") followed by a contextual explanation. Keep each bullet under 30 words. Follow with a blank line.
 
 6. RESPONSIBLE LENDING (1 sentence, its own paragraph): State that the assessment was conducted in line with responsible lending obligations, which exist to ensure any credit provided is suitable and manageable. Follow with a blank line.
 
 7. "What You Can Do:" section label on its own line, then a blank line, then:
    - State this decision is based on current circumstances and does not prevent future applications.
-   - "The following steps may strengthen a future application:" then leave a blank line, then list specific improvement steps as bulleted items (\u2022), each connected to the denial factors.
+   - "The following steps may strengthen a future application:" then leave a blank line, then list specific improvement steps (each under 30 words) as bulleted items (\u2022), each connected to the denial factors.
    Follow with a blank line.
 
 8. CREDIT REPORT (its own paragraph): State they are entitled to a free copy of their credit report to verify the information used. Leave a blank line, then list the three bodies as bulleted items:
@@ -373,7 +373,7 @@ These are the most frequent reasons denial emails fail quality checks:
 7. MISSING AFCA: Every denial email MUST include AFCA contact details in the footer.
 8. EXCLAMATION MARKS: Do not use any exclamation marks in a denial letter.
 9. WORD COUNT: Keep the body under 500 words. Be concise but thorough.
-10. SENTENCE RHYTHM: Mix short sentences (5-8 words) with longer ones (12-18 words).
+10. SENTENCE LENGTH: No sentence may exceed 40 words. Keep bullet points under 30 words. Mix short sentences (5-8 words) with longer ones (12-18 words).
 11. MARKDOWN/EM DASHES: Plain text only. En dashes (\u2013) not em dashes (\u2014). Bullet character \u2022 not - or *.
 12. CONTEXTUAL DIGNITY: Describe the SITUATION, never label the PERSON. NEVER: "You have no job" / "You cannot afford this" / "Your poor credit" / "You are a high risk". INSTEAD: "Your employment status at the time of application" / "The requested amount exceeded our serviceability thresholds" / "Your credit profile at the time of assessment" / "The risk profile of this application".
 13. PSYCHOLOGICAL FRAMING: Never use "the bank has determined", "per our policy", "our systems indicate" (institutional coldness). Never use "this decision is final", "there is nothing more we can do" (finality). Always leave the door open. Close with specific warmth, not generic "we wish you well."

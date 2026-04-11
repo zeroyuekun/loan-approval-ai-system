@@ -316,18 +316,34 @@ class ModelPredictor:
                     df[col] = le.transform(df[col].astype(str))
             df[self.feature_cols] = self.scaler.transform(df[self.feature_cols])
         else:
-            # New path: one-hot encoding
+            # New path: one-hot encoding. A single inference row only emits the
+            # dummy columns matching that row's actual values, so almost every
+            # other dummy column will be 'missing' and must be padded to 0 —
+            # this is normal one-hot reindexing, NOT an unknown-category event.
+            #
+            # Detect *truly* unknown categorical values (a value at inference
+            # whose dummy column never existed at training time) before encoding.
+            unknown_values: dict[str, list[str]] = {}
+            for col in self.categorical_cols:
+                if col not in df.columns:
+                    continue
+                for raw_val in df[col].dropna().unique():
+                    expected_dummy = f"{col}_{raw_val}"
+                    if expected_dummy not in self.feature_cols:
+                        unknown_values.setdefault(col, []).append(str(raw_val))
+
+            if unknown_values:
+                logger.warning(
+                    "Unknown categorical values at inference — defaulting to all-zero encoding: %s",
+                    unknown_values,
+                )
+
             df = pd.get_dummies(df, columns=self.categorical_cols, dtype=float)
 
-            # Align to training columns: add missing as 0, reorder
-            missing_cols = [col for col in self.feature_cols if col not in df.columns]
-            if missing_cols:
-                logger.warning(
-                    "Unknown categories at inference time — columns missing from training: %s. These will be set to 0.",
-                    missing_cols,
-                )
-            for col in missing_cols:
-                df[col] = 0.0
+            # Align to training columns: pad missing one-hot columns with 0.
+            for col in self.feature_cols:
+                if col not in df.columns:
+                    df[col] = 0.0
 
             df[self.feature_cols] = self.scaler.transform(df[self.feature_cols])
 
@@ -492,7 +508,10 @@ class ModelPredictor:
 
             calibrated_prob = float(probabilities[1])
             if abs(float(np.array(explainer.expected_value).flat[0]) - calibrated_prob) > 0.05:
-                logger.warning(
+                # Expected — SHAP runs against the uncalibrated base model so its
+                # baseline naturally differs from the calibrated probability.
+                # Logged at DEBUG only; not actionable in production.
+                logger.debug(
                     "SHAP expected value (%.3f) diverges from calibrated probability (%.3f) — values are from uncalibrated base model",
                     float(np.array(explainer.expected_value).flat[0]),
                     calibrated_prob,

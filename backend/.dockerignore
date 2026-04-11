@@ -18,6 +18,10 @@ tests/
 .coverage
 htmlcov
 .hypothesis
+.ruff_cache
+.mypy_cache
+.tmp
+.zap
 
 # ML model artifacts (rebuilt at runtime)
 ml_models/*.joblib

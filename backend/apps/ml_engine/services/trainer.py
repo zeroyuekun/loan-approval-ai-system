@@ -357,6 +357,136 @@ class ModelTrainer:
             meta,
         )
 
+    # ------------------------------------------------------------------
+    # Diagnostic helpers — baseline comparison and temporal CV
+    # ------------------------------------------------------------------
+
+    _BASELINE_CANDIDATE_FEATURES = (
+        "credit_score",
+        "annual_income",
+        "loan_amount",
+        "debt_to_income",
+    )
+
+    def _train_credit_score_baseline(self, X_train, y_train, X_test, y_test):
+        """Fit a logistic-regression baseline on a handful of core credit features.
+
+        The purpose is to report an honest lift number for the main model:
+        "XGBoost AUC minus credit-score-only-baseline AUC". This answers the
+        standard credit-risk interview question "how much better is your model
+        than a naive scorecard?" without requiring a full champion/challenger
+        comparison.
+
+        Returns a dict with keys: baseline_auc (float or None),
+        baseline_features (list[str]), error (str or None).
+
+        Fails soft — any exception returns baseline_auc=None and logs a
+        warning, so training continues without the diagnostic.
+        """
+        from sklearn.linear_model import LogisticRegression
+
+        available = [c for c in self._BASELINE_CANDIDATE_FEATURES if c in X_train.columns]
+        if len(available) < 2:
+            logger.info(
+                "Baseline LR skipped — only %d candidate features present (need >=2): %s",
+                len(available),
+                available,
+            )
+            return {
+                "baseline_auc": None,
+                "baseline_features": available,
+                "error": f"insufficient_features ({len(available)})",
+            }
+
+        try:
+            baseline = LogisticRegression(max_iter=1000, random_state=42, solver="liblinear")
+            baseline.fit(X_train[available], y_train)
+            probs = baseline.predict_proba(X_test[available])[:, 1]
+            auc = float(roc_auc_score(y_test, probs))
+            return {
+                "baseline_auc": round(auc, 4),
+                "baseline_features": list(available),
+                "error": None,
+            }
+        except Exception as exc:
+            logger.warning("Baseline LR training failed: %s", exc)
+            return {
+                "baseline_auc": None,
+                "baseline_features": list(available),
+                "error": str(exc),
+            }
+
+    def _compute_temporal_cv_auc(self, X_train, y_train, train_quarters, max_folds=3):
+        """Walk-forward temporal cross-validation on the training set.
+
+        For each of the last ``max_folds`` quarters in ``train_quarters``,
+        fit a lightweight XGBoost on everything from earlier quarters and
+        score it on that held-out quarter. Return the mean fold AUC and the
+        number of folds actually used.
+
+        Unlike the standard stratified CV, this splits by time — if the
+        model secretly relies on features that drift across quarters, this
+        number will be lower than the random-CV number, and the gap is a
+        usable drift signal.
+
+        Returns (mean_auc, n_folds_used) or (None, 0) if there are fewer
+        than 3 quarters, insufficient data per fold, or the same class in
+        every validation slice.
+        """
+        from xgboost import XGBClassifier as _TemporalCVClassifier
+
+        if train_quarters is None or len(train_quarters) != len(y_train):
+            return None, 0
+
+        unique_quarters = sorted(set(train_quarters))
+        if len(unique_quarters) < 3:
+            return None, 0
+
+        # Walk-forward: last N quarters become successive validation folds.
+        # Leave at least one quarter for the initial training prefix.
+        n_folds = min(max_folds, len(unique_quarters) - 1)
+        fold_quarters = unique_quarters[-n_folds:]
+
+        neg = int((y_train == 0).sum())
+        pos = int((y_train == 1).sum())
+        scale_pos = neg / pos if pos > 0 else 1.0
+        n_jobs = getattr(settings, "ML_XGB_N_JOBS", 2)
+
+        fold_aucs = []
+        quarters_arr = np.asarray(train_quarters)
+        y_train_arr = np.asarray(y_train)
+
+        for fold_q in fold_quarters:
+            train_mask = quarters_arr < fold_q
+            val_mask = quarters_arr == fold_q
+
+            if train_mask.sum() < 50 or val_mask.sum() < 20:
+                continue
+            if len(np.unique(y_train_arr[val_mask])) < 2:
+                continue
+
+            X_train_fold = X_train.iloc[train_mask] if hasattr(X_train, "iloc") else X_train[train_mask]
+            X_val_fold = X_train.iloc[val_mask] if hasattr(X_train, "iloc") else X_train[val_mask]
+            y_train_fold = y_train_arr[train_mask]
+            y_val_fold = y_train_arr[val_mask]
+
+            model = _TemporalCVClassifier(
+                n_estimators=200,
+                max_depth=6,
+                learning_rate=0.1,
+                random_state=42,
+                eval_metric="logloss",
+                n_jobs=n_jobs,
+                scale_pos_weight=scale_pos,
+            )
+            model.fit(X_train_fold, y_train_fold)
+            probs = model.predict_proba(X_val_fold)[:, 1]
+            fold_aucs.append(float(roc_auc_score(y_val_fold, probs)))
+
+        if not fold_aucs:
+            return None, 0
+        return round(float(np.mean(fold_aucs)), 4), len(fold_aucs)
+
     def train(self, data_path, algorithm="xgb", use_reject_inference=True, reject_inference_labels=None):
         """Train model with Optuna (XGBoost) or GridSearchCV (RF) and return model + metrics.
 
@@ -392,6 +522,15 @@ class ModelTrainer:
         # Uses temporal split (by application_quarter) if available,
         # otherwise falls back to random stratified 80/10/10.
         df_train, df_val, df_test, y_train, y_val, y_test, split_meta = self._split_data(df, y)
+
+        # Snapshot training-set quarter values BEFORE the column is dropped.
+        # Used later for the diagnostic temporal CV pass that produces
+        # training_metadata["temporal_cv_auc_mean"] alongside the standard
+        # random-stratified CV number.
+        if "application_quarter" in df_train.columns:
+            train_quarters_snapshot = df_train["application_quarter"].to_numpy()
+        else:
+            train_quarters_snapshot = None
 
         # Drop application_quarter from feature DataFrames (used only for splitting)
         for split_df in [df_train, df_val, df_test]:
@@ -631,6 +770,42 @@ class ModelTrainer:
             "unstable": cv_unstable,
         }
 
+        # Diagnostic: time-based CV alongside the random-stratified CV.
+        # Random CV tells us how well the model generalises across random folds;
+        # temporal CV tells us how well it generalises across time — a harder,
+        # more production-realistic question. The gap between the two is a
+        # drift signal that interviewers want to see.
+        temporal_cv_auc_mean = None
+        temporal_cv_folds_used = 0
+        cv_drift_signal = None
+        # Align the quarter snapshot to the current X_train rows. Reject-inference
+        # augmentation (below) happens AFTER this block for the XGB path, so we
+        # run the temporal CV on pre-augmented indices; but X_train may still
+        # have been trimmed by preprocessing earlier, so guard on length.
+        if train_quarters_snapshot is not None and len(train_quarters_snapshot) == len(y_train):
+            try:
+                temporal_cv_auc_mean, temporal_cv_folds_used = self._compute_temporal_cv_auc(
+                    X_train, y_train, train_quarters_snapshot
+                )
+                if temporal_cv_auc_mean is not None:
+                    cv_drift_signal = round(cv_mean - temporal_cv_auc_mean, 4)
+                    logger.info(
+                        "Temporal CV AUC: %.4f over %d quarter folds (drift signal vs random CV: %+.4f)",
+                        temporal_cv_auc_mean,
+                        temporal_cv_folds_used,
+                        cv_drift_signal,
+                    )
+                else:
+                    logger.info("Temporal CV skipped — insufficient quarters in training set")
+            except Exception as exc:
+                logger.warning("Temporal CV failed: %s", exc)
+        else:
+            logger.info(
+                "Temporal CV skipped — quarter snapshot unavailable or length mismatch (snapshot=%s, y_train=%d)",
+                "None" if train_quarters_snapshot is None else len(train_quarters_snapshot),
+                len(y_train),
+            )
+
         if algorithm == "xgb":
             raw_model, best_params = self._train_xgb(X_train, y_train, X_val, y_val, sample_weights=sample_weights)
         else:
@@ -689,6 +864,20 @@ class ModelTrainer:
                 overfitting_gap,
             )
 
+        # Logistic-regression baseline on core credit features. Lets us report
+        # the XGBoost lift over a simple scorecard — the credit-risk interview
+        # question "how much better is your model than credit_score alone?"
+        baseline_result = self._train_credit_score_baseline(X_train, y_train, X_test, y_test)
+        xgb_lift_over_baseline = None
+        if baseline_result["baseline_auc"] is not None:
+            xgb_lift_over_baseline = round(metrics["auc_roc"] - baseline_result["baseline_auc"], 4)
+            logger.info(
+                "Baseline LR AUC: %.4f on %s; XGBoost lift: %+.4f",
+                baseline_result["baseline_auc"],
+                baseline_result["baseline_features"],
+                xgb_lift_over_baseline,
+            )
+
         training_time = round(time.time() - start_time, 2)
         metrics["training_time_seconds"] = training_time
         metrics["optimal_threshold"] = optimal_threshold
@@ -706,6 +895,12 @@ class ModelTrainer:
             "cv_auc_per_fold": cv_scores.tolist(),
             "cv_unstable": cv_unstable,
             "cv_report": cv_report,
+            "temporal_cv_auc_mean": temporal_cv_auc_mean,
+            "temporal_cv_folds_used": temporal_cv_folds_used,
+            "cv_drift_signal": cv_drift_signal,
+            "baseline_auc": baseline_result["baseline_auc"],
+            "baseline_features": baseline_result["baseline_features"],
+            "xgb_lift_over_baseline": xgb_lift_over_baseline,
             "optimal_threshold": optimal_threshold,
             "calibration_method": getattr(model, "calibration_method", "unknown"),
             "group_thresholds": getattr(self, "_group_thresholds", {}),
@@ -944,7 +1139,11 @@ class ModelTrainer:
                 scale_pos_weight=scale_pos_weight,
                 monotone_constraints=monotonic,
                 max_bin=max_bin,
-                n_jobs=1,
+                # Matches the celery_worker_ml container's cpus: '2.0' quota.
+                # Setting n_jobs=1 left half the allocated CPU idle during
+                # training; Optuna itself is sequential so there is no
+                # oversubscription risk.
+                n_jobs=getattr(settings, "ML_XGB_N_JOBS", 2),
             )
 
             cv_fit_params = {}

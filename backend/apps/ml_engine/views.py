@@ -86,12 +86,14 @@ class ModelMetricsView(APIView):
 
 
 class TrainModelThrottle(UserRateThrottle):
-    rate = "3/hour"
+    rate = "10/hour"
 
 
 class TrainModelView(APIView):
     permission_classes = [IsAdmin]
     throttle_classes = [TrainModelThrottle]
+
+    TRAIN_LOCK_KEY = "train_model_lock"
 
     def post(self, request):
         """Trigger model training (admin only)."""
@@ -101,6 +103,27 @@ class TrainModelView(APIView):
                 {"error": "algorithm must be one of: 'rf', 'xgb'"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Reject duplicate training requests at the API layer. The Celery task
+        # also holds this same Redis lock as a backstop, but checking here
+        # prevents recording misleading audit events for no-op runs.
+        from django.conf import settings as dj_settings
+        import redis as _redis
+
+        try:
+            redis_client = _redis.from_url(dj_settings.CELERY_BROKER_URL)
+            if redis_client.exists(self.TRAIN_LOCK_KEY):
+                return Response(
+                    {
+                        "error": "A training job is already in progress. Please wait for it to complete before starting another.",
+                        "code": "training_in_progress",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+        except _redis.RedisError:
+            # If Redis is unreachable the Celery task itself will fail fast;
+            # don't block the user here on a transient broker blip.
+            pass
 
         task = train_model_task.delay(algorithm=algorithm, data_path=None)
 

@@ -112,7 +112,16 @@ services:
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
     volumes:
       - ./backend:/app
-    command: celery -A config worker -l info -Q ml --concurrency 2
+    # Concurrency 1: training holds a Redis lock so only one run executes at a
+    # time anyway, and a single XGBoost+Optuna run already saturates available
+    # CPU. Scheduled drift/fairness tasks queue briefly behind training (both
+    # are non-latency-sensitive).
+    #
+    # --max-tasks-per-child=5 recycles the worker process after every 5
+    # completed tasks so any accumulated native state (XGBoost/OpenMP threads,
+    # Optuna memory, file descriptors) gets cleaned up and zombie tasks cannot
+    # run indefinitely past their time_limit.
+    command: celery -A config worker -l info -Q ml --concurrency 1 --max-tasks-per-child 5
     healthcheck:
       test: ["CMD-SHELL", "celery -A config inspect ping --timeout 10"]
       interval: 30s
@@ -253,6 +262,7 @@ services:
       - ./frontend/postcss.config.js:/app/postcss.config.js
       - frontend_next:/app/.next
       - frontend_node_modules:/app/node_modules
+    user: root
     command: sh -c "npm ci && npm run dev"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]

@@ -223,6 +223,89 @@ describe('useTrainModel', () => {
     expect(localStorage.getItem(TRAINING_STORAGE_KEY)).toBeNull()
   })
 
+  it('transitions to skipped when task succeeds with skipped payload', async () => {
+    server.use(
+      http.post(`${API_URL}/ml/models/train/`, () => {
+        return HttpResponse.json({ task_id: 'task-skipped', status: 'queued' })
+      }),
+      http.get(`${API_URL}/tasks/:taskId/status/`, () => {
+        return HttpResponse.json({
+          task_id: 'task-skipped',
+          status: 'SUCCESS',
+          result: { status: 'skipped', reason: 'training_already_in_progress' },
+        })
+      }),
+    )
+
+    const { result } = renderHook(() => useTrainModel(), {
+      wrapper: createWrapper(),
+    })
+
+    await act(async () => {
+      result.current.mutate('xgboost')
+    })
+
+    await waitFor(() => {
+      expect(result.current.trainingStatus).toBe('skipped')
+    })
+    expect(localStorage.getItem(TRAINING_STORAGE_KEY)).toBeNull()
+  })
+
+  it('parses skipped payload from stringified result', async () => {
+    server.use(
+      http.post(`${API_URL}/ml/models/train/`, () => {
+        return HttpResponse.json({ task_id: 'task-skipped-str', status: 'queued' })
+      }),
+      http.get(`${API_URL}/tasks/:taskId/status/`, () => {
+        return HttpResponse.json({
+          task_id: 'task-skipped-str',
+          status: 'SUCCESS',
+          result: JSON.stringify({ status: 'skipped', reason: 'training_already_in_progress' }),
+        })
+      }),
+    )
+
+    const { result } = renderHook(() => useTrainModel(), {
+      wrapper: createWrapper(),
+    })
+
+    await act(async () => {
+      result.current.mutate('xgboost')
+    })
+
+    await waitFor(() => {
+      expect(result.current.trainingStatus).toBe('skipped')
+    })
+  })
+
+  it('exposes 409 conflict as in-progress error message', async () => {
+    server.use(
+      http.post(`${API_URL}/ml/models/train/`, () => {
+        return HttpResponse.json(
+          { error: 'A training job is already in progress. Please wait for it to complete before starting another.', code: 'training_in_progress' },
+          { status: 409 },
+        )
+      }),
+    )
+
+    const { result } = renderHook(() => useTrainModel(), {
+      wrapper: createWrapper(),
+    })
+
+    await act(async () => {
+      try {
+        await result.current.mutateAsync('xgboost')
+      } catch {
+        // expected
+      }
+    })
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true)
+    })
+    expect(result.current.errorMessage).toMatch(/already in progress/i)
+  })
+
   it('transitions to failure when task fails', async () => {
     server.use(
       http.post(`${API_URL}/ml/models/train/`, () => {

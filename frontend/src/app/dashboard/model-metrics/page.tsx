@@ -39,7 +39,7 @@ export default function ModelMetricsPage() {
   const { data: metrics, isLoading, isError } = useModelMetrics()
   const { data: driftReports } = useDriftReports(6)
   const { user } = useAuth()
-  const { trainingStatus, trainingAlgorithm, ...trainModel } = useTrainModel()
+  const { trainingStatus, trainingAlgorithm, errorMessage: trainErrorMessage, ...trainModel } = useTrainModel()
   const [selectedAlgorithm, setSelectedAlgorithm] = useState('xgb')
   const isTraining = trainModel.isPending || trainingStatus === 'training'
   const algorithmLabels: Record<string, string> = {
@@ -52,8 +52,20 @@ export default function ModelMetricsPage() {
       onSuccess: () => {
         toast.success('Model training started')
       },
-      onError: () => {
-        toast.error('Failed to start training')
+      onError: (err: any) => {
+        const status = err?.response?.status
+        const detail = err?.response?.data?.detail || err?.response?.data?.error
+        if (status === 429) {
+          toast.error(detail ? `Rate limit reached: ${detail}` : 'Training rate limit reached. Please wait a few minutes before retrying.')
+        } else if (status === 409) {
+          toast.error(detail || 'A training job is already in progress. Please wait for it to complete.')
+        } else if (status === 403) {
+          toast.error('You do not have permission to train models.')
+        } else if (status === 400) {
+          toast.error(detail || 'Invalid training request.')
+        } else {
+          toast.error('Failed to start training')
+        }
       },
     })
   }
@@ -183,12 +195,26 @@ export default function ModelMetricsPage() {
         </Card>
       )}
 
+      {/* Skipped banner — task finished but no retraining happened */}
+      {trainingStatus === 'skipped' && !isTraining && (
+        <Card className="border-amber-200 bg-gradient-to-r from-amber-50 to-yellow-50">
+          <CardContent className="flex items-center gap-3 py-4">
+            <XCircle className="h-5 w-5 text-amber-600 shrink-0" />
+            <p className="text-sm font-medium text-amber-800">
+              Training was skipped because another training job was already in progress. The active model was not retrained.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Error banner */}
       {(trainModel.isError || trainingStatus === 'failure') && !isTraining && (
         <Card className="border-red-200 bg-gradient-to-r from-red-50 to-rose-50">
           <CardContent className="flex items-center gap-3 py-4">
             <XCircle className="h-5 w-5 text-red-600 shrink-0" />
-            <p className="text-sm font-medium text-red-800">Model training failed. Please try again.</p>
+            <p className="text-sm font-medium text-red-800">
+              {trainErrorMessage || 'Model training failed. Please try again.'}
+            </p>
           </CardContent>
         </Card>
       )}
