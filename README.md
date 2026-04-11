@@ -236,6 +236,30 @@ A separate `watchdog` service runs in the core stack at all times. It polls ever
 
 ~1000 tests across 92 files. 60% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
 
+## Recording a demo video
+
+The `happy-path.spec.ts` Playwright test drives the full golden path — login, multi-step application form, submit, watch the agent pipeline complete, verify decision + email. There's a dedicated recording project that runs it headed at 1280×720 with `video: 'on'` and a 300ms `slowMo` so the result is readable rather than a blur of clicks.
+
+```bash
+# With Docker Compose running (backend + frontend + workers):
+cd frontend
+npx playwright install chromium   # first time only
+npm run demo:record
+```
+
+The recording lands in `frontend/test-results/.../video.webm`. To embed in the README as a GIF (smaller, auto-playing in GitHub):
+
+```bash
+# Requires ffmpeg. ~30-second clip, 10fps, 800px wide, palette-optimised.
+ffmpeg -i frontend/test-results/*/video.webm \
+  -vf "fps=10,scale=800:-1:flags=lanczos,palettegen" -y /tmp/palette.png
+ffmpeg -i frontend/test-results/*/video.webm -i /tmp/palette.png \
+  -lavfi "fps=10,scale=800:-1:flags=lanczos [x]; [x][1:v] paletteuse" \
+  -y docs/screenshots/demo.gif
+```
+
+Then embed near the top of this README: `![Demo](docs/screenshots/demo.gif)`.
+
 ## Limitations and honest caveats
 
 - **Trained on synthetic data.** The data generator is calibrated against ATO, ABS, APRA, and Equifax published statistics and runs the labels through a 1000-line rules-based underwriting engine plus a separate loan-performance simulator, so the learning task is non-trivial. It does not capture real-world feedback loops, fraud patterns, broker channel effects, or lender-specific heuristics. A production rollout would retrain on real historical data before trusting the outputs.

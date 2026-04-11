@@ -16,6 +16,23 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Demo recording project — runs headed at 1280x720 with video always on
+    // so the resulting .webm in test-results/ is portfolio-ready.
+    // Invoke with: npm run demo:record
+    {
+      name: 'chromium-demo',
+      use: {
+        ...devices['Desktop Chrome'],
+        headless: false,
+        viewport: { width: 1280, height: 720 },
+        video: { mode: 'on', size: { width: 1280, height: 720 } },
+        // Slow everything by 300ms per action so the recording is readable
+        // at normal playback speed rather than a blur of clicks.
+        launchOptions: { slowMo: 300 },
+      },
+      // Retries would pollute test-results/ with multiple recordings.
+      retries: 0,
+    },
   ],
   // Don't start dev server — assume Docker Compose is running
 });

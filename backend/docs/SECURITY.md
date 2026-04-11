@@ -65,6 +65,10 @@ Do not open public GitHub issues for security vulnerabilities. Use responsible d
 
 **Out of scope:** Third-party services (Anthropic API, Gmail SMTP), the underlying Docker/OS infrastructure, denial-of-service attacks against development environments, social engineering.
 
+## Compliance mapping
+
+For a scannable index that maps each regulation the system was designed against to the specific code and ADR that implements it — APRA CPG 235, APRA CPS 230, NCCP Act, ASIC RG 209, CFPB Circular 2022-03, EEOC 4/5 rule, EU AI Act Annex III, Banking Code of Practice, AML/CTF Act — see [COMPLIANCE.md](COMPLIANCE.md). It cross-links to this document for data handling and to [MODEL_CARD.md](MODEL_CARD.md) for model-level obligations rather than duplicating either.
+
 ## Upcoming Regulatory Deadlines
 
 ### Privacy Act 1988 — Automated Decision Disclosure (10 December 2026)

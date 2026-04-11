@@ -264,6 +264,10 @@ For denied applications, a binary search over the top 3 contributing features fi
 
 Weight of Evidence binning and Information Value computation for all numeric features, providing a traditional interpretable scorecard alongside the XGBoost model. A WOE logistic regression scorecard is also built (base score 600, PDO 20) with out-of-sample AUC reported.
 
+### Measured lift over a naive scorecard
+
+Every training run also fits a lightweight logistic-regression baseline on `credit_score, annual_income, loan_amount, debt_to_income` and records the XGBoost lift over it on `ModelVersion.training_metadata`. This is the honest answer to "how much better than a 4-feature scorecard is your model?" without needing a separate champion/challenger exercise. See [BASELINE_LIFT.md](BASELINE_LIFT.md) for the latest numbers, what a healthy lift range looks like, and what the number is NOT (not a real-world benchmark, not a lift over bureau score alone).
+
 ### SHAP Explainability: Stability Caveat
 
 This system uses TreeSHAP for generating adverse action reason codes. TreeSHAP
