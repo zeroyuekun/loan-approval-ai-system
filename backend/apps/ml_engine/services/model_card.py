@@ -168,8 +168,9 @@ class ModelCardGenerator:
     @staticmethod
     def _limitations() -> list[str]:
         return [
-            "Trained on synthetic data — TSTR framework estimates 3-8% AUC "
-            "degradation vs real data (see synthetic_data_validation section)",
+            "Trained on synthetic data — real-world AUC estimated live against "
+            "APRA Quarterly ADI Property Exposures when a test set with "
+            "actual_outcome is available (see synthetic_data_validation section)",
             "Point-in-time prediction — does not model time-to-default",
             "State-level geographic granularity only",
         ]
@@ -188,21 +189,32 @@ class ModelCardGenerator:
 
         real_auc = tstr.get("estimated_real_world_auc", {})
         confidence = tstr.get("synthetic_confidence", {})
+        apra_fidelity = tstr.get("apra_fidelity") or {}
+
+        grounded = bool(apra_fidelity.get("available"))
+        note = (
+            "Estimate is grounded in live APRA Quarterly ADI Property Exposures "
+            "via MacroDataService — no foreign datasets used. The synthetic "
+            "default rate is compared directly to APRA's published NPL rate, "
+            "and model AUC is scored against the actual_outcome column rather "
+            "than the underwriting approval label."
+            if grounded
+            else "APRA benchmark unavailable for this training run; falling back "
+            "to literature-based TSTR degradation estimate."
+        )
 
         return {
             "status": "available",
             "estimated_real_world_auc": real_auc.get("estimated_real_auc"),
             "estimated_auc_range": real_auc.get("estimated_range"),
             "degradation_from_synthetic": real_auc.get("total_degradation"),
+            "estimate_source": real_auc.get("estimate_source"),
             "synthetic_confidence_score": confidence.get("overall_score"),
             "confidence_interpretation": confidence.get("interpretation"),
+            "apra_fidelity": apra_fidelity if grounded else None,
             "methodology": real_auc.get("methodology"),
             "references": real_auc.get("references", []),
-            "note": (
-                "These estimates are based on published research on synthetic-to-real "
-                "transfer learning degradation. Actual performance on real loan data "
-                "may differ. See references for methodology."
-            ),
+            "note": note,
         }
 
     @staticmethod

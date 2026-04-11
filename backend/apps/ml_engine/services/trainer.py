@@ -510,6 +510,25 @@ class ModelTrainer:
         # Load data
         df = pd.read_csv(data_path)
 
+        # Auto-load sibling reject-inference labels file when caller did not
+        # supply one explicitly. DataGenerator.save_to_csv persists the labels
+        # as ``<base>_reject_labels.csv`` alongside the main CSV.
+        if use_reject_inference and reject_inference_labels is None:
+            base, ext = os.path.splitext(data_path)
+            sibling = f"{base}_reject_labels{ext}"
+            if os.path.exists(sibling):
+                try:
+                    ri_df = pd.read_csv(sibling, index_col="row_index")
+                    col = ri_df.columns[0]
+                    reject_inference_labels = ri_df[col].dropna().astype(int)
+                    logger.info(
+                        "Auto-loaded %d reject-inference labels from %s",
+                        len(reject_inference_labels),
+                        sibling,
+                    )
+                except Exception:
+                    logger.warning("Failed to auto-load reject-inference labels from %s", sibling, exc_info=True)
+
         if len(df) < 20:
             raise ValueError(f"Dataset too small for training: {len(df)} rows (minimum 20 required)")
 
@@ -673,6 +692,7 @@ class ModelTrainer:
         # approved loans would teach the model that approved-looking
         # profiles are always good).
         # ------------------------------------------------------------------
+        reject_inference_stats = {"used": False, "n_labels_applied": 0}
         if use_reject_inference and reject_inference_labels is not None:
             # Identify denied rows in the TRAINING split only (avoid leakage)
             denied_mask = df_train["approved"] == 0
@@ -716,6 +736,10 @@ class ModelTrainer:
                 # Re-normalise so weights sum to len(y_train)
                 sample_weights = sample_weights * len(y_train) / sample_weights.sum()
 
+                reject_inference_stats = {
+                    "used": True,
+                    "n_labels_applied": int(len(ri_labels)),
+                }
                 logger.info(
                     "Reject inference: augmented training set with %d denied applications at 0.5 weight "
                     "(total training size: %d)",
@@ -779,13 +803,16 @@ class ModelTrainer:
         temporal_cv_folds_used = 0
         cv_drift_signal = None
         # Align the quarter snapshot to the current X_train rows. Reject-inference
-        # augmentation (below) happens AFTER this block for the XGB path, so we
-        # run the temporal CV on pre-augmented indices; but X_train may still
-        # have been trimmed by preprocessing earlier, so guard on length.
-        if train_quarters_snapshot is not None and len(train_quarters_snapshot) == len(y_train):
+        # augmentation appends new rows at the end of y_train/X_train without
+        # a corresponding quarter snapshot, so we slice to the original prefix
+        # for the temporal CV diagnostic.
+        if train_quarters_snapshot is not None and len(train_quarters_snapshot) <= len(y_train):
             try:
+                n_orig = len(train_quarters_snapshot)
+                X_train_orig = X_train.iloc[:n_orig] if hasattr(X_train, "iloc") else X_train[:n_orig]
+                y_train_orig = y_train.iloc[:n_orig] if hasattr(y_train, "iloc") else y_train[:n_orig]
                 temporal_cv_auc_mean, temporal_cv_folds_used = self._compute_temporal_cv_auc(
-                    X_train, y_train, train_quarters_snapshot
+                    X_train_orig, y_train_orig, train_quarters_snapshot
                 )
                 if temporal_cv_auc_mean is not None:
                     cv_drift_signal = round(cv_mean - temporal_cv_auc_mean, 4)
@@ -907,6 +934,8 @@ class ModelTrainer:
             "iv_features_selected": len(getattr(self, "_iv_result", {}).get("selected_features", [])),
             "iv_features_excluded_weak": len(getattr(self, "_iv_result", {}).get("excluded_weak", [])),
             "iv_features_excluded_leakage": len(getattr(self, "_iv_result", {}).get("excluded_leakage", [])),
+            "reject_inference_used": reject_inference_stats["used"],
+            "n_reject_labels_applied": reject_inference_stats["n_labels_applied"],
             **split_meta,
         }
 
@@ -979,10 +1008,15 @@ class ModelTrainer:
             metrics["woe_iv"] = {}
 
         # WOE logistic regression scorecard on RAW data with out-of-sample AUC.
+        # Use only the original (pre-reject-inference) portion of y_train so the
+        # label series length matches df_train_raw. Reject-inference augmented
+        # rows are appended at the end of y_train, so slicing by the raw shape
+        # recovers the original labels.
         try:
+            raw_y_train = y_train.iloc[: len(df_train_raw)] if len(y_train) > len(df_train_raw) else y_train
             _, _, scorecard = self.metrics_service.build_woe_scorecard(
                 df_train_raw[self.NUMERIC_COLS],
-                y_train,
+                raw_y_train,
                 self.NUMERIC_COLS,
                 n_bins=10,
                 X_test=df_test_raw[self.NUMERIC_COLS],
@@ -1029,12 +1063,15 @@ class ModelTrainer:
                 "concentration_by_vintage": concentration,
             }
 
-        # TSTR validation: estimate real-world performance degradation
+        # TSTR validation: estimate real-world performance degradation.
+        # When df_test_raw still carries ``actual_outcome``, pass it along with
+        # y_prob so TSTRValidator can ground the estimate in live APRA
+        # benchmarks (via MacroDataService) instead of a literature constant.
         try:
             from .tstr_validator import TSTRValidator
 
             tstr = TSTRValidator()
-            tstr_result = tstr.validate(metrics)
+            tstr_result = tstr.validate(metrics, y_prob=y_prob, df_test_raw=df_test_raw)
             metrics["tstr_validation"] = tstr_result
             metrics["training_metadata"]["tstr_validation"] = tstr_result
             logger.info("TSTR validation: %s", tstr_result.get("summary", ""))

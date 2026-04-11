@@ -1,9 +1,12 @@
+import logging
 import os
 from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
 from scipy import stats
+
+logger = logging.getLogger(__name__)
 
 from .benchmark_resolver import BenchmarkResolver
 from .feature_generator import BehavioralFeatureGenerator
@@ -1284,6 +1287,46 @@ class DataGenerator:
             lower=650
         )
 
+        # ---------------------------------------------------------------
+        # TEMPORAL DRIFT (applied after measurement noise, before CSV save)
+        #
+        # Nominal growth per quarter to match Australian macro reality so
+        # trainer.py's temporal_cv_auc_mean diverges from random CV mean
+        # (cv_drift_signal). Without this, the only quarterly variation
+        # comes from credit_score jitter, which underestimates real drift.
+        #
+        #   income_drift:  0.5% per quarter ≈ 2%/yr (ABS Wage Price Index)
+        #   loan_drift:    0.7% per quarter ≈ 2.8%/yr (CPI + housing mix)
+        #
+        # Unemployment / RBA cash rate / property growth already drift
+        # naturally via `_resolve_macro_for_quarter` above.
+        # ---------------------------------------------------------------
+        if "application_quarter" in df.columns:
+            try:
+                # application_quarter format: "2023Q3" (year first, then Q, then quarter)
+                q_parsed = df["application_quarter"].astype(str).str.extract(r"(\d{4})Q(\d)")
+                q_year = pd.to_numeric(q_parsed[0], errors="coerce")
+                q_num = pd.to_numeric(q_parsed[1], errors="coerce")
+                if q_num.notna().all() and q_year.notna().all():
+                    min_year = int(q_year.min())
+                    quarter_idx = ((q_year - min_year) * 4 + (q_num - 1)).astype(int).values
+                    income_drift_factor = 1.0 + 0.005 * quarter_idx
+                    loan_drift_factor = 1.0 + 0.007 * quarter_idx
+                    df["annual_income"] = np.clip(
+                        (df["annual_income"] * income_drift_factor).round(2), 30000, 600000
+                    )
+                    df["loan_amount"] = np.clip(
+                        (df["loan_amount"] * loan_drift_factor).round(2), 5000, 3500000
+                    )
+                    logger.info(
+                        "Applied temporal drift across %d quarters (income +%.1f%%, loan +%.1f%%)",
+                        int(quarter_idx.max() - quarter_idx.min() + 1),
+                        0.5 * (quarter_idx.max() - quarter_idx.min()),
+                        0.7 * (quarter_idx.max() - quarter_idx.min()),
+                    )
+            except Exception:
+                logger.warning("Failed to apply temporal drift to income/loan_amount", exc_info=True)
+
         if "hecs_debt_balance" in df.columns:
             hecs_noise = rng.normal(1.0, 0.10, size=n)
             df["hecs_debt_balance"] = np.where(
@@ -1476,8 +1519,20 @@ class DataGenerator:
         return val
 
     def save_to_csv(self, df, path):
-        """Save DataFrame to CSV, creating directories as needed."""
+        """Save DataFrame to CSV, creating directories as needed.
+
+        Also persists reject_inference_labels as a sibling file
+        ``<base>_reject_labels.csv`` so the trainer can pick them up
+        automatically and wire them into the reject-inference branch.
+        """
         os.makedirs(os.path.dirname(path), exist_ok=True)
         safe_df = df.apply(lambda col: col.map(self._sanitize_csv_value) if col.dtype == object else col)
         safe_df.to_csv(path, index=False)
+
+        if self.reject_inference_labels is not None:
+            base, ext = os.path.splitext(path)
+            labels_path = f"{base}_reject_labels{ext}"
+            self.reject_inference_labels.to_csv(labels_path, index_label="row_index", header=True)
+            logger.info("Persisted %d reject-inference labels to %s", int(self.reject_inference_labels.notna().sum()), labels_path)
+
         return path
