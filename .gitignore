@@ -55,6 +55,7 @@ token.json
 .coverage
 htmlcov/
 .pytest_cache/
+frontend/coverage/
 
 # Hypothesis (property-based testing cache)
 .hypothesis/
