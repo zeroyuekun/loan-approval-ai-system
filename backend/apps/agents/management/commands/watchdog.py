@@ -170,8 +170,11 @@ class Command(BaseCommand):
                 },
             )
             r.expire("watchdog:health", 120)
-        except Exception:
-            pass  # Redis itself may be down
+        except Exception as exc:
+            logger.warning(
+                "watchdog_health_write_failed",
+                extra={"error": str(exc), "broker": settings.CELERY_BROKER_URL.split("@")[-1]},
+            )
 
     # ------------------------------------------------------------------
     # 2. Self-healing Celery

@@ -183,8 +183,15 @@ class HumanReviewHandler:
                 if fi:
                     top_factors = sorted(fi.items(), key=lambda x: x[1], reverse=True)[:3]
                     denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
-            except (LoanDecision.DoesNotExist, AttributeError):
-                pass
+            except (LoanDecision.DoesNotExist, AttributeError) as exc:
+                logger.debug(
+                    "denial_feature_importances_missing",
+                    extra={
+                        "agent_run_id": str(agent_run_id),
+                        "application_id": str(application.id),
+                        "error": type(exc).__name__,
+                    },
+                )
 
             marketing_pipeline = MarketingPipelineService(self.tracker)
             steps = marketing_pipeline.run(

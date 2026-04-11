@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from django.db.models import OuterRef, Prefetch, Subquery
 from rest_framework import status
@@ -12,6 +14,8 @@ from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
 from apps.email_engine.services.sender import _plain_text_to_html
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 from apps.loans.permissions import check_loan_access
+
+logger = logging.getLogger(__name__)
 
 
 class OrchestrationThrottle(UserRateThrottle):
@@ -438,7 +442,14 @@ class HumanReviewView(APIView):
                     decision.reasoning = f"Human review override by {request.user.username}: {reviewer_note}"
                     decision.save(update_fields=["decision", "reasoning"])
                 except LoanDecision.DoesNotExist:
-                    pass  # No decision record yet — acceptable for edge cases
+                    logger.info(
+                        "human_review_deny_no_decision_record",
+                        extra={
+                            "agent_run_id": str(run_id),
+                            "application_id": str(application.id),
+                            "reviewer": request.user.username,
+                        },
+                    )
 
                 agent_run.steps = agent_run.steps + [review_step]
                 agent_run.status = AgentRun.Status.COMPLETED

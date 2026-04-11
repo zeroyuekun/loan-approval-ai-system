@@ -133,8 +133,11 @@ def _do_train(task, algorithm, data_path, lock):
     # Release the training lock
     try:
         lock.release()
-    except Exception:
-        pass  # Lock may have expired — safe to ignore
+    except Exception as exc:
+        logger.debug(
+            "training_lock_release_noop",
+            extra={"model_version_id": str(mv.id), "error": str(exc)},
+        )
 
     return {"model_version_id": str(mv.id), "metrics": metrics}
 

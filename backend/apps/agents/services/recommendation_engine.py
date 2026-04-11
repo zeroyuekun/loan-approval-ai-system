@@ -9,8 +9,11 @@ INCOME_SHADING, tax brackets) are replicated from data_generator.py which is
 the source of truth for the synthetic data pipeline.
 """
 
+import logging
 import math
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants — copied from ml_engine/services/data_generator.py
@@ -447,8 +450,14 @@ class RecommendationEngine:
                     "is_loyal_customer": profile.is_loyal_customer,
                 }
             )
-        except Exception:
-            pass  # New customer — defaults are fine
+        except Exception as exc:
+            logger.debug(
+                "customer_snapshot_profile_missing",
+                extra={
+                    "applicant_id": str(getattr(application.applicant, "id", "unknown")),
+                    "error": type(exc).__name__,
+                },
+            )
 
         return CustomerSnapshot(**kwargs)
 

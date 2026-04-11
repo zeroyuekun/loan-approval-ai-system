@@ -434,8 +434,11 @@ class EmailGenerator:
                     "Tool response has subject but empty body (stop_reason=%s) — falling back to text parse",
                     stop_reason,
                 )
-        except (StopIteration, AttributeError):
-            pass
+        except (StopIteration, AttributeError) as exc:
+            logger.debug(
+                "tool_block_missing_falling_back_to_text",
+                extra={"error": type(exc).__name__, "stop_reason": stop_reason},
+            )
 
         # Fallback: try to parse from text block (in case tool_use wasn't used)
         text_block = next((b for b in response.content if b.type == "text"), None)

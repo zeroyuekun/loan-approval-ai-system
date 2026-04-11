@@ -149,7 +149,10 @@ def resume_pipeline_task(self, agent_run_id, reviewer="", note=""):
             run = AgentRun.objects.get(pk=agent_run_id)
             _cleanup_stuck_application(str(run.application_id))
         except Exception:
-            pass
+            logger.exception(
+                "resume_pipeline_cleanup_failed",
+                extra={"agent_run_id": str(agent_run_id)},
+            )
         raise
 
     return {
@@ -199,8 +202,11 @@ def compute_pipeline_sla():
                     end = datetime.fromisoformat(step["completed_at"])
                     duration_ms = int((end - start).total_seconds() * 1000)
                     step_timings.setdefault(name, []).append(duration_ms)
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(
+                        "sla_step_timing_parse_failed",
+                        extra={"step_name": name, "error": str(exc)},
+                    )
 
     step_sla = {}
     for name, times in step_timings.items():

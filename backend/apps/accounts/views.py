@@ -605,8 +605,11 @@ class LogoutView(generics.GenericAPIView):
         try:
             token = RefreshToken(refresh)
             token.blacklist()
-        except TokenError:
-            pass  # Clear cookies regardless — token may already be blacklisted or expired
+        except TokenError as exc:
+            logger.debug(
+                "logout_token_already_invalid",
+                extra={"user_id": str(request.user.id), "error": type(exc).__name__},
+            )
 
         AuditLog.objects.create(
             user=request.user,

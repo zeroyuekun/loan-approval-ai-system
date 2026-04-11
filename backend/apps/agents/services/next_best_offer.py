@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 import anthropic
@@ -6,6 +7,8 @@ import httpx
 
 from .api_budget import guarded_api_call
 from .recommendation_engine import RecommendationEngine
+
+logger = logging.getLogger("agents.next_best_offer")
 
 
 def _extract_tool_result(response, fallback):
@@ -20,8 +23,11 @@ def _extract_tool_result(response, fallback):
                 json_start = text_block.text.find("{")
                 json_end = text_block.text.rfind("}") + 1
                 return json.loads(text_block.text[json_start:json_end])
-            except (json.JSONDecodeError, ValueError):
-                pass
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.debug(
+                    "nbo_tool_text_parse_failed",
+                    extra={"error": type(exc).__name__},
+                )
         return fallback
 
 

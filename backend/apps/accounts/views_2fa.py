@@ -7,12 +7,15 @@ require 2FA.
 
 import base64
 import io
+import logging
 
 from django_otp.plugins.otp_totp.models import TOTPDevice
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 
 class TOTPSetupView(APIView):
@@ -54,7 +57,7 @@ class TOTPSetupView(APIView):
             qr.save(buffer, format="PNG")
             qr_base64 = base64.b64encode(buffer.getvalue()).decode()
         except ImportError:
-            pass  # qrcode package optional for API-only use
+            logger.debug("qrcode_package_unavailable_returning_uri_only")
 
         return Response(
             {

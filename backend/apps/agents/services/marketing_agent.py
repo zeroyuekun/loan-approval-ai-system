@@ -278,7 +278,10 @@ class MarketingAgent:
             context["savings_balance"] = float(profile.savings_balance) if profile.savings_balance else None
             context["checking_balance"] = float(profile.checking_balance) if profile.checking_balance else None
         except AttributeError:
-            pass
+            _logging.getLogger("agents.marketing_agent").debug(
+                "marketing_guardrail_profile_missing",
+                extra={"application_id": str(application.id)},
+            )
         guardrail_results = self.guardrail_checker.run_all_checks(body, context, email_type="marketing")
         all_passed = all(r["passed"] for r in guardrail_results if r.get("severity") != "warning")
 
