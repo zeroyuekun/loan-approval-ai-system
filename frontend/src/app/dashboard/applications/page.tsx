@@ -111,7 +111,6 @@ export default function ApplicationsPage() {
             variant="outline"
             onClick={handleCheckAll}
             disabled={checkAllState === 'loading'}
-            className="shadow-md shadow-blue-900/25 hover:shadow-lg hover:shadow-blue-900/30"
           >
             {checkAllState === 'loading' ? (
               <>
@@ -127,7 +126,7 @@ export default function ApplicationsPage() {
             )}
           </Button>
           <Link href="/dashboard/applications/new">
-            <Button>
+            <Button className="!shadow-[0_1px_3px_0_rgb(0_0_0_/_0.04),0_1px_2px_-1px_rgb(0_0_0_/_0.04)] hover:!shadow-[0_1px_3px_0_rgb(0_0_0_/_0.04),0_1px_2px_-1px_rgb(0_0_0_/_0.04)]">
               New Application
             </Button>
           </Link>
