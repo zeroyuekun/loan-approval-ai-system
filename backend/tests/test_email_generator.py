@@ -255,3 +255,89 @@ class TestEmailGenerator:
         # The generator should raise on first failure; it falls back after 3 consecutive
         with pytest.raises(Exception):
             gen.generate(app, "approved", confidence=0.92)
+
+
+class TestDenialReasonMapContract:
+    """Contract tests for DENIAL_REASON_MAP — the SHAP-feature-name to
+    plain-language reason map used in adverse-action emails. A silent miss
+    here is a compliance risk: a denied applicant would receive a generic
+    reason instead of the specific one the model identified.
+    """
+
+    # The subset of SHAP feature names we require to be mapped at all times.
+    # If the model drops one of these (e.g. renames credit_score), the test
+    # fails loudly so the map can be updated in the same PR.
+    ESSENTIAL_FEATURES = [
+        "credit_score",
+        "debt_to_income",
+        "annual_income",
+        "loan_amount",
+        "bureau_risk_score",
+        "num_credit_enquiries_6m",
+        "num_defaults_5yr",
+        "serviceability_ratio",
+        "stressed_repayment",
+        "hem_surplus",
+    ]
+
+    def test_essential_features_all_mapped(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        missing = [f for f in self.ESSENTIAL_FEATURES if f not in EmailGenerator.DENIAL_REASON_MAP]
+        assert not missing, (
+            f"Essential SHAP features missing from DENIAL_REASON_MAP: {missing}. "
+            f"Add plain-language entries in email_generator.py before shipping."
+        )
+
+    def test_unknown_feature_falls_back_and_warns(self, caplog):
+        """An unmapped SHAP feature should produce a generic reason AND log a
+        warning exactly once per feature name per process."""
+        import logging
+
+        from apps.email_engine.services import email_generator as eg_mod
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        # Reset the seen-set so the warning fires for this test run
+        eg_mod._UNMAPPED_SHAP_FEATURES_SEEN.clear()
+
+        gen = EmailGenerator()
+        shap = {
+            "credit_score": -0.4,  # known
+            "unmapped_new_feature": -0.3,  # unknown — should warn once
+            "debt_to_income": -0.2,  # known
+        }
+
+        with caplog.at_level(logging.WARNING, logger="apps.email_engine.services.email_generator"):
+            out1 = gen._format_denial_reasons({}, shap_values=shap)
+            out2 = gen._format_denial_reasons({}, shap_values=shap)
+
+        # Both calls produce valid output with the generic fallback text
+        assert "Part of your financial profile didn't meet our lending criteria" in out1
+        assert "Part of your financial profile didn't meet our lending criteria" in out2
+        # Warning is logged exactly once across both calls (first-seen semantics)
+        warnings = [
+            r for r in caplog.records
+            if r.levelname == "WARNING" and "unmapped_new_feature" in r.getMessage()
+        ]
+        assert len(warnings) == 1, f"Expected 1 warning, got {len(warnings)}: {[r.getMessage() for r in warnings]}"
+
+    def test_all_mapped_features_produce_no_warning(self, caplog):
+        """If every SHAP feature is in the map, no warnings should fire."""
+        import logging
+
+        from apps.email_engine.services import email_generator as eg_mod
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        eg_mod._UNMAPPED_SHAP_FEATURES_SEEN.clear()
+        gen = EmailGenerator()
+        shap = {
+            "credit_score": -0.4,
+            "debt_to_income": -0.3,
+            "annual_income": -0.2,
+        }
+
+        with caplog.at_level(logging.WARNING, logger="apps.email_engine.services.email_generator"):
+            result = gen._format_denial_reasons({}, shap_values=shap)
+
+        assert "Part of your financial profile" not in result
+        assert not any(r.levelname == "WARNING" for r in caplog.records)

@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 
@@ -10,6 +11,13 @@ from .documentation import build_documentation_checklist
 from .guardrails import GuardrailChecker
 from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
+
+logger = logging.getLogger(__name__)
+
+# Track SHAP feature names that don't have an entry in DENIAL_REASON_MAP.
+# Warning is logged once per feature name per process so a new feature
+# surfaces loudly the first time without spamming the email queue.
+_UNMAPPED_SHAP_FEATURES_SEEN: set[str] = set()
 
 EMAIL_SUBMIT_TOOL = {
     "name": "submit_email",
@@ -136,11 +144,19 @@ class EmailGenerator:
 
         reasons = []
         for feature_name, _score in top_factors:
-            readable = self.DENIAL_REASON_MAP.get(
-                feature_name,
-                "Part of your financial profile didn't meet our lending criteria",
-            )
-            reasons.append(readable)
+            if feature_name in self.DENIAL_REASON_MAP:
+                reasons.append(self.DENIAL_REASON_MAP[feature_name])
+            else:
+                reasons.append("Part of your financial profile didn't meet our lending criteria")
+                # First-time miss only — future emails for the same feature stay quiet.
+                if feature_name not in _UNMAPPED_SHAP_FEATURES_SEEN:
+                    _UNMAPPED_SHAP_FEATURES_SEEN.add(feature_name)
+                    logger.warning(
+                        "SHAP feature '%s' is not in DENIAL_REASON_MAP — falling back to generic text. "
+                        "Add a plain-language entry in email_generator.DENIAL_REASON_MAP to surface this "
+                        "reason properly in adverse-action emails.",
+                        feature_name,
+                    )
         return "; ".join(reasons)
 
     def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
