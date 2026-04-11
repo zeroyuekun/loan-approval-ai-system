@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.8.2 — 2026-04-12
+
+Hardening, deploy prep, and documentation focused on portfolio readiness and closing gaps surfaced by an adversarial code review.
+
+Infrastructure: `DATABASE_URL` and `REDIS_URL` env var support via `dj-database-url`, with safe fallback to individual `POSTGRES_*` / `CELERY_BROKER_URL` vars so local dev and docker-compose stay unchanged. Django cache URL derivation now uses `urllib.parse` so hosted Redis URLs like `rediss://host/0?ssl_cert_reqs=required` keep their query strings and TLS options when the DB index is swapped. Production DRF throttles tightened to 10/min anonymous (from 20/min) with the $5/day Claude budget cap still sitting underneath as the circuit breaker. Codecov upload wired into CI for backend + frontend, with the lcov reporter added to vitest. `frontend/Dockerfile` documents the `NEXT_PUBLIC_API_URL` build-arg gotcha for hosted deploys.
+
+ML: XGBoost `ML_MAX_BIN` 512 → 256 (no AUC loss, halved histogram memory), new `ML_OPTUNA_TRIALS` and `ML_XGB_N_JOBS` settings matching the Celery worker CPU quota. Every training run now fits a logistic-regression baseline on `credit_score, annual_income, loan_amount, debt_to_income` and records the XGBoost lift on `ModelVersion.training_metadata`; the latest run reports **+0.1015 AUC** over the 3-feature baseline. `ModelPredictor` distinguishes true unknown categorical values from one-hot padding and downgrades the SHAP-vs-calibrated divergence warning to debug. New `cleanup_old_models` management command for ML artifact rotation.
+
+Compliance / adverse-action emails: `DENIAL_REASON_MAP` extended with `has_bankruptcy`, `cash_advance_count_12m`, and `income_credit_interaction` after an adversarial review found them in the active model's top-20 SHAP features with no plain-language entries. `has_bankruptcy` was the most compliance-critical miss. Unmapped SHAP features now log a warning once per feature name per process, and `TestDenialReasonMapContract` pins 13 essential features against silent regressions.
+
+Documentation: Mermaid architecture diagram in README, four-paragraph "Why this exists" hero section framing the regulation-versus-accuracy tradeoff, `backend/docs/COMPLIANCE.md` regulation-to-code index cross-linking MODEL_CARD.md / ADRs / SECURITY.md, `backend/docs/BASELINE_LIFT.md` writeup of the measured XGBoost lift over a naive scorecard, `workflows/deployment.md` production deploy section with secrets checklist, volume mount rationale, and smoke-test checklist. Cross-links from MODEL_CARD.md → BASELINE_LIFT.md and SECURITY.md → COMPLIANCE.md.
+
+Tooling: new `npm run demo:record` Playwright mode (headed, 1280×720, video on, 300ms slowMo) runs the existing `happy-path.spec.ts` end-to-end to produce a portfolio demo recording. `frontend/coverage/` artifacts removed from git and added to `.gitignore`.
+
+Tests: backend suite grew from 991 to **1001** (7 new Redis URL regression tests added after the adversarial review, 3 new SHAP denial-map contract tests).
+
 ## 1.8.1 — 2026-04-02
 
 Security hardening from code review: restrict ML views to admin/officer, bind monitoring ports to localhost, timing-safe health check tokens, pin Trivy action to commit SHA after supply-chain advisory.
