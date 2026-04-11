@@ -210,6 +210,22 @@ CELERY_BROKER_URL = os.environ.get(
     "CELERY_BROKER_URL",
     os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
 )
+
+
+def _redis_url_with_db(url: str, db: int) -> str:
+    """Return ``url`` with its Redis DB index replaced by ``db``.
+
+    Hosted Redis URLs (Upstash, Railway, Fly) often look like
+    ``rediss://user:pass@host:6379/0?ssl_cert_reqs=required``. A naive
+    ``rsplit("/", 1)`` drops the query string, which strips TLS options and
+    breaks the Django cache even though Celery still works off the raw
+    broker URL. Parse properly so the cache URL keeps scheme, auth, host,
+    port, query, and fragment intact — only the path (``/<db>``) changes.
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(url)
+    return urlunparse(parsed._replace(path=f"/{db}"))
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "django-db")
 CELERY_RESULT_EXPIRES = 3600  # Expire task results after 1 hour to prevent DB bloat
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -223,12 +239,14 @@ CELERY_TASK_ROUTES = {
 }
 
 # Django Cache (Redis-backed)
+# Derived from CELERY_BROKER_URL on DB index 1 (broker uses 0). The helper
+# preserves query params and TLS options from rediss:// hosted URLs.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": os.environ.get(
             "DJANGO_CACHE_URL",
-            CELERY_BROKER_URL.rsplit("/", 1)[0] + "/1" if CELERY_BROKER_URL else "redis://localhost:6379/1",
+            _redis_url_with_db(CELERY_BROKER_URL, 1) if CELERY_BROKER_URL else "redis://localhost:6379/1",
         ),
         "TIMEOUT": 300,  # 5 minutes default TTL
     }

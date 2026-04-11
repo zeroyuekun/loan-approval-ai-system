@@ -267,6 +267,9 @@ class TestDenialReasonMapContract:
     # The subset of SHAP feature names we require to be mapped at all times.
     # If the model drops one of these (e.g. renames credit_score), the test
     # fails loudly so the map can be updated in the same PR.
+    # The last three were added after an adversarial review flagged them as
+    # real top-20 features in the active model with no plain-language
+    # entries — has_bankruptcy is the most compliance-critical miss.
     ESSENTIAL_FEATURES = [
         "credit_score",
         "debt_to_income",
@@ -278,6 +281,9 @@ class TestDenialReasonMapContract:
         "serviceability_ratio",
         "stressed_repayment",
         "hem_surplus",
+        "has_bankruptcy",
+        "cash_advance_count_12m",
+        "income_credit_interaction",
     ]
 
     def test_essential_features_all_mapped(self):

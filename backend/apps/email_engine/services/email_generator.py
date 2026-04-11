@@ -119,6 +119,10 @@ class EmailGenerator:
         "gambling_transaction_flag": "Gambling transactions were detected in your account history",
         "days_negative_balance_90d": "Your account has been in negative balance too frequently in recent months",
         "bnpl_monthly_commitment": "Your buy-now-pay-later commitments reduce the amount we can lend",
+        "has_bankruptcy": "There is a bankruptcy on your credit file that we can't look past for this loan",
+        "cash_advance_count_12m": "You've taken a number of cash advances on your credit card in the last 12 months, which we read as a sign of short-term cash flow pressure",
+        # Combined / interaction features from feature engineering
+        "income_credit_interaction": "The combination of your income level and credit history doesn't meet our risk settings for this product",
     }
 
     def _format_denial_reasons(self, feature_importances, shap_values=None):
