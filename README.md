@@ -6,6 +6,16 @@
 
 Full-stack loan approval system built for Australian lending. ML scores applicants (XGBoost), Claude writes the decision emails, and an agent pipeline checks everything for bias before it goes out. The compliance layer — APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure requirements — is where most of the work went.
 
+## Why this exists
+
+Automated credit decisions are one of the highest-stakes places ML meets regulation. Get the model wrong and you decline creditworthy applicants or approve defaults. Get the *explanation* wrong and you fail the NCCP Act's adverse-action requirements. Get the *email* wrong and you breach the Privacy Act or the Banking Code of Practice. Most portfolio ML projects stop at "I got 0.87 AUC" — the interesting part of this one is everything that has to sit around the model.
+
+The model itself is an XGBoost scorer with 21 monotonic constraints (higher income can never raise default probability), isotonic probability calibration, conformal prediction intervals, and SHAP values mapped to 70 adverse-action reason codes. But the model is maybe 20% of the codebase. The other 80% is: deterministic guardrails on every Claude-generated email, a three-layer bias detection pipeline (regex → LLM → human escalation), fairness gates on disparate impact, PSI/CSI drift monitoring, a runbook for incident response, and a synthetic data generator calibrated against APRA, ABS, ATO, and Equifax published statistics so the learning task isn't artificially easy.
+
+The architecture follows a pattern I call **WAT** — Workflows (markdown SOPs), Agents (LLM reasoning), Tools (deterministic Python and Django services). The split keeps probabilistic decision-making separate from deterministic execution so the audit trail is reconstructable and each failure mode has a defined recovery path. The orchestrator is a single Celery task chaining prediction → email → bias check → next-best-offer, and every step is recorded on an `AgentRun` row a reviewer can replay after the fact.
+
+It's a portfolio project, not a production system — the caveats section at the bottom is honest about what's synthetic, what's unaudited, and what would need real-world hardening before it touched real money.
+
 <details>
 <summary><strong>Screenshots</strong> (click to expand)</summary>
 
@@ -28,6 +38,36 @@ Full-stack loan approval system built for Australian lending. ML scores applican
 ![Agent Workflows](docs/screenshots/06-agent-workflows.png)
 
 </details>
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Browser["Browser<br/>Next.js 15 + React 19"]
+    API["Django 5 + DRF<br/>JWT cookies · CSP · CORS"]
+    subgraph Workers["Celery workers"]
+        direction TB
+        ML["ml queue<br/>train / predict / drift"]
+        IO["io queue<br/>emails / agents / NBO"]
+        WD["watchdog<br/>re-queues stuck pipelines"]
+    end
+    PG[("PostgreSQL 17<br/>applications · runs · audit")]
+    Redis[("Redis<br/>cache + broker")]
+    Claude["Claude API<br/>Sonnet · Opus"]
+
+    Browser <-->|"HttpOnly JWT"| API
+    API --> PG
+    API <--> Redis
+    Redis <-.broker.-> ML
+    Redis <-.broker.-> IO
+    ML --> PG
+    IO --> PG
+    IO <-->|"generate + review"| Claude
+    WD --> PG
+    WD -.re-enqueue.-> Redis
+```
+
+Core stack is 8 containers (backend, frontend, db, redis, celery-ml, celery-io, celery-beat, watchdog). An optional `monitoring` compose profile adds 5 more (Prometheus, Grafana, Loki, Promtail, Alertmanager) when you want dashboards.
 
 ## How the pipeline works
 
@@ -106,6 +146,8 @@ workflows/          # markdown SOPs for each pipeline stage
 | Template-first email with $5/day Claude budget cap | [006](backend/docs/adr/006-template-first-email-with-cost-cap.md) |
 | WAT architecture (workflows, agents, tools) | [007](backend/docs/adr/007-wat-architecture.md) |
 | Security architecture | [008](backend/docs/adr/008-security-architecture.md) |
+
+For a regulation-by-regulation index of how the system maps to APRA CPG 235, NCCP Act, CFPB Circular 2022-03, the EEOC 4/5 rule, and the upcoming Privacy Act auto-decision disclosure deadline, see [backend/docs/COMPLIANCE.md](backend/docs/COMPLIANCE.md).
 
 ## ML model
 
