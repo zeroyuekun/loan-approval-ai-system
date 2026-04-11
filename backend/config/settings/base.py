@@ -88,18 +88,33 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "loan_approval"),
-        "USER": os.environ.get("POSTGRES_USER", "postgres"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
-        "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
-        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-        "CONN_MAX_AGE": 600,
-        "CONN_HEALTH_CHECKS": True,
+# Prefer DATABASE_URL if the host injects one (Railway, Render, Fly, Heroku).
+# Fall back to individual POSTGRES_* vars so existing docker-compose, CI, and
+# local dev workflows keep working unchanged.
+_DATABASE_URL = os.environ.get("DATABASE_URL")
+if _DATABASE_URL:
+    import dj_database_url
+
+    DATABASES = {
+        "default": dj_database_url.parse(
+            _DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("POSTGRES_DB", "loan_approval"),
+            "USER": os.environ.get("POSTGRES_USER", "postgres"),
+            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
+            "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": 600,
+            "CONN_HEALTH_CHECKS": True,
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -188,7 +203,13 @@ CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False  # Frontend JS needs to read CSRF token
 
 # Celery
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+# CELERY_BROKER_URL is the most specific var and wins. REDIS_URL is what
+# Railway / Fly / Heroku inject by default, so fall back to it before the
+# local-dev default.
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL",
+    os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+)
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "django-db")
 CELERY_RESULT_EXPIRES = 3600  # Expire task results after 1 hour to prevent DB bloat
 CELERY_ACCEPT_CONTENT = ["json"]

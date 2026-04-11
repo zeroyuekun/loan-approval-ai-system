@@ -4,6 +4,7 @@ django-cors-headers>=4.7
 django-filter>=25.1
 djangorestframework-simplejwt>=5.5
 psycopg[binary]>=3.2
+dj-database-url>=2.3
 celery[redis]>=5.5
 django-celery-results>=2.6
 cryptography>=44.0
