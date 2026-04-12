@@ -589,7 +589,8 @@ class ModelPredictor:
                     "threshold": threshold,
                 }
                 result["counterfactuals"] = self._generate_counterfactuals(
-                    features_df, result["feature_importances"], model_bundle
+                    features_df, result["feature_importances"], model_bundle,
+                    shap_values=result.get("shap_values"),
                 )
             except Exception as e:
                 logger.warning("Counterfactual generation failed: %s", e)
@@ -887,7 +888,7 @@ class ModelPredictor:
             "available": True,
         }
 
-    def _generate_counterfactuals(self, features_df, feature_importances, model_bundle):
+    def _generate_counterfactuals(self, features_df, feature_importances, model_bundle, shap_values=None):
         """Generate counterfactual explanations for denied applications.
 
         For top 3 negative factors, binary-search for the value that flips
@@ -898,8 +899,17 @@ class ModelPredictor:
         if not feature_importances:
             return counterfactuals
 
-        # Get top 3 features that most contributed to denial
-        sorted_features = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]
+        # Use per-prediction SHAP values (negative = denial drivers) when available,
+        # falling back to global feature importances. SHAP values reflect this
+        # specific applicant's denial drivers, not global model behaviour (ML-MEDIUM-2).
+        if shap_values and any(v < 0 for v in shap_values.values()):
+            sorted_features = sorted(
+                [(k, abs(v)) for k, v in shap_values.items() if v < 0],
+                key=lambda x: x[1],
+                reverse=True,
+            )[:3]
+        else:
+            sorted_features = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]
 
         model = model_bundle["model"]
 

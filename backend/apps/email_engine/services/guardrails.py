@@ -1,4 +1,7 @@
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class GuardrailChecker:
@@ -58,6 +61,11 @@ class GuardrailChecker:
         re.compile(r"\bwe understand how important\b", re.IGNORECASE),
         re.compile(r"\bwe understand this (?:may be|is) disappointing\b", re.IGNORECASE),
         re.compile(r"\bnot the outcome you were hoping for\b", re.IGNORECASE),
+        # Apology language — hard project rule: NEVER in denial emails (CLAUDE.md)
+        re.compile(r"\bsorry\b", re.IGNORECASE),
+        re.compile(r"\bapologi[sz]e\b", re.IGNORECASE),
+        re.compile(r"\bapologies\b", re.IGNORECASE),
+        re.compile(r"\bwe regret to\b", re.IGNORECASE),
         re.compile(
             r"\bwe (?:understand|know) (?:this|how) (?:is|may be|must be) (?:difficult|hard|tough|frustrating)\b",
             re.IGNORECASE,
@@ -372,7 +380,7 @@ class GuardrailChecker:
         r"|hayne royal commission"
         r"|anti[- ]money laundering"
         r").*?(?:\.|$)",
-        re.IGNORECASE | re.DOTALL,
+        re.IGNORECASE | re.DOTALL | re.MULTILINE,
     )
 
     def check_prohibited_language(self, text):
@@ -496,6 +504,7 @@ class GuardrailChecker:
                 # Amounts under $5,000 in NBO emails are typically computed values
                 # like annual interest ($1,625 = $32,500 × 5%) or monthly targets.
                 if not is_valid and has_nbo and val < 5000:
+                    logger.debug("NBO email: allowing small derived amount $%.2f without validation", val)
                     is_valid = True
 
                 if not is_valid:

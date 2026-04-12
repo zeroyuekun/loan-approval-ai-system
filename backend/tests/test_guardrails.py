@@ -97,8 +97,8 @@ class TestApologyLanguageGap:
 
         return GuardrailChecker()
 
-    def test_sorry_not_caught_by_guardrails(self):
-        """The word 'sorry' in a denial email should be caught but currently isn't."""
+    def test_sorry_caught_by_guardrails(self):
+        """The word 'sorry' in a denial email should now be caught by the apology guardrail."""
         checker = self._make_checker()
         email_with_sorry = (
             "We're sorry to inform you that your loan application has been denied. "
@@ -108,13 +108,12 @@ class TestApologyLanguageGap:
         )
         context = {"decision": "denied", "applicant_name": "Test", "loan_amount": 100000.0, "purpose": "Personal"}
         results = checker.run_all_checks(email_with_sorry, context)
-        # Check if any guardrail caught "sorry"
+        # After fix: "sorry" is now caught by AI_GIVEAWAY_TERMS
         failed = [r for r in results if not r["passed"] and "sorry" in r.get("details", "").lower()]
-        # This SHOULD fail but currently passes — proving the gap:
-        assert len(failed) == 0, "If this fails, the apology guardrail was added (good!)"
+        assert len(failed) > 0, "Apology guardrail should now catch 'sorry'"
 
-    def test_apologise_not_caught_by_guardrails(self):
-        """The word 'apologise' in a denial email should be caught but currently isn't."""
+    def test_apologise_caught_by_guardrails(self):
+        """The word 'apologise' should now be caught by the apology guardrail."""
         checker = self._make_checker()
         email_with_apologise = (
             "We apologise but your application could not be approved. "
@@ -125,7 +124,7 @@ class TestApologyLanguageGap:
         context = {"decision": "denied", "applicant_name": "Test", "loan_amount": 100000.0, "purpose": "Personal"}
         results = checker.run_all_checks(email_with_apologise, context)
         failed = [r for r in results if not r["passed"] and "apolog" in r.get("details", "").lower()]
-        assert len(failed) == 0, "If this fails, the apology guardrail was added (good!)"
+        assert len(failed) > 0, "Apology guardrail should now catch 'apologise'"
 
 
 class TestUnfortunatelyFalsePass:

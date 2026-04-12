@@ -66,8 +66,8 @@ class NextBestOfferGenerator:
                 "can help you get started."
             )
             result["personalized_message"] = (
-                "We appreciate your interest in banking with us. While we were unable "
-                "to approve your application at this time, we have options to help you "
+                "We appreciate your interest in banking with us. "
+                "We have options that may suit your current situation and help you "
                 "work toward your financial goals."
             )
             return result

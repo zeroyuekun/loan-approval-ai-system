@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { loansApi, type LoanPayload } from '@/lib/api'
 import { LoanApplication, PaginatedResponse } from '@/types'
 
-export function useApplications(params?: Record<string, any>) {
+export function useApplications(params?: Record<string, string | number | boolean | undefined>) {
   return useQuery<PaginatedResponse<LoanApplication>>({
     queryKey: ['applications', params],
     queryFn: async () => {

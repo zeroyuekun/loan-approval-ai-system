@@ -34,10 +34,10 @@ function plainTextToHtml(body: string): string {
     + '</div>'
 }
 
-function formatTime() {
-  const now = new Date()
-  const hours = now.getHours()
-  const minutes = now.getMinutes().toString().padStart(2, '0')
+function formatTime(dateStr?: string) {
+  const date = dateStr ? new Date(dateStr) : new Date()
+  const hours = date.getHours()
+  const minutes = date.getMinutes().toString().padStart(2, '0')
   const ampm = hours >= 12 ? 'PM' : 'AM'
   const h = hours % 12 || 12
   return `${h}:${minutes} ${ampm}`
@@ -104,7 +104,7 @@ export function EmailPreview({ email }: EmailPreviewProps) {
                     <Clock className="h-3 w-3" />
                     {email.generation_time_ms}ms
                   </span>
-                  <span>{formatTime()}</span>
+                  <span>{formatTime(email.created_at)}</span>
                   <Star className="h-4 w-4 text-gray-300 hover:text-yellow-400 cursor-pointer" />
                 </div>
               </div>
