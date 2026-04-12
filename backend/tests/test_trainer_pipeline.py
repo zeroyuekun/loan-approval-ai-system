@@ -243,53 +243,38 @@ from unittest.mock import patch, call
 
 
 class TestMLCritical1CrossValFitParams:
-    """ML-CRITICAL-1: cross_val_score(params=cv_fit_params) silently ignores
-    sample weights. The correct kwarg is fit_params=.
+    """ML-CRITICAL-1: cross_val_score must pass sample weights via the
+    ``params`` keyword (sklearn >= 1.6).
 
-    sklearn.model_selection.cross_val_score does NOT accept a ``params``
-    keyword argument. Passing ``params=`` sends the dict into ``**kwargs``
-    which are silently ignored. The result is that sample weights (from
-    fairness reweighting and reject-inference) are never applied during
-    Optuna cross-validation, leading to biased hyperparameter selection.
+    In sklearn < 1.6 the kwarg was ``fit_params=``. Since sklearn 1.6 it
+    was deprecated in favour of ``params=``, and sklearn 1.8 removed
+    ``fit_params`` entirely.  Using the wrong name silently drops sample
+    weights from Optuna CV, biasing hyperparameter selection.
     """
 
     @patch("apps.ml_engine.services.trainer.cross_val_score")
-    def test_optuna_cv_uses_fit_params_not_params(self, mock_cv_score):
-        """Assert that cross_val_score is called with fit_params=, not params=."""
-        # We need to intercept the cross_val_score call made inside the
-        # Optuna objective function (trainer.py line ~1190).
-        # Return a plausible score so the objective completes.
+    def test_optuna_cv_uses_params_kwarg(self, mock_cv_score):
+        """Assert that cross_val_score is called with params=, not the
+        removed fit_params= (sklearn 1.8+)."""
         mock_cv_score.return_value = np.array([0.85, 0.84, 0.86])
 
-        # We only need to verify the kwargs, so inspect all calls after
-        # the training completes. The Optuna path is only used for XGBoost.
-        # To avoid a full training run, we inspect the call signature directly.
-        #
-        # Read the source to verify the bug exists:
         import inspect
         from apps.ml_engine.services import trainer as trainer_module
 
         source = inspect.getsource(trainer_module.ModelTrainer)
 
-        # The bug: the code uses params= instead of fit_params=
-        # This test FAILS (proving the bug) if params= is found in an
-        # Optuna cross_val_score call.
-        #
-        # After the fix, params= should be replaced with fit_params=.
         assert "cross_val_score(" in source, "cross_val_score call not found in trainer"
 
-        # Find lines with cross_val_score that use params= (the bug)
+        # Detect the removed fit_params= kwarg
         lines_with_bug = [
             line.strip()
             for line in source.split("\n")
-            if "cross_val_score(" in line and "params=" in line and "fit_params=" not in line
+            if "cross_val_score(" in line and "fit_params=" in line
         ]
 
-        # This assertion FAILS on buggy code (proving the bug exists)
-        # and PASSES after the fix replaces params= with fit_params=
         assert len(lines_with_bug) == 0, (
-            f"ML-CRITICAL-1 BUG: cross_val_score uses 'params=' instead of 'fit_params='. "
-            f"Sample weights are silently ignored during Optuna CV. "
+            f"ML-CRITICAL-1 BUG: cross_val_score uses removed 'fit_params=' kwarg "
+            f"(sklearn >= 1.8). Use 'params=' instead. "
             f"Buggy lines: {lines_with_bug}"
         )
 

@@ -1195,7 +1195,14 @@ class ModelTrainer:
             if sample_weights is not None:
                 cv_fit_params["sample_weight"] = sample_weights
 
-            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", fit_params=cv_fit_params)
+            # ML-C1: Enable metadata routing locally for this CV call so
+            # params={"sample_weight": ...} is forwarded to fit().
+            # Global enable_metadata_routing would break GridSearchCV
+            # elsewhere, so we scope it to the Optuna objective only.
+            import sklearn
+            model.set_fit_request(sample_weight=True)
+            with sklearn.config_context(enable_metadata_routing=True):
+                scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
             return scores.mean()
 
         study = optuna.create_study(
