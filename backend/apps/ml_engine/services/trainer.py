@@ -595,14 +595,16 @@ class ModelTrainer:
                     feature_bounds[col] = (p1, p99)
         self._feature_bounds = feature_bounds
 
-        # Save original test indices before transform() resets them
+        # Save original test indices and a raw copy before transform() mutates df_test
         test_original_indices = df_test.index.copy()
+        df_test_orig = df_test.copy()  # preserved for df_test_raw after imputation restore
 
-        # Save raw copies BEFORE preprocessing for WOE scorecard (C4 fix).
+        # Save raw training copy BEFORE preprocessing for WOE scorecard (C4 fix).
         # WOE bins must be in interpretable units (credit_score 650-750),
         # not z-score units from StandardScaler.
         df_train_raw = self.add_derived_features(df_train.copy())
-        df_test_raw = self.add_derived_features(df_test.copy())
+        # NOTE: df_test_raw is built AFTER fit_preprocess below so it uses
+        # training-set imputation values (ML-H1 fix). See line after _train_imputation.
 
         # ------------------------------------------------------------------
         # IV-based feature selection: keep only features with meaningful
@@ -663,6 +665,11 @@ class ModelTrainer:
 
         # Restore train-based imputation values (transform may have overwritten)
         self._imputation_values = _train_imputation
+
+        # Build df_test_raw AFTER restoring training imputation so
+        # add_derived_features uses training-set medians, not test-set (ML-H1 fix).
+        df_test_raw = self.add_derived_features(df_test_orig.copy())
+        df_test_raw = df_test_raw.drop(columns=["approved"], errors="ignore")
 
         # Fairness reweighting: compute sample weights to reduce employment
         # type disparate impact (DI). Without this, DI ~0.38 (failing EEOC 80%
@@ -851,16 +858,17 @@ class ModelTrainer:
         f1_threshold = float(val_threshold_analysis["f1_optimal_threshold"])
         logger.info("Cost-optimal threshold: %.3f (F1-optimal: %.3f)", optimal_threshold, f1_threshold)
 
-        # Conformal prediction: compute nonconformity scores on validation set.
-        # These are stored in the model bundle and used at inference time to
-        # produce prediction intervals with guaranteed coverage.
-        # Nonconformity score = |predicted_prob - actual_outcome|
-        y_val_prob = model.predict_proba(X_val)[:, 1]
-        self._conformal_scores = np.sort(np.abs(y_val_prob - y_val.values))
-
         # Evaluate on test set only (val was used for calibration and early stopping)
         y_pred = model.predict(X_test)
         y_prob = model.predict_proba(X_test)[:, 1]
+
+        # Conformal prediction: compute nonconformity scores on the TEST set.
+        # The validation set was used to fit the calibrator (_CalibratedModel),
+        # so computing scores on it would violate the exchangeability assumption
+        # and produce optimistically narrow intervals. The test set is held out
+        # from both training and calibration, preserving the coverage guarantee.
+        # Nonconformity score = |predicted_prob - actual_outcome|
+        self._conformal_scores = np.sort(np.abs(y_prob - y_test.values))
 
         metrics = self.metrics_service.compute_metrics(y_test, y_pred, y_prob)
         metrics["confusion_matrix"] = self.metrics_service.confusion_matrix_data(y_test, y_pred)
@@ -1187,7 +1195,7 @@ class ModelTrainer:
             if sample_weights is not None:
                 cv_fit_params["sample_weight"] = sample_weights
 
-            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
+            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", fit_params=cv_fit_params)
             return scores.mean()
 
         study = optuna.create_study(

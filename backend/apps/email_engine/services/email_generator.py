@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 
 import anthropic
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Warning is logged once per feature name per process so a new feature
 # surfaces loudly the first time without spamming the email queue.
 _UNMAPPED_SHAP_FEATURES_SEEN: set[str] = set()
+_UNMAPPED_LOCK = threading.Lock()
 
 EMAIL_SUBMIT_TOOL = {
     "name": "submit_email",
@@ -54,8 +56,14 @@ class EmailGenerator:
         else:
             self.client = None
         self.guardrail_checker = GuardrailChecker()
-        self._consecutive_failures = 0
-        self._circuit_open_until = 0
+        # Circuit breaker state is class-level so it persists across
+        # EmailGenerator instances (one per pipeline run). Without this,
+        # each new application starts fresh and burns through retries
+        # even when the API is known to be down (EMAIL-H3 fix).
+
+    # Class-level circuit breaker state
+    _consecutive_failures = 0
+    _circuit_open_until = 0.0
 
     # Map ML feature names to plain-language denial reasons
     DENIAL_REASON_MAP = {
@@ -153,14 +161,15 @@ class EmailGenerator:
             else:
                 reasons.append("Part of your financial profile didn't meet our lending criteria")
                 # First-time miss only — future emails for the same feature stay quiet.
-                if feature_name not in _UNMAPPED_SHAP_FEATURES_SEEN:
-                    _UNMAPPED_SHAP_FEATURES_SEEN.add(feature_name)
-                    logger.warning(
-                        "SHAP feature '%s' is not in DENIAL_REASON_MAP — falling back to generic text. "
-                        "Add a plain-language entry in email_generator.DENIAL_REASON_MAP to surface this "
-                        "reason properly in adverse-action emails.",
-                        feature_name,
-                    )
+                with _UNMAPPED_LOCK:
+                    if feature_name not in _UNMAPPED_SHAP_FEATURES_SEEN:
+                        _UNMAPPED_SHAP_FEATURES_SEEN.add(feature_name)
+                        logger.warning(
+                            "SHAP feature '%s' is not in DENIAL_REASON_MAP — falling back to generic text. "
+                            "Add a plain-language entry in email_generator.DENIAL_REASON_MAP to surface this "
+                            "reason properly in adverse-action emails.",
+                            feature_name,
+                        )
         return "; ".join(reasons)
 
     def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
@@ -409,6 +418,8 @@ class EmailGenerator:
                 feedback_parts.append(
                     "MINOR (nice to fix): " + "; ".join(f"{r['check_name']}: {r['details']}" for r in minor)
                 )
+            # Regenerate feedback fresh from current failures (not accumulated
+            # from prior retry levels) so Claude sees only what's wrong NOW.
             self._last_feedback = "\n".join(feedback_parts)
             return self.generate(
                 application, decision, attempt=attempt + 1, confidence=confidence, profile_context=profile_context
@@ -516,6 +527,9 @@ class EmailGenerator:
                 logger.warning("Claude API credit insufficient — using template fallback")
                 return False
             return True  # other bad request errors may be prompt-specific
+        except anthropic.RateLimitError:
+            logger.warning("Claude API rate limited — using template fallback")
+            return False
         except (anthropic.APIConnectionError, anthropic.APITimeoutError):
             logger.warning("Claude API unreachable — using template fallback")
             return False

@@ -183,7 +183,8 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Content Security Policy (django-csp 4.0+)
 # Uses CONTENT_SECURITY_POLICY dict format.
-# Start in report-only mode to avoid breaking existing functionality.
+# Report-only in development — enforced in production (see production.py).
+# SEC-H5: Even in report-only mode, having the policy helps identify violations.
 CONTENT_SECURITY_POLICY = {
     "REPORT_ONLY": True,
     "DIRECTIVES": {

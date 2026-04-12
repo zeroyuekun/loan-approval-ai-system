@@ -66,8 +66,10 @@ def _clear_jwt_cookies(response):
     """Remove JWT cookies from the response."""
     access_name = getattr(django_settings, "JWT_ACCESS_COOKIE_NAME", "access_token")
     refresh_name = getattr(django_settings, "JWT_REFRESH_COOKIE_NAME", "refresh_token")
-    response.delete_cookie(access_name, path="/")
-    response.delete_cookie(refresh_name, path="/")
+    secure = not getattr(django_settings, "DEBUG", False)
+    samesite = getattr(django_settings, "JWT_COOKIE_SAMESITE", "Lax")
+    response.delete_cookie(access_name, path="/", samesite=samesite)
+    response.delete_cookie(refresh_name, path="/", samesite=samesite)
     return response
 
 
@@ -128,7 +130,10 @@ class CookieTokenRefreshView(generics.GenericAPIView):
         from django.contrib.auth import get_user_model
 
         User = get_user_model()
-        return User.objects.get(pk=token["user_id"])
+        try:
+            return User.objects.get(pk=token["user_id"])
+        except User.DoesNotExist:
+            raise TokenError("User no longer exists")
 
 
 class LoginRateThrottle(AnonRateThrottle):

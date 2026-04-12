@@ -83,3 +83,119 @@ If unresolved, contact the Australian Financial Complaints Authority (AFCA) on 1
         failed_names = [r["check_name"] for r in results if not r["passed"]]
         # Should detect discrimination
         self.assertTrue(len(failed_names) > 0, "Expected guardrail failures for discriminatory language")
+
+
+# ---------------------------------------------------------------------------
+# Compliance gap tests (pytest-style)
+# ---------------------------------------------------------------------------
+
+class TestApologyLanguageGap:
+    """EMAIL-LOW-1: No guardrail catches sorry/apologise — hard project rule."""
+
+    def _make_checker(self):
+        from apps.email_engine.services.guardrails import GuardrailChecker
+
+        return GuardrailChecker()
+
+    def test_sorry_not_caught_by_guardrails(self):
+        """The word 'sorry' in a denial email should be caught but currently isn't."""
+        checker = self._make_checker()
+        email_with_sorry = (
+            "We're sorry to inform you that your loan application has been denied. "
+            "Based on your credit score and debt-to-income ratio, we are unable to approve "
+            "your application at this time. You can request a free copy of your credit report "
+            "from Equifax. Contact AFCA on 1800 931 678 if you wish to lodge a complaint."
+        )
+        context = {"decision": "denied", "applicant_name": "Test", "loan_amount": 100000.0, "purpose": "Personal"}
+        results = checker.run_all_checks(email_with_sorry, context)
+        # Check if any guardrail caught "sorry"
+        failed = [r for r in results if not r["passed"] and "sorry" in r.get("details", "").lower()]
+        # This SHOULD fail but currently passes — proving the gap:
+        assert len(failed) == 0, "If this fails, the apology guardrail was added (good!)"
+
+    def test_apologise_not_caught_by_guardrails(self):
+        """The word 'apologise' in a denial email should be caught but currently isn't."""
+        checker = self._make_checker()
+        email_with_apologise = (
+            "We apologise but your application could not be approved. "
+            "Based on your income assessment, we are unable to offer this product. "
+            "You can request a free credit report from Equifax. "
+            "Contact AFCA on 1800 931 678."
+        )
+        context = {"decision": "denied", "applicant_name": "Test", "loan_amount": 100000.0, "purpose": "Personal"}
+        results = checker.run_all_checks(email_with_apologise, context)
+        failed = [r for r in results if not r["passed"] and "apolog" in r.get("details", "").lower()]
+        assert len(failed) == 0, "If this fails, the apology guardrail was added (good!)"
+
+
+class TestUnfortunatelyFalsePass:
+    """EMAIL-HIGH-1: 'unfortunately' falsely satisfies denial reason requirement."""
+
+    def test_unfortunately_alone_fails_required_elements(self):
+        """An email with only 'unfortunately' and no actual reason should now fail.
+
+        EMAIL-HIGH-1 FIX: 'unfortunately' removed from the reason-phrase list.
+        """
+        from apps.email_engine.services.guardrails import GuardrailChecker
+
+        checker = GuardrailChecker()
+        email = (
+            "Unfortunately, we are unable to help you at this time. "
+            "You can request a free credit report from Equifax. "
+            "Contact AFCA on 1800 931 678."
+        )
+        context = {"decision": "denied", "applicant_name": "Test", "loan_amount": 100000.0, "purpose": "Personal"}
+        results = checker.run_all_checks(email, context)
+        required_elements = [r for r in results if r["check_name"] == "Required Elements"]
+        # After fix: "unfortunately" no longer satisfies the reason requirement
+        if required_elements:
+            assert required_elements[0]["passed"] is False, (
+                "Expected fail — 'unfortunately' alone is not a substantive reason"
+            )
+
+
+class TestMarketingUnsubscribeGap:
+    """EMAIL-HIGH-5: No Spam Act 2003 unsubscribe check for marketing emails."""
+
+    def test_marketing_email_without_unsubscribe_fails(self):
+        """Marketing email with no unsubscribe link should now fail.
+
+        EMAIL-HIGH-5 FIX: Spam Act 2003 unsubscribe check added.
+        """
+        from apps.email_engine.services.guardrails import GuardrailChecker
+
+        checker = GuardrailChecker()
+        marketing_email = (
+            "Great news! Based on your profile, we'd like to offer you our Premium Savings Account "
+            "with a competitive 4.5% interest rate. This is a limited-time offer just for you. "
+            "Reach out to us at 1300 123 456 to learn more."
+        )
+        context = {"decision": "approved", "applicant_name": "Test", "loan_amount": 100000.0, "purpose": "Personal"}
+        results = checker.run_all_checks(marketing_email, context, email_type="marketing")
+        unsubscribe_fails = [r for r in results if not r["passed"] and "unsubscribe" in r.get("details", "").lower()]
+        assert len(unsubscribe_fails) > 0, "Unsubscribe check should now catch missing mechanism"
+
+
+class TestNboDeclineLanguageConflict:
+    """EMAIL-MEDIUM-1: NBO personalized_message contains 'unable to approve'
+    which would be caught by check_no_decline_language."""
+
+    def test_nbo_fallback_message_conflicts_with_decline_check(self):
+        """The hardcoded NBO fallback message triggers the no-decline-language guardrail."""
+        from apps.email_engine.services.guardrails import GuardrailChecker
+
+        checker = GuardrailChecker()
+        # This is the hardcoded fallback from NextBestOfferGenerator.generate()
+        # when there are no offers (next_best_offer.py lines 68-72)
+        nbo_message = (
+            "We appreciate your interest in banking with us. While we were unable "
+            "to approve your application at this time, we have options to help you "
+            "work toward your financial goals."
+        )
+        result = checker.check_no_decline_language(nbo_message)
+        # "unable to approve" IS in the decline_phrases list, so this should fail
+        assert result["passed"] is False, (
+            "NBO hardcoded message contains 'unable to approve' which triggers "
+            "check_no_decline_language — this creates a conflict if the message "
+            "is used in a marketing email context"
+        )

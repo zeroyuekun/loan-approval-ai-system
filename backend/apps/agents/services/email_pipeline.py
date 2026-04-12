@@ -132,22 +132,43 @@ class EmailPipelineService:
             logger.error("Application %s: bias check failed: %s", application_id, e)
             step = self.tracker.fail_step(step, str(e), failure_category="transient")
             bias_result = {
-                "score": 25,
+                "score": 0,
                 "flagged": False,
                 "requires_human_review": False,
                 "categories": [],
                 "analysis": f"Bias check infrastructure error: {e}",
             }
+            # Persist audit record so infrastructure errors are visible (EMAIL-H4)
+            BiasReport.objects.create(
+                agent_run=agent_run,
+                email=generated_email,
+                bias_score=0,
+                score_source="error",
+                categories=[],
+                analysis=f"Bias check infrastructure error: {e}",
+                flagged=False,
+                requires_human_review=False,
+            )
         except Exception as e:
             logger.critical("Application %s: UNEXPECTED failure at bias_check: %s", application_id, e, exc_info=True)
             step = self.tracker.fail_step(step, str(e), failure_category=None)
             bias_result = {
-                "score": 25,
+                "score": 0,
                 "flagged": False,
                 "requires_human_review": False,
                 "categories": [],
                 "analysis": f"Bias check infrastructure error: {e}",
             }
+            BiasReport.objects.create(
+                agent_run=agent_run,
+                email=generated_email,
+                bias_score=0,
+                score_source="error",
+                categories=[],
+                analysis=f"Bias check unexpected error: {e}",
+                flagged=False,
+                requires_human_review=False,
+            )
 
         steps.append(step)
 

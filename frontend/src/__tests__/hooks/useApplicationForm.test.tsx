@@ -55,7 +55,8 @@ function createWrapper(user: User = adminUser) {
   return Wrapper
 }
 
-const DRAFT_KEY = 'loan_application_draft'
+// Draft key is now scoped to user ID (FE-H3 fix)
+const DRAFT_KEY = `loan_application_draft_${adminUser.id}`
 
 describe('useApplicationForm', () => {
   beforeEach(() => {
@@ -166,5 +167,26 @@ describe('useApplicationForm', () => {
     // Should still initialize with defaults, not crash
     expect(result.current.step).toBe(1)
     expect(result.current.watch().applicant_type).toBe('single')
+  })
+})
+
+describe('Draft localStorage key security', () => {
+  it('FE-H3 FIX: draft key is now scoped to user ID', () => {
+    // After fix, the key includes the user ID so different users have separate drafts
+    expect(DRAFT_KEY).toContain(`${adminUser.id}`)
+    expect(DRAFT_KEY).toMatch(/loan_application_draft_\d+/)
+  })
+
+  it('FE-H3 FIX: different users get different draft keys', () => {
+    // User A and User B should not share draft storage
+    const userAKey = `loan_application_draft_${adminUser.id}`
+    const userBKey = `loan_application_draft_99`
+
+    const userADraft = { annual_income: 150000, credit_score: 820 }
+    localStorage.setItem(userAKey, JSON.stringify(userADraft))
+
+    // User B's key is different — no PII leakage
+    const userBData = localStorage.getItem(userBKey)
+    expect(userBData).toBeNull()
   })
 })

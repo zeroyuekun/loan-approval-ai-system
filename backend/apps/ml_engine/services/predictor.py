@@ -850,7 +850,7 @@ class ModelPredictor:
                 # Adjust alpha for finite-sample coverage guarantee
                 # Target: P(coverage >= 1-alpha) >= 0.9
                 adjusted_alpha = alpha
-                for candidate_alpha in np.arange(alpha * 0.5, alpha, 0.001):
+                for candidate_alpha in np.arange(alpha - 0.001, alpha * 0.5, -0.001):
                     k = int(np.ceil((1 - candidate_alpha) * (n + 1))) - 1
                     k = min(k, n - 1)
                     # Beta distribution for order statistic coverage

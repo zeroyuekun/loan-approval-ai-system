@@ -232,3 +232,186 @@ class TestTrainerPipeline:
         meta = metrics.get("training_metadata", {})
         assert "split_strategy" in meta
         assert meta["split_strategy"] in ("temporal", "random_stratified")
+
+
+# ======================================================================
+# Bug-proving tests: these should FAIL on the current code, proving the
+# bug exists, and PASS after the fix is applied.
+# ======================================================================
+
+from unittest.mock import patch, call
+
+
+class TestMLCritical1CrossValFitParams:
+    """ML-CRITICAL-1: cross_val_score(params=cv_fit_params) silently ignores
+    sample weights. The correct kwarg is fit_params=.
+
+    sklearn.model_selection.cross_val_score does NOT accept a ``params``
+    keyword argument. Passing ``params=`` sends the dict into ``**kwargs``
+    which are silently ignored. The result is that sample weights (from
+    fairness reweighting and reject-inference) are never applied during
+    Optuna cross-validation, leading to biased hyperparameter selection.
+    """
+
+    @patch("apps.ml_engine.services.trainer.cross_val_score")
+    def test_optuna_cv_uses_fit_params_not_params(self, mock_cv_score):
+        """Assert that cross_val_score is called with fit_params=, not params=."""
+        # We need to intercept the cross_val_score call made inside the
+        # Optuna objective function (trainer.py line ~1190).
+        # Return a plausible score so the objective completes.
+        mock_cv_score.return_value = np.array([0.85, 0.84, 0.86])
+
+        # We only need to verify the kwargs, so inspect all calls after
+        # the training completes. The Optuna path is only used for XGBoost.
+        # To avoid a full training run, we inspect the call signature directly.
+        #
+        # Read the source to verify the bug exists:
+        import inspect
+        from apps.ml_engine.services import trainer as trainer_module
+
+        source = inspect.getsource(trainer_module.ModelTrainer)
+
+        # The bug: the code uses params= instead of fit_params=
+        # This test FAILS (proving the bug) if params= is found in an
+        # Optuna cross_val_score call.
+        #
+        # After the fix, params= should be replaced with fit_params=.
+        assert "cross_val_score(" in source, "cross_val_score call not found in trainer"
+
+        # Find lines with cross_val_score that use params= (the bug)
+        lines_with_bug = [
+            line.strip()
+            for line in source.split("\n")
+            if "cross_val_score(" in line and "params=" in line and "fit_params=" not in line
+        ]
+
+        # This assertion FAILS on buggy code (proving the bug exists)
+        # and PASSES after the fix replaces params= with fit_params=
+        assert len(lines_with_bug) == 0, (
+            f"ML-CRITICAL-1 BUG: cross_val_score uses 'params=' instead of 'fit_params='. "
+            f"Sample weights are silently ignored during Optuna CV. "
+            f"Buggy lines: {lines_with_bug}"
+        )
+
+
+class TestMLCritical3DfTestRawContainsApproved:
+    """ML-CRITICAL-3: df_test_raw at trainer.py line ~605 still contains
+    the 'approved' column, which is the target variable.
+
+    This means that when df_test_raw is passed to the TSTR validator for
+    APRA fidelity scoring, the target column leaks into the raw test data.
+    The approved column should be dropped from df_test before creating
+    df_test_raw.
+    """
+
+    def test_df_test_raw_should_not_contain_approved(self, csv_path):
+        """Train and verify df_test_raw does NOT contain the 'approved' column.
+
+        This test FAILS on the current code (proving the bug) because
+        df_test_raw is created from df_test.copy() which still has 'approved'.
+        """
+        trainer = ModelTrainer()
+        model, metrics = trainer.train(csv_path, algorithm="rf", use_reject_inference=False)
+
+        # The trainer stores df_test_raw internally for TSTR validation.
+        # Access it via the internal attribute (set during training).
+        df_test_raw = getattr(trainer, "_df_test_raw", None)
+
+        if df_test_raw is None:
+            # _df_test_raw not stored as attribute — verify the fix exists
+            # in the source code: df_test_raw.drop(columns=["approved"]) must
+            # appear after add_derived_features(df_test.copy())
+            import inspect
+            source = inspect.getsource(trainer.train)
+            has_drop = "df_test_raw" in source and 'drop(columns=["approved"]' in source
+            assert has_drop, (
+                "ML-CRITICAL-3 BUG: trainer.train() does not drop 'approved' from df_test_raw. "
+                "The target column leaks into TSTR validation data."
+            )
+        else:
+            assert "approved" not in df_test_raw.columns, (
+                "ML-CRITICAL-3 BUG: df_test_raw contains 'approved' column."
+            )
+
+
+class TestMLHigh2RejectInferenceDuplication:
+    """ML-HIGH-2: Reject-inference augmentation duplicates denied rows.
+
+    Denied rows appear in X_train twice: once in the original training data
+    (with label 0 and weight 1.0) and again as appended RI rows (with the
+    inferred label and weight 0.5). The original denied row teaches the model
+    'this profile should be denied' while the appended copy might teach 'this
+    profile should be approved' -- contradicting each other and creating noise.
+
+    The correct approach is to REPLACE the denied rows' labels (not append
+    duplicates), or remove the originals before appending RI-augmented copies.
+    """
+
+    def test_denied_rows_not_duplicated_in_training_data(self, small_dataset):
+        """Verify denied row indices don't appear in both original and appended portions.
+
+        This test FAILS on the current code because concat appends X_denied
+        (which are rows already in X_train) without removing the originals.
+        """
+        df, reject_labels = small_dataset
+
+        if reject_labels is None or reject_labels.dropna().empty:
+            pytest.skip("No reject inference labels available for this dataset")
+
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
+        df.to_csv(tmp.name, index=False)
+        tmp.close()
+
+        try:
+            trainer = ModelTrainer()
+
+            # We need to inspect internal state during training.
+            # Patch pd.concat to capture what gets concatenated.
+            original_concat = pd.concat
+            concat_calls = []
+
+            def tracking_concat(objs, **kwargs):
+                # Track calls that look like RI augmentation (X_train + X_denied)
+                result = original_concat(objs, **kwargs)
+                if len(objs) == 2 and isinstance(objs[0], pd.DataFrame):
+                    # Store the shapes for analysis
+                    concat_calls.append({
+                        "first_shape": objs[0].shape,
+                        "second_shape": objs[1].shape,
+                        "ignore_index": kwargs.get("ignore_index", False),
+                    })
+                return result
+
+            try:
+                with patch("apps.ml_engine.services.trainer.pd.concat", side_effect=tracking_concat):
+                    model, metrics = trainer.train(
+                        tmp.name,
+                        algorithm="rf",
+                        use_reject_inference=True,
+                        reject_inference_labels=reject_labels,
+                    )
+            except (KeyError, Exception):
+                # If training fails for other reasons, verify the bug via source inspection
+                pass
+
+            # Alternative: verify via source code inspection that the bug pattern exists
+            import inspect
+            from apps.ml_engine.services import trainer as trainer_module
+
+            source = inspect.getsource(trainer_module.ModelTrainer.train)
+
+            # The bug pattern: X_denied is extracted FROM X_train, then
+            # concatenated BACK into X_train without removing originals.
+            has_x_denied_from_x_train = "X_denied = X_train.loc[" in source or "X_denied = X_train[" in source
+            has_concat_x_denied = "concat([X_train, X_denied]" in source
+
+            # This assertion FAILS on buggy code (proving the bug exists)
+            assert not (has_x_denied_from_x_train and has_concat_x_denied), (
+                "ML-HIGH-2 BUG: Denied rows are extracted from X_train and then "
+                "appended back via pd.concat, creating duplicates. Denied rows appear "
+                "twice in training data: once with original label (0) at weight 1.0, "
+                "and once with inferred label at weight 0.5. This creates contradictory "
+                "training signals. The originals should be removed before appending RI copies."
+            )
+        finally:
+            os.unlink(tmp.name)

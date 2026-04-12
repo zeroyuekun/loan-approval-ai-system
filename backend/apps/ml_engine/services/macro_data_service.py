@@ -73,6 +73,9 @@ class MacroDataService:
         self.fred_api_key = os.environ.get("FRED_API_KEY", "")
         self._cache: dict = {}
         self._cache_timestamps: dict[str, datetime] = {}
+        # NOTE (ML-H4): Cache is instance-level. For APRA benchmarks this is
+        # fine (dict lookup, no HTTP). For live macro data, consider using a
+        # module-level singleton or Django cache to avoid repeated HTTP calls.
 
     # ------------------------------------------------------------------
     # Public getters

@@ -657,9 +657,13 @@ class GuardrailChecker:
         missing = []
 
         if email_type == "marketing":
-            # Marketing emails only need a call to action (checked separately)
-            # They should NOT require credit report, AFCA, or other regulatory elements
-            pass
+            # Marketing emails need an unsubscribe mechanism (Spam Act 2003)
+            has_unsubscribe = any(
+                phrase in text_lower
+                for phrase in ["unsubscribe", "opt out", "opt-out", "stop receiving", "manage your preferences"]
+            )
+            if not has_unsubscribe:
+                missing.append("unsubscribe mechanism (Spam Act 2003 requirement)")
         elif decision == "approved":
             has_next = any(
                 phrase in text_lower
@@ -695,7 +699,6 @@ class GuardrailChecker:
                     "because",
                     "based on",
                     "due to",
-                    "unfortunately",
                     "factor",
                     "criteria",
                     "unable to approve",

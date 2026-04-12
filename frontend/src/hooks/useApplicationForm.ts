@@ -44,7 +44,9 @@ export const formSchema = z.object({
 
 export type FormData = z.infer<typeof formSchema>
 
-const DRAFT_KEY = 'loan_application_draft'
+// Draft key scoped to user ID to prevent PII leakage on shared devices (FE-H3 fix)
+const getDraftKey = (userId?: string | number) =>
+  userId ? `loan_application_draft_${userId}` : 'loan_application_draft'
 
 export function useApplicationForm(onSuccessPath?: string) {
   const [step, setStep] = useState(1)
@@ -55,13 +57,15 @@ export function useApplicationForm(onSuccessPath?: string) {
   const createApplication = useCreateApplication()
   const isCustomer = user?.role === 'customer'
 
+  const draftKey = getDraftKey(user?.id)
+
   const getSavedDraft = useCallback((): Partial<FormData> | null => {
     try {
-      const saved = localStorage.getItem(DRAFT_KEY)
+      const saved = localStorage.getItem(draftKey)
       if (saved) return JSON.parse(saved)
     } catch (e) { console.warn('[useApplicationForm] Failed to parse draft from localStorage:', e) }
     return null
-  }, [])
+  }, [draftKey])
 
   const savedDraft = useRef(getSavedDraft())
 
@@ -95,7 +99,7 @@ export function useApplicationForm(onSuccessPath?: string) {
   useEffect(() => {
     const subscription = watch((values) => {
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(values))
+        localStorage.setItem(draftKey, JSON.stringify(values))
       } catch (e) { console.warn('[useApplicationForm] Failed to save draft to localStorage:', e) }
     })
     return () => subscription.unsubscribe()
@@ -118,7 +122,7 @@ export function useApplicationForm(onSuccessPath?: string) {
     submittingRef.current = true
     try {
       const result = await createApplication.mutateAsync(data)
-      localStorage.removeItem(DRAFT_KEY)
+      localStorage.removeItem(draftKey)
       const basePath = onSuccessPath || '/dashboard/applications'
       router.push(`${basePath}/${result.id}`)
     } catch (error) {

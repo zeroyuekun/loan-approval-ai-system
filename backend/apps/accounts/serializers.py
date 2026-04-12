@@ -223,6 +223,10 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+        extra_kwargs = {
+            "primary_id_number": {"write_only": True, "required": False},
+            "secondary_id_number": {"write_only": True, "required": False},
+        }
 
     def validate(self, data):
         warnings = []

@@ -107,8 +107,13 @@ class ApiBudgetGuard:
         except (BudgetExhausted, CircuitOpen):
             raise
         except Exception as e:
-            # If Redis is down, allow the call (fail-open for availability)
-            logger.warning("Budget check failed (Redis unavailable): %s — allowing call", e)
+            # INTENTIONAL FAIL-OPEN: If Redis is down, allow the call so
+            # customer-facing email generation continues. The daily dollar cap
+            # is a soft limit, not a hard safety gate. The production rate
+            # throttles in REST_FRAMEWORK are the first defence; this budget
+            # cap is the circuit breaker. A Redis outage is logged as a warning
+            # and should trigger an ops alert via the monitoring stack.
+            logger.warning("Budget check failed (Redis unavailable): %s — allowing call (fail-open)", e)
 
     def record_call(self, input_tokens=0, output_tokens=0, model=""):
         """Increment daily call counter, token usage, and dollar cost."""

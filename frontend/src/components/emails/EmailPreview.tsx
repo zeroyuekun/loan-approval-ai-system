@@ -12,7 +12,8 @@ export function HtmlEmailBody({ html }: { html: string }) {
   // Content is sanitized with DOMPurify before rendering — safe against XSS
   const sanitized = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ['div', 'p', 'strong', 'em', 'br', 'hr', 'table', 'tr', 'td', 'th', 'span', 'b', 'i', 'u', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3'],
-    ALLOWED_ATTR: ['style', 'href'],
+    ALLOWED_ATTR: ['href'],
+    ALLOWED_URI_REGEXP: /^https?:/i,
   })
 
   return (
