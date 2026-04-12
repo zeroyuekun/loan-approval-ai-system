@@ -11,6 +11,7 @@ export function useApplications(params?: Record<string, string | number | boolea
       const { data } = await loansApi.list(params)
       return data
     },
+    staleTime: 15_000, // 15s — loan statuses change frequently during processing
   })
 }
 
