@@ -14,10 +14,22 @@ import pytest
 from tests.conftest import skip_without_redis
 
 
-@skip_without_redis
 @pytest.mark.django_db(transaction=True)
 class TestCeleryTaskExecution:
-    """Verify tasks execute through the real broker."""
+    """Verify tasks execute through the real broker.
+
+    Most tests use .apply() which runs synchronously and exercises serialization
+    without needing Redis. CELERY_TASK_EAGER_PROPAGATES is overridden to False
+    via the autouse fixture below so the assertion on result.state catches the
+    FAILURE path instead of propagation re-raising the underlying DoesNotExist
+    (the tests intentionally pass non-existent IDs to verify serialization,
+    not task body success). The send_task ping test still requires Redis and
+    carries its own per-test skip marker.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _eager_no_propagate(self, settings):
+        settings.CELERY_TASK_EAGER_PROPAGATES = False
 
     def test_prediction_task_serializes_correctly(self):
         """Verify the prediction task can be serialized and sent to broker."""
@@ -39,7 +51,8 @@ class TestCeleryTaskExecution:
             result = run_prediction_task.apply(args=[999])
             # The task will fail on DB lookup (no app with id=999) but the
             # important thing is it got past serialization. Check it ran.
-            assert result is not None
+            assert result.id is not None
+            assert result.state in ("SUCCESS", "FAILURE")
 
     def test_email_task_serializes_correctly(self):
         """Verify the email task args are JSON-serializable through the broker."""
@@ -47,18 +60,18 @@ class TestCeleryTaskExecution:
 
         # apply() runs synchronously but exercises serialization
         result = generate_email_task.apply(args=[999, "approved"])
-        # Will fail on DB lookup, but serialization succeeded if we get here
-        assert result is not None
+        assert result.id is not None
+        assert result.state in ("SUCCESS", "FAILURE")
 
-    @pytest.mark.skip(reason="flaky on CI, need to investigate")
     def test_orchestrate_task_serializes_correctly(self):
         """Verify the orchestrate pipeline task serializes its arguments."""
         from apps.agents.tasks import orchestrate_pipeline_task
 
         result = orchestrate_pipeline_task.apply(args=[999])
-        # Will fail on DB lookup, but serialization of args succeeded
-        assert result is not None
+        assert result.id is not None
+        assert result.state in ("SUCCESS", "FAILURE")
 
+    @skip_without_redis
     def test_task_result_is_json_serializable(self):
         """Verify task results can be stored in Redis result backend."""
         from celery import current_app
@@ -66,7 +79,7 @@ class TestCeleryTaskExecution:
         # Send a built-in ping task that always succeeds
         result = current_app.send_task("celery.ping")
         # If Redis is available, this should work
-        assert result is not None
+        assert result.id is not None
 
     def test_train_model_task_serializes_kwargs(self):
         """Verify train_model_task kwargs (algorithm, data_path) serialize."""

@@ -47,14 +47,13 @@ class TestPSIComputation:
         psi = compute_psi([1, 2, 3], [])
         assert psi == 0.0
 
-    @pytest.mark.skip(reason="flaky on CI, need to investigate")
     def test_psi_symmetric_approximately(self):
         """PSI should be roughly symmetric (not exactly due to binning)."""
         from apps.ml_engine.services.drift_monitor import compute_psi
 
-        np.random.seed(42)
-        a = np.random.normal(0, 1, 1000)
-        b = np.random.normal(1, 1, 1000)
+        rng = np.random.default_rng(42)
+        a = rng.normal(0, 1, 1000)
+        b = rng.normal(1, 1, 1000)
 
         psi_ab = compute_psi(a, b)
         psi_ba = compute_psi(b, a)

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from apps.ml_engine.services.feature_engineering import (
@@ -629,8 +629,7 @@ class TestEdgeCaseFeatures:
         app_type=st.sampled_from(CATEGORICAL_VALUES["applicant_type"]),
         state=st.sampled_from(CATEGORICAL_VALUES["state"]),
     )
-    @settings(max_examples=100)
-    @pytest.mark.skip(reason="flaky on CI, need to investigate")
+    @settings(max_examples=50, derandomize=True, suppress_health_check=[HealthCheck.too_slow])
     def test_all_categorical_combinations_valid(self, purpose, home, emp, app_type, state):
         """Every combination of categorical values should be handled."""
         features = _build_base_feature_dict()

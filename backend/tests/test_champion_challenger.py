@@ -45,11 +45,14 @@ class TestModelSelector:
         with pytest.raises(ValueError, match="No active model"):
             select_model_version()
 
-    @pytest.mark.skip(reason="flaky on CI, need to investigate")
     def test_weighted_distribution_approximate(self):
+        import random as _random
         mv1 = _create_model_version(True, version="champ_v1", traffic_percentage=70)
         _create_model_version(True, version="chall_v1", traffic_percentage=30)
 
+        # Deterministic RNG: production code calls random.choices() at module level,
+        # so seeding the global random gives reproducible sampling.
+        _random.seed(42)
         counts = Counter()
         for _ in range(1000):
             selected = select_model_version()
