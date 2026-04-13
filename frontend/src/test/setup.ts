@@ -1,7 +1,10 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect } from 'vitest'
+import * as matchers from 'vitest-axe/matchers'
 import { server } from './mocks/server'
+
+expect.extend(matchers)
 
 // Mock next/navigation
 vi.mock('next/navigation', () => ({
@@ -17,7 +20,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
+beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }))
 afterEach(() => {
   cleanup()
   server.resetHandlers()

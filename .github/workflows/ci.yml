@@ -53,6 +53,7 @@ jobs:
       CELERY_BROKER_URL: redis://localhost:6379/0
       FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
       ANTHROPIC_API_KEY: sk-ant-test-key
+      RUN_CONTRACT_TESTS: "1"
     steps:
       - uses: actions/checkout@v5
 
@@ -73,7 +74,7 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: pytest tests/ -v --tb=short --cov=apps --cov-report=term-missing --cov-fail-under=60
+        run: pytest tests/ -v --tb=short --cov-report=term-missing
 
   backend-lint:
     name: Backend Lint

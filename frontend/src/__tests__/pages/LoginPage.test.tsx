@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AuthContext } from '@/lib/auth'
+import { expectNoAxeViolations } from '@/test/axe-helper'
 
 const mockLogin = vi.fn()
 
@@ -23,12 +24,13 @@ function renderPage() {
 describe('LoginPage', () => {
   beforeEach(() => { mockLogin.mockReset() })
 
-  it('renders the login form with username and password fields', () => {
-    renderPage()
+  it('renders the login form with username and password fields', async () => {
+    const { container } = renderPage()
     expect(screen.getByText('Welcome back')).toBeInTheDocument()
     expect(screen.getByLabelText('Username')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument()
+    await expectNoAxeViolations(container)
   })
 
   it('calls login with username and password on submit', async () => {
