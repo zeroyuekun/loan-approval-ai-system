@@ -31,6 +31,6 @@ django-csp==4.0
 hypothesis>=6.100
 django-otp>=1.5
 qrcode>=8.0
-schemathesis>=3.36,<4
+schemathesis>=4
 reportlab>=4.0
 optuna>=4.0
