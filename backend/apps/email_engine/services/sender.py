@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 
@@ -5,6 +6,11 @@ from django.conf import settings
 from django.core.mail import send_mail
 
 logger = logging.getLogger(__name__)
+
+
+def _esc(value: str) -> str:
+    """HTML-escape user-controlled text before interpolating into HTML templates."""
+    return html.escape(value, quote=True)
 
 
 SECTION_LABELS = [
@@ -55,17 +61,17 @@ def _plain_text_to_html(body: str) -> str:
 
         if is_section or is_option:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{_esc(stripped)}</strong></p>')
             continue
 
         if is_dear:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:0 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(f'<p style="margin:0 0 4px 0;"><strong>{_esc(stripped)}</strong></p>')
             continue
 
         if is_closing:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{_esc(stripped)}</strong></p>')
             continue
 
         # Bullet points — render as plain text with bullet character
@@ -73,14 +79,14 @@ def _plain_text_to_html(body: str) -> str:
         if bullet_match:
             _flush_detail_rows()
             content = bullet_match.group(1)
-            html_parts.append(f'<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;{content}</p>')
+            html_parts.append(f'<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;{_esc(content)}</p>')
             continue
 
         # Numbered list items (e.g. "  1. Document.pdf")
         num_match = re.match(r"^\s+(\d+)\.\s+(.+)$", line)
         if num_match:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:2px 0 2px 16px;">{num_match.group(1)}. {num_match.group(2)}</p>')
+            html_parts.append(f'<p style="margin:2px 0 2px 16px;">{_esc(num_match.group(1))}. {_esc(num_match.group(2))}</p>')
             continue
 
         # Loan detail key-value lines (e.g. "  Loan Amount:   $35,000.00")
@@ -89,7 +95,7 @@ def _plain_text_to_html(body: str) -> str:
             label = detail_match.group(2)
             value = detail_match.group(3)
             if len(label) < 35 and len(value) < 50:
-                detail_rows.append(f"<tr><td {td_label}>{label}</td><td {td_value}>{value}</td></tr>")
+                detail_rows.append(f"<tr><td {td_label}>{_esc(label)}</td><td {td_value}>{_esc(value)}</td></tr>")
                 continue
 
         _flush_detail_rows()
@@ -107,7 +113,7 @@ def _plain_text_to_html(body: str) -> str:
             or stripped.startswith("Email:")
             or stripped.startswith("Website:")
         ):
-            html_parts.append(f'<p style="margin:0;font-size:12px;color:#888;">{stripped}</p>')
+            html_parts.append(f'<p style="margin:0;font-size:12px;color:#888;">{_esc(stripped)}</p>')
             continue
 
         # Empty lines
@@ -118,7 +124,7 @@ def _plain_text_to_html(body: str) -> str:
         # Body text — sentences get paragraph spacing
         margin = "16px" if stripped.endswith(".") else "4px"
         top_margin = "16px" if stripped.startswith("Congratulations") else "0"
-        html_parts.append(f'<p style="margin:{top_margin} 0 {margin} 0;">{stripped}</p>')
+        html_parts.append(f'<p style="margin:{top_margin} 0 {margin} 0;">{_esc(stripped)}</p>')
 
     _flush_detail_rows()
 

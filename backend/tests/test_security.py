@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from rest_framework.test import APIClient
 
 User = get_user_model()
 
@@ -42,14 +43,21 @@ class TestXSSPrevention(TestCase):
             model_used="test",
         )
 
-        self.client.force_login(self.admin)
-        response = self.client.get("/api/v1/emails/")
-        if response.status_code == 200:
-            content = response.content.decode()
-            # JSON serialization should escape angle brackets or the framework
-            # should prevent raw script injection
-            assert "<script>alert" not in content or "\\u003c" in content or "&lt;" in content, (
-                "Raw script tags found in response without escaping -- XSS vulnerability"
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+        response = client.get("/api/v1/emails/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        results = payload.get("results", [])
+        assert len(results) >= 1, "expected at least one email in response"
+        # html_body is the field contractually containing HTML; it must escape user content
+        for email_record in results:
+            html_body = email_record.get("html_body", "")
+            assert "<script>" not in html_body, (
+                f"unsanitized <script> tag in html_body: {html_body[:200]}"
+            )
+            assert "&lt;script&gt;" in html_body, (
+                f"expected escaped script in html_body, got: {html_body[:200]}"
             )
 
 
