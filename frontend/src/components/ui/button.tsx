@@ -4,16 +4,16 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium ring-offset-background transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.97]",
+  "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium ring-offset-background transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.97] active:opacity-80",
   {
     variants: {
       variant: {
-        default: "gradient-primary text-white shadow-md shadow-blue-900/25 hover:shadow-lg hover:shadow-blue-900/30 hover:brightness-110 border border-white/10",
-        destructive: "bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/30 btn-sheen border border-white/10",
-        outline: "border border-input bg-gradient-to-b from-white to-slate-50 hover:from-slate-50 hover:to-slate-100 hover:text-accent-foreground shadow-soft",
-        secondary: "bg-gradient-to-b from-slate-100 to-slate-200/80 text-secondary-foreground hover:from-slate-200/80 hover:to-slate-200 shadow-soft border border-slate-200/50",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "gradient-primary text-white shadow-md shadow-blue-900/25 hover:shadow-lg hover:shadow-blue-900/30 hover:brightness-110 active:!bg-blue-950 active:brightness-90 border border-white/10",
+        destructive: "bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/30 active:from-red-700 active:to-rose-800 active:brightness-90 btn-sheen border border-white/10",
+        outline: "border border-input bg-gradient-to-b from-white to-slate-50 hover:from-slate-50 hover:to-slate-100 hover:text-accent-foreground active:from-slate-200 active:to-slate-300 shadow-soft",
+        secondary: "bg-gradient-to-b from-slate-100 to-slate-200/80 text-secondary-foreground hover:from-slate-200/80 hover:to-slate-200 active:from-slate-300 active:to-slate-400 shadow-soft border border-slate-200/50",
+        ghost: "hover:bg-accent hover:text-accent-foreground active:bg-accent/70",
+        link: "text-primary underline-offset-4 hover:underline active:opacity-70",
       },
       size: {
         default: "h-10 px-5 py-2",

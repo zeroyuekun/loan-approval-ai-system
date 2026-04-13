@@ -108,10 +108,9 @@ export default function ApplicationsPage() {
         </div>
         <div className="flex gap-2">
           <Button
-            variant="outline"
             onClick={handleCheckAll}
             disabled={checkAllState === 'loading'}
-            className="shadow-md shadow-blue-900/25 hover:shadow-lg hover:shadow-blue-900/30"
+            className="hover:opacity-90"
           >
             {checkAllState === 'loading' ? (
               <>
@@ -127,7 +126,7 @@ export default function ApplicationsPage() {
             )}
           </Button>
           <Link href="/dashboard/applications/new">
-            <Button>
+            <Button className="hover:opacity-90">
               New Application
             </Button>
           </Link>

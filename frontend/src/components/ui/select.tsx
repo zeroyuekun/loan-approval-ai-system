@@ -9,10 +9,14 @@ export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElemen
 const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   ({ className, children, ...props }, ref) => {
     return (
-      <div className="relative">
+      <div className="relative group">
         <select
           className={cn(
-            "flex h-10 w-full appearance-none rounded-lg border border-slate-200/60 bg-gradient-to-b from-white to-slate-50/50 px-3 py-2 pr-8 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/20 focus-visible:border-indigo-400/50 disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200 shadow-sm shadow-slate-100",
+            "peer flex h-10 w-full appearance-none cursor-pointer rounded-lg border border-slate-200 bg-gradient-to-b from-white to-slate-50/50 px-3 py-2 pr-9 text-sm text-slate-900 ring-offset-background transition-all duration-200 shadow-sm shadow-slate-200/60",
+            "hover:border-slate-300 hover:from-slate-50 hover:to-slate-100 hover:shadow-md hover:shadow-blue-900/10",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:border-blue-500/60 focus-visible:from-white focus-visible:to-white",
+            "active:from-slate-100 active:to-slate-200",
+            "disabled:cursor-not-allowed disabled:opacity-50",
             className
           )}
           ref={ref}
@@ -20,7 +24,14 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         >
           {children}
         </select>
-        <ChevronDown className="absolute right-2.5 top-3 h-4 w-4 text-muted-foreground/60 pointer-events-none" />
+        <ChevronDown
+          className={cn(
+            "absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none transition-all duration-200",
+            "text-slate-400 peer-hover:text-slate-600 peer-focus-visible:text-blue-600",
+            "peer-[:open]:rotate-180 peer-[:open]:text-blue-600"
+          )}
+          aria-hidden="true"
+        />
       </div>
     )
   }
