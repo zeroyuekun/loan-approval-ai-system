@@ -282,5 +282,5 @@ def celery_config():
         "broker_url": "redis://localhost:6379/0",
         "result_backend": "redis://localhost:6379/0",
         "task_always_eager": False,
-        "task_eager_propagates": False,
+        "task_eager_propagates": True,
     }

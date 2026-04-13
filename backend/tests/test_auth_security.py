@@ -13,21 +13,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 
 
-def _redis_available():
-    try:
-        import redis
-
-        r = redis.Redis(host="localhost", port=6379, db=1, socket_connect_timeout=1)
-        r.ping()
-        return True
-    except Exception:
-        return False
-
-
-skip_without_redis = pytest.mark.skipif(
-    not _redis_available(),
-    reason="Redis not available (tests run in Docker/CI)",
-)
+from tests.conftest import skip_without_redis  # noqa: E402
 
 
 def _no_throttle(self, request, view):
