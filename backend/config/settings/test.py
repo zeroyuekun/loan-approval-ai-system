@@ -2,8 +2,10 @@
 
 Used by pytest via DJANGO_SETTINGS_MODULE in pytest.ini. Never ships to production.
 """
-from .base import *  # noqa: F401, F403
+
 import os
+
+from .base import *  # noqa: F401, F403
 
 os.environ.setdefault("DJANGO_DEBUG", "False")
 

@@ -47,6 +47,7 @@ class TestModelSelector:
 
     def test_weighted_distribution_approximate(self):
         import random as _random
+
         mv1 = _create_model_version(True, version="champ_v1", traffic_percentage=70)
         _create_model_version(True, version="chall_v1", traffic_percentage=30)
 

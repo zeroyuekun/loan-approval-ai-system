@@ -40,8 +40,7 @@ class TestCalculateTax:
         assert _calculate_tax(250_000) == pytest.approx(78638.0)
 
     def test_monotonic_in_income(self):
-        for low, high in [(20_000, 50_000), (50_000, 100_000),
-                          (100_000, 200_000), (200_000, 500_000)]:
+        for low, high in [(20_000, 50_000), (50_000, 100_000), (100_000, 200_000), (200_000, 500_000)]:
             assert _calculate_tax(high) > _calculate_tax(low)
 
     def test_tax_never_exceeds_income(self):
@@ -50,18 +49,21 @@ class TestCalculateTax:
 
 
 class TestRiskTier:
-    @pytest.mark.parametrize("score,expected", [
-        (820, "premium"),
-        (800, "premium"),
-        (775, "good"),
-        (750, "good"),
-        (725, "standard"),
-        (700, "standard"),
-        (675, "subprime"),
-        (650, "subprime"),
-        (600, "ineligible"),
-        (450, "ineligible"),
-    ])
+    @pytest.mark.parametrize(
+        "score,expected",
+        [
+            (820, "premium"),
+            (800, "premium"),
+            (775, "good"),
+            (750, "good"),
+            (725, "standard"),
+            (700, "standard"),
+            (675, "subprime"),
+            (650, "subprime"),
+            (600, "ineligible"),
+            (450, "ineligible"),
+        ],
+    )
     def test_score_maps_to_tier(self, score, expected):
         assert _get_risk_tier(score) == expected
 

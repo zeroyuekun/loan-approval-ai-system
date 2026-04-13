@@ -72,8 +72,7 @@ class TestHelpRepaymentRate:
         assert resolver.get_help_repayment_rate(200_000) > 0.0
 
     def test_rate_monotonic_non_decreasing(self, resolver):
-        rates = [resolver.get_help_repayment_rate(i)
-                 for i in range(0, 250_000, 10_000)]
+        rates = [resolver.get_help_repayment_rate(i) for i in range(0, 250_000, 10_000)]
         for a, b in zip(rates, rates[1:], strict=False):
             assert b >= a, f"HELP rate must be non-decreasing in income, got {a} → {b}"
 
@@ -82,18 +81,14 @@ class TestIncomeParams:
     def test_returns_mean_sigma_arrays(self, resolver, sub_populations):
         is_couple = np.array([False, True, False])
         state_mult = np.array([1.0, 1.0, 1.0])
-        mean, sigma = resolver.resolve_income_params(
-            "first_home_buyer", is_couple, state_mult, sub_populations
-        )
+        mean, sigma = resolver.resolve_income_params("first_home_buyer", is_couple, state_mult, sub_populations)
         assert mean.shape == (3,)
         assert sigma.shape == (3,)
 
     def test_couple_higher_mean_than_single(self, resolver, sub_populations):
         is_couple = np.array([True, False])
         state_mult = np.array([1.0, 1.0])
-        mean, _ = resolver.resolve_income_params(
-            "first_home_buyer", is_couple, state_mult, sub_populations
-        )
+        mean, _ = resolver.resolve_income_params("first_home_buyer", is_couple, state_mult, sub_populations)
         assert mean[0] > mean[1]
 
 

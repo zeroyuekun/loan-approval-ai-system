@@ -53,12 +53,8 @@ class TestXSSPrevention(TestCase):
         # html_body is the field contractually containing HTML; it must escape user content
         for email_record in results:
             html_body = email_record.get("html_body", "")
-            assert "<script>" not in html_body, (
-                f"unsanitized <script> tag in html_body: {html_body[:200]}"
-            )
-            assert "&lt;script&gt;" in html_body, (
-                f"expected escaped script in html_body, got: {html_body[:200]}"
-            )
+            assert "<script>" not in html_body, f"unsanitized <script> tag in html_body: {html_body[:200]}"
+            assert "&lt;script&gt;" in html_body, f"expected escaped script in html_body, got: {html_body[:200]}"
 
 
 class TestPromptInjection(TestCase):

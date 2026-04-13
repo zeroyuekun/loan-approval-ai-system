@@ -45,8 +45,7 @@ class TestOutputShape:
 
     def test_adds_expected_columns(self, simulator):
         out = simulator.simulate_loan_performance(_make_input_df(5))
-        for col in ("months_on_book", "ever_30dpd", "ever_90dpd",
-                    "default_flag", "prepaid_flag", "current_status"):
+        for col in ("months_on_book", "ever_30dpd", "ever_90dpd", "default_flag", "prepaid_flag", "current_status"):
             assert col in out.columns
 
     def test_months_on_book_non_negative(self, simulator):
@@ -98,9 +97,18 @@ class TestRiskAdjustment:
 class TestEmptyInput:
     def test_empty_input_returns_empty_output(self, simulator):
         empty = pd.DataFrame(
-            columns=["loan_amount", "loan_term_months", "interest_rate",
-                     "credit_score", "approved", "application_date",
-                     "debt_to_income", "lvr", "cash_rate", "employment_type"]
+            columns=[
+                "loan_amount",
+                "loan_term_months",
+                "interest_rate",
+                "credit_score",
+                "approved",
+                "application_date",
+                "debt_to_income",
+                "lvr",
+                "cash_rate",
+                "employment_type",
+            ]
         )
         out = simulator.simulate_loan_performance(empty)
         assert len(out) == 0
