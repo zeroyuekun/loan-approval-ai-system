@@ -6,7 +6,6 @@ import pytest
 
 from tests.conftest import skip_without_redis  # noqa: F401
 
-
 # ---------------------------------------------------------------------------
 # Helper: replicate the parsing logic from base.py so we can unit-test it
 # without importing Django settings (which would freeze the values).

@@ -7,7 +7,6 @@ the real send path including the credentials gate, the SMTP backend
 
 import pytest
 from django.core import mail
-from django.test import override_settings
 
 from apps.email_engine.services.sender import send_decision_email
 

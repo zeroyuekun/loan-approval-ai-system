@@ -1,13 +1,14 @@
 """Unit tests for email_engine.lifecycle.send_application_received."""
 
-import pytest
-from django.core import mail
 from decimal import Decimal
 
+import pytest
+from django.core import mail
+
+from apps.accounts.models import CustomUser
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.lifecycle import send_application_received
 from apps.loans.models import LoanApplication
-from apps.accounts.models import CustomUser
 
 
 @pytest.fixture

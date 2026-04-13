@@ -74,7 +74,7 @@ class TestHelpRepaymentRate:
     def test_rate_monotonic_non_decreasing(self, resolver):
         rates = [resolver.get_help_repayment_rate(i)
                  for i in range(0, 250_000, 10_000)]
-        for a, b in zip(rates, rates[1:]):
+        for a, b in zip(rates, rates[1:], strict=False):
             assert b >= a, f"HELP rate must be non-decreasing in income, got {a} → {b}"
 
 

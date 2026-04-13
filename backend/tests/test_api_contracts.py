@@ -9,9 +9,8 @@ They ensure the API contract between backend and frontend is not broken.
 from unittest.mock import patch
 
 import pytest
-from rest_framework.test import APIClient
-
 from django.conf import settings
+from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer

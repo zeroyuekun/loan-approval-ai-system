@@ -11,8 +11,6 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-
-
 from tests.conftest import skip_without_redis  # noqa: E402
 
 
