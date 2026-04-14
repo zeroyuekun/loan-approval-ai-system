@@ -170,6 +170,7 @@ class PipelineOrchestrator:
                     "reason_code": eligibility_result.reason_code,
                 },
             )
+            self._save_waterfall(application, waterfall)
             self._finalize_run(agent_run, steps, start_time)
             return agent_run
 
