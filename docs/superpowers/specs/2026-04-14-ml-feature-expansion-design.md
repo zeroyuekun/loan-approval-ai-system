@@ -1,4 +1,4 @@
-# ML Feature Expansion — Design
+# ML Feature Expansion — Design (revised)
 
 **Date:** 2026-04-14
 **Sub-project:** B (of A→B→C sequence)
@@ -6,73 +6,63 @@
 **Feeds:** Sub-project C (stress testing the regenerated pipeline; surfacing new features in UI/email)
 **Out of scope:** Policy rules (age-at-maturity cap, visa eligibility gate), real-data GMSC validation (in-flight on a separate branch), frontend/email changes, stress testing.
 
+## Revision note (2026-04-14)
+
+The initial design named four features (`bnpl_balance`, `savings_balance_months`, `rhi_on_time_last_24`/`rhi_late_last_24`, `enquiries_last_6_months`). Inspection of `backend/apps/ml_engine/services/data_generator.py` shows three of those already exist in richer form:
+
+- BNPL already covered by `num_bnpl_accounts`, `bnpl_total_limit`, `bnpl_utilization_pct`, `bnpl_late_payments_12m`, `bnpl_monthly_commitment`, `bnpl_to_income_ratio`.
+- Savings already covered by `savings_balance`, `avg_monthly_savings_rate`, `savings_trend_3m`, `savings_to_loan_ratio`.
+- Windowed enquiries already covered by `num_credit_enquiries_6m`.
+
+The genuinely missing feature is the 24-month Repayment History Information (RHI) split. The current generator produces `worst_arrears_months` and `worst_late_payment_days` but no month-by-month RHI counts. Sub-project B is reduced to adding that plus a coverage audit so the research gap list stays honest.
+
 ## Goal
 
-Add four research-backed features to the synthetic loan data generator, train a new `ModelVersion` on the regenerated dataset, and gate promotion of the new model behind an A/B metric check so the current active model remains a one-flag rollback.
+Add one research-backed feature (`rhi_on_time_last_24` / `rhi_late_last_24`) to the synthetic loan data generator, train a new `ModelVersion` on the regenerated dataset, and gate promotion of the new model behind an A/B metric check so the current active model remains a one-flag rollback. Additionally, publish an audit document that maps every research-identified gap to either an existing generator field or an explicit "deferred" note.
 
-## Why these four
-
-From `docs/research/findings.json` consolidated `gaps_in_our_model`, these are the highest leverage and lowest complexity:
-
-- `bnpl_balance` — Wisr explicitly lists BNPL as a first-class debt input; post-2019 AU norm
-- `savings_balance_months` — Canstar names savings history as a denial signal
-- `rhi_on_time_last_24` and `rhi_late_last_24` — CBA, NAB, Wisr, Plenti all drive pricing off 24-month RHI
-- `enquiries_last_6_months` — Canstar flags short-window application clustering; our current `enquiries` is total-only
-
-Deferred (policy-logic-heavy or low base rate): visa sub-class, self-employed trading years, financial-hardship flag, age-at-maturity, soft-pull indicator.
-
-## Feature specifications
-
-### `bnpl_balance` (float, AUD)
-
-- Zero-inflated: `P(bnpl_balance = 0) = 0.50` overall; drops to 0.30 for age < 30, rises to 0.75 for age ≥ 55
-- When non-zero: lognormal, median ~$800, p95 ~$4,500, clipped to [50, 15000]
-- Inverse correlation with `credit_score`: higher utilisation among mid-tier scores
-- Stays as a standalone feature for the model; does not mutate existing `debt_to_income`
-
-### `savings_balance_months` (float)
-
-- Definition: months of current `monthly_expenses` held as liquid savings
-- Lognormal, median 1.5, p95 ~12, clipped to [0, 60]
-- Positive correlation with `annual_income` (log-log) and with age_proxy
-- `first_home_buyer` sub-population skews higher (median 3.5) reflecting deposit accumulation
-- `income_constrained` sub-population skews lower (median 0.5)
+## Feature specification
 
 ### `rhi_on_time_last_24` and `rhi_late_last_24` (ints)
 
-- Joint constraint: `rhi_on_time_last_24 + rhi_late_last_24 = 24` (full RHI window coverage; missing-months modelling is out of scope)
-- Derived from existing `worst_arrears_months`: applicants with `worst_arrears_months = 0` get `rhi_on_time = 24, rhi_late = 0` with 0.98 probability; otherwise `rhi_late` sampled from a truncated geometric weighted by `worst_arrears_months`
-- Strong positive correlation of `rhi_on_time_last_24` with `credit_score`
-- Both features are additive, not a pure restatement of `worst_arrears_months` — two applicants with the same worst-month can have different late-month counts
+- Joint constraint: `rhi_on_time_last_24 + rhi_late_last_24 = 24`
+- Derived from existing `worst_arrears_months`:
+  - If `worst_arrears_months == 0`: `rhi_on_time = 24, rhi_late = 0` with probability 0.98; otherwise sample `rhi_late` from `{1, 2}` with probability 0.015 and 0.005 respectively (captures the small fraction of customers whose worst month is 0 but who had isolated late months beyond the worst-window logic — matches AU bank observed behaviour)
+  - If `worst_arrears_months >= 1`: sample `rhi_late` from a truncated geometric distribution with mean scaled linearly by `worst_arrears_months` (mean ≈ 1.5 × `worst_arrears_months`, capped at 24)
+- Strong positive correlation of `rhi_on_time_last_24` with `credit_score` (already present indirectly via `worst_arrears_months`, preserved)
+- Both features are additive signal beyond `worst_arrears_months`: two applicants with the same worst-arrears value can have different late-month counts
 
-### `enquiries_last_6_months` (int)
+## Coverage audit
 
-- Drawn from the existing aggregated enquiries column (inspect the generator and use the actual column name) by a binomial split with recency-weighted `p`
-- `p = 0.55` default, rises to 0.75 for applicants with `credit_score` < 500 (clustering behaviour)
-- Result is `<=` the parent enquiry count, enforced as an invariant in a post-generation validation step
+Create `docs/research/ml-gap-coverage.md` that maps each item in `findings.json#/consolidated/gaps_in_our_model` to one of:
+
+- **Covered:** existing field name(s) in the generator; cite line number
+- **Adding now:** the two RHI features above
+- **Deferred:** named with reason (e.g. `age_at_loan_maturity` → "policy rule, not ML feature; deferred per sub-project B spec")
+
+This document is the honest record that sub-project A's gap analysis was name-based rather than semantic, and that most perceived gaps are already covered.
 
 ## Pipeline changes
 
 ### `backend/apps/ml_engine/services/data_generator.py`
 
-- Add four feature generators following existing patterns (reuse the `rng` passed into record generation; plumb through the existing copula/correlation machinery where it fits)
-- Append new columns to the returned records
-- Add a module-level `DATA_SCHEMA_VERSION` string (e.g. `"2026-04-14-v2"`) and include it in generator metadata
-- Update module docstring with an index of features and their provenance (cite `docs/research/findings.json`)
+- Add generator logic for `rhi_on_time_last_24` and `rhi_late_last_24` following existing patterns (reuse the `rng` already threaded through record generation; place the block near the existing `worst_arrears_months` generation to keep semantically related fields colocated)
+- Append both new columns to the returned records dict
+- Add a module-level `DATA_SCHEMA_VERSION = "2026-04-14-v2"` constant; update any metadata return path that surfaces the schema
+- Update module docstring with the two new features and cite `docs/research/findings.json`
 
 ### Training
 
-- `backend/apps/ml_engine/services/trainer.py` should not need behavioural changes — it reads columns from the generated dataset. Verify the feature allow-list (if any) picks up the four new columns; extend if needed.
-- Train a new `ModelVersion` with `name="rf-v2-au-features-2026-04-14"` (or equivalent for whichever algorithm is currently `is_active`). Create it with `is_active=False`.
-- Artefacts (serialised model, calibration, SHAP summary) written using the existing persistence convention; no change to serialisation format.
+- `backend/apps/ml_engine/services/trainer.py` needs the new columns in its feature allow-list (if any exists). Inspect for `FEATURE_COLUMNS`, `feature_columns`, or equivalent; if present, extend it. If absent, the generator output flows through automatically.
+- Train a new `ModelVersion` with `name` tagged `"rf-v2-au-rhi-2026-04-14"` (or `"xgb-v2-au-rhi-2026-04-14"` if XGBoost is currently `is_active`). Create it with `is_active=False`.
+- Use the existing persistence and artefact conventions with no changes.
 
 ### Reason codes
 
-- `backend/apps/ml_engine/services/reason_codes.py`: add mappings so the four new features can appear in adverse-action explanations. Follow the existing phrasing conventions (no apology language; plain English per memory).
+- `backend/apps/ml_engine/services/reason_codes.py`: add mappings for `rhi_on_time_last_24` and `rhi_late_last_24` so they can appear in adverse-action explanations. Follow existing phrasing conventions (no apology language; plain English per memory). Example phrasing: "Fewer on-time repayments in your 24-month credit history than peers approved at similar rates."
 
 ## A/B promotion gate
 
-After training the new model, compute on a held-out test set (use the existing test-split convention):
+After training the new model, compute on the held-out test set:
 
 - AUC-ROC
 - Precision at 10% approval rate
@@ -86,24 +76,29 @@ After training the new model, compute on a held-out test set (use the existing t
 
 If either condition fails, new version stays `is_active=False` and is diagnosed in a follow-up. Old version is untouched — instant rollback by design.
 
-The comparison is executed by an explicit management command (`ab_compare_models`), not implicitly at training time. The command prints the metric table and proposes the promotion decision; promotion is executed by a second explicit command (`promote_model`) so a human sign-off remains in the loop.
+Comparison and promotion are two explicit management commands (`ab_compare_models` and `promote_model`) so a human sign-off stays in the loop.
 
 ## Testing
 
-- **Unit tests per feature:** distribution sanity (mean/median in expected range, null rate 0, min/max bounds respected, invariants like `rhi_on_time + rhi_late = 24` and `enquiries_last_6m <= total_enquiries`)
-- **Schema regression test:** existing columns present and distributions unchanged within a tolerance — guards against accidentally mutating existing features
-- **Smoke train test:** run trainer on 1,000 generated rows end-to-end before full generation, to catch schema/name mismatches cheaply
-- **A/B metric test:** unit-test the promotion-gate logic against synthetic metric inputs (win/lose/tie combinations)
+- **Unit tests for the new features:**
+  - Distribution sanity: for `worst_arrears_months == 0` inputs, `rhi_on_time == 24` at ≥97% rate
+  - Invariant: `rhi_on_time_last_24 + rhi_late_last_24 == 24` for every row
+  - Bounds: both values in `[0, 24]`
+  - Correlation sign: `rhi_on_time_last_24` positively correlated with `credit_score` at Pearson ρ > 0.1
+- **Schema regression test:** all pre-existing columns present; a spot-check (mean/median) of a couple of existing features unchanged within tolerance
+- **Smoke train test:** run trainer on 1,000 generated rows end-to-end before full generation
+- **A/B promotion-gate unit test:** exercise the gate logic against synthetic metric inputs covering win/lose/tie combinations
 
 ## Success criteria
 
-- Data generator outputs the four new features with documented distributions
-- `DATA_SCHEMA_VERSION` bumped
+- Generator outputs both new features with documented distributions and invariants
+- `DATA_SCHEMA_VERSION` bumped to `"2026-04-14-v2"`
+- Coverage audit `docs/research/ml-gap-coverage.md` committed
 - New `ModelVersion` trained and persisted with `is_active=False`
-- `ab_compare_models` command produces a metric table and promotion decision
-- All new unit tests pass
-- No existing tests regress
-- Rollback path verified: manually flipping `is_active` back to the previous version works end-to-end
+- `ab_compare_models` command produces a metric table and proposes a decision
+- `promote_model` command flips `is_active` only when called explicitly by a human
+- All new unit tests pass; no existing tests regress
+- Rollback path verified manually
 
 ## Deliverables
 
@@ -112,4 +107,5 @@ The comparison is executed by an explicit management command (`ab_compare_models
 - Modified: `backend/apps/ml_engine/services/reason_codes.py`
 - Created: `backend/apps/ml_engine/management/commands/ab_compare_models.py`
 - Created: `backend/apps/ml_engine/management/commands/promote_model.py`
-- Created: tests under `backend/apps/ml_engine/tests/` covering the four features, invariants, schema regression, and promotion-gate logic
+- Created: tests covering the two new features, invariants, schema regression, and promotion-gate logic
+- Created: `docs/research/ml-gap-coverage.md`
