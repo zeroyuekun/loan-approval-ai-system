@@ -13,6 +13,11 @@ Application details:
 === BANKING RELATIONSHIP ===
 {banking_context}
 
+=== RATE-SUPPORTING FACTORS (optional — may be empty) ===
+{approval_factors}
+
+If a non-empty string above names factors that supported this applicant's rate, weave a single natural sentence into the "We're Pleased to Let You Know" opening or the closing paragraph — for example, "Your rate was supported by strong credit history and stable employment." Do NOT use bullet points, do NOT repeat the exact phrase list verbatim, and do NOT imply a quantitative guarantee. If the string above is empty, omit this entirely — do not invent factors.
+
 === EMAIL FORMAT AND STRUCTURE ===
 
 This is a FORMAL but WARM loan approval letter from a licensed Australian credit provider. The structure is clean and simple: no box-drawing dividers, no UPPERCASE section headers. Instead, use plain-text section labels followed by a colon or just clear paragraph breaks. The tone is that of a senior lending officer who genuinely cares about the customer.

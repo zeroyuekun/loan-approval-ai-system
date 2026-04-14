@@ -427,6 +427,7 @@ def generate_approval_template(
     employment_type=None,
     applicant_type=None,
     has_cosigner=False,
+    approval_factors=None,
 ):
     """Generate an approval email matching the Claude-generated format exactly."""
     loan_type = _loan_type(purpose)
@@ -496,6 +497,8 @@ Please review the attached loan agreement, which outlines all terms and conditio
             f"{loan_type} Loan with AussieLoanAI has been conditionally approved. "
             f"Congratulations!"
         )
+    if approval_factors:
+        opening = f"{opening} Your rate was supported by {approval_factors}."
 
     body = f"""Dear {first},
 

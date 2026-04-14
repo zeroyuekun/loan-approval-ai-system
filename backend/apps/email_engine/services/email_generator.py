@@ -115,6 +115,28 @@ class EmailGenerator:
         "bnpl_monthly_commitment": "Your buy-now-pay-later commitments reduce the amount we can lend",
     }
 
+    # Map feature names to positive-frame phrases for approved-loan emails.
+    # Qualitative only — never promise a number or certainty.
+    APPROVAL_FACTOR_MAP = {
+        "credit_score": "strong credit history",
+        "employment_length": "stable employment history",
+        "employment_stability": "consistent employment",
+        "annual_income": "strong income",
+        "debt_to_income": "a manageable debt-to-income position",
+        "loan_to_income": "a loan amount well matched to your income",
+        "home_ownership": "a stable housing situation",
+        "savings_balance": "healthy savings",
+        "savings_to_loan_ratio": "a strong savings buffer",
+        "num_late_payments_24m": "a clean recent repayment record",
+        "worst_late_payment_days": "no material late payments on your credit file",
+        "credit_utilization_pct": "low credit utilisation",
+        "num_credit_enquiries_6m": "a light recent credit enquiry footprint",
+        "uncommitted_monthly_income": "a comfortable monthly surplus after expenses",
+        "net_monthly_surplus": "a comfortable monthly surplus after expenses",
+        "serviceability_ratio": "strong serviceability",
+        "has_cosigner": "co-signer support on this application",
+    }
+
     _POLICY_REASON_CODE_RE = re.compile(r"\[(R\d{2,3})\]")
 
     def _format_denial_reasons(self, feature_importances, shap_values=None, reasoning=None):
@@ -157,6 +179,34 @@ class EmailGenerator:
             )
             reasons.append(readable)
         return "; ".join(reasons)
+
+    def _format_approval_factors(self, feature_importances=None, shap_values=None, top_n: int = 3) -> str:
+        """Build a qualitative factor string for approval emails.
+
+        Picks features that supported approval (positive SHAP contribution) and
+        maps them to reviewer-approved positive phrases. Falls back to
+        feature_importances only if SHAP is absent. Returns an empty string when
+        no signal is available — the prompt is instructed to omit the sentence.
+        """
+        if shap_values:
+            positive = {k: v for k, v in shap_values.items() if isinstance(v, (int, float)) and v > 0}
+            if positive:
+                ranked = sorted(positive.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            elif feature_importances:
+                ranked = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            else:
+                return ""
+        elif feature_importances:
+            ranked = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        else:
+            return ""
+
+        phrases = []
+        for feature_name, _ in ranked:
+            phrase = self.APPROVAL_FACTOR_MAP.get(feature_name, "an aspect of your financial profile")
+            if phrase not in phrases:
+                phrases.append(phrase)
+        return ", ".join(phrases)
 
     def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
         """Generate an approval/denial email for the given loan application."""
@@ -239,6 +289,12 @@ class EmailGenerator:
                 f"our product pricing engine based on the applicant's credit profile."
             )
 
+            decision_obj = getattr(application, "decision", None)
+            approval_factors = self._format_approval_factors(
+                feature_importances=decision_obj.feature_importances if decision_obj else None,
+                shap_values=decision_obj.shap_values if decision_obj else None,
+            )
+
             prompt = APPROVAL_EMAIL_PROMPT.format(
                 applicant_name=applicant_name,
                 loan_amount=float(application.loan_amount),
@@ -250,6 +306,7 @@ class EmailGenerator:
                 has_hecs="Yes" if getattr(application, "has_hecs", False) else "No",
                 documentation_checklist=documentation_checklist,
                 banking_context=banking_context,
+                approval_factors=approval_factors,
             )
             # Append pricing context after the main prompt
             prompt += f"\n\n{pricing_context}"
@@ -545,6 +602,11 @@ class EmailGenerator:
                 except Exception:
                     pricing = None
 
+            decision_obj_fb = getattr(application, "decision", None)
+            approval_factors_fb = self._format_approval_factors(
+                feature_importances=decision_obj_fb.feature_importances if decision_obj_fb else None,
+                shap_values=decision_obj_fb.shap_values if decision_obj_fb else None,
+            )
             result = generate_approval_template(
                 applicant_name,
                 float(application.loan_amount),
@@ -553,6 +615,7 @@ class EmailGenerator:
                 employment_type=application.get_employment_type_display(),
                 applicant_type=application.get_applicant_type_display(),
                 has_cosigner=application.has_cosigner,
+                approval_factors=approval_factors_fb,
             )
         else:
             # Gather rich denial context
