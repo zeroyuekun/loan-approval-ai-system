@@ -70,6 +70,9 @@ services:
       DJANGO_THROTTLE_LOGIN_RATE: ${DJANGO_THROTTLE_LOGIN_RATE:-5/min}
       DJANGO_THROTTLE_REGISTER_RATE: ${DJANGO_THROTTLE_REGISTER_RATE:-3/min}
       DJANGO_THROTTLE_ORCHESTRATE_RATE: ${DJANGO_THROTTLE_ORCHESTRATE_RATE:-60/hour}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-2}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
       SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -78,7 +81,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - ./backend:/app
-    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120 --max-requests 1000 --max-requests-jitter 100 --access-logfile -
+    command: sh -c "gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-4} --threads ${GUNICORN_THREADS:-2} --timeout ${GUNICORN_TIMEOUT:-120} --max-requests 1000 --max-requests-jitter 100 --access-logfile -"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/ready/", "--connect-timeout", "5"]
       interval: 30s
