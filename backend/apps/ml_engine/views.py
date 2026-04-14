@@ -541,6 +541,43 @@ class QuoteThrottle(UserRateThrottle):
     rate = os.environ.get("DJANGO_THROTTLE_QUOTE_RATE", "30/min")
 
 
+class QuoteListView(APIView):
+    """List quotes for the authenticated user (staff see all).
+
+    Paginated via the project default (PageNumberPagination, page_size=20).
+    Response shape per item is a trimmed summary — use GET /quotes/<id>/ for the full body.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from rest_framework.pagination import PageNumberPagination
+
+        from apps.ml_engine.models import QuoteLog
+
+        user = request.user
+        qs = QuoteLog.objects.all() if user.role in ("admin", "officer") else QuoteLog.objects.filter(user=user)
+        qs = qs.order_by("-created_at")
+
+        paginator = PageNumberPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        items = [
+            {
+                "quote_id": str(q.id),
+                "eligible_for_application": q.eligible,
+                "rate_min": float(q.rate_min) if q.rate_min is not None else None,
+                "rate_max": float(q.rate_max) if q.rate_max is not None else None,
+                "estimated_monthly_repayment": (
+                    float(q.estimated_monthly_repayment) if q.estimated_monthly_repayment is not None else None
+                ),
+                "created_at": q.created_at.isoformat(),
+                "expires_at": q.expires_at.isoformat(),
+            }
+            for q in page
+        ]
+        return paginator.get_paginated_response(items)
+
+
 class QuoteDetailView(APIView):
     """Retrieve a previously generated quote by id.
 

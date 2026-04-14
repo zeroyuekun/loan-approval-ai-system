@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path("predict/<uuid:loan_id>/", views.PredictView.as_view(), name="ml-predict"),
     path("quote/", views.QuoteView.as_view(), name="ml-quote"),
+    path("quotes/", views.QuoteListView.as_view(), name="ml-quote-list"),
     path("quotes/<uuid:quote_id>/", views.QuoteDetailView.as_view(), name="ml-quote-detail"),
     path("models/active/metrics/", views.ModelMetricsView.as_view(), name="model-metrics"),
     path("models/active/drift/", views.ModelDriftView.as_view(), name="model-drift"),
