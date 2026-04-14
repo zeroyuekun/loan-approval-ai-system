@@ -16,7 +16,8 @@ def _make_application(age_years: int | None, loan_term_months: int):
     dob = None
     if age_years is not None:
         today = datetime.date.today()
-        dob = today.replace(year=today.year - age_years)
+        # min(today.day, 28) avoids ValueError on Feb 29 -> non-leap year.
+        dob = datetime.date(today.year - age_years, today.month, min(today.day, 28))
     profile = SimpleNamespace(date_of_birth_date=dob)
     applicant = SimpleNamespace(profile=profile)
     return SimpleNamespace(applicant=applicant, loan_term_months=loan_term_months)

@@ -22,7 +22,9 @@ def test_orchestrator_denies_on_age_maturity_and_skips_ml():
         username="too-old", password="test-pass", role="customer"
     )
     # Applicant is 65 today; with a 60-month term, maturity age is 70 → >67.
-    dob = datetime.date.today().replace(year=datetime.date.today().year - 65)
+    # min(today.day, 28) avoids ValueError on Feb 29 -> non-leap year.
+    today = datetime.date.today()
+    dob = datetime.date(today.year - 65, today.month, min(today.day, 28))
     profile, _ = CustomerProfile.objects.get_or_create(user=user)
     profile.date_of_birth = dob.isoformat()
     profile.save()
