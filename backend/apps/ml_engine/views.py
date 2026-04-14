@@ -1,5 +1,9 @@
+from datetime import timedelta
+from types import SimpleNamespace
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -531,3 +535,130 @@ class DriftReportListView(APIView):
             )
 
         return Response(data)
+
+
+class QuoteThrottle(UserRateThrottle):
+    rate = os.environ.get("DJANGO_THROTTLE_QUOTE_RATE", "30/min")
+
+
+class QuoteView(APIView):
+    """Soft-pull rate quote. No LoanApplication created, no bureau call, no Celery."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [QuoteThrottle]
+
+    def post(self, request):
+        from apps.agents.services.eligibility_checker import EligibilityChecker
+        from apps.ml_engine.models import QuoteLog, compute_inputs_hash
+        from apps.ml_engine.serializers import QuoteRequestSerializer
+        from apps.ml_engine.services.predictor import ModelPredictor
+        from apps.ml_engine.services.rate_quote_service import RateQuoteService
+
+        serializer = QuoteRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        fields = serializer.validated_data
+
+        now = timezone.now()
+        expires_at = now + timedelta(days=7)
+
+        # Build a duck-typed application for EligibilityChecker and ModelPredictor.
+        profile = getattr(request.user, "profile", None)
+        applicant_ns = SimpleNamespace(profile=profile)
+        duck_app = SimpleNamespace(
+            applicant=applicant_ns,
+            annual_income=fields["annual_income"],
+            credit_score=fields["credit_score"],
+            loan_amount=fields["loan_amount"],
+            loan_term_months=fields["loan_term_months"],
+            debt_to_income=fields["debt_to_income"],
+            employment_length=fields["employment_length"],
+            has_cosigner=False,
+            purpose=fields["purpose"],
+            home_ownership=fields["home_ownership"],
+            number_of_dependants=0,
+            monthly_expenses=fields["monthly_expenses"],
+            employment_type=fields["employment_type"],
+            applicant_type="single",
+            has_hecs=False,
+            has_bankruptcy=False,
+            state=fields["state"],
+        )
+
+        payload_for_hash = {k: (str(v) if hasattr(v, "quantize") else v) for k, v in fields.items()}
+        inputs_hash = compute_inputs_hash(payload_for_hash)
+
+        eligibility = EligibilityChecker().check(duck_app)
+
+        if not eligibility.passed:
+            quote = QuoteLog.objects.create(
+                user=request.user,
+                inputs_hash=inputs_hash,
+                eligible=False,
+                ineligible_reason=eligibility.detail or "",
+                expires_at=expires_at,
+            )
+            return Response(
+                {
+                    "quote_id": str(quote.id),
+                    "indicative_rate_range": None,
+                    "estimated_monthly_repayment": None,
+                    "comparison_rate_estimate": None,
+                    "top_rate_factors": [],
+                    "indicative": True,
+                    "disclosure": (
+                        "This is an indicative quote only. It is not a credit offer and does "
+                        "not impact your credit file. A full application is required for a firm rate."
+                    ),
+                    "expires_at": expires_at.isoformat(),
+                    "eligible_for_application": False,
+                    "ineligible_reason": eligibility.detail,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        prediction = ModelPredictor().predict(duck_app)
+        probability = float(prediction["probability"])
+
+        service = RateQuoteService()
+        request_fields_for_factors = {
+            "credit_score": int(fields["credit_score"]),
+            "employment_length": int(fields["employment_length"]),
+            "debt_to_income": float(fields["debt_to_income"]),
+            "annual_income": float(fields["annual_income"]),
+            "monthly_expenses": float(fields["monthly_expenses"]),
+            "loan_amount": float(fields["loan_amount"]),
+            "loan_term_months": int(fields["loan_term_months"]),
+        }
+        quote_data = service.build_quote(probability, request_fields_for_factors)
+
+        quote = QuoteLog.objects.create(
+            user=request.user,
+            inputs_hash=inputs_hash,
+            eligible=True,
+            rate_min=quote_data["rate_min"],
+            rate_max=quote_data["rate_max"],
+            comparison_rate=quote_data["comparison_rate"],
+            estimated_monthly_repayment=quote_data["estimated_monthly_repayment"],
+            expires_at=expires_at,
+        )
+
+        return Response(
+            {
+                "quote_id": str(quote.id),
+                "indicative_rate_range": {
+                    "min": float(quote_data["rate_min"]),
+                    "max": float(quote_data["rate_max"]),
+                },
+                "estimated_monthly_repayment": float(quote_data["estimated_monthly_repayment"]),
+                "comparison_rate_estimate": float(quote_data["comparison_rate"]),
+                "top_rate_factors": quote_data["top_rate_factors"],
+                "indicative": True,
+                "disclosure": (
+                    "This is an indicative quote only. It is not a credit offer and does "
+                    "not impact your credit file. A full application is required for a firm rate."
+                ),
+                "expires_at": expires_at.isoformat(),
+                "eligible_for_application": True,
+            },
+            status=status.HTTP_200_OK,
+        )
