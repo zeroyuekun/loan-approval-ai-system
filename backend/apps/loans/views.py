@@ -73,16 +73,16 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         with transaction.atomic():
             instance = serializer.save(applicant=user)
-            # Ensure customer has a profile and seed it from the application
+            # Ensure customer has a profile and seed it from the first application
+            # (subsequent applications don't re-seed — avoids row-lock contention on
+            # the profile row when the same customer submits concurrent applications).
             if user.role == "customer":
                 profile, created = CustomerProfile.objects.get_or_create(user=user)
-                if created or profile.num_products <= 1:
-                    # Seed profile banking fields from the loan application data
+                if created:
                     profile.has_mortgage = instance.home_ownership == "mortgage"
                     profile.has_credit_card = (instance.existing_credit_card_limit or 0) > 0
-                    profile.num_products = max(
-                        profile.num_products,
-                        1 + int(profile.has_credit_card) + int(profile.has_mortgage),
+                    profile.num_products = (
+                        1 + int(profile.has_credit_card) + int(profile.has_mortgage)
                     )
                     profile.save(
                         update_fields=[
