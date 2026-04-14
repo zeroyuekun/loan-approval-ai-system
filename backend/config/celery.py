@@ -75,4 +75,8 @@ app.conf.beat_schedule = {
         "task": "apps.loans.tasks.enforce_data_retention",
         "schedule": crontab(hour=6, minute=0, day_of_week="sunday"),
     },
+    "weekly-purge-expired-quotes": {
+        "task": "apps.ml_engine.tasks.purge_expired_quotes_task",
+        "schedule": crontab(hour=7, minute=0, day_of_week="sunday"),
+    },
 }

@@ -354,3 +354,22 @@ def compute_weekly_drift_report(self):
         "alert_level": alert_level,
         "num_predictions": num_predictions,
     }
+
+
+@shared_task(bind=True, name="apps.ml_engine.tasks.purge_expired_quotes_task", time_limit=300, soft_time_limit=280)
+def purge_expired_quotes_task(self, older_than_days: int = 30):
+    """Delete QuoteLog rows whose expires_at is older than ``older_than_days``.
+
+    Thin wrapper around the ``purge_expired_quotes`` management command so the
+    same logic is reachable via celery-beat. Default retention mirrors the
+    command's default (30 days past the 7-day indicative window).
+    """
+    import datetime
+
+    from django.utils import timezone
+
+    from apps.ml_engine.models import QuoteLog
+
+    cutoff = timezone.now() - datetime.timedelta(days=older_than_days)
+    deleted, _ = QuoteLog.objects.filter(expires_at__lt=cutoff).delete()
+    return {"status": "completed", "deleted": deleted, "older_than_days": older_than_days}
