@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from pathlib import Path
 
@@ -241,3 +242,39 @@ class DriftReport(models.Model):
 
     def __str__(self):
         return f"DriftReport {self.report_date}: PSI={self.psi_score}, alert={self.alert_level}"
+
+
+class QuoteLog(models.Model):
+    """Soft-pull rate quote log. Not a LoanApplication — no credit impact."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="quote_logs",
+    )
+    inputs_hash = models.CharField(max_length=64, db_index=True)
+    rate_min = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    rate_max = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    comparison_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    estimated_monthly_repayment = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    eligible = models.BooleanField(default=True)
+    ineligible_reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "-created_at"])]
+
+    def __str__(self):
+        return f"QuoteLog({self.id}, user={self.user_id}, eligible={self.eligible})"
+
+
+def compute_inputs_hash(payload: dict) -> str:
+    """SHA256 of a canonical-JSON representation of the quote request."""
+    import json as _json
+    canonical = _json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
