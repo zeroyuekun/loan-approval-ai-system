@@ -33,7 +33,7 @@ def test_denies_when_maturity_age_over_67():
     app = _make_application(age_years=65, loan_term_months=60)
     result = EligibilityChecker().check(app)
     assert result.passed is False
-    assert result.reason_code == "R50"
+    assert result.reason_code == "R71"
     assert "67" in (result.detail or "")
 
 

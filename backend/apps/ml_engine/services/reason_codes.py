@@ -111,7 +111,7 @@ REASON_CODE_MAP = {
     "monthly_rent": ("R70", "Rental commitments reduce assessed borrowing capacity"),
     # Policy gates (deterministic, not ML features)
     "age_at_loan_maturity": (
-        "R50",
+        "R71",
         "Applicant age at loan maturity exceeds 67-year policy limit",
     ),
 }

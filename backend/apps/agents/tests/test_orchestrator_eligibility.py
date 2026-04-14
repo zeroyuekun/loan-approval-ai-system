@@ -55,4 +55,4 @@ def test_orchestrator_denies_on_age_maturity_and_skips_ml():
     assert app.status == "denied"
     decision = LoanDecision.objects.get(application=app)
     assert decision.decision == "denied"
-    assert "R50" in (decision.reasoning or "")
+    assert "R71" in (decision.reasoning or "")

@@ -33,7 +33,7 @@ class EligibilityChecker:
         if age_at_maturity > AGE_AT_MATURITY_LIMIT_YEARS:
             return EligibilityResult(
                 passed=False,
-                reason_code="R50",
+                reason_code="R71",
                 detail=(
                     f"Applicant would be {age_at_maturity:.1f} years old at loan "
                     f"maturity; policy limit is {AGE_AT_MATURITY_LIMIT_YEARS}."
