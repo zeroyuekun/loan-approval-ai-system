@@ -541,6 +541,64 @@ class QuoteThrottle(UserRateThrottle):
     rate = os.environ.get("DJANGO_THROTTLE_QUOTE_RATE", "30/min")
 
 
+class QuoteDetailView(APIView):
+    """Retrieve a previously generated quote by id.
+
+    Non-staff users only see their own quotes. Staff (admin/officer) see all.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, quote_id):
+        from apps.ml_engine.models import QuoteLog
+
+        try:
+            quote = QuoteLog.objects.get(pk=quote_id)
+        except (QuoteLog.DoesNotExist, ValidationError):
+            return Response({"detail": "Quote not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        user = request.user
+        if user.role not in ("admin", "officer") and quote.user_id != user.id:
+            # Hide existence from unauthorised users.
+            return Response({"detail": "Quote not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not quote.eligible:
+            body = {
+                "quote_id": str(quote.id),
+                "indicative_rate_range": None,
+                "estimated_monthly_repayment": None,
+                "comparison_rate_estimate": None,
+                "indicative": True,
+                "disclosure": _QUOTE_DISCLOSURE,
+                "expires_at": quote.expires_at.isoformat(),
+                "eligible_for_application": False,
+                "ineligible_reason": quote.ineligible_reason or None,
+            }
+            return Response(body)
+
+        return Response(
+            {
+                "quote_id": str(quote.id),
+                "indicative_rate_range": {
+                    "min": float(quote.rate_min),
+                    "max": float(quote.rate_max),
+                },
+                "estimated_monthly_repayment": float(quote.estimated_monthly_repayment),
+                "comparison_rate_estimate": float(quote.comparison_rate),
+                "indicative": True,
+                "disclosure": _QUOTE_DISCLOSURE,
+                "expires_at": quote.expires_at.isoformat(),
+                "eligible_for_application": True,
+            }
+        )
+
+
+_QUOTE_DISCLOSURE = (
+    "This is an indicative quote only. It is not a credit offer and does "
+    "not impact your credit file. A full application is required for a firm rate."
+)
+
+
 class QuoteView(APIView):
     """Soft-pull rate quote. No LoanApplication created, no bureau call, no Celery."""
 
