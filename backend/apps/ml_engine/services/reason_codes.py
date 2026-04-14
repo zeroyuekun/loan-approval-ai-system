@@ -109,6 +109,11 @@ REASON_CODE_MAP = {
     "hecs_debt_balance": ("R20", "HECS-HELP debt included in serviceability assessment"),
     "cash_advance_count_12m": ("R69", "Cash advance usage in the last 12 months"),
     "monthly_rent": ("R70", "Rental commitments reduce assessed borrowing capacity"),
+    # Policy gates (deterministic, not ML features)
+    "age_at_loan_maturity": (
+        "R50",
+        "Applicant age at loan maturity exceeds 67-year policy limit",
+    ),
 }
 
 
