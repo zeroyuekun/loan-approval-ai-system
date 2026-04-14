@@ -34,3 +34,4 @@ qrcode>=8.0
 schemathesis>=4
 reportlab>=4.0
 optuna>=4.0
+locust==2.32.1
