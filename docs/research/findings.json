@@ -1,0 +1,639 @@
+{
+  "generated_at": "2026-04-14",
+  "method_caveat": "CBA and NAB fully fetched via WebFetch; Up, Judo, Alex, Plenti, Wisr, MoneyMe, and Canstar extracted from WebSearch result snippets because WebFetch was denied in those subagent sessions. All numeric values below are as published by the lender at time of extraction.",
+  "lenders": [
+    {
+      "name": "Commonwealth Bank",
+      "type": "big_four",
+      "urls_fetched": [
+        "https://www.commbank.com.au/personal-loans/what-you-need-to-apply.html",
+        "https://www.commbank.com.au/personal-loans/fixed-rate-loan/rates-and-fees.html",
+        "https://www.commbank.com.au/personal-loans/variable-rate-loan/rates-and-fees.html",
+        "https://www.commbank.com.au/support/credit-reporting.html",
+        "https://www.commbank.com.au/personal-loans/personal-loan-guide.html",
+        "https://www.commbank.com.au/retail/personalloans/borrowingestimator"
+      ],
+      "application_fields": [
+        "full_name",
+        "id_documents",
+        "residency_or_citizenship",
+        "visa_subclass_and_expiry",
+        "employment_type",
+        "proof_of_income_3_months",
+        "self_employed_12_months_trading",
+        "existing_debts_via_bank_statement",
+        "loan_purpose",
+        "loan_amount",
+        "loan_term",
+        "rate_type_fixed_or_variable",
+        "car_specific_docs_if_auto"
+      ],
+      "eligibility": {
+        "min_income_aud": null,
+        "min_age": null,
+        "residency": "Australian citizens and permanent residents; visa holders eligible if visa outlasts loan term by >=1 month; 417 and 600 visas ineligible",
+        "credit_notes": "Credit history checked; lowest rates offered to customers with excellent credit history"
+      },
+      "risk_signals": [
+        "ccr",
+        "rhi_24_month",
+        "bank_statement_analysis",
+        "serviceability",
+        "employment_stability",
+        "visa_term_vs_loan_term_mismatch",
+        "hardship_rhi_codes_A_V"
+      ],
+      "rates": {
+        "advertised_min_apr": 7.00,
+        "advertised_max_apr": 22.00,
+        "comparison_rate_min": 8.41,
+        "comparison_rate_max": 23.29,
+        "fees": [
+          "$250 establishment",
+          "$15 monthly service",
+          "$20 late payment",
+          "$15 early repayment adjustment (if >=12 months remaining)",
+          "$15 per additional settlement cheque after first two"
+        ]
+      },
+      "ux_patterns": [
+        "borrowing_power_estimator",
+        "personal_loan_selector",
+        "rate_personalisation_disclosure",
+        "commbank_credit_score_hub_free_experian",
+        "comparison_rate_mandated",
+        "conditional_approval_language"
+      ],
+      "gaps": [
+        "no_published_min_income",
+        "no_published_min_age",
+        "no_decision_sla",
+        "no_dti_threshold",
+        "no_credit_score_cutoff"
+      ]
+    },
+    {
+      "name": "NAB",
+      "type": "big_four",
+      "urls_fetched": [
+        "https://www.nab.com.au/personal/personal-loans",
+        "https://www.nab.com.au/personal/personal-loans/how-to-apply/application-help",
+        "https://www.nab.com.au/personal/personal-loans/interest-rates",
+        "https://www.nab.com.au/personal/personal-loans/verify-income",
+        "https://www.nab.com.au/personal/life-moments/manage-money/money-basics/creditworthiness",
+        "https://www.savings.com.au/news/nab-serviceability"
+      ],
+      "application_fields": [
+        "loan_amount_5k_to_55k",
+        "loan_term_1_to_7_years",
+        "repayment_frequency",
+        "rate_type",
+        "full_name_dob",
+        "drivers_licence_for_bureau_pull",
+        "residency",
+        "mobile_email",
+        "current_address_and_living_arrangement",
+        "previous_address_if_under_3_years",
+        "employment_history_3_years",
+        "gross_and_net_income",
+        "assets_with_valuations",
+        "current_liabilities",
+        "itemised_expense_categories",
+        "loan_purpose"
+      ],
+      "eligibility": {
+        "min_income_aud": null,
+        "min_age": 18,
+        "residency": "Australian citizen or permanent resident; sole applicant only",
+        "credit_notes": "Near-retirement (63+) triggers additional repayment-intent questioning; credit report discrepancies trigger follow-up"
+      },
+      "risk_signals": [
+        "credit_bureau_check_via_licence",
+        "ccr_and_credit_score_drives_pricing",
+        "nccp_responsible_lending_unsuitability",
+        "lti_cap_7",
+        "dti_cap_8x_self_employed_context",
+        "income_verification_payslips_or_bank_statements",
+        "expense_categorisation_implicit_hem",
+        "banking_history_with_nab_feeds_rate"
+      ],
+      "rates": {
+        "advertised_min_apr": 7.00,
+        "advertised_max_apr": 21.00,
+        "comparison_rate_min": 8.41,
+        "comparison_rate_max": 22.29,
+        "fees": [
+          "$250 application",
+          "$15 monthly",
+          "$0 exit",
+          "$0 late payment",
+          "$0 early repayment"
+        ]
+      },
+      "ux_patterns": [
+        "risk_based_pricing",
+        "fixed_vs_variable_upfront",
+        "conditional_approval_with_esign",
+        "funding_in_1_business_day_post_acceptance",
+        "accordion_help_structure",
+        "explicit_purpose_exclusions"
+      ],
+      "gaps": [
+        "no_min_income",
+        "no_min_credit_score",
+        "no_serviceability_buffer_published",
+        "no_initial_decision_sla"
+      ]
+    },
+    {
+      "name": "Up",
+      "type": "neobank",
+      "urls_fetched": [
+        "https://up.com.au/home-loans/",
+        "https://up.com.au/home-loans/apply/",
+        "https://up.com.au/home-loans/fees-and-rates/",
+        "https://up.com.au/home-loans/learn/working-out-how-much-you-can-afford/",
+        "https://up.com.au/credit-guide/",
+        "https://up.com.au/docs/Up-Home-Loan-Booklet.pdf"
+      ],
+      "application_fields": [
+        "id_documents",
+        "applicant_personal_details",
+        "joint_applicant_details",
+        "property_details",
+        "income_including_type",
+        "expenses",
+        "deposit_size",
+        "sole_vs_joint"
+      ],
+      "eligibility": {
+        "min_income_aud": null,
+        "min_age": null,
+        "residency": null,
+        "credit_notes": "Bendigo & Adelaide Bank performs credit assessment under NCCP; property must be in urban centre postcode"
+      },
+      "risk_signals": [
+        "credit_check",
+        "serviceability_spending_analysis",
+        "income_type_segmentation",
+        "human_in_the_loop_exception_handling",
+        "nccp_unsuitability_test"
+      ],
+      "rates": {
+        "advertised_min_apr": null,
+        "advertised_max_apr": null,
+        "comparison_rate_min": null,
+        "comparison_rate_max": null,
+        "fees": [
+          "$0 application",
+          "$0 setup",
+          "$0 monthly bank",
+          "$0 annual bank",
+          "$0 redraw",
+          "$0 discharge"
+        ]
+      },
+      "ux_patterns": [
+        "fully_in_app_application",
+        "postcode_first_eligibility_gate",
+        "plain_english_copy",
+        "auto_generated_loan_docs",
+        "hybrid_automation_plus_human",
+        "rate_equity_no_loyalty_tax",
+        "dedicated_learn_content_hub"
+      ],
+      "gaps": [
+        "no_consumer_personal_loan_product",
+        "webfetch_denied",
+        "no_numeric_rate_or_lvr_extracted"
+      ]
+    },
+    {
+      "name": "Judo Bank",
+      "type": "neobank",
+      "urls_fetched": [
+        "https://www.judo.bank/business-lending/",
+        "https://www.judo.bank/business-banking",
+        "https://www.judo.bank/home-loan",
+        "https://www.judo.bank/business-lending/home-loans/",
+        "https://www.judo.bank/business-lending/business-rates-pricing/",
+        "https://www.judo.bank/business-lending/acquisition-loan/"
+      ],
+      "application_fields": [
+        "government_photo_id",
+        "source_of_funds_docs",
+        "business_pnl_balance_sheet_cashflow",
+        "existing_debt_obligations",
+        "abn_for_trusts_and_inc_associations",
+        "trust_deed",
+        "business_plan",
+        "relationship_banker_intake"
+      ],
+      "eligibility": {
+        "min_income_aud": null,
+        "min_age": null,
+        "residency": null,
+        "credit_notes": "Character-first lending; home loans restricted to Judo business customers; business lending from $250k"
+      },
+      "risk_signals": [
+        "character_first_underwriting",
+        "cashflow_analysis",
+        "serviceability_of_existing_debt",
+        "collateral_posture_52_33_15",
+        "data_analytics_partnerships",
+        "source_of_funds_verification_aml_ctf"
+      ],
+      "rates": {
+        "advertised_min_apr": null,
+        "advertised_max_apr": null,
+        "comparison_rate_min": null,
+        "comparison_rate_max": null,
+        "fees": []
+      },
+      "ux_patterns": [
+        "dedicated_relationship_banker",
+        "no_self_serve_online_application",
+        "judgement_over_algorithm",
+        "broker_channel"
+      ],
+      "gaps": [
+        "no_consumer_personal_loan_product",
+        "business_rates_relationship_priced_not_published",
+        "webfetch_denied"
+      ]
+    },
+    {
+      "name": "Alex Bank",
+      "type": "neobank",
+      "urls_fetched": [
+        "https://www.alex.bank/personal-loan/",
+        "https://www.alex.bank/personal-loan/apply/",
+        "https://www.alex.bank/about-alex/faqs/",
+        "https://www.alex.bank/how-do-alex-bank-rates-work/",
+        "https://www.alex.bank/legal/personal-loan-target-market-determination/",
+        "https://www.canstar.com.au/providers/alex-personal-loans/"
+      ],
+      "application_fields": [
+        "dob_age",
+        "residency_citizenship",
+        "au_photo_id",
+        "bsb_and_account_for_direct_debit",
+        "device_camera_id_verification",
+        "income",
+        "loan_amount_2100_to_30000",
+        "loan_term_6mo_to_5yr",
+        "loan_purpose"
+      ],
+      "eligibility": {
+        "min_income_aud": null,
+        "min_age": 18,
+        "residency": "Australian citizen or permanent resident, resident in Australia at time of application",
+        "credit_notes": "Higher than average credit scores required; no prior bankruptcy; not >67 at loan maturity unless satisfactory repayment proposal"
+      },
+      "risk_signals": [
+        "credit_history_and_score",
+        "transactional_behaviour_open_banking_style",
+        "employment_stability",
+        "loan_purpose",
+        "loan_term",
+        "serviceability_without_substantial_hardship",
+        "age_at_loan_maturity_67_cap",
+        "bankruptcy_exclusion"
+      ],
+      "rates": {
+        "advertised_min_apr": null,
+        "advertised_max_apr": null,
+        "comparison_rate_min": 5.45,
+        "comparison_rate_max": null,
+        "fees": [
+          "$295 establishment",
+          "$0 ongoing",
+          "$0 early repayment"
+        ]
+      },
+      "ux_patterns": [
+        "5_minute_application",
+        "1_business_day_decision",
+        "transparent_rate_factor_disclosure",
+        "digital_camera_id_verification",
+        "qantas_points_tie_in",
+        "advertised_vs_offered_rate_gap_credibility_risk"
+      ],
+      "gaps": [
+        "exact_apr_range_not_published",
+        "no_dti_threshold",
+        "no_min_income",
+        "webfetch_denied"
+      ]
+    },
+    {
+      "name": "Plenti",
+      "type": "specialist",
+      "urls_fetched": [
+        "https://www.plenti.com.au/personal-loans",
+        "https://www.plenti.com.au/guides/eligibility",
+        "https://www.plenti.com.au/personal-loans/applying-for-a-personal-loan",
+        "https://www.plenti.com.au/guides/what-is-risk-based-pricing/",
+        "https://www.plenti.com.au/guides/what-is-comprehensive-credit-reporting/",
+        "https://www.plenti.com.au/guides/how-does-credit-score-affect-personal-loan",
+        "https://www.plenti.com.au/personal-loans/compare-plenti-loan-interest-rates",
+        "https://www.plenti.com.au/help/am-i-able-to-get-a-loan"
+      ],
+      "application_fields": [
+        "loan_purpose",
+        "loan_amount_5k_to_65k_unsecured",
+        "loan_term_1_to_7yr_fixed",
+        "dob_age",
+        "residency_status",
+        "annual_income",
+        "employment_type_incl_self_employed",
+        "au_drivers_licence_or_passport",
+        "income_verification_bank_statements_or_tax_returns",
+        "ccr_consent"
+      ],
+      "eligibility": {
+        "min_income_aud": 25000,
+        "min_age": 18,
+        "residency": "Australian citizen or permanent resident",
+        "credit_notes": "Good credit history required; CCR means positive repayment history offsets past black marks"
+      },
+      "risk_signals": [
+        "ccr_positive_and_negative",
+        "full_repayment_history",
+        "income_level_and_stability",
+        "existing_debts",
+        "credit_score_drives_approval_size_rate",
+        "bank_statement_review",
+        "self_employed_additional_checks"
+      ],
+      "rates": {
+        "advertised_min_apr": 6.17,
+        "advertised_max_apr": 24.09,
+        "comparison_rate_min": 6.17,
+        "comparison_rate_max": 25.08,
+        "fees": [
+          "establishment $0-$599",
+          "credit assistance fee variable",
+          "$0 monthly",
+          "$0 early repayment"
+        ]
+      },
+      "ux_patterns": [
+        "rate_estimate_soft_pull_quote",
+        "explicit_risk_based_pricing_doctrine_page",
+        "rate_promise_marketing",
+        "ccr_positive_framing_copy",
+        "3_step_application_framing",
+        "self_service_eligibility_faq"
+      ],
+      "gaps": [
+        "no_decision_sla",
+        "no_published_credit_grade_bands_for_retail",
+        "no_dti_threshold",
+        "no_credit_score_cutoff"
+      ]
+    },
+    {
+      "name": "Wisr",
+      "type": "specialist",
+      "urls_fetched": [
+        "https://wisr.com.au/loans/personal-loans",
+        "https://wisr.com.au/help-centre/who-can-apply-for-a-wisr-personal-loan",
+        "https://wisr.com.au/help-centre/what-do-you-need-from-me-to-apply",
+        "https://wisr.com.au/help-centre/are-there-any-other-fees-and-charges",
+        "https://wisr.com.au/blog/what-is-comprehensive-credit-reporting",
+        "https://wisr.com.au/comprehensive-credit-reporting-changes",
+        "https://wisr.com.au/credit-scores"
+      ],
+      "application_fields": [
+        "two_forms_of_id",
+        "employment_history_3_to_5_years",
+        "bank_statements",
+        "existing_debts_including_bnpl",
+        "itemised_living_expenses",
+        "loan_amount_and_purpose",
+        "supporting_documents_checklist"
+      ],
+      "eligibility": {
+        "min_income_aud": 25000,
+        "min_age": 18,
+        "residency": "Australian (implied AU-only lender)",
+        "credit_notes": "Good credit standing; decent repayment track record; lowest rate applies only to excellent credit histories"
+      },
+      "risk_signals": [
+        "ccr_central_to_model",
+        "rhi_green_ticks",
+        "fhi_financial_hardship_information",
+        "credit_score_tiered_pricing",
+        "dti",
+        "serviceability_surplus_cash",
+        "bank_statement_analysis",
+        "bnpl_balances_as_first_class_debt",
+        "hem_style_expense_itemisation"
+      ],
+      "rates": {
+        "advertised_min_apr": 6.94,
+        "advertised_max_apr": 24.74,
+        "comparison_rate_min": null,
+        "comparison_rate_max": null,
+        "fees": [
+          "$595 establishment unsecured",
+          "$605 establishment motorcycle",
+          "$655 establishment motorcycle private sale",
+          "$15 dishonour",
+          "$30 late payment",
+          "$0 early exit"
+        ]
+      },
+      "ux_patterns": [
+        "free_credit_score_tool_lead_gen",
+        "smart_guides_content_marketing",
+        "purpose_specific_landing_pages",
+        "calculator_on_product_page",
+        "supporting_documents_checklist_up_front",
+        "aspirational_power_your_possible_tone",
+        "no_apology_language"
+      ],
+      "gaps": [
+        "no_decision_sla",
+        "no_comparison_rate_max",
+        "no_credit_score_cutoff"
+      ]
+    },
+    {
+      "name": "MoneyMe",
+      "type": "specialist",
+      "urls_fetched": [
+        "https://www.moneyme.com.au/personal-loan/eligibility",
+        "https://www.moneyme.com.au/personal-loan/quick-approval",
+        "https://www.moneyme.com.au/personal-loan/interest-rates",
+        "https://www.moneyme.com.au/personal-loan",
+        "https://www.moneyme.com.au/faq",
+        "https://www.moneyme.com.au/loans/express-approval/australia"
+      ],
+      "application_fields": [
+        "mobile",
+        "email",
+        "personal_details",
+        "approximate_income",
+        "approximate_expenses",
+        "existing_bills",
+        "employment_status",
+        "digital_bank_statement_retrieval"
+      ],
+      "eligibility": {
+        "min_income_aud": null,
+        "min_age": 18,
+        "residency": "Australian citizen, NZ citizen, or Australian permanent resident",
+        "credit_notes": "Credit-file marks do not auto-decline; bankruptcy and debt agreement auto-decline"
+      },
+      "risk_signals": [
+        "proprietary_moneyme_loan_rating",
+        "credit_check",
+        "debt_agreement_auto_decline",
+        "bankruptcy_auto_decline",
+        "serviceability_responsible_lending",
+        "bank_statement_transaction_analysis_cdr_style",
+        "income_vs_expense_comparison",
+        "risk_based_pricing"
+      ],
+      "rates": {
+        "advertised_min_apr": 5.99,
+        "advertised_max_apr": null,
+        "comparison_rate_min": 6.70,
+        "comparison_rate_max": null,
+        "fees": [
+          "establishment $395 or $495 tiered",
+          "establishment $0 for excellent credit",
+          "$10 monthly",
+          "$0 early repayment",
+          "$0 exit"
+        ]
+      },
+      "ux_patterns": [
+        "90_second_online_quote_soft_pull",
+        "instant_approval_in_business_hours",
+        "same_day_funding",
+        "no_paperwork_digital_retrieval",
+        "mobile_first",
+        "fee_tier_transparency",
+        "app_managed_servicing"
+      ],
+      "gaps": [
+        "no_min_income_published",
+        "no_max_apr_published",
+        "proprietary_rating_weights_undisclosed",
+        "no_dti_cutoff",
+        "ccr_not_explicitly_confirmed"
+      ]
+    },
+    {
+      "name": "Canstar",
+      "type": "comparison",
+      "urls_fetched": [
+        "https://www.canstar.com.au/personal-loans/",
+        "https://www.canstar.com.au/personal-loans/how-to-apply-for-loan/",
+        "https://www.canstar.com.au/personal-loans/personal-loans-guide/",
+        "https://www.canstar.com.au/personal-loans/personal-loan-on-a-visa/",
+        "https://www.canstar.com.au/credit-score/comprehensive-credit-reporting/",
+        "https://www.canstar.com.au/star-ratings-awards/personal-and-car-loans/"
+      ],
+      "application_fields": [
+        "photo_id",
+        "payg_payslips",
+        "bank_statements",
+        "employment_details",
+        "assets",
+        "existing_debts",
+        "living_expenses",
+        "self_employed_tax_return",
+        "loan_purpose",
+        "single_vs_joint_and_dependants"
+      ],
+      "eligibility": {
+        "min_income_aud": null,
+        "min_age": 18,
+        "residency": "Australian citizen or permanent resident; some lenders accept specific visas; guarantor may help",
+        "credit_notes": "Reliable record as borrower based on credit history; some products require excellent credit rating"
+      },
+      "risk_signals": [
+        "income_vs_expenses_serviceability",
+        "existing_debts_dti",
+        "credit_report_defaults",
+        "repayment_history_14_days_overdue",
+        "savings_history_bank_statement",
+        "loan_purpose_risk_factor",
+        "multiple_recent_applications",
+        "ccr_mandatory_for_big4_since_2018_2021"
+      ],
+      "rates": {
+        "advertised_min_apr": 5.76,
+        "advertised_max_apr": 12.99,
+        "comparison_rate_min": 5.95,
+        "comparison_rate_max": 24.03,
+        "fees": [
+          "establishment $0-$1200",
+          "ongoing mostly $0",
+          "Bendigo $60/yr",
+          "HSBC $60/yr"
+        ]
+      },
+      "ux_patterns": [
+        "decision_in_a_few_days",
+        "conditional_approval_with_doc_followups",
+        "rate_personalisation",
+        "pre_approval_as_distinct_product",
+        "secured_vs_unsecured_primary_axis",
+        "fixed_vs_variable_primary_axis",
+        "guarantor_as_eligibility_enhancer",
+        "star_rating_price_plus_features"
+      ],
+      "gaps": [
+        "no_universal_min_income",
+        "no_quantitative_dti_or_hem_threshold_published"
+      ]
+    }
+  ],
+  "consolidated": {
+    "common_application_fields": [
+      "photo_id",
+      "loan_amount_term_purpose",
+      "income_amount",
+      "itemised_living_expenses",
+      "existing_debts_liabilities",
+      "bank_statements",
+      "residency_age",
+      "employment_type_and_history"
+    ],
+    "common_risk_signals": [
+      "comprehensive_credit_reporting_rhi",
+      "risk_based_pricing",
+      "serviceability_nccp_unsuitability",
+      "bank_statement_transaction_analysis",
+      "credit_score_tiered_pricing",
+      "employment_stability",
+      "loan_purpose_as_risk_factor"
+    ],
+    "gaps_in_our_model": [
+      "bnpl_balance",
+      "savings_balance_months",
+      "rhi_24_month_vector_or_on_time_late_counts",
+      "enquiries_last_6_months_windowed",
+      "age_at_loan_maturity",
+      "visa_subclass_and_expiry_gap",
+      "self_employed_trading_years",
+      "financial_hardship_flag",
+      "soft_pull_vs_hard_pull_indicator"
+    ],
+    "ux_recommendations": [
+      "soft_pull_rate_quote_no_credit_impact",
+      "transparent_rate_factor_disclosure_on_email_and_ui",
+      "supporting_documents_checklist_up_front",
+      "borrowing_power_estimator_pre_funnel",
+      "ccr_positive_framing_copy",
+      "fee_tier_transparency",
+      "plain_english_no_apology_copy",
+      "avoid_advertised_vs_offered_rate_gap"
+    ]
+  }
+}
