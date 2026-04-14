@@ -115,6 +115,7 @@ def orchestrate_pipeline_task(self, application_id, force=False):
         logger.warning("Failed to create audit log for pipeline completion on %s", application_id)
 
     return {
+        "application_id": str(application_id),
         "agent_run_id": str(agent_run.id),
         "status": agent_run.status,
         "total_time_ms": agent_run.total_time_ms,
@@ -156,6 +157,7 @@ def resume_pipeline_task(self, agent_run_id, reviewer="", note=""):
         raise
 
     return {
+        "application_id": str(agent_run.application_id),
         "agent_run_id": str(agent_run.id),
         "status": agent_run.status,
         "total_time_ms": agent_run.total_time_ms,
