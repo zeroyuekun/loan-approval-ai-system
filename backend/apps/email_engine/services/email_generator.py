@@ -1,9 +1,11 @@
 import os
+import re
 import time
 
 import anthropic
 import httpx
 
+from apps.ml_engine.services.reason_codes import REASON_CODE_MAP
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from .documentation import build_documentation_checklist
@@ -113,13 +115,26 @@ class EmailGenerator:
         "bnpl_monthly_commitment": "Your buy-now-pay-later commitments reduce the amount we can lend",
     }
 
-    def _format_denial_reasons(self, feature_importances, shap_values=None):
+    _POLICY_REASON_CODE_RE = re.compile(r"\[(R\d{2,3})\]")
+
+    def _format_denial_reasons(self, feature_importances, shap_values=None, reasoning=None):
         """Convert per-applicant SHAP values to plain-language denial reasons.
 
-        Prefers SHAP values (per-applicant, explains why THIS person was denied)
-        over global feature importances (model-wide weights, same for everyone).
-        Falls back to global importances when SHAP values are unavailable.
+        Preference order:
+        1. Policy-gate reason code in `reasoning` (e.g. "[R71] ...") — used when a
+           deterministic rule denied the application before the ML model ran, so no
+           SHAP values exist.
+        2. SHAP values (per-applicant, explains why THIS person was denied).
+        3. Global feature importances (model-wide weights, same for everyone).
         """
+        if reasoning and isinstance(reasoning, str):
+            match = self._POLICY_REASON_CODE_RE.search(reasoning)
+            if match:
+                code = match.group(1)
+                for _, (mapped_code, text) in REASON_CODE_MAP.items():
+                    if mapped_code == code:
+                        return text
+
         if not feature_importances and not shap_values:
             return "Credit assessment criteria not met"
 
@@ -246,6 +261,7 @@ class EmailGenerator:
             reasons = self._format_denial_reasons(
                 decision_obj.feature_importances if decision_obj else None,
                 shap_values=decision_obj.shap_values if decision_obj else None,
+                reasoning=decision_obj.reasoning if decision_obj else None,
             )
             prompt = DENIAL_EMAIL_PROMPT.format(
                 applicant_name=applicant_name,
@@ -542,11 +558,15 @@ class EmailGenerator:
             # Gather rich denial context
             feature_importances = None
             shap_values = None
+            reasoning = None
             if hasattr(application, "decision") and application.decision:
                 feature_importances = application.decision.feature_importances
                 shap_values = application.decision.shap_values
+                reasoning = application.decision.reasoning
 
-            denial_reasons = self._format_denial_reasons(feature_importances, shap_values=shap_values)
+            denial_reasons = self._format_denial_reasons(
+                feature_importances, shap_values=shap_values, reasoning=reasoning
+            )
 
             credit_score = getattr(application, "credit_score", None)
             debt_to_income = getattr(application, "debt_to_income", None)
