@@ -5,6 +5,7 @@ from django.db.models import OuterRef, Prefetch, Subquery
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+import os
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class OrchestrationThrottle(UserRateThrottle):
-    rate = "60/hour"
+    rate = os.environ.get("DJANGO_THROTTLE_ORCHESTRATE_RATE", "60/hour")
 
 
 class AgentRunListView(APIView):

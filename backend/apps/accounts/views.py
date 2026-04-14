@@ -9,6 +9,7 @@ from django.utils.html import escape
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+import os
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -132,11 +133,11 @@ class CookieTokenRefreshView(generics.GenericAPIView):
 
 
 class LoginRateThrottle(AnonRateThrottle):
-    rate = "5/min"
+    rate = os.environ.get("DJANGO_THROTTLE_LOGIN_RATE", "5/min")
 
 
 class RegisterRateThrottle(AnonRateThrottle):
-    rate = "3/min"
+    rate = os.environ.get("DJANGO_THROTTLE_REGISTER_RATE", "3/min")
 
 
 class RegisterView(generics.CreateAPIView):
