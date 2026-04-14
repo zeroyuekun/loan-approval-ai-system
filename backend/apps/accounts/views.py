@@ -73,7 +73,7 @@ def _clear_jwt_cookies(response):
 
 
 class RefreshRateThrottle(AnonRateThrottle):
-    rate = "30/min"
+    rate = os.environ.get("DJANGO_THROTTLE_REFRESH_RATE", "30/min")
 
 
 class CookieTokenRefreshView(generics.GenericAPIView):

@@ -9,18 +9,27 @@ Writes CSV to --out. Stop with Ctrl+C.
 """
 import argparse
 import csv
+import os
 import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
 
 
+REDIS_SERVICE = os.environ.get("LOAD_SAMPLER_REDIS_SERVICE", "redis")
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
+POSTGRES_SERVICE = os.environ.get("LOAD_SAMPLER_POSTGRES_SERVICE", "db")
+POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
+POSTGRES_DB = os.environ.get("POSTGRES_DB", "loan_approval")
+
+
 def redis_llen(queue: str) -> int:
+    cmd = ["docker", "compose", "exec", "-T", REDIS_SERVICE, "redis-cli"]
+    if REDIS_PASSWORD:
+        cmd += ["-a", REDIS_PASSWORD, "--no-auth-warning"]
+    cmd += ["LLEN", queue]
     try:
-        out = subprocess.run(
-            ["docker", "compose", "exec", "-T", "redis", "redis-cli", "LLEN", queue],
-            capture_output=True, text=True, timeout=5,
-        )
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         return int(out.stdout.strip() or 0)
     except Exception:
         return -1
@@ -29,8 +38,11 @@ def redis_llen(queue: str) -> int:
 def pg_active_connections() -> int:
     try:
         out = subprocess.run(
-            ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", "postgres",
-             "-tAc", "SELECT count(*) FROM pg_stat_activity;"],
+            [
+                "docker", "compose", "exec", "-T", POSTGRES_SERVICE,
+                "psql", "-U", POSTGRES_USER, "-d", POSTGRES_DB,
+                "-tAc", "SELECT count(*) FROM pg_stat_activity;",
+            ],
             capture_output=True, text=True, timeout=5,
         )
         return int(out.stdout.strip() or 0)
