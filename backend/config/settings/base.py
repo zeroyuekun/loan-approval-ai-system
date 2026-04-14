@@ -136,8 +136,8 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "20/min",
-        "user": "60/min",
+        "anon": os.environ.get("DJANGO_THROTTLE_ANON_RATE", "20/min"),
+        "user": os.environ.get("DJANGO_THROTTLE_USER_RATE", "60/min"),
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }

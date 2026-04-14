@@ -14,7 +14,7 @@ def loan_application_payload() -> dict:
     return {
         "loan_amount": loan_amount,
         "loan_term_months": random.choice([12, 24, 36, 60, 84, 120, 240, 360]),
-        "purpose": random.choice(["car", "home", "personal", "debt_consolidation"]),
+        "purpose": random.choice(["home", "auto", "education", "personal", "business"]),
         "annual_income": annual_income,
         "employment_type": random.choice(
             ["payg_permanent", "payg_casual", "self_employed", "contract"]
@@ -32,5 +32,5 @@ def loan_application_payload() -> dict:
         "state": random.choice(["NSW", "VIC", "QLD", "SA", "WA", "TAS", "ACT", "NT"]),
         "property_value": 0,
         "deposit_amount": 0,
-        "applicant_type": "individual",
+        "applicant_type": random.choice(["single", "couple"]),
     }

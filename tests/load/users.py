@@ -14,7 +14,9 @@ class _AuthedUser(HttpUser):
 
     def on_start(self):
         token = login(self.client)
-        self.client.headers["Authorization"] = f"Bearer {token}"
+        if token:
+            self.client.headers["Authorization"] = f"Bearer {token}"
+        # Else cookie-based auth; HttpUser persists cookies automatically.
 
 
 class QuickScoreUser(_AuthedUser):

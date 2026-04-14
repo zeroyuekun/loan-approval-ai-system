@@ -3,6 +3,7 @@ from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+import os
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
@@ -14,7 +15,7 @@ from apps.ml_engine.tasks import run_prediction_task, train_model_task
 
 
 class PredictionThrottle(UserRateThrottle):
-    rate = "10/hour"
+    rate = os.environ.get("DJANGO_THROTTLE_PREDICT_RATE", "10/hour")
 
 
 class PredictView(APIView):

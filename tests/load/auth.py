@@ -20,7 +20,12 @@ def get_credentials() -> tuple[str, str]:
 
 
 def login(client) -> str:
-    """POST login and return the bearer token. Raises on non-200."""
+    """POST login. Returns bearer token if body carries one, else empty string.
+
+    This app uses cookie-based JWT (HttpOnly cookies set on login). The Locust
+    HttpUser client persists cookies automatically, so downstream requests are
+    authenticated without a Bearer header.
+    """
     user, password = get_credentials()
     resp = client.post(
         LOGIN_PATH,
@@ -30,8 +35,4 @@ def login(client) -> str:
     if resp.status_code != 200:
         raise RuntimeError(f"login failed: {resp.status_code} {resp.text[:200]}")
     body = resp.json()
-    # Accept either {access: ...} (SimpleJWT) or {token: ...}
-    token = body.get("access") or body.get("token")
-    if not token:
-        raise RuntimeError(f"login returned no token: {body}")
-    return token
+    return body.get("access") or body.get("token") or ""
