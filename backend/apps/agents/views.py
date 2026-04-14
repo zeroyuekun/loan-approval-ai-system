@@ -1,5 +1,6 @@
 import logging
 
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import OuterRef, Prefetch, Subquery
 from rest_framework import status
@@ -21,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 class OrchestrationThrottle(UserRateThrottle):
     rate = os.environ.get("DJANGO_THROTTLE_ORCHESTRATE_RATE", "60/hour")
+
+
+# 7-day TTL matches the typical Celery result retention window and mirrors
+# config.urls.TASK_APPLICATION_CACHE_TTL. Duplicated here to avoid an import
+# cycle between apps.agents.views and config.urls.
+_TASK_APP_TTL = 7 * 24 * 3600
+
+
+def _record_task_application(task_id, application_id):
+    """Record task_id -> application_id so non-staff can poll their own PENDING tasks."""
+    cache.set(f"task_app:{task_id}", str(application_id), _TASK_APP_TTL)
 
 
 class AgentRunListView(APIView):
@@ -175,6 +187,7 @@ class OrchestrateView(APIView):
 
         force = request.query_params.get("force", "").lower() == "true"
         task = orchestrate_pipeline_task.delay(str(loan_id), force=force)
+        _record_task_application(task.id, loan_id)
 
         AuditLog.objects.create(
             user=request.user,
@@ -229,6 +242,7 @@ class BatchOrchestrateView(APIView):
         tasks = []
         for app_id in pending_apps:
             task = orchestrate_pipeline_task.delay(str(app_id), force=recheck)
+            _record_task_application(task.id, app_id)
             tasks.append({"application_id": str(app_id), "task_id": task.id})
 
         AuditLog.objects.create(
@@ -428,6 +442,9 @@ class HumanReviewView(APIView):
                         reviewer=request.user.username,
                         note=reviewer_note,
                     )
+                    _record_task_application(
+                        task_holder["task"].id, agent_run.application_id
+                    )
 
                 transaction.on_commit(_dispatch_resume)
 
@@ -498,6 +515,9 @@ class HumanReviewView(APIView):
 
                 def _dispatch_regenerate():
                     task_holder["task"] = orchestrate_pipeline_task.delay(str(agent_run.application_id))
+                    _record_task_application(
+                        task_holder["task"].id, agent_run.application_id
+                    )
 
                 transaction.on_commit(_dispatch_regenerate)
 

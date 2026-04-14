@@ -18,6 +18,39 @@ from rest_framework.views import APIView
 from apps.loans.models import LoanApplication
 
 
+# 7-day TTL matches the typical Celery result retention window.
+TASK_APPLICATION_CACHE_TTL = 7 * 24 * 3600
+
+
+def task_application_cache_key(task_id: str) -> str:
+    """Redis key for the task_id -> application_id ownership mapping."""
+    return f"task_app:{task_id}"
+
+
+def _resolve_task_application_id(task_id, result):
+    """Return the application_id this task belongs to, or None if not resolvable.
+
+    Tries (in order): the cache mapping set at dispatch time, then the
+    task result body if present. The cache lookup lets non-staff customers
+    poll their own PENDING tasks without waiting for the result to land.
+    """
+    from django.core.cache import cache
+
+    cached = cache.get(task_application_cache_key(task_id))
+    if cached:
+        return cached
+    if result is not None and result.result:
+        try:
+            result_data = (
+                json.loads(result.result) if isinstance(result.result, str) else result.result
+            )
+            if isinstance(result_data, dict):
+                return result_data.get("application_id")
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
 class TaskStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -28,6 +61,21 @@ class TaskStatusView(APIView):
         try:
             result = TaskResult.objects.get(task_id=task_id)
         except TaskResult.DoesNotExist:
+            result = None
+
+        user = request.user
+        is_staff = user.role in ("admin", "officer")
+        if not is_staff:
+            app_id = _resolve_task_application_id(task_id, result)
+            if app_id is None or not LoanApplication.objects.filter(
+                pk=app_id, applicant=user
+            ).exists():
+                return Response(
+                    {"error": "You do not have permission to view this task"},
+                    status=http_status.HTTP_403_FORBIDDEN,
+                )
+
+        if result is None:
             return Response(
                 {
                     "task_id": task_id,
@@ -36,40 +84,6 @@ class TaskStatusView(APIView):
                     "date_done": None,
                 }
             )
-
-        # Staff can see all tasks
-        user = request.user
-        if user.role not in ("admin", "officer"):
-            # For completed tasks, verify ownership via application_id in the result
-            if result.result:
-                try:
-                    result_data = json.loads(result.result) if isinstance(result.result, str) else result.result
-                    app_id = None
-                    if isinstance(result_data, dict):
-                        app_id = result_data.get("application_id")
-                    if app_id:
-                        if not LoanApplication.objects.filter(pk=app_id, applicant=user).exists():
-                            return Response(
-                                {"error": "You do not have permission to view this task"},
-                                status=http_status.HTTP_403_FORBIDDEN,
-                            )
-                    else:
-                        # No application_id in result — deny non-staff access
-                        return Response(
-                            {"error": "You do not have permission to view this task"},
-                            status=http_status.HTTP_403_FORBIDDEN,
-                        )
-                except (json.JSONDecodeError, TypeError):
-                    return Response(
-                        {"error": "You do not have permission to view this task"},
-                        status=http_status.HTTP_403_FORBIDDEN,
-                    )
-            else:
-                # PENDING/no result yet — deny non-staff unless they can't trace ownership
-                return Response(
-                    {"error": "You do not have permission to view this task"},
-                    status=http_status.HTTP_403_FORBIDDEN,
-                )
 
         return Response(
             {
