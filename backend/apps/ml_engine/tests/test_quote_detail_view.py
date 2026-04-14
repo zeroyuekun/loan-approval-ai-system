@@ -119,3 +119,29 @@ def test_unauthenticated_request_is_rejected():
     client = APIClient()
     resp = client.get(_url(uuid.uuid4()))
     assert resp.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_detail_reports_is_expired_true_for_past_expiry():
+    user = _make_user("expired-owner")
+    quote = _make_eligible_quote(user)
+    QuoteLog.objects.filter(pk=quote.pk).update(expires_at=timezone.now() - datetime.timedelta(hours=1))
+
+    client = APIClient()
+    client.force_authenticate(user=user)
+    resp = client.get(_url(quote.id))
+
+    assert resp.status_code == 200
+    assert resp.json()["is_expired"] is True
+
+
+@pytest.mark.django_db
+def test_detail_reports_is_expired_false_for_future_expiry():
+    user = _make_user("live-owner")
+    quote = _make_eligible_quote(user)
+    client = APIClient()
+    client.force_authenticate(user=user)
+    resp = client.get(_url(quote.id))
+
+    assert resp.status_code == 200
+    assert resp.json()["is_expired"] is False

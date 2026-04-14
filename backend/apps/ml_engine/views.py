@@ -557,6 +557,12 @@ class QuoteListView(APIView):
 
         user = request.user
         qs = QuoteLog.objects.all() if user.role in ("admin", "officer") else QuoteLog.objects.filter(user=user)
+
+        include_expired = request.query_params.get("include_expired", "").lower() == "true"
+        now = timezone.now()
+        if not include_expired:
+            qs = qs.filter(expires_at__gt=now)
+
         qs = qs.order_by("-created_at")
 
         paginator = PageNumberPagination()
@@ -572,6 +578,7 @@ class QuoteListView(APIView):
                 ),
                 "created_at": q.created_at.isoformat(),
                 "expires_at": q.expires_at.isoformat(),
+                "is_expired": q.expires_at <= now,
             }
             for q in page
         ]
@@ -599,6 +606,8 @@ class QuoteDetailView(APIView):
             # Hide existence from unauthorised users.
             return Response({"detail": "Quote not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        is_expired = quote.expires_at <= timezone.now()
+
         if not quote.eligible:
             body = {
                 "quote_id": str(quote.id),
@@ -608,6 +617,7 @@ class QuoteDetailView(APIView):
                 "indicative": True,
                 "disclosure": _QUOTE_DISCLOSURE,
                 "expires_at": quote.expires_at.isoformat(),
+                "is_expired": is_expired,
                 "eligible_for_application": False,
                 "ineligible_reason": quote.ineligible_reason or None,
             }
@@ -625,6 +635,7 @@ class QuoteDetailView(APIView):
                 "indicative": True,
                 "disclosure": _QUOTE_DISCLOSURE,
                 "expires_at": quote.expires_at.isoformat(),
+                "is_expired": is_expired,
                 "eligible_for_application": True,
             }
         )

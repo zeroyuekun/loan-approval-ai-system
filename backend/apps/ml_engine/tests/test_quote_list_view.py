@@ -91,3 +91,38 @@ def test_list_rejects_unauthenticated():
     client = APIClient()
     resp = client.get(URL)
     assert resp.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_list_excludes_expired_quotes_by_default():
+    owner = _make_user("expired-list-1")
+    live = _make_quote(owner)
+    expired = _make_quote(owner)
+    QuoteLog.objects.filter(pk=expired.pk).update(expires_at=timezone.now() - datetime.timedelta(days=1))
+
+    client = APIClient()
+    client.force_authenticate(user=owner)
+    resp = client.get(URL)
+
+    ids = {item["quote_id"] for item in resp.json()["results"]}
+    assert ids == {str(live.id)}
+
+
+@pytest.mark.django_db
+def test_list_includes_expired_when_flag_is_true():
+    owner = _make_user("expired-list-2")
+    live = _make_quote(owner)
+    expired = _make_quote(owner)
+    QuoteLog.objects.filter(pk=expired.pk).update(expires_at=timezone.now() - datetime.timedelta(days=1))
+
+    client = APIClient()
+    client.force_authenticate(user=owner)
+    resp = client.get(URL + "?include_expired=true")
+
+    results = resp.json()["results"]
+    ids = {item["quote_id"] for item in results}
+    assert ids == {str(live.id), str(expired.id)}
+    expired_item = next(item for item in results if item["quote_id"] == str(expired.id))
+    live_item = next(item for item in results if item["quote_id"] == str(live.id))
+    assert expired_item["is_expired"] is True
+    assert live_item["is_expired"] is False
