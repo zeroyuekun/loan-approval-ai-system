@@ -4,6 +4,7 @@ Confirms that when EligibilityChecker denies an application, the orchestrator
 writes a denied LoanDecision, transitions the application to 'denied', and
 does NOT invoke the ML predictor.
 """
+
 import datetime
 from unittest.mock import patch
 
@@ -18,9 +19,7 @@ from apps.loans.models import LoanApplication, LoanDecision
 @pytest.mark.django_db
 def test_orchestrator_denies_on_age_maturity_and_skips_ml():
     User = get_user_model()
-    user = User.objects.create_user(
-        username="too-old", password="test-pass", role="customer"
-    )
+    user = User.objects.create_user(username="too-old", password="test-pass", role="customer")
     # Applicant is 65 today; with a 60-month term, maturity age is 70 → >67.
     # min(today.day, 28) avoids ValueError on Feb 29 -> non-leap year.
     today = datetime.date.today()

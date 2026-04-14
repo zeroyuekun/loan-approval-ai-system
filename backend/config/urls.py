@@ -17,7 +17,6 @@ from rest_framework.views import APIView
 
 from apps.loans.models import LoanApplication
 
-
 # 7-day TTL matches the typical Celery result retention window.
 TASK_APPLICATION_CACHE_TTL = 7 * 24 * 3600
 
@@ -41,9 +40,7 @@ def _resolve_task_application_id(task_id, result):
         return cached
     if result is not None and result.result:
         try:
-            result_data = (
-                json.loads(result.result) if isinstance(result.result, str) else result.result
-            )
+            result_data = json.loads(result.result) if isinstance(result.result, str) else result.result
             if isinstance(result_data, dict):
                 return result_data.get("application_id")
         except (json.JSONDecodeError, TypeError):
@@ -67,9 +64,7 @@ class TaskStatusView(APIView):
         is_staff = user.role in ("admin", "officer")
         if not is_staff:
             app_id = _resolve_task_application_id(task_id, result)
-            if app_id is None or not LoanApplication.objects.filter(
-                pk=app_id, applicant=user
-            ).exists():
+            if app_id is None or not LoanApplication.objects.filter(pk=app_id, applicant=user).exists():
                 return Response(
                     {"error": "You do not have permission to view this task"},
                     status=http_status.HTTP_403_FORBIDDEN,

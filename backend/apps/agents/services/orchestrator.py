@@ -13,8 +13,8 @@ from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.predictor import ModelPredictor
 
 from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector, MarketingEmailReviewer  # noqa: F401
-from .eligibility_checker import EligibilityChecker
 from .context_builder import ApplicationContextBuilder
+from .eligibility_checker import EligibilityChecker
 from .email_pipeline import EmailPipelineService
 from .human_review_handler import HumanReviewHandler
 from .marketing_pipeline import MarketingPipelineService
@@ -157,10 +157,7 @@ class PipelineOrchestrator:
                 defaults={
                     "decision": "denied",
                     "confidence": 1.0,
-                    "reasoning": (
-                        f"[{eligibility_result.reason_code}] "
-                        f"{eligibility_result.detail}"
-                    ),
+                    "reasoning": (f"[{eligibility_result.reason_code}] {eligibility_result.detail}"),
                 },
             )
             application.transition_to(

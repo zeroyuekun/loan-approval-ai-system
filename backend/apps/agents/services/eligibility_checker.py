@@ -3,9 +3,9 @@
 Policy: deny if the applicant would be older than 67 at the end of the loan.
 Source: Alex Bank published rule (see docs/research/2026-04-14-au-lending-research.md).
 """
+
 import datetime
 from dataclasses import dataclass
-
 
 AGE_AT_MATURITY_LIMIT_YEARS = 67
 

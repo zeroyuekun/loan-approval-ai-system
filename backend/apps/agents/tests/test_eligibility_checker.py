@@ -1,8 +1,7 @@
 """Tests for EligibilityChecker — age-at-loan-maturity policy gate."""
+
 import datetime
 from types import SimpleNamespace
-
-import pytest
 
 from apps.agents.services.eligibility_checker import EligibilityChecker
 

@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -7,7 +8,6 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-import os
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 

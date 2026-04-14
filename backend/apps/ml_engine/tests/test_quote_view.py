@@ -1,4 +1,5 @@
 """Integration tests for POST /api/v1/ml/quote/."""
+
 import datetime
 from unittest.mock import patch
 
@@ -8,7 +9,6 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomerProfile
 from apps.ml_engine.models import QuoteLog
-
 
 QUOTE_URL = "/api/v1/ml/quote/"
 
@@ -32,9 +32,7 @@ def _valid_request():
 @pytest.fixture
 def authed_client():
     User = get_user_model()
-    user = User.objects.create_user(
-        username="quoter", password="quote-pass", role="customer"
-    )
+    user = User.objects.create_user(username="quoter", password="quote-pass", role="customer")
     # min(day, 28) avoids Feb-29 edge case
     today = datetime.date.today()
     dob = datetime.date(today.year - 30, today.month, min(today.day, 28))
@@ -52,9 +50,7 @@ def authed_client():
 def test_quote_happy_path(authed_client):
     client, user = authed_client
     fake_prediction = {"probability": 0.05}  # Excellent band
-    with patch(
-        "apps.ml_engine.services.predictor.ModelPredictor"
-    ) as mock_cls:
+    with patch("apps.ml_engine.services.predictor.ModelPredictor") as mock_cls:
         mock_cls.return_value.predict.return_value = fake_prediction
         resp = client.post(QUOTE_URL, _valid_request(), format="json")
 
@@ -78,9 +74,7 @@ def test_quote_happy_path(authed_client):
 @pytest.mark.django_db
 def test_quote_ineligible_when_age_over_67_at_maturity():
     User = get_user_model()
-    user = User.objects.create_user(
-        username="older-quoter", password="quote-pass", role="customer"
-    )
+    user = User.objects.create_user(username="older-quoter", password="quote-pass", role="customer")
     today = datetime.date.today()
     dob = datetime.date(today.year - 65, today.month, min(today.day, 28))
     profile, _ = CustomerProfile.objects.get_or_create(user=user)
@@ -94,12 +88,8 @@ def test_quote_ineligible_when_age_over_67_at_maturity():
     client = APIClient()
     client.force_authenticate(user=user)
 
-    with patch(
-        "apps.ml_engine.services.predictor.ModelPredictor"
-    ) as mock_cls:
-        mock_cls.return_value.predict.side_effect = AssertionError(
-            "ML predictor should not be called when gate fails"
-        )
+    with patch("apps.ml_engine.services.predictor.ModelPredictor") as mock_cls:
+        mock_cls.return_value.predict.side_effect = AssertionError("ML predictor should not be called when gate fails")
         resp = client.post(QUOTE_URL, _valid_request(), format="json")
 
     assert resp.status_code == 200, resp.content

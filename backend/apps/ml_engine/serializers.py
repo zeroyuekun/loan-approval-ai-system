@@ -1,6 +1,6 @@
 """Serializers for ml_engine API endpoints."""
-from rest_framework import serializers
 
+from rest_framework import serializers
 
 _PURPOSE_CHOICES = ("home", "auto", "education", "personal", "business")
 _EMPLOYMENT_CHOICES = ("payg_permanent", "payg_casual", "self_employed", "contract")

@@ -81,9 +81,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 if created:
                     profile.has_mortgage = instance.home_ownership == "mortgage"
                     profile.has_credit_card = (instance.existing_credit_card_limit or 0) > 0
-                    profile.num_products = (
-                        1 + int(profile.has_credit_card) + int(profile.has_mortgage)
-                    )
+                    profile.num_products = 1 + int(profile.has_credit_card) + int(profile.has_mortgage)
                     profile.save(
                         update_fields=[
                             "has_mortgage",

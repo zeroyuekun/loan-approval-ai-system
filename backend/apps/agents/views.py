@@ -1,4 +1,5 @@
 import logging
+import os
 
 from django.core.cache import cache
 from django.db import transaction
@@ -6,7 +7,6 @@ from django.db.models import OuterRef, Prefetch, Subquery
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-import os
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
@@ -442,9 +442,7 @@ class HumanReviewView(APIView):
                         reviewer=request.user.username,
                         note=reviewer_note,
                     )
-                    _record_task_application(
-                        task_holder["task"].id, agent_run.application_id
-                    )
+                    _record_task_application(task_holder["task"].id, agent_run.application_id)
 
                 transaction.on_commit(_dispatch_resume)
 
@@ -515,9 +513,7 @@ class HumanReviewView(APIView):
 
                 def _dispatch_regenerate():
                     task_holder["task"] = orchestrate_pipeline_task.delay(str(agent_run.application_id))
-                    _record_task_application(
-                        task_holder["task"].id, agent_run.application_id
-                    )
+                    _record_task_application(task_holder["task"].id, agent_run.application_id)
 
                 transaction.on_commit(_dispatch_regenerate)
 

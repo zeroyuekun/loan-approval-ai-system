@@ -257,9 +257,7 @@ class QuoteLog(models.Model):
     rate_min = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     rate_max = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     comparison_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    estimated_monthly_repayment = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
-    )
+    estimated_monthly_repayment = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     eligible = models.BooleanField(default=True)
     ineligible_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -276,5 +274,6 @@ class QuoteLog(models.Model):
 def compute_inputs_hash(payload: dict) -> str:
     """SHA256 of a canonical-JSON representation of the quote request."""
     import json as _json
+
     canonical = _json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

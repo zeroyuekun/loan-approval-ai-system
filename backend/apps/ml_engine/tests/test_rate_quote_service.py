@@ -1,4 +1,5 @@
 """Tests for RateQuoteService — rate band mapping, amortisation, top factors."""
+
 from decimal import Decimal
 
 import pytest

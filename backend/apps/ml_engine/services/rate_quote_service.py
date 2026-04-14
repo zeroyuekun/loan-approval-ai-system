@@ -3,9 +3,9 @@
 Hand-tuned bands. NOT env-configurable; changing thresholds is a product
 decision that warrants code review.
 """
-from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
 
+from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 
 BAND_EXCELLENT = "excellent"
 BAND_STANDARD = "standard"
@@ -32,7 +32,7 @@ _COMPARISON_RATE_FEE_OFFSET = Decimal("0.50")
 # Plausible AU-market means for top-factor z-scoring. Deliberately simple and
 # documented; swap for bureau means later if we have them.
 _FEATURE_MEANS = {
-    "credit_score": (700.0, 80.0),         # (mean, std)
+    "credit_score": (700.0, 80.0),  # (mean, std)
     "employment_length": (6.0, 5.0),
     "debt_to_income": (0.25, 0.12),
     "annual_income": (85000.0, 35000.0),
@@ -58,9 +58,7 @@ class RateQuoteService:
                 return band.apr_min, band.apr_max
         raise ValueError(f"Unknown band: {band_name}")
 
-    def amortised_monthly_payment(
-        self, principal: Decimal, apr_percent: Decimal, term_months: int
-    ) -> Decimal:
+    def amortised_monthly_payment(self, principal: Decimal, apr_percent: Decimal, term_months: int) -> Decimal:
         if term_months <= 0:
             raise ValueError("term_months must be positive")
         r = (apr_percent / Decimal("100")) / Decimal("12")
@@ -73,9 +71,7 @@ class RateQuoteService:
 
     def comparison_rate_estimate(self, apr_min: Decimal, apr_max: Decimal) -> Decimal:
         midpoint = (apr_min + apr_max) / Decimal("2")
-        return (midpoint + _COMPARISON_RATE_FEE_OFFSET).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
+        return (midpoint + _COMPARISON_RATE_FEE_OFFSET).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def top_rate_factors(self, request_fields: dict, n: int = 3) -> list[dict]:
         scored = []
