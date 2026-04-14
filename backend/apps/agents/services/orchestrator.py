@@ -13,6 +13,7 @@ from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.predictor import ModelPredictor
 
 from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector, MarketingEmailReviewer  # noqa: F401
+from .eligibility_checker import EligibilityChecker
 from .context_builder import ApplicationContextBuilder
 from .email_pipeline import EmailPipelineService
 from .human_review_handler import HumanReviewHandler
@@ -119,6 +120,72 @@ class PipelineOrchestrator:
         steps = []
         waterfall = []
         prediction_result = None
+
+        # Policy gate: age at loan maturity must be <= 67 (Alex Bank policy).
+        # Deterministic, runs before any ML scoring to short-circuit on fail.
+        step = self._start_step("eligibility_check")
+        try:
+            eligibility_result = EligibilityChecker().check(application)
+        except Exception as e:
+            step = self._fail_step(step, e)
+            steps.append(step)
+            self._finalize_run(agent_run, steps, start_time, error=str(e))
+            raise
+
+        if not eligibility_result.passed:
+            waterfall.append(
+                self._waterfall_entry(
+                    "eligibility_check",
+                    "fail",
+                    eligibility_result.reason_code or "POLICY_GATE",
+                    eligibility_result.detail or "",
+                )
+            )
+            step = self._complete_step(
+                step,
+                result_summary={
+                    "passed": False,
+                    "reason_code": eligibility_result.reason_code,
+                    "detail": eligibility_result.detail,
+                },
+            )
+            steps.append(step)
+
+            # Record a denied LoanDecision with the reason in the reasoning field.
+            LoanDecision.objects.update_or_create(
+                application=application,
+                defaults={
+                    "decision": "denied",
+                    "confidence": 1.0,
+                    "reasoning": (
+                        f"[{eligibility_result.reason_code}] "
+                        f"{eligibility_result.detail}"
+                    ),
+                },
+            )
+            application.transition_to(
+                "denied",
+                details={
+                    "source": "eligibility_check",
+                    "reason_code": eligibility_result.reason_code,
+                },
+            )
+            self._finalize_run(agent_run, steps, start_time)
+            return agent_run
+
+        waterfall.append(
+            self._waterfall_entry(
+                "eligibility_check",
+                "pass",
+                "POLICY_CLEAR",
+                "Age-at-maturity within policy",
+            )
+        )
+        step = self._complete_step(
+            step,
+            result_summary={"passed": True},
+        )
+        steps.append(step)
 
         # Step 0: Fraud Detection / Velocity Checks
         step = self._start_step("fraud_check")
