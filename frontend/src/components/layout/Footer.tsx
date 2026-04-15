@@ -1,11 +1,13 @@
 import Link from 'next/link';
 
-const LAST_UPDATED_DATE = '2026-04-15';
+const LAST_UPDATED_DATE = '2026-04-16';
 const FALLBACK_ACL = 'DEMO-LENDER-000000';
-const LENDER_NAME = 'Demo Lender Pty Ltd';
+const FALLBACK_ABN = '00 000 000 000';
+const LENDER_NAME = 'AussieLoanAI Pty Ltd';
 
 export function Footer() {
   const acl = process.env.NEXT_PUBLIC_ACL_NUMBER ?? FALLBACK_ACL;
+  const abn = process.env.NEXT_PUBLIC_ABN ?? FALLBACK_ABN;
 
   return (
     <footer
@@ -16,6 +18,7 @@ export function Footer() {
         <p>
           <strong className="text-foreground">{LENDER_NAME}</strong>
           &nbsp;·&nbsp;ACL <span aria-label="Australian Credit Licence number">{acl}</span>
+          &nbsp;·&nbsp;ABN <span aria-label="Australian Business Number">{abn}</span>
         </p>
         <nav aria-label="Legal and regulatory links">
           <ul className="flex flex-wrap gap-x-4 gap-y-1">
