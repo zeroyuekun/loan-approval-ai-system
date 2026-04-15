@@ -42,9 +42,12 @@ describe('<ComparisonRate />', () => {
       />,
     );
     await user.hover(screen.getByText('*'));
-    expect(
-      await screen.findByText(/WARNING: This comparison rate applies only to/i),
-    ).toBeInTheDocument();
+    // Radix Tooltip renders the content in a popper and a visually-hidden
+    // a11y mirror, so findAllByText is the stable assertion here.
+    const matches = await screen.findAllByText(
+      /WARNING: This comparison rate applies only to/i,
+    );
+    expect(matches.length).toBeGreaterThan(0);
   });
 
   it('has no axe violations', async () => {
