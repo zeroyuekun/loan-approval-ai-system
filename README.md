@@ -21,8 +21,6 @@ Open http://localhost:3000. `make demo` seeds an admin user, 100 synthetic appli
 
 <!-- Placeholder — real GIF to be recorded later per docs/media/RECORDING.md -->
 
-**Live demo:** not yet deployed — see [`docs/deployment/README.md`](docs/deployment/README.md) for Vercel + bring-your-own-backend self-host instructions.
-
 ## What this does
 
 Predicts Australian personal and home loan approvals with a calibrated XGBoost model, generates NCCP-compliant decision emails via Claude with guardrails and template fallback, runs bias and fairness checks on every decision, surfaces per-decision SHAP explanations to officers, and escalates flagged cases to a human review queue.
@@ -96,7 +94,6 @@ See the [model cards](docs/model-cards/) and the [benchmark](docs/experiments/be
 │       ├── loans/           Application CRUD, state machine, fraud
 │       └── ml_engine/       Feature engineering, training, prediction, model cards
 ├── frontend/                Next.js 15 App Router + shadcn/ui
-├── deploy/                  Vercel config and deploy assets
 ├── docs/                    ADRs, compliance, experiments, model cards, specs, plans
 ├── reports/                 Research reports (AU lenders, hiring signals, UX patterns)
 ├── workflows/               WAT SOPs
