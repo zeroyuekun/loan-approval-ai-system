@@ -52,7 +52,7 @@ Decision chain, in order: deterministic eligibility gates → calibrated XGBoost
 
 ## AU regulatory posture
 
-- **NCCP 3% serviceability buffer** applied on every affordability assessment (`underwriting_engine.py`)
+- **NCCP 3% serviceability buffer** applied on every affordability assessment (`backend/apps/ml_engine/services/underwriting_engine.py`)
 - **HEM** table from Melbourne Institute 2025/26 with per-state multipliers
 - **APRA DTI ≥6 cap** (formalised Feb-2026) wired as a hard policy lever
 - **ASIC INFO 146** — ACL number, Credit Guide, ADI disclaimer in the `Footer` component; NCCP Sch 1 comparison rate in the `ComparisonRate` component

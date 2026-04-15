@@ -83,4 +83,3 @@ See `docs/security/threat-model.md`. For responsible disclosure, email the maint
 - [`CLAUDE.md`](CLAUDE.md) — AI agent conventions and WAT architecture
 - [`backend/docs/RUNBOOK.md`](backend/docs/RUNBOOK.md) — operations runbook and incident response
 - [`SECURITY.md`](SECURITY.md) — security policy and responsible disclosure
-- [`docs/deployment/README.md`](docs/deployment/README.md) — Vercel + bring-your-own-backend deploy guide

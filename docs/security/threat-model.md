@@ -8,9 +8,9 @@
 
 ```mermaid
 flowchart LR
-  Customer[Customer browser] -->|HTTPS| Frontend[Next.js on Vercel]
+  Customer[Customer browser] -->|HTTPS| Frontend[Next.js frontend]
   Officer[Officer browser] -->|HTTPS| Frontend
-  Frontend -->|HTTPS REST + CSRF| API[Django API on Fly.io]
+  Frontend -->|HTTPS REST + CSRF| API[Django API]
   API -->|SQL| DB[(PostgreSQL)]
   API -->|AMQP| Redis[(Redis / Celery broker)]
   Redis --> Worker[Celery worker]

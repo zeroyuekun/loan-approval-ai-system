@@ -1,7 +1,7 @@
 """Seed the demo environment: admin user, synthetic applicants, Neville Zeng golden fixture.
 
 Idempotent — re-running only creates rows that do not already exist.
-Used by `make demo` and by the Vercel/self-hosted deployment guide.
+Used by `make demo`.
 """
 
 from __future__ import annotations
@@ -100,6 +100,12 @@ class Command(BaseCommand):
             admin.set_password("demo-admin-password")
             admin.save()
             self.stdout.write(self.style.SUCCESS("Created admin user (username=admin)"))
+            self.stdout.write(
+                self.style.WARNING(
+                    "Default demo password is 'demo-admin-password' — "
+                    "change it immediately for any non-local use."
+                )
+            )
         else:
             self.stdout.write("Admin user already exists — skipping")
 

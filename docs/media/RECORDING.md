@@ -15,7 +15,7 @@
 ## Tools
 - **Terminal recording:** `asciinema rec demo.cast`
 - **Browser recording:** OBS Studio (or QuickTime on macOS, Game Bar on Windows)
-- **Combine:** `ffmpeg -i browser.mp4 -vf "fps=10,scale=1280:-1:flags=lanczos" browser.mp4 && ffmpeg -i browser.mp4 -i terminal.mp4 -filter_complex hstack combined.mp4`
+- **Combine:** `ffmpeg -i browser.mp4 -vf "fps=10,scale=1280:-1:flags=lanczos" browser_10fps.mp4 && ffmpeg -i browser_10fps.mp4 -i terminal.mp4 -filter_complex hstack combined.mp4`
 - **GIF export:** `gifski --fps 10 --width 1280 --quality 80 combined.mp4 --output demo.gif`
 - **Final check:** `du -h demo.gif` should be ≤2 MB.
 
