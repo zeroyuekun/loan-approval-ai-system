@@ -12,6 +12,34 @@ from .property_data_service import PropertyDataService
 from .underwriting_engine import UnderwritingEngine
 
 
+# Columns that describe post-approval outcomes, or that directly encode the
+# approval decision. They MUST be excluded from any feature matrix built for
+# model training or ablation — including them gives all models trivially
+# perfect separation (AUC ~= 1.0). Kept here next to the generator that emits
+# them so any future schema change can update this tuple in one place.
+# Consumers: apps.ml_engine.management.commands.run_benchmark,
+#            apps.ml_engine.management.commands.run_ablation
+LABEL_LEAKING_COLUMNS: tuple[str, ...] = (
+    "approval_type",
+    "conditions",
+    "requires_human_review",
+    "n_conditions",
+    "prepayment_buffer_months",
+    "negative_equity_flag",
+    "default_probability",
+    "actual_outcome",
+    "months_to_outcome",
+    "months_on_book",
+    "ever_30dpd",
+    "ever_90dpd",
+    "default_flag",
+    "prepaid_flag",
+    "current_status",
+    "stressed_repayment",
+    "stressed_dsr",
+)
+
+
 class DataGenerator:
     """Creates synthetic loan data calibrated against official Australian sources.
 

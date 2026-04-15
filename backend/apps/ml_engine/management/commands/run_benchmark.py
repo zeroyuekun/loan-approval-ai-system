@@ -14,33 +14,11 @@ from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_s
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from apps.ml_engine.services.data_generator import DataGenerator
+from apps.ml_engine.services.data_generator import DataGenerator, LABEL_LEAKING_COLUMNS
 from apps.ml_engine.services.feature_engineering import compute_derived_features
 
 TAKEAWAY_MARKER_BEGIN = "<!-- BENCHMARK TABLE BEGIN -->"
 TAKEAWAY_MARKER_END = "<!-- BENCHMARK TABLE END -->"
-
-# Columns that describe post-approval outcomes or encode the approval decision
-# directly. These leak the label and must be excluded from benchmark/ablation.
-LABEL_LEAKING_COLUMNS = (
-    "approval_type",
-    "conditions",
-    "requires_human_review",
-    "n_conditions",
-    "prepayment_buffer_months",
-    "negative_equity_flag",
-    "default_probability",
-    "actual_outcome",
-    "months_to_outcome",
-    "months_on_book",
-    "ever_30dpd",
-    "ever_90dpd",
-    "default_flag",
-    "prepaid_flag",
-    "current_status",
-    "stressed_repayment",
-    "stressed_dsr",
-)
 
 
 class Command(BaseCommand):
