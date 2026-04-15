@@ -11,7 +11,7 @@
 | 3 | Collection of solicited personal information | Covered | `apps/loans/models.py`, `apps/accounts/models.py`; purposes documented in `/rights` | None known |
 | 4 | Dealing with unsolicited personal information | Partial | No inbound unsolicited-data channel beyond support email | Policy for destroy/de-identify is not yet formalised |
 | 5 | Notification of collection | Covered | Application flow shows privacy-collection notice at form start; `/rights` details use | Notification at the time of collection relies on the frontend; server-side receipt audit could be stronger |
-| 6 | Use or disclosure of personal information | Covered | `apps/ml_engine.services.pii_masking`, field-level encryption (`FIELD_ENCRYPTION_KEY`) | Disclosure register not yet published as a doc |
+| 6 | Use or disclosure of personal information | Covered | `backend/utils/pii_masking.py`, field-level encryption (`FIELD_ENCRYPTION_KEY`) | Disclosure register not yet published as a doc |
 | 7 | Direct marketing | Covered | `apps/email_engine.services.lifecycle` honours opt-out; `BiasScoreBadge` gates marketing emails | Preference-centre UI not exposed to customers; opt-out is email-link-based only |
 | 8 | Cross-border disclosure | Partial | Infra choices (Fly.io `primary_region=syd`, AU-region Vercel) minimise transfer | Any third-party call (Claude API, credit-bureau stub) crosses borders; documented but no contractual clause list yet |
 | 9 | Adoption, use or disclosure of government related identifiers | Covered | No TFN collected; no Medicare collected; identity verification uses licence/passport per KYC flow | None known |
