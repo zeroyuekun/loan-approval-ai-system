@@ -15,13 +15,8 @@ test.describe('Regulatory surfaces - footer presence', () => {
   }
 });
 
-test.describe('Regulatory surfaces - ComparisonRate on rate display', () => {
-  // Minimal smoke: the RepaymentCalculator is inside /apply/new, which is
-  // behind auth. We assert the component mounts when a rate is displayed.
-  // If the dev harness exposes a public storybook-style preview route in
-  // the future, prefer that; for now we rely on unit tests for behaviour
-  // and this e2e for integration wiring.
-  test.skip('covered by unit tests in PR 2', () => {
-    // Intentionally skipped; see src/__tests__/comparison-rate.test.tsx
-  });
-});
+// ComparisonRate integration is covered by unit tests
+// (src/__tests__/comparison-rate.test.tsx) and by the
+// RepaymentCalculator test suite. An e2e case here would require a
+// public preview route or an authenticated helper to reach /apply/new,
+// which is out of scope for this PR. Revisit when either exists.
