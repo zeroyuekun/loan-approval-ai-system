@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [master, main]
+  # Trigger on PRs regardless of base branch so stacked PRs get CI too.
+  # Jobs gated on `github.ref == 'refs/heads/master'` (DAST, k6, deploy) stay
+  # master-only; the rest run for every PR.
   pull_request:
-    branches: [master, main]
 
 # Force Node.js 24 runtime for all JS actions (gitleaks@v2 has no native Node 24 version)
 env:
