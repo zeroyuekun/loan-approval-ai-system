@@ -21,7 +21,11 @@ describe('<Footer />', () => {
 
   it('shows the ACL number from env', () => {
     render(<Footer />);
-    expect(screen.getByText(/ACL\s*123456/)).toBeInTheDocument();
+    // ACL label and number live in sibling text + span nodes, so we
+    // match on the combined textContent of the paragraph that holds them.
+    const matcher = (_: string, el: Element | null) =>
+      !!el && /ACL\s*123456/.test(el.textContent ?? '');
+    expect(screen.getAllByText(matcher).length).toBeGreaterThan(0);
   });
 
   it('falls back to the demo ACL number when env is unset', () => {
