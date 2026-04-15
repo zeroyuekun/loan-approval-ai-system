@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Calculator, TrendingUp } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
+import { ComparisonRate } from '@/components/finance/ComparisonRate'
 
 interface RepaymentCalculatorProps {
   loanAmount?: number
@@ -118,7 +119,7 @@ export function RepaymentCalculator({
             <p className="text-xs text-muted-foreground">Rate</p>
             <p className="font-semibold text-sm">{effectiveRate.toFixed(2)}% p.a.</p>
             <p className="text-xs text-muted-foreground">
-              Comparison {comparisonRate.toFixed(2)}% p.a.*
+              Comparison {comparisonRate.toFixed(2)}% p.a.
             </p>
           </div>
         </div>
@@ -174,17 +175,21 @@ export function RepaymentCalculator({
           </div>
         </div>
 
+        {/*
+          NCCP Sch 1 comparison-rate surface. RepaymentCalculator stores
+          rates as percentages (e.g. 6.25); ComparisonRate expects fractions.
+        */}
+        <ComparisonRate
+          headlineRate={effectiveRate / 100}
+          comparisonRate={comparisonRate / 100}
+          loanAmount={loanAmount}
+          termYears={Math.round(loanTermMonths / 12)}
+        />
+
         <p className="text-[11px] text-muted-foreground leading-relaxed">
           This estimate is indicative only and does not constitute a loan offer. Actual
           repayments may vary based on the approved rate, fees, and loan structure. Figures
           assume principal and interest repayments over the full loan term.
-        </p>
-        <p className="text-[11px] text-muted-foreground leading-relaxed">
-          *Comparison rate calculated on a $150,000 secured loan over 25 years per
-          National Credit Code Schedule 6. Includes estimated fees. WARNING: This
-          comparison rate applies only to the example given. Different loan amounts and
-          terms will result in different comparison rates. Costs such as redraw fees and
-          early repayment costs are not included.
         </p>
       </CardContent>
     </Card>

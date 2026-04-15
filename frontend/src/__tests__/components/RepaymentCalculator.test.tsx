@@ -7,7 +7,8 @@ describe('RepaymentCalculator', () => {
 
     expect(screen.getByText('Repayment Estimator')).toBeInTheDocument()
     expect(screen.getByText('360 months')).toBeInTheDocument()
-    expect(screen.getByText('6.50% p.a.')).toBeInTheDocument()
+    // Rate appears in the top stat block and in the ComparisonRate surface.
+    expect(screen.getAllByText('6.50% p.a.').length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders with custom props', () => {
@@ -20,7 +21,7 @@ describe('RepaymentCalculator', () => {
     )
 
     expect(screen.getByText('240 months')).toBeInTheDocument()
-    expect(screen.getByText('5.50% p.a.')).toBeInTheDocument()
+    expect(screen.getAllByText('5.50% p.a.').length).toBeGreaterThanOrEqual(1)
   })
 
   it('calculates monthly repayment', () => {
@@ -52,7 +53,7 @@ describe('RepaymentCalculator', () => {
 
     fireEvent.click(screen.getByText('+3%'))
 
-    expect(screen.getByText('9.50% p.a.')).toBeInTheDocument()
+    expect(screen.getAllByText('9.50% p.a.').length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows increase from stress test', () => {
@@ -72,6 +73,11 @@ describe('RepaymentCalculator', () => {
   it('displays comparison rate', () => {
     render(<RepaymentCalculator interestRate={6.5} />)
 
-    expect(screen.getByText(/Comparison.*% p\.a\.\*/)).toBeInTheDocument()
+    // Comparison-rate asterisk disclaimer is now surfaced via the
+    // ComparisonRate component's tooltip, which renders a labelled
+    // trigger in the DOM.
+    expect(
+      screen.getByLabelText(/Comparison rate disclaimer/i),
+    ).toBeInTheDocument()
   })
 })
