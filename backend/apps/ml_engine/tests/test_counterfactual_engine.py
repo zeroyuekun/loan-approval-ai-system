@@ -1,3 +1,5 @@
+import inspect
+
 import numpy as np
 import pandas as pd
 
@@ -108,9 +110,7 @@ class TestCounterfactualEngine:
             ]
         )
         result = engine.generate(approved, original_loan_amount=10000.0)
-
-
-import inspect
+        assert result == []
 
 
 def test_generate_default_timeout_is_20_seconds():
@@ -132,4 +132,3 @@ def test_dice_total_cfs_is_three():
     assert "total_CFs=3" in src or "total_CFs = 3" in src, (
         "DiCE call should use total_CFs=3 after B1 fix"
     )
-        assert result == []
