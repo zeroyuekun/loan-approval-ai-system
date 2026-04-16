@@ -25,15 +25,17 @@ from django.conf import settings
 
 logger = logging.getLogger("agents.api_budget")
 
-# Anthropic pricing per million tokens. Kept stable across 4.x generations
-# (Anthropic has historically not changed per-token pricing on minor releases).
-# Old Claude 4 IDs retained so historical APICallLog records resolve correctly.
+# Anthropic pricing per million tokens. Verified April 2026 against
+# https://platform.claude.com/docs/en/docs/about-claude/models/overview
+# Legacy IDs retained so historical APICallLog records resolve correctly.
 MODEL_PRICING = {
-    # Current (4.6 / 4.5 series)
-    "claude-opus-4-6": {"input": 15.00, "output": 75.00},
+    # Current models
+    "claude-opus-4-7": {"input": 5.00, "output": 25.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
-    "claude-haiku-4-5-20251001": {"input": 0.25, "output": 1.25},
-    # Legacy Claude 4 (May 2025) — kept for historical cost lookups
+    "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00},
+    # Opus 4.6 — still generally available; same per-token pricing as 4.7
+    "claude-opus-4-6": {"input": 5.00, "output": 25.00},
+    # Legacy Claude 4 (May 2025) — deprecated, retiring 2026-06-15
     "claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-20250514": {"input": 0.25, "output": 1.25},
