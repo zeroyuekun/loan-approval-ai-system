@@ -204,7 +204,11 @@ class HumanReviewHandler:
 
         # Finalize — finalize_run sets status to 'completed' internally
         with transaction.atomic():
-            LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+            application.refresh_from_db()
+            application.transition_to(
+                decision,
+                details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
+            )
         self.tracker.finalize_run(agent_run, steps, start_time)
         logger.info("Agent run %s: resumed and completed with decision=%s", agent_run_id, decision)
 
