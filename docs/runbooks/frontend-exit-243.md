@@ -80,3 +80,7 @@ If the container still crash-loops after applying the fix above:
 - Attach to the escalation issue: full `docker compose logs frontend` output (at least 500 lines), `docker inspect frontend` JSON, and `docker stats frontend --no-stream`.
 - Tag the Frontend and Infra owners from `.github/CODEOWNERS`.
 - If production is affected: flip the "maintenance mode" feature flag (once implemented) or route DNS to a static status page.
+
+## Resolved cases
+
+- **2026-04-17** — Root cause: Next.js dev server hit Node's default heap ceiling under `WATCHPACK_POLLING=true`, exiting with code 243. Fix: pin `NODE_OPTIONS=--max-old-space-size=768` and `mem_limit: 1g` on the frontend service in `docker-compose.yml`, and raise `healthcheck.start_period` to 90 s so the first `npm ci && npm run dev` boot doesn't trip the healthcheck. No app code changed.
