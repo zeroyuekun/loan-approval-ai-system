@@ -369,6 +369,11 @@ class LoanDecision(models.Model):
     )
     feature_importances = models.JSONField(default=dict)
     shap_values = models.JSONField(default=dict, blank=True)
+    counterfactual_results = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="DiCE counterfactual explanations for denied applications",
+    )
     decision_waterfall = models.JSONField(
         default=list,
         blank=True,

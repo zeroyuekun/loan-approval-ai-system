@@ -24,6 +24,7 @@ class LoanDecisionSerializer(serializers.ModelSerializer):
             "risk_score",
             "feature_importances",
             "shap_values",
+            "counterfactual_results",
             "decision_waterfall",
             "model_version",
             "model_version_name",
@@ -45,6 +46,7 @@ class LoanDecisionSerializer(serializers.ModelSerializer):
 class CustomerLoanDecisionSerializer(serializers.ModelSerializer):
     denial_reasons = serializers.SerializerMethodField()
     reapplication_guidance = serializers.SerializerMethodField()
+    counterfactuals = serializers.SerializerMethodField()
 
     class Meta:
         model = LoanDecision
@@ -54,16 +56,22 @@ class CustomerLoanDecisionSerializer(serializers.ModelSerializer):
             "created_at",
             "denial_reasons",
             "reapplication_guidance",
+            "counterfactuals",
         )
 
     def get_denial_reasons(self, obj):
         return generate_adverse_action_reasons(obj.shap_values or {}, obj.decision)
 
+    def get_counterfactuals(self, obj):
+        if obj.decision == "denied":
+            return obj.counterfactual_results or []
+        return []
+
     def get_reapplication_guidance(self, obj):
         if obj.decision != "denied":
             return None
         reasons = self.get_denial_reasons(obj)
-        return generate_reapplication_guidance([], reasons)
+        return generate_reapplication_guidance(obj.counterfactual_results or [], reasons)
 
 
 class FraudCheckSerializer(serializers.ModelSerializer):
