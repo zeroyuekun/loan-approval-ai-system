@@ -30,7 +30,7 @@ class AIEmailReviewer:
     """
 
     # Use Opus for the senior reviewer — tougher model, harder to fool
-    MODEL = "claude-opus-4-20250514"
+    MODEL = "claude-opus-4-7"
 
     def __init__(self):
         self.client = _make_anthropic_client()

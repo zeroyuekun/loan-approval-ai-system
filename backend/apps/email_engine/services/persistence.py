@@ -12,7 +12,7 @@ class EmailPersistenceService:
     """
 
     @staticmethod
-    def save_generated_email(application, decision, email_result, model_used="claude-sonnet-4-20250514"):
+    def save_generated_email(application, decision, email_result, model_used="claude-sonnet-4-6"):
         """Persist a generated email with all metadata."""
         return GeneratedEmail.objects.create(
             application=application,

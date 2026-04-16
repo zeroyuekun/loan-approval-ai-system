@@ -167,7 +167,7 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             fallback,
             "LLM bias interpretation",
             "falling back to deterministic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
             messages=[{"role": "user", "content": prompt}],
