@@ -67,9 +67,36 @@ def test_success_resets_failures():
     r.delete.assert_called_once_with("ai_budget:consecutive_failures")
 
 
-def test_redis_down_fails_open():
-    """When Redis is unreachable, check_budget allows the call (fail-open)."""
+def test_redis_down_allows_brief_blip():
+    """When Redis is unreachable, a single check_budget still passes so a
+    Redis blip doesn't immediately kill all traffic."""
+    from apps.agents.services import api_budget
+
+    # Reset the process-local counter so other tests don't leak in
+    api_budget._REDIS_FALLBACK_CALLS = 0
+
     r = MagicMock()
     r.exists.side_effect = ConnectionError("Redis connection refused")
-    # Should not raise
+    # Should not raise (well below the per-process fallback limit)
     _guard(r).check_budget()
+
+
+def test_redis_sustained_outage_fails_closed():
+    """After the per-process fallback limit, check_budget must raise
+    BudgetExhausted to protect the API budget during a Redis outage."""
+    from apps.agents.services import api_budget
+    from apps.agents.services.api_budget import BudgetExhausted
+
+    api_budget._REDIS_FALLBACK_CALLS = 0
+
+    r = MagicMock()
+    r.exists.side_effect = ConnectionError("Redis connection refused")
+    guard = _guard(r)
+
+    # Consume the fallback budget
+    for _ in range(api_budget._REDIS_FALLBACK_LIMIT):
+        guard.check_budget()
+
+    # Next call must raise
+    with pytest.raises(BudgetExhausted):
+        guard.check_budget()

@@ -525,8 +525,18 @@ class ModelPredictor:
         # the training distribution (APRA CPG 235 ongoing monitoring)
         drift_warnings = self._check_feature_drift(features)
 
-        # Use optimal threshold from model version if available
-        threshold = self.model_version.optimal_threshold or 0.5
+        # Use optimal threshold from model version. Falling back to a
+        # hardcoded 0.5 can cause disparate-impact issues because the model
+        # was calibrated against its learned threshold. Warn loudly instead.
+        threshold = self.model_version.optimal_threshold
+        if threshold is None:
+            threshold = 0.5
+            logger.warning(
+                "ModelVersion %s has no optimal_threshold set — falling back to 0.5. "
+                "This may cause calibration drift and disparate-impact risk. "
+                "Re-run validate_model to populate optimal_threshold.",
+                self.model_version.id,
+            )
         probability = round(float(probabilities[1]), 4)
 
         # Per-group fairness threshold (EEOC 80% rule compliance)

@@ -54,6 +54,13 @@ class CircuitOpen(Exception):
     pass
 
 
+# Process-local fallback counter used when Redis is unavailable.
+# Survives for the lifetime of the worker process only, which is acceptable:
+# it caps cost exposure during a Redis outage without blocking traffic entirely.
+_REDIS_FALLBACK_CALLS = 0
+_REDIS_FALLBACK_LIMIT = 20  # calls per process during Redis outage
+
+
 class ApiBudgetGuard:
     """Redis-based daily call counter, dollar tracker, and circuit breaker."""
 
@@ -107,8 +114,25 @@ class ApiBudgetGuard:
         except (BudgetExhausted, CircuitOpen):
             raise
         except Exception as e:
-            # If Redis is down, allow the call (fail-open for availability)
-            logger.warning("Budget check failed (Redis unavailable): %s — allowing call", e)
+            # Redis is unavailable. We can't enforce the true daily budget, but
+            # we MUST still cap cost exposure — fail-open previously allowed
+            # unlimited calls during an outage. Use a per-process fallback
+            # counter so brief blips don't kill availability, but a sustained
+            # Redis outage won't run up the API bill.
+            global _REDIS_FALLBACK_CALLS
+            _REDIS_FALLBACK_CALLS += 1
+            if _REDIS_FALLBACK_CALLS > _REDIS_FALLBACK_LIMIT:
+                raise BudgetExhausted(
+                    f"Redis unavailable and per-process fallback limit reached "
+                    f"({_REDIS_FALLBACK_CALLS}/{_REDIS_FALLBACK_LIMIT}). "
+                    f"Blocking calls until Redis recovers. Reason: {e}"
+                ) from e
+            logger.warning(
+                "Budget check failed (Redis unavailable, %d/%d fallback calls used): %s",
+                _REDIS_FALLBACK_CALLS,
+                _REDIS_FALLBACK_LIMIT,
+                e,
+            )
 
     def record_call(self, input_tokens=0, output_tokens=0, model=""):
         """Increment daily call counter, token usage, and dollar cost."""
