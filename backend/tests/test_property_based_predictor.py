@@ -217,8 +217,14 @@ class TestFeatureBoundsValidation:
     """_validate_input should never crash — it raises ValueError for
     out-of-bounds inputs but never throws an unexpected exception."""
 
+    # Reduced example budget + deadline=None: FEATURE_BOUNDS has ~50 keys
+    # and the test re-builds a mock bundle inside each example, so the
+    # default 200-examples / 200ms deadline hit Hypothesis' health-check
+    # threshold on slower CI runners. 50 examples still covers the bounds
+    # space adequately because the strategy samples a value per key
+    # independently.
     @given(features=_in_bounds_strategy)
-    @settings(max_examples=200)
+    @settings(max_examples=50, deadline=None)
     def test_in_bounds_values_never_raise(self, features):
         """Values within FEATURE_BOUNDS should pass validation."""
         bundle = _make_fake_bundle()
@@ -232,7 +238,7 @@ class TestFeatureBoundsValidation:
             predictor._validate_input(features)
 
     @given(features=_near_bounds_strategy)
-    @settings(max_examples=200)
+    @settings(max_examples=50, deadline=None)
     def test_near_bounds_values_raise_or_pass_cleanly(self, features):
         """Values slightly outside bounds should either pass or raise
         ValueError — never an unexpected exception type."""

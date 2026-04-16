@@ -295,14 +295,10 @@ class TestAustralianFeatures:
         return gen.generate(num_records=3000)
 
     def test_ccr_late_payments_range(self, generated_data):
-        if "num_late_payments_24m" not in generated_data.columns:
-            pytest.skip("CCR features not yet implemented")
         assert generated_data["num_late_payments_24m"].min() >= 0
         assert generated_data["num_late_payments_24m"].max() <= 24
 
     def test_ccr_late_payments_correlated_with_credit(self, generated_data):
-        if "num_late_payments_24m" not in generated_data.columns:
-            pytest.skip("CCR features not yet implemented")
         low = generated_data[generated_data["credit_score"] < 750]["num_late_payments_24m"].mean()
         high = generated_data[generated_data["credit_score"] > 900]["num_late_payments_24m"].mean()
         if np.isnan(low) or np.isnan(high):
@@ -310,27 +306,19 @@ class TestAustralianFeatures:
         assert low > high, f"Low credit ({low:.2f}) should have more late payments than high ({high:.2f})"
 
     def test_worst_arrears_categories(self, generated_data):
-        if "worst_late_payment_days" not in generated_data.columns:
-            pytest.skip("CCR features not yet implemented")
         valid = {0, 14, 30, 60, 90}
         actual = set(generated_data["worst_late_payment_days"].unique())
         assert actual.issubset(valid), f"Invalid arrears: {actual - valid}"
 
     def test_credit_utilization_range(self, generated_data):
-        if "credit_utilization_pct" not in generated_data.columns:
-            pytest.skip("CCR features not yet implemented")
         assert generated_data["credit_utilization_pct"].min() >= 0
         assert generated_data["credit_utilization_pct"].max() <= 1
 
     def test_hardship_flags_rare(self, generated_data):
-        if "num_hardship_flags" not in generated_data.columns:
-            pytest.skip("CCR features not yet implemented")
         rate = (generated_data["num_hardship_flags"] > 0).mean()
         assert rate < 0.15, f"Hardship rate {rate:.1%} too high"
 
     def test_bnpl_limit_correlated_with_accounts(self, generated_data):
-        if "bnpl_total_limit" not in generated_data.columns:
-            pytest.skip("BNPL features not yet implemented")
         # More BNPL accounts should correlate with higher total limits
         low_bnpl = generated_data[generated_data["bnpl_active_count"] <= 1]["bnpl_total_limit"].mean()
         high_bnpl = generated_data[generated_data["bnpl_active_count"] >= 3]["bnpl_total_limit"].mean()
@@ -340,60 +328,42 @@ class TestAustralianFeatures:
             )
 
     def test_bnpl_utilization_range(self, generated_data):
-        if "bnpl_utilization_pct" not in generated_data.columns:
-            pytest.skip("BNPL features not yet implemented")
         assert generated_data["bnpl_utilization_pct"].min() >= 0
         assert generated_data["bnpl_utilization_pct"].max() <= 1
 
     def test_income_source_count_reasonable(self, generated_data):
-        if "income_source_count" not in generated_data.columns:
-            pytest.skip("CDR features not yet implemented")
         assert generated_data["income_source_count"].min() >= 1, "Everyone should have at least 1 income source"
         assert generated_data["income_source_count"].max() <= 10, "Income sources capped at reasonable max"
         mean_sources = generated_data["income_source_count"].mean()
         assert 1.0 <= mean_sources <= 3.0, f"Mean income sources {mean_sources:.1f} outside range"
 
     def test_rent_regularity_nan_for_owners(self, generated_data):
-        if "rent_payment_regularity" not in generated_data.columns:
-            pytest.skip("CDR features not yet implemented")
         owners = generated_data[generated_data["home_ownership"] == "own"]
         if len(owners) > 0:
             nan_rate = owners["rent_payment_regularity"].isna().mean()
             assert nan_rate > 0.8, f"Owners should have NaN rent regularity, got {nan_rate:.1%} NaN"
 
     def test_essential_spend_ratio_range(self, generated_data):
-        if "essential_to_total_spend" not in generated_data.columns:
-            pytest.skip("CDR features not yet implemented")
         assert generated_data["essential_to_total_spend"].min() >= 0.20
         assert generated_data["essential_to_total_spend"].max() <= 0.90
 
     def test_stressed_dsr_positive_for_loans(self, generated_data):
-        if "stressed_dsr" not in generated_data.columns:
-            pytest.skip("APRA stress test not yet implemented")
         with_loan = generated_data[generated_data["loan_amount"] > 0]
         assert with_loan["stressed_dsr"].mean() > 0
 
     def test_stress_index_range(self, generated_data):
-        if "stress_index" not in generated_data.columns:
-            pytest.skip("Stress index not yet implemented")
         assert generated_data["stress_index"].min() >= 0
         assert generated_data["stress_index"].max() <= 100
 
     def test_log_transforms_finite(self, generated_data):
-        if "log_annual_income" not in generated_data.columns:
-            pytest.skip("Log features not yet implemented")
         assert np.all(np.isfinite(generated_data["log_annual_income"]))
         assert np.all(np.isfinite(generated_data["log_loan_amount"]))
 
     def test_postcode_default_rate_range(self, generated_data):
-        if "postcode_default_rate" not in generated_data.columns:
-            pytest.skip("Geographic features not yet implemented")
         assert generated_data["postcode_default_rate"].min() >= 0.001
         assert generated_data["postcode_default_rate"].max() <= 0.06
 
     def test_industry_risk_tier_values(self, generated_data):
-        if "industry_risk_tier" not in generated_data.columns:
-            pytest.skip("Industry risk not yet implemented")
         valid = {"low", "medium", "high", "very_high"}
         actual = set(generated_data["industry_risk_tier"].unique())
         assert actual.issubset(valid)
@@ -500,36 +470,26 @@ class TestOutcomeTracking:
         return gen.generate(num_records=5000)
 
     def test_outcomes_exist_for_approved(self, generated_data):
-        if "actual_outcome" not in generated_data.columns:
-            pytest.skip("Outcome tracking not yet implemented")
         approved = generated_data[generated_data["approved"] == 1]
         assert approved["actual_outcome"].notna().mean() > 0.9, "Most approved loans should have outcomes"
 
     def test_outcomes_null_for_denied(self, generated_data):
-        if "actual_outcome" not in generated_data.columns:
-            pytest.skip()
         denied = generated_data[generated_data["approved"] == 0]
         if len(denied) > 0:
             nan_rate = denied["actual_outcome"].isna().mean()
             assert nan_rate > 0.9, "Denied loans should have no observable outcome"
 
     def test_performing_is_majority(self, generated_data):
-        if "actual_outcome" not in generated_data.columns:
-            pytest.skip()
         approved = generated_data[generated_data["approved"] == 1]
         performing = (approved["actual_outcome"] == "performing").mean()
         assert performing > 0.75, f"Performing rate {performing:.1%} too low (expect >75%)"
 
     def test_default_rate_realistic(self, generated_data):
-        if "actual_outcome" not in generated_data.columns:
-            pytest.skip()
         approved = generated_data[generated_data["approved"] == 1]
         default_rate = (approved["actual_outcome"] == "default").mean()
         assert default_rate < 0.05, f"Default rate {default_rate:.1%} too high (APRA target ~1.5%)"
 
     def test_defaults_correlated_with_credit_score(self, generated_data):
-        if "actual_outcome" not in generated_data.columns:
-            pytest.skip()
         defaults = generated_data[generated_data["actual_outcome"] == "default"]
         performing = generated_data[generated_data["actual_outcome"] == "performing"]
         if len(defaults) > 20 and len(performing) > 50:
@@ -538,8 +498,6 @@ class TestOutcomeTracking:
             )
 
     def test_months_to_outcome_range(self, generated_data):
-        if "months_to_outcome" not in generated_data.columns:
-            pytest.skip()
         approved = generated_data[generated_data["approved"] == 1]
         valid = approved["months_to_outcome"].dropna()
         if len(valid) > 0:
