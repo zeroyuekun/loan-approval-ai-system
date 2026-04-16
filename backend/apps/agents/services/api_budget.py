@@ -19,6 +19,7 @@ Or use the guarded_api_call() wrapper which handles all of the above:
 
 import hashlib
 import logging
+import threading
 
 import redis
 from django.conf import settings
@@ -69,6 +70,7 @@ class CircuitOpen(Exception):
 # it caps cost exposure during a Redis outage without blocking traffic entirely.
 _REDIS_FALLBACK_CALLS = 0
 _REDIS_FALLBACK_LIMIT = 20  # calls per process during Redis outage
+_REDIS_FALLBACK_LOCK = threading.Lock()
 
 
 class ApiBudgetGuard:
@@ -95,6 +97,7 @@ class ApiBudgetGuard:
 
     def check_budget(self):
         """Raise BudgetExhausted if daily limit reached, CircuitOpen if breaker tripped."""
+        global _REDIS_FALLBACK_CALLS
         try:
             r = self._get_redis()
 
@@ -121,6 +124,12 @@ class ApiBudgetGuard:
                 raise BudgetExhausted(
                     f"Daily API call limit reached ({call_count}/{daily_limit}). Resets at midnight UTC."
                 )
+
+            # Happy path — Redis is healthy and under limits.
+            # Reset the process-local fallback counter so a transient outage
+            # does not permanently brick this worker (F-04).
+            with _REDIS_FALLBACK_LOCK:
+                _REDIS_FALLBACK_CALLS = 0
         except (BudgetExhausted, CircuitOpen):
             raise
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
@@ -128,18 +137,21 @@ class ApiBudgetGuard:
             # we MUST still cap cost exposure — fail-open previously allowed
             # unlimited calls during an outage. Use a per-process fallback
             # counter so brief blips don't kill availability, but a sustained
-            # Redis outage won't run up the API bill.
-            global _REDIS_FALLBACK_CALLS
-            _REDIS_FALLBACK_CALLS += 1
-            if _REDIS_FALLBACK_CALLS > _REDIS_FALLBACK_LIMIT:
+            # Redis outage won't run up the API bill. The increment must be
+            # lock-guarded because Celery IO workers run with concurrency > 1
+            # and unlocked += is not atomic on multi-threaded Python.
+            with _REDIS_FALLBACK_LOCK:
+                _REDIS_FALLBACK_CALLS += 1
+                current = _REDIS_FALLBACK_CALLS
+            if current > _REDIS_FALLBACK_LIMIT:
                 raise BudgetExhausted(
                     f"Redis unavailable and per-process fallback limit reached "
-                    f"({_REDIS_FALLBACK_CALLS}/{_REDIS_FALLBACK_LIMIT}). "
+                    f"({current}/{_REDIS_FALLBACK_LIMIT}). "
                     f"Blocking calls until Redis recovers. Reason: {e}"
                 ) from e
             logger.warning(
                 "Budget check failed (Redis unavailable, %d/%d fallback calls used): %s",
-                _REDIS_FALLBACK_CALLS,
+                current,
                 _REDIS_FALLBACK_LIMIT,
                 e,
             )
