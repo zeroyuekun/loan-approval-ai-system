@@ -312,7 +312,7 @@ class EmailGenerator:
             # ~5k tokens each, rapid sequential calls will hit this.
             max_api_retries = 3
             response = None
-            _model = "claude-sonnet-4-20250514"
+            _model = "claude-sonnet-4-6"
             for api_attempt in range(max_api_retries):
                 try:
                     response = guarded_api_call(
@@ -477,7 +477,7 @@ class EmailGenerator:
             return False
         try:
             self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-4-6",
                 max_tokens=1,
                 messages=[{"role": "user", "content": "hi"}],
             )

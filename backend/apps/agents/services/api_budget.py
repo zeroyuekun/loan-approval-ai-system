@@ -9,12 +9,12 @@ Usage:
     budget = ApiBudgetGuard()
     budget.check_budget()  # Raises BudgetExhausted if over limit
     # ... make API call ...
-    budget.record_call(input_tokens=500, output_tokens=200, model='claude-sonnet-4-20250514')
+    budget.record_call(input_tokens=500, output_tokens=200, model='claude-sonnet-4-6')
     budget.record_success()  # or budget.record_failure()
 
 Or use the guarded_api_call() wrapper which handles all of the above:
     from apps.agents.services.api_budget import guarded_api_call
-    response = guarded_api_call(client, model='claude-sonnet-4-20250514', ...)
+    response = guarded_api_call(client, model='claude-sonnet-4-6', ...)
 """
 
 import hashlib
@@ -25,8 +25,15 @@ from django.conf import settings
 
 logger = logging.getLogger("agents.api_budget")
 
-# Anthropic pricing per million tokens (as of 2025-05)
+# Anthropic pricing per million tokens. Kept stable across 4.x generations
+# (Anthropic has historically not changed per-token pricing on minor releases).
+# Old Claude 4 IDs retained so historical APICallLog records resolve correctly.
 MODEL_PRICING = {
+    # Current (4.6 / 4.5 series)
+    "claude-opus-4-6": {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    "claude-haiku-4-5-20251001": {"input": 0.25, "output": 1.25},
+    # Legacy Claude 4 (May 2025) — kept for historical cost lookups
     "claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-20250514": {"input": 0.25, "output": 1.25},

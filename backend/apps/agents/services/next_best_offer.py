@@ -153,7 +153,7 @@ RULES:
 
             response = guarded_api_call(
                 self.client,
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-4-6",
                 max_tokens=1024,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
                 messages=[{"role": "user", "content": prompt}],
@@ -270,7 +270,7 @@ Respond with the marketing message text only, no JSON wrapping."""
         try:
             response = guarded_api_call(
                 self.client,
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-4-6",
                 max_tokens=1024,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
                 messages=[{"role": "user", "content": prompt}],

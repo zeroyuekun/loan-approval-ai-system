@@ -155,7 +155,7 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
             fallback,
             "LLM marketing bias",
             "falling back to deterministic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
             messages=[{"role": "user", "content": prompt}],
@@ -220,7 +220,7 @@ class MarketingEmailReviewer:
     judgment that a pattern-matching system or junior analyst cannot provide.
     """
 
-    MODEL = "claude-opus-4-20250514"
+    MODEL = "claude-opus-4-7"
 
     def __init__(self):
         self.client = _make_anthropic_client()

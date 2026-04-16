@@ -111,7 +111,7 @@ class MarketingEmail(models.Model):
     subject = models.CharField(max_length=200)
     body = models.TextField()
     prompt_used = models.TextField()
-    model_used = models.CharField(max_length=50, default="claude-sonnet-4-20250514")
+    model_used = models.CharField(max_length=50, default="claude-sonnet-4-6")
     generation_time_ms = models.IntegerField(null=True)
     attempt_number = models.IntegerField(default=1)
     passed_guardrails = models.BooleanField(default=False)
