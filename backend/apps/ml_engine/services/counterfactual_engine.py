@@ -120,7 +120,7 @@ class CounterfactualEngine:
         self,
         features_df: pd.DataFrame,
         original_loan_amount: float,
-        timeout_seconds: int = 15,
+        timeout_seconds: int = 20,
     ) -> list[dict]:
         """Return up to 3 counterfactual suggestions for a denied applicant.
 
@@ -224,7 +224,7 @@ class CounterfactualEngine:
 
         cf_result = exp.generate_counterfactuals(
             query,
-            total_CFs=5,
+            total_CFs=3,
             desired_class="opposite",
             features_to_vary=features_to_vary,
             permitted_range=permitted_range,
