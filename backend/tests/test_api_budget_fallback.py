@@ -57,10 +57,19 @@ def test_fallback_counter_resets_after_redis_recovers():
 
 
 def test_fallback_counter_is_thread_safe():
-    """1000 concurrent increments during a simulated Redis outage count to exactly 1000."""
-    guard = ApiBudgetGuard()
+    """1000 concurrent increments during a simulated Redis outage count to exactly 1000.
+
+    Each worker gets its own ApiBudgetGuard so patch.object never races on a
+    shared instance. unittest.mock's enter/exit uses setattr/delattr, and for
+    an attribute that lives on the class (not on vars(instance)), the restore
+    path is a delattr — under concurrent enter/exit on the same instance,
+    this races and can raise AttributeError at exit. The counter we're
+    actually testing lives at module level, so using a fresh guard per call
+    does not weaken the assertion.
+    """
 
     def _one_call():
+        guard = ApiBudgetGuard()
         with patch.object(guard, "_get_redis", side_effect=redis.RedisError("down")):
             try:
                 guard.check_budget()
