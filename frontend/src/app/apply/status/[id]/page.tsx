@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
 import { formatCurrency, formatDate, getDisplayStatus } from '@/lib/utils'
+import DenialExplanationPanel from '@/components/applications/DenialExplanationPanel'
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,
@@ -289,6 +290,16 @@ export default function CustomerApplicationStatusPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Denial Explanation Panel */}
+      {application.status === 'denied' && application.decision && (
+        <DenialExplanationPanel
+          denialReasons={application.decision.denial_reasons || []}
+          counterfactuals={application.decision.counterfactuals || []}
+          reapplicationGuidance={application.decision.reapplication_guidance || null}
+          creditScore={application.credit_score}
+        />
       )}
 
       {/* Application Summary */}
