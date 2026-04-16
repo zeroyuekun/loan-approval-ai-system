@@ -103,7 +103,7 @@ class PipelineOrchestrator:
                 # pipeline the live model expects.
                 transform_fn=predictor._transform,
             )
-            return engine.generate(features_df, original_loan_amount, timeout_seconds=10)
+            return engine.generate(features_df, original_loan_amount)
         except Exception as e:
             logger.warning("Counterfactual generation failed in orchestrator: %s", e)
             return []

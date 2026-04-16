@@ -108,4 +108,28 @@ class TestCounterfactualEngine:
             ]
         )
         result = engine.generate(approved, original_loan_amount=10000.0)
+
+
+import inspect
+
+
+def test_generate_default_timeout_is_20_seconds():
+    """B1: caller/callee timeout mismatch fix — generate() defaults to 20s."""
+    from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+
+    sig = inspect.signature(CounterfactualEngine.generate)
+    param = sig.parameters["timeout_seconds"]
+    assert param.default == 20, (
+        f"generate() default timeout should be 20s after B1 fix; got {param.default}"
+    )
+
+
+def test_dice_total_cfs_is_three():
+    """B1: total_CFs reduced 5→3 to cut DiCE wall time."""
+    from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+
+    src = inspect.getsource(CounterfactualEngine._dice_counterfactuals)
+    assert "total_CFs=3" in src or "total_CFs = 3" in src, (
+        "DiCE call should use total_CFs=3 after B1 fix"
+    )
         assert result == []
