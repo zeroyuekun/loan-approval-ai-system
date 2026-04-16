@@ -110,11 +110,11 @@ Isotonic regression fitted on the held-out validation set (10% of data). The `_C
 
 ### Monotonic Constraints
 
-33 features have enforced monotonic constraints during XGBoost tree construction:
+21 features have enforced monotonic constraints during XGBoost tree construction (see `backend/apps/ml_engine/services/trainer.py::_build_monotonic_constraints`):
 
-- **16 positive** (higher value improves approval): annual_income, credit_score, employment_length, has_cosigner, income_credit_interaction, serviceability_ratio, employment_stability, deposit_ratio, net_monthly_surplus, income_per_dependant, credit_score_x_tenure, credit_history_months, savings_balance, salary_credit_regularity, avg_monthly_savings_rate, document_consistency_score.
-- **17 negative** (higher value worsens approval): debt_to_income, has_bankruptcy, loan_to_income, expense_to_income, credit_card_burden, lvr_x_dti, monthly_repayment_ratio, num_credit_enquiries_6m, worst_arrears_months, num_defaults_5yr, num_bnpl_accounts, num_dishonours_12m, days_in_overdraft_12m, income_verification_gap, enquiry_intensity, bureau_risk_score, rate_stress_buffer.
-- **8 unconstrained**: has_hecs, lvr, total_open_accounts, is_existing_customer, rba_cash_rate, unemployment_rate, property_growth_12m, consumer_confidence.
+- **13 positive** (higher value improves approval): credit_score, annual_income, employment_length, savings_balance, credit_history_months, salary_credit_regularity, income_verification_score, property_value, deposit_amount, has_cosigner, on_time_payment_pct, savings_to_loan_ratio, debt_service_coverage.
+- **8 negative** (higher value worsens approval): debt_to_income, num_defaults_5yr, worst_arrears_months, existing_credit_card_limit, monthly_expenses, num_credit_enquiries_6m, bureau_risk_score, stressed_dsr.
+- **All other features are unconstrained** (the model learns the direction freely, subject to training signal).
 
 `lvr` is intentionally unconstrained because non-home loans have LVR = 0.0, which is semantically "no property collateral" rather than "best possible LVR". `has_hecs` is unconstrained because its effect is income-mediated and not uniformly negative.
 
@@ -229,7 +229,7 @@ at intersections.
 
 ### Adverse Action Reason Codes
 
-20 standardised reason codes (R01 through R20) mapped from SHAP-based feature contributions:
+70 standardised reason codes (R01 through R70) are defined in `backend/apps/ml_engine/services/reason_codes.py`, mapping SHAP-based feature contributions to human-readable explanations. The adverse-action notice surfaces the top 4 by convention (ECOA allows up to 4). A representative subset:
 
 | Code | Feature | Explanation |
 |------|---------|-------------|
@@ -280,9 +280,9 @@ fall within the stable ranking zone. The CFPB Circular 2022-03 is method-agnosti
 it requires "specific and accurate reasons" but does not mandate SHAP.
 
 **References:**
-- arXiv:2508.01851 — "SHAP Stability in Credit Risk Management" (2025).
+- Lin, L., & Wang, Y. (2025). "SHAP Stability in Credit Risk Management: A Case Study in Credit Card Default Model." arXiv:2508.01851.
 - CFPB Circular 2022-03 — consumerfinance.gov/compliance/circulars/circular-2022-03.
-- Mougan et al. (2025). "Evaluating stability of model explanations." arXiv:2509.01409.
+- Ballegeer, M., Bogaert, M., & Benoit, D. F. (2025). "Evaluating the stability of model explanations in instance-dependent cost-sensitive credit scoring." arXiv:2509.01409.
 
 ### Decile Analysis
 
@@ -299,9 +299,10 @@ Predictions are partitioned into 10 deciles by predicted probability. Per-decile
 
 ### Drift Monitoring Limitations
 
-The industry-standard PSI thresholds (0.10 / 0.25) originate from Lewis (1994) and
-have **no statistical foundation** — they are arbitrary industry convention that does
-not account for sample size or number of categories (Yurdakul, 2020; Siddiqi, 2023).
+The industry-standard PSI thresholds (0.10 / 0.25) originate from Lewis, E. M. (1994),
+"An Introduction to Credit Scoring" (Athena Press, London) and have **no statistical
+foundation** — they are arbitrary industry convention that does not account for sample
+size or number of categories (Yurdakul, 2020; Siddiqi, 2023).
 
 This system supplements PSI with Kolmogorov-Smirnov testing (p-value based) and
 Characteristic Stability Index (CSI) per-feature monitoring to provide statistically
@@ -378,7 +379,7 @@ Expected Loss = PD x LGD x EAD, computed per application.
 - **No protected characteristics used as features.** The model does not include age, gender, ethnicity, marital status, or disability as input features.
 - **Fairness metrics monitored** across employment type, applicant type, and geography. Disparate impact ratio must pass the EEOC 80% rule (>= 0.80).
 - **Fairness reweighting** during training equalises group representation, preventing the model from systematically disadvantaging under-represented employment types.
-- **Monotonic constraints** (33 of 48 numeric features) prevent paradoxical outcomes. A higher credit score cannot produce a worse outcome, all else being equal. A bankruptcy flag cannot improve approval chances.
+- **Monotonic constraints** (21 features) prevent paradoxical outcomes. A higher credit score cannot produce a worse outcome, all else being equal. A bankruptcy flag cannot improve approval chances.
 - **Bias detection pipeline** reviews all generated customer communications (denial emails, next best offers) for discriminatory or inappropriate language.
 - **Human-in-the-loop escalation** for low-confidence predictions where |probability - threshold| <= 0.10, and for applications with significant feature drift (z-score > 4.0 from training mean).
 
