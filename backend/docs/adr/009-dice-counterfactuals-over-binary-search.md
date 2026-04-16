@@ -1,4 +1,4 @@
-# ADR 0007: DiCE Counterfactuals over Binary Search
+# ADR 009: DiCE Counterfactuals over Binary Search
 
 ## Status
 
