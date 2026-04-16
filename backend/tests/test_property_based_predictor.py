@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -629,8 +628,10 @@ class TestEdgeCaseFeatures:
         app_type=st.sampled_from(CATEGORICAL_VALUES["applicant_type"]),
         state=st.sampled_from(CATEGORICAL_VALUES["state"]),
     )
-    @settings(max_examples=100)
-    @pytest.mark.skip(reason="flaky on CI, need to investigate")
+    # Reduced from 100 → 30 examples. The test explores ~5 categorical dims
+    # via Hypothesis; 30 is enough for a high-coverage sweep without the
+    # wall-clock cost that originally made it unreliable on CI.
+    @settings(max_examples=30, deadline=None)
     def test_all_categorical_combinations_valid(self, purpose, home, emp, app_type, state):
         """Every combination of categorical values should be handled."""
         features = _build_base_feature_dict()

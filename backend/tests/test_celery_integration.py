@@ -50,13 +50,14 @@ class TestCeleryTaskExecution:
         # Will fail on DB lookup, but serialization succeeded if we get here
         assert result is not None
 
-    @pytest.mark.skip(reason="flaky on CI, need to investigate")
     def test_orchestrate_task_serializes_correctly(self):
         """Verify the orchestrate pipeline task serializes its arguments."""
         from apps.agents.tasks import orchestrate_pipeline_task
 
+        # apply() runs synchronously and exercises serialization. The task
+        # itself will fail inside on DB lookup (app_id=999 doesn't exist)
+        # but that's fine — we're testing the transport layer.
         result = orchestrate_pipeline_task.apply(args=[999])
-        # Will fail on DB lookup, but serialization of args succeeded
         assert result is not None
 
     def test_task_result_is_json_serializable(self):
@@ -104,7 +105,9 @@ class TestCeleryBrokerHealth:
         """Verify we can ping the Celery broker."""
         import redis
 
-        r = redis.Redis(host="localhost", port=6379, db=0, socket_connect_timeout=2)
+        from tests.conftest import _redis_url
+
+        r = redis.Redis.from_url(_redis_url(), socket_connect_timeout=2)
         assert r.ping() is True
 
     def test_celery_app_configured(self):

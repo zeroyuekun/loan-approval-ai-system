@@ -257,12 +257,25 @@ def escalated_agent_run(sample_application, db):
 # ---------------------------------------------------------------------------
 
 
+def _redis_url():
+    """Return the Redis URL to probe, honouring CELERY_BROKER_URL / REDIS_URL.
+
+    Previously hardcoded to ``localhost:6379`` which silently skipped the
+    Celery integration tests inside the backend Docker container (where
+    Redis lives at ``redis:6379``) and in CI that runs pytest inside the
+    app container.
+    """
+    import os
+
+    return os.environ.get("CELERY_BROKER_URL") or os.environ.get("REDIS_URL") or "redis://localhost:6379/0"
+
+
 def _redis_available():
     """Check if Redis broker is reachable."""
     try:
         import redis
 
-        r = redis.Redis(host="localhost", port=6379, db=0, socket_connect_timeout=1)
+        r = redis.Redis.from_url(_redis_url(), socket_connect_timeout=1)
         r.ping()
         return True
     except Exception:
@@ -278,9 +291,10 @@ skip_without_redis = pytest.mark.skipif(
 @pytest.fixture(scope="session")
 def celery_config():
     """Configure Celery for integration testing."""
+    url = _redis_url()
     return {
-        "broker_url": "redis://localhost:6379/0",
-        "result_backend": "redis://localhost:6379/0",
+        "broker_url": url,
+        "result_backend": url,
         "task_always_eager": False,
         "task_eager_propagates": False,
     }
