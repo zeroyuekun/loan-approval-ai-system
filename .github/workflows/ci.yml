@@ -65,7 +65,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend
-        run: pip install -r requirements.txt pytest-cov
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run migrations
         working-directory: backend

@@ -19,8 +19,6 @@ numpy==2.4.3
 joblib==1.5.3
 anthropic==0.85.0
 gunicorn==25.1.0
-pytest==9.0.3
-pytest-django==4.12.0
 python-dotenv==1.2.2
 python-json-logger>=3.2
 httpx>=0.28
@@ -29,9 +27,7 @@ django-prometheus==2.4.1
 sentry-sdk[django,celery]==2.19.2
 drf-spectacular==0.29.0
 django-csp==4.0
-hypothesis>=6.100
 django-otp>=1.5
 qrcode>=8.0
-schemathesis>=3.36
 reportlab>=4.0
 optuna>=4.0
