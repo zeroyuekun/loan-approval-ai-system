@@ -219,7 +219,11 @@ class EmailPipelineService:
             steps.append(step)
 
             with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status=LoanApplication.Status.REVIEW)
+                application.refresh_from_db()
+                application.transition_to(
+                    LoanApplication.Status.REVIEW,
+                    details={"source": "email_pipeline_bias_escalation", "bias_score": bias_score},
+                )
             agent_run.status = "escalated"
             return steps, email_result, generated_email, bias_result, True
 

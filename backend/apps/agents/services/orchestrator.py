@@ -344,7 +344,11 @@ class PipelineOrchestrator:
             step = self._fail_step(step, str(e), failure_category="transient")
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status=LoanApplication.Status.REVIEW)
+                application.refresh_from_db()
+                application.transition_to(
+                    LoanApplication.Status.REVIEW,
+                    details={"source": "orchestrator_ml_prediction_failure", "reason": "transient"},
+                )
             return agent_run
         except Exception as e:
             logger.critical("Application %s: UNEXPECTED failure at ml_prediction: %s", application_id, e, exc_info=True)
@@ -360,7 +364,11 @@ class PipelineOrchestrator:
             step = self._fail_step(step, str(e), failure_category=None)
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
             with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status=LoanApplication.Status.REVIEW)
+                application.refresh_from_db()
+                application.transition_to(
+                    LoanApplication.Status.REVIEW,
+                    details={"source": "orchestrator_ml_prediction_failure", "reason": "unexpected"},
+                )
             return agent_run
 
         steps.append(step)
@@ -421,7 +429,11 @@ class PipelineOrchestrator:
             error_msg = last_step.get("error", "Email generation failed")
             self._finalize_run(agent_run, steps, start_time, error=error_msg)
             with transaction.atomic():
-                LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+                application.refresh_from_db()
+                application.transition_to(
+                    decision,
+                    details={"source": "orchestrator_email_pipeline_failure"},
+                )
             return agent_run
 
         # Step 5: NBO + Marketing pipeline (if denied)
@@ -464,7 +476,11 @@ class PipelineOrchestrator:
         self._save_waterfall(application, waterfall)
 
         with transaction.atomic():
-            LoanApplication.objects.filter(pk=application.pk).update(status=decision)
+            application.refresh_from_db()
+            application.transition_to(
+                decision,
+                details={"source": "orchestrator_final_decision"},
+            )
         agent_run.status = "completed"
         self._finalize_run(agent_run, steps, start_time)
         logger.info(
