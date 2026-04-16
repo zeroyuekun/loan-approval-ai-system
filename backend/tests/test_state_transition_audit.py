@@ -74,7 +74,7 @@ def test_orchestrator_ml_failure_writes_transition_auditlog(pending_application)
         resource_type="LoanApplication",
         resource_id=str(pending_application.id),
         action="status_transition",
-    ).order_by("created_at")
+    ).order_by("timestamp")
     # Expected: pending→processing (line 141) + processing→review (ML fail handler) = 2
     new_count = new_transitions.count() - baseline_transitions
     assert new_count == 2, (
