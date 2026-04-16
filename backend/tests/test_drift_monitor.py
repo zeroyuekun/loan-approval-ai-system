@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 
 class TestPSIComputation:
@@ -47,7 +46,6 @@ class TestPSIComputation:
         psi = compute_psi([1, 2, 3], [])
         assert psi == 0.0
 
-    @pytest.mark.skip(reason="flaky on CI, need to investigate")
     def test_psi_symmetric_approximately(self):
         """PSI should be roughly symmetric (not exactly due to binning)."""
         from apps.ml_engine.services.drift_monitor import compute_psi

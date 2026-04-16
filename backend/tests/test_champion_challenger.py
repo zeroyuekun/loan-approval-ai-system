@@ -45,8 +45,15 @@ class TestModelSelector:
         with pytest.raises(ValueError, match="No active model"):
             select_model_version()
 
-    @pytest.mark.skip(reason="flaky on CI, need to investigate")
     def test_weighted_distribution_approximate(self):
+        # Seed stdlib random so the 1,000-sample distribution check is
+        # deterministic. Without this the test was "flaky" only because the
+        # unseeded RNG could occasionally drift a champion-split just outside
+        # the [0.55, 0.85] tolerance band over a 1,000-trial Monte Carlo.
+        import random as _r
+
+        _r.seed(42)
+
         mv1 = _create_model_version(True, version="champ_v1", traffic_percentage=70)
         _create_model_version(True, version="chall_v1", traffic_percentage=30)
 
