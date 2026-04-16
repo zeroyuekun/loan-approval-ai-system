@@ -46,8 +46,10 @@ class EmailGenerator:
         else:
             self.client = None
         self.guardrail_checker = GuardrailChecker()
-        self._consecutive_failures = 0
-        self._circuit_open_until = 0
+        # Circuit breaker lives in ApiBudgetGuard (Redis-backed). The previous
+        # per-instance breaker here duplicated that state and did not reset
+        # the failure counter after cooldown expired — a buggy shadow of the
+        # real one. All breaker logic now flows through guarded_api_call.
 
     # Map ML feature names to plain-language denial reasons
     DENIAL_REASON_MAP = {
@@ -281,10 +283,6 @@ class EmailGenerator:
                     "use simpler language and stick to the exact template structure.\n"
                 )
 
-        # Check circuit breaker — fallback to template if API is down
-        if self._consecutive_failures >= 3 and time.time() < self._circuit_open_until:
-            return self._generate_fallback(application, decision, context, start_time)
-
         # Pre-flight: detect billing/auth errors immediately so the pipeline
         # completes end-to-end using templates rather than failing at this step.
         if attempt == 1 and not self._api_available():
@@ -344,7 +342,6 @@ class EmailGenerator:
                     else:
                         raise  # Final attempt — propagate to outer handler
 
-            self._consecutive_failures = 0
             # Read actual token usage from the response
             usage = getattr(response, "usage", None)
             if usage:
@@ -352,11 +349,8 @@ class EmailGenerator:
                 output_tokens = getattr(usage, "output_tokens", 0)
         except BudgetExhausted:
             return self._generate_fallback(application, decision, context, start_time)
-        except Exception:
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= 3:
-                self._circuit_open_until = time.time() + 600  # 10 min cooldown
-            raise
+        # Failure accounting (record_failure, circuit-breaker tripping) happens
+        # inside guarded_api_call. Any exception here propagates to the caller.
 
         # Extract structured output from tool_use response
         subject, body = self._parse_tool_response(response)

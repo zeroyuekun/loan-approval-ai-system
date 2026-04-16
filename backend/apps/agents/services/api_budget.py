@@ -20,6 +20,7 @@ Or use the guarded_api_call() wrapper which handles all of the above:
 import hashlib
 import logging
 
+import redis
 from django.conf import settings
 
 logger = logging.getLogger("agents.api_budget")
@@ -113,7 +114,7 @@ class ApiBudgetGuard:
                 )
         except (BudgetExhausted, CircuitOpen):
             raise
-        except Exception as e:
+        except (redis.RedisError, ConnectionError, TimeoutError) as e:
             # Redis is unavailable. We can't enforce the true daily budget, but
             # we MUST still cap cost exposure — fail-open previously allowed
             # unlimited calls during an outage. Use a per-process fallback
@@ -164,16 +165,16 @@ class ApiBudgetGuard:
                 model or "unknown",
                 cost_usd,
             )
-        except Exception as e:
-            logger.warning("Failed to record API call: %s", e)
+        except (redis.RedisError, ConnectionError, TimeoutError) as e:
+            logger.warning("Failed to record API call (Redis): %s", e)
 
     def record_success(self):
         """Reset consecutive failure counter on success."""
         try:
             r = self._get_redis()
             r.delete("ai_budget:consecutive_failures")
-        except Exception as e:
-            logger.debug("Failed to reset failure counter: %s", e)
+        except (redis.RedisError, ConnectionError, TimeoutError) as e:
+            logger.debug("Failed to reset failure counter (Redis): %s", e)
 
     def record_failure(self):
         """Increment consecutive failure counter. Trip circuit breaker after threshold."""
@@ -193,8 +194,8 @@ class ApiBudgetGuard:
                     failures,
                     cooldown_seconds,
                 )
-        except Exception as e:
-            logger.warning("Failed to record API failure: %s", e)
+        except (redis.RedisError, ConnectionError, TimeoutError) as e:
+            logger.warning("Failed to record API failure (Redis): %s", e)
 
     def get_daily_stats(self):
         """Return current daily usage stats."""
@@ -209,8 +210,8 @@ class ApiBudgetGuard:
                 "call_limit": getattr(settings, "AI_DAILY_CALL_LIMIT", 500),
                 "circuit_breaker_open": bool(r.exists("ai_budget:circuit_breaker")),
             }
-        except Exception as e:
-            logger.debug("Failed to fetch daily stats from Redis: %s", e)
+        except (redis.RedisError, ConnectionError, TimeoutError) as e:
+            logger.debug("Failed to fetch daily stats (Redis): %s", e)
             return {
                 "calls": 0,
                 "tokens": 0,
