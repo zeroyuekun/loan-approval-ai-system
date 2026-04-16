@@ -280,9 +280,9 @@ fall within the stable ranking zone. The CFPB Circular 2022-03 is method-agnosti
 it requires "specific and accurate reasons" but does not mandate SHAP.
 
 **References:**
-- arXiv:2508.01851 — "SHAP Stability in Credit Risk Management" (2025).
+- Lin, L., & Wang, Y. (2025). "SHAP Stability in Credit Risk Management: A Case Study in Credit Card Default Model." arXiv:2508.01851.
 - CFPB Circular 2022-03 — consumerfinance.gov/compliance/circulars/circular-2022-03.
-- Mougan et al. (2025). "Evaluating stability of model explanations." arXiv:2509.01409.
+- Ballegeer, M., Bogaert, M., & Benoit, D. F. (2025). "Evaluating the stability of model explanations in instance-dependent cost-sensitive credit scoring." arXiv:2509.01409.
 
 ### Decile Analysis
 
@@ -299,9 +299,10 @@ Predictions are partitioned into 10 deciles by predicted probability. Per-decile
 
 ### Drift Monitoring Limitations
 
-The industry-standard PSI thresholds (0.10 / 0.25) originate from Lewis (1994) and
-have **no statistical foundation** — they are arbitrary industry convention that does
-not account for sample size or number of categories (Yurdakul, 2020; Siddiqi, 2023).
+The industry-standard PSI thresholds (0.10 / 0.25) originate from Lewis, E. M. (1994),
+"An Introduction to Credit Scoring" (Athena Press, London) and have **no statistical
+foundation** — they are arbitrary industry convention that does not account for sample
+size or number of categories (Yurdakul, 2020; Siddiqi, 2023).
 
 This system supplements PSI with Kolmogorov-Smirnov testing (p-value based) and
 Characteristic Stability Index (CSI) per-feature monitoring to provide statistically
