@@ -579,6 +579,8 @@ class ModelPredictor:
             "expected_loss": expected_loss,
             "stress_test": stress_results,
             "confidence_interval": confidence_interval,
+            # Raw (pre-transform) features for downstream counterfactual generation
+            "_features_df": features_df,
         }
 
         # Generate counterfactual explanations for denied applications

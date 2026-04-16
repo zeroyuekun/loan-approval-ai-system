@@ -10,6 +10,7 @@ from apps.agents.models import AgentRun
 from apps.loans.models import FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
+from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
 from apps.ml_engine.services.predictor import ModelPredictor
 
 from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector, MarketingEmailReviewer  # noqa: F401
@@ -72,6 +73,36 @@ class PipelineOrchestrator:
 
     def _run_marketing_bias_check(self, email_result_marketing, application, agent_run, steps):
         return self._marketing_pipeline.check_bias(email_result_marketing, application, agent_run, steps)
+
+    # ------------------------------------------------------------------
+    # Counterfactual generation (denied applications only)
+    # ------------------------------------------------------------------
+
+    def _run_counterfactual_step(self, prediction_result, predictor, original_loan_amount):
+        """Generate DiCE counterfactual explanations for denied applications.
+
+        Returns a list of counterfactual dicts, or [] if prediction is not
+        denied or if generation fails.
+        """
+        if prediction_result.get("prediction") != "denied":
+            return []
+
+        try:
+            features_df = prediction_result.get("_features_df")
+            if features_df is None:
+                logger.warning("Counterfactual step: no _features_df in prediction result")
+                return []
+
+            engine = CounterfactualEngine(
+                model=predictor.model,
+                feature_cols=predictor.feature_cols,
+                training_data=features_df,
+                threshold=predictor.model_version.optimal_threshold or 0.5,
+            )
+            return engine.generate(features_df, original_loan_amount, timeout_seconds=10)
+        except Exception as e:
+            logger.warning("Counterfactual generation failed in orchestrator: %s", e)
+            return []
 
     # ------------------------------------------------------------------
     # Main orchestration
@@ -330,6 +361,39 @@ class PipelineOrchestrator:
 
         steps.append(step)
         decision = prediction_result["prediction"]  # 'approved' or 'denied'
+
+        # Step 1b: Counterfactual generation (denied applications only)
+        if decision == "denied":
+            step = self._start_step("counterfactual_generation")
+            try:
+                cf_results = self._run_counterfactual_step(
+                    prediction_result,
+                    predictor,
+                    float(application.loan_amount),
+                )
+                # Persist counterfactuals on the LoanDecision
+                loan_decision = LoanDecision.objects.filter(application=application).first()
+                if loan_decision and cf_results:
+                    loan_decision.counterfactual_results = cf_results
+                    loan_decision.save(update_fields=["counterfactual_results"])
+
+                step = self._complete_step(
+                    step,
+                    result_summary={"count": len(cf_results)},
+                )
+                logger.info(
+                    "Application %s: generated %d counterfactual(s)",
+                    application_id,
+                    len(cf_results),
+                )
+            except Exception as e:
+                logger.warning(
+                    "Application %s: counterfactual generation failed: %s",
+                    application_id,
+                    e,
+                )
+                step = self._fail_step(step, str(e))
+            steps.append(step)
 
         # Steps 2-4: Email generation, bias check, delivery (delegated)
         steps, email_result, generated_email, bias_result, escalated = self._email_pipeline.run(
