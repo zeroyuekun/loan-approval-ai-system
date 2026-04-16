@@ -1,0 +1,11 @@
+# CODEOWNERS — default reviewer for all paths
+# GitHub user: zeroyuekun (Neville Zeng)
+
+*                               @zeroyuekun
+
+# Specific areas (future contributors can be added here)
+/backend/apps/ml_engine/        @zeroyuekun
+/backend/apps/email_engine/     @zeroyuekun
+/backend/apps/agents/           @zeroyuekun
+/frontend/                      @zeroyuekun
+/.github/                       @zeroyuekun
