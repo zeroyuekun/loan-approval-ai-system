@@ -34,12 +34,20 @@ class EmailPipelineService:
         # Inject counterfactual statements into profile_context for denial emails.
         # These are deterministic strings already produced by the orchestrator's
         # counterfactual_generation step — no new Claude API call.
-        decision_obj = getattr(application, "decision", None)
-        if decision == "denied" and decision_obj is not None:
-            cf_results = getattr(decision_obj, "counterfactual_results", None) or []
-            cf_statements = [cf["statement"] for cf in cf_results if isinstance(cf, dict) and cf.get("statement")]
-            if cf_statements:
-                profile_context = {**(profile_context or {}), "counterfactual_statements": cf_statements}
+        # IMPORTANT: the reverse OneToOne relation may be cached on `application`
+        # from earlier in the orchestrator flow. Refresh from DB so we pick up
+        # the counterfactual_results saved by the CF step.
+        if decision == "denied":
+            from apps.loans.models import LoanDecision
+            try:
+                decision_obj = LoanDecision.objects.get(application=application)
+            except LoanDecision.DoesNotExist:
+                decision_obj = None
+            if decision_obj is not None:
+                cf_results = decision_obj.counterfactual_results or []
+                cf_statements = [cf["statement"] for cf in cf_results if isinstance(cf, dict) and cf.get("statement")]
+                if cf_statements:
+                    profile_context = {**(profile_context or {}), "counterfactual_statements": cf_statements}
 
         # Step 2: Generate Email
         step = self.tracker.start_step("email_generation")

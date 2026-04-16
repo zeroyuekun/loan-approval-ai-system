@@ -24,6 +24,7 @@ class LoanDecisionSerializer(serializers.ModelSerializer):
             "risk_score",
             "feature_importances",
             "shap_values",
+            "counterfactual_results",
             "decision_waterfall",
             "model_version",
             "model_version_name",

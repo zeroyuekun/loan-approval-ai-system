@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
 import { formatCurrency, formatDate, getDisplayStatus } from '@/lib/utils'
-import DenialExplanationPanel from '@/components/applications/DenialExplanationPanel'
+import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,

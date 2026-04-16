@@ -121,21 +121,66 @@ class CounterfactualEngine:
     # DiCE approach
     # ------------------------------------------------------------------
 
+    def _build_dice_dataset(self, features_df: pd.DataFrame) -> pd.DataFrame:
+        """Return a training-like dataset DiCE can use to estimate feature
+        distributions.
+
+        If ``self.training_data`` already has enough rows (>= 50), use it with
+        an appended ``_dice_outcome`` column. Otherwise synthesise 200 rows
+        around the query by perturbing ``features_df`` and scoring with the
+        live model — DiCE only needs the distribution, not ground-truth labels.
+        """
+        import numpy as np
+
+        if self.training_data is not None and len(self.training_data) >= 50:
+            df = self.training_data[self.feature_cols].copy()
+        else:
+            rng = np.random.default_rng(42)
+            base = features_df[self.feature_cols].iloc[0]
+            rows: list[dict] = []
+            for _ in range(200):
+                row: dict = {}
+                for col in self.feature_cols:
+                    val = base[col]
+                    if col == "has_cosigner":
+                        row[col] = int(rng.integers(0, 2))
+                    elif col == "loan_term_months":
+                        row[col] = int(rng.choice([12, 24, 36, 48, 60]))
+                    elif isinstance(val, (int, float, np.integer, np.floating)):
+                        # ±50% jitter around the current value; clamp to >= 0
+                        jitter = rng.uniform(0.5, 1.5)
+                        row[col] = max(0.0, float(val) * jitter)
+                    else:
+                        row[col] = val
+                rows.append(row)
+            df = pd.DataFrame(rows)
+
+        # Label rows with the model's prediction so DiCE sees both classes.
+        probs = self.model.predict_proba(df[self.feature_cols])[:, 1]
+        df = df.copy()
+        df["_dice_outcome"] = (probs >= self.threshold).astype(int)
+        return df
+
     def _dice_counterfactuals(
         self, features_df: pd.DataFrame, original_loan_amount: float
     ) -> list[dict]:
         import dice_ml
 
-        # Build DiCE data object
+        # DiCE's Data object needs a distribution with an outcome column.
+        # If training_data is too small (e.g. a single applicant row passed
+        # from the orchestrator), synthesise one by perturbing the query.
+        dice_df = self._build_dice_dataset(features_df)
+
+        continuous_features = [
+            c for c in self.feature_cols if c != "has_cosigner"
+        ]
+
         d = dice_ml.Data(
-            dataframe=self.training_data,
-            continuous_features=[
-                c for c in self.feature_cols if c != "has_cosigner"
-            ],
-            outcome_name=None,  # no outcome column in training_data
+            dataframe=dice_df,
+            continuous_features=continuous_features,
+            outcome_name="_dice_outcome",
         )
 
-        # Build DiCE model wrapper
         m = dice_ml.Model(model=self.model, backend="sklearn")
 
         exp = dice_ml.Dice(d, m, method="genetic")
