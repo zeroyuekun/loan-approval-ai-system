@@ -31,33 +31,30 @@ Full-stack loan approval system built for Australian lending. ML scores applican
 
 ## How the pipeline works
 
-```
-Application submitted
-    |
-    v
-[1] XGBoost scores it --> probability + SHAP feature importances
-    |
-    v
-[2] Claude writes the email --> approval or denial letter
-    |
-    v
-[3] Guardrails check the email --> 15 deterministic checks
-    |
-    v
-[4] Bias pre-screen (regex) --> scores 0-100
-    |
-    |-- score <= 60: pass, send the email
-    |-- score 60-80: Claude reviews the flags
-    |       \-- confidence < 0.70? escalate to human
-    \-- score > 80: straight to human review
-    |
-    v
-[5] Email sends (or gets held)
-    |
-    v
-[6] If denied --> NBO engine generates alternative offers
-    v
-[7] Status updates, frontend picks it up on next poll
+```mermaid
+flowchart TD
+    A[Application submitted] --> B[1. XGBoost scores it]
+    B --> B1[probability + SHAP]
+    B1 --> C[2. Claude writes the email]
+    C --> D[3. Guardrails — 15 deterministic checks]
+    D --> E[4. Bias pre-screen regex<br/>score 0–100]
+    E -- "score ≤ 60" --> F[Send the email]
+    E -- "60–80" --> G[Claude reviews flags]
+    G -- "confidence &lt; 0.70" --> H[Human review]
+    G -- "confidence ≥ 0.70" --> F
+    E -- "score &gt; 80" --> H
+    F --> I[5. Email sends]
+    I --> J{Denied?}
+    J -- yes --> K[6. NBO — alternative offers]
+    J -- no --> L[7. Frontend polls status]
+    K --> L
+
+    classDef primary fill:#1e40af,color:#fff,stroke:#1e3a8a
+    classDef review fill:#dc2626,color:#fff,stroke:#991b1b
+    classDef ok fill:#059669,color:#fff,stroke:#065f46
+    class A,B,C,I primary
+    class H review
+    class F,L ok
 ```
 
 Failed steps put the application into "review" with a log of where it broke. Stuck pipelines auto-recover after 5 minutes.
@@ -71,6 +68,27 @@ Failed steps put the application into "review" with a log of where it broke. Stu
 | ML | scikit-learn, XGBoost, SHAP, Optuna |
 | AI | Claude API (Sonnet for generation, Opus for compliance review) |
 | Infra | Docker Compose, 7 containers, separate ML and IO Celery workers |
+
+## Run locally in 60 seconds
+
+Prereqs: Docker Desktop (or Docker Engine + Compose v2), ~4 GB free RAM, an Anthropic API key.
+
+```bash
+git clone https://github.com/zeroyuekun/loan-approval-ai-system.git
+cd loan-approval-ai-system
+cp .env.example .env      # add ANTHROPIC_API_KEY
+docker compose up -d      # backend, frontend, db, redis, ml + io workers
+docker compose exec backend bash scripts/init_db.sh
+docker compose exec backend bash scripts/seed_data.sh
+```
+
+Then:
+
+- Dashboard → [http://localhost:3000](http://localhost:3000) — default login `admin` / `admin1234`
+- API docs → [http://localhost:8000/api/schema/swagger-ui/](http://localhost:8000/api/schema/swagger-ui/)
+- Tests → `docker compose exec backend pytest tests/ -v`
+
+Something broken? See [runbooks](docs/runbooks/).
 
 ## Project layout
 
@@ -132,24 +150,8 @@ Every email Claude generates goes through 10 checks before sending:
 
 Three regeneration attempts, then human review.
 
-## Running it
+## Retraining the model
 
-Requires Docker and an Anthropic API key.
-
-```bash
-git clone <repo-url>
-cd loan-approval-ai-system
-cp .env.example .env
-# add your ANTHROPIC_API_KEY to .env
-
-docker compose up -d
-docker compose exec backend bash scripts/init_db.sh
-docker compose exec backend bash scripts/seed_data.sh
-```
-
-Frontend at `localhost:3000`. Default login: `admin` / `admin1234`
-
-To retrain:
 ```bash
 docker compose exec backend python manage.py generate_data --num-records 10000 --output .tmp/synthetic_loans.csv
 docker compose exec backend python manage.py train_model --algorithm xgb --data-path .tmp/synthetic_loans.csv
