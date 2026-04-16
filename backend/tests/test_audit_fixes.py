@@ -2,11 +2,10 @@
 
 Covers:
 - Token refresh returns 401 (not 500) when the token's user has been deleted
-- ApiBudgetGuard raises BudgetExhausted (not fail-open) after N consecutive
-  Redis failures within a single process
-"""
 
-from unittest.mock import patch
+The ApiBudgetGuard fail-closed behaviour is tested alongside the other
+budget-guard scenarios in test_api_budget.py.
+"""
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
@@ -51,38 +50,3 @@ class DeletedUserTokenRefreshTests(TestCase):
         # Previously returned 500 due to unhandled User.DoesNotExist.
         # Now the view re-raises as TokenError and returns 401.
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
-
-
-class ApiBudgetRedisFailClosedTests(TestCase):
-    """Regression: previously failed open on Redis errors, allowing unbounded
-    API spend during Redis outages."""
-
-    def _guard(self):
-        from apps.agents.services import api_budget
-
-        # Reset the process-local counter between tests
-        api_budget._REDIS_FALLBACK_CALLS = 0
-        return api_budget.ApiBudgetGuard()
-
-    def test_brief_redis_blip_still_allows_calls(self):
-        """Less than fallback limit of Redis failures should not raise."""
-        from apps.agents.services import api_budget
-
-        guard = self._guard()
-        with patch.object(guard, "_get_redis", side_effect=ConnectionError("redis down")):
-            for _ in range(api_budget._REDIS_FALLBACK_LIMIT):
-                guard.check_budget()  # must not raise
-
-    def test_sustained_redis_outage_raises_budget_exhausted(self):
-        """After the fallback limit, check_budget must fail closed."""
-        from apps.agents.services import api_budget
-        from apps.agents.services.api_budget import BudgetExhausted
-
-        guard = self._guard()
-        with patch.object(guard, "_get_redis", side_effect=ConnectionError("redis down")):
-            # Consume the fallback budget
-            for _ in range(api_budget._REDIS_FALLBACK_LIMIT):
-                guard.check_budget()
-            # Next call must raise — this is the behaviour change
-            with self.assertRaises(BudgetExhausted):
-                guard.check_budget()
