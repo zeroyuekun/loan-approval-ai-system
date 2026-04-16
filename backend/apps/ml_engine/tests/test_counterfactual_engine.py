@@ -1,7 +1,5 @@
-import pytest
 import numpy as np
 import pandas as pd
-from unittest.mock import patch, MagicMock
 
 from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
 

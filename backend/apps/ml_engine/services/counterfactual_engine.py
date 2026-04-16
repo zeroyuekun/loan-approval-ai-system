@@ -130,7 +130,6 @@ class CounterfactualEngine:
         around the query by perturbing ``features_df`` and scoring with the
         live model — DiCE only needs the distribution, not ground-truth labels.
         """
-        import numpy as np
 
         if self.training_data is not None and len(self.training_data) >= 50:
             df = self.training_data[self.feature_cols].copy()

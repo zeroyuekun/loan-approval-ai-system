@@ -10,7 +10,6 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
 
 @patch("apps.agents.services.orchestrator.CounterfactualEngine")
