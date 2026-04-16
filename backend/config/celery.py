@@ -44,6 +44,27 @@ def _clear_correlation_id(**kwargs):
     _correlation_id.value = None
 
 
+# --- Worker tuning (B2) -----------------------------------------------------
+# Prefer fair dispatch + at-least-once semantics over raw throughput.
+# Per-queue prefetch is configured on the worker command line in
+# docker-compose (ml=1, agents=1, email=2). This is the safe global default.
+app.conf.worker_prefetch_multiplier = 2
+
+# Acknowledge tasks only after successful execution; if a worker dies
+# mid-task, the broker re-delivers to another worker.
+app.conf.task_acks_late = True
+app.conf.task_reject_on_worker_lost = True
+
+# Pin JSON for task payloads + results. Safer than the default serialiser
+# and easier to inspect in Flower / logs.
+app.conf.task_serializer = "json"
+app.conf.result_serializer = "json"
+app.conf.accept_content = ["json"]
+
+# Worker restart every N tasks to mitigate memory leaks (common with
+# ML worker processes importing large libs).
+app.conf.worker_max_tasks_per_child = 1000
+
 app.conf.task_routes = {
     "apps.ml_engine.tasks.*": {"queue": "ml"},
     "apps.email_engine.tasks.*": {"queue": "email"},
