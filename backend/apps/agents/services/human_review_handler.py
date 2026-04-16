@@ -28,13 +28,13 @@ class HumanReviewHandler:
         logger.info("Resuming agent run %s after human review", agent_run_id)
 
         with transaction.atomic():
+            # `application.decision` is a nullable OneToOne. Including it in a
+            # select_related alongside select_for_update produces a LEFT JOIN
+            # that Postgres refuses to lock ("FOR UPDATE cannot be applied to
+            # the nullable side of an outer join"). Fetch decision separately
+            # below.
             agent_run = (
-                AgentRun.objects.select_for_update()
-                .select_related(
-                    "application__applicant",
-                    "application__decision",
-                )
-                .get(pk=agent_run_id)
+                AgentRun.objects.select_for_update().select_related("application__applicant").get(pk=agent_run_id)
             )
 
             if agent_run.status != "escalated":
