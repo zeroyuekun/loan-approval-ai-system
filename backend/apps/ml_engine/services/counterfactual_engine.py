@@ -68,12 +68,23 @@ class CounterfactualEngine:
     ----------
     model : sklearn-compatible classifier with ``predict_proba``
     feature_cols : list[str]
-        Ordered feature column names the model was trained on.
+        Ordered feature column names the *model* was trained on. In production
+        these are the fully-transformed columns (one-hot + engineered
+        interactions), not the raw applicant input fields.
     training_data : pd.DataFrame
-        Representative sample of training data (used by DiCE for ranges).
+        Representative sample used by DiCE for range estimation. Treated as
+        *raw* (pre-transform) features — the engine applies ``transform_fn``
+        before handing rows to the model.
     threshold : float
         Probability threshold above which the model considers an application
         approved.  Defaults to 0.5.
+    transform_fn : callable, optional
+        Function mapping a raw-features DataFrame to the model's feature
+        space (one-hot, scaling, engineered interactions). Defaults to
+        identity, which is fine for unit tests that use a model trained
+        directly on raw columns but wrong in production — the orchestrator
+        MUST pass ``predictor._transform`` so candidate values are scored
+        through the same pipeline as live predictions.
     """
 
     def __init__(
@@ -82,11 +93,24 @@ class CounterfactualEngine:
         feature_cols: list[str],
         training_data: pd.DataFrame,
         threshold: float = 0.5,
+        transform_fn: Any = None,
     ) -> None:
         self.model = model
         self.feature_cols = feature_cols
         self.training_data = training_data.copy()
         self.threshold = threshold
+        self._transform_fn = transform_fn
+
+    def _predict_prob(self, raw_df: pd.DataFrame) -> float:
+        """Predict approval probability for a single raw-features row.
+
+        Applies ``transform_fn`` (if provided) before calling ``predict_proba``.
+        """
+        if self._transform_fn is not None:
+            transformed = self._transform_fn(raw_df.copy())
+        else:
+            transformed = raw_df
+        return float(self.model.predict_proba(transformed[self.feature_cols])[0][1])
 
     # ------------------------------------------------------------------
     # Public API
@@ -103,18 +127,23 @@ class CounterfactualEngine:
         Returns ``[]`` if the applicant is already predicted as approved.
         """
         # Check if already approved — nothing to explain
-        prob = self.model.predict_proba(features_df[self.feature_cols])[0][1]
+        prob = self._predict_prob(features_df)
         if prob >= self.threshold:
             return []
 
-        # Try DiCE first, fall back to binary-search
-        try:
-            with _timeout_ctx(timeout_seconds):
-                cfs = self._dice_counterfactuals(features_df, original_loan_amount)
-                if cfs:
-                    return cfs
-        except (TimeoutError, Exception) as exc:
-            logger.info("DiCE counterfactuals failed/timed-out: %s — using fallback", exc)
+        # DiCE requires a model that predicts on the same feature space as
+        # the Data object. When a transform_fn is supplied (production path),
+        # the model's input space differs from the raw-features space DiCE
+        # operates in — running DiCE would need a custom wrapper and is
+        # deferred to a future spec. Skip straight to the fallback.
+        if self._transform_fn is None:
+            try:
+                with _timeout_ctx(timeout_seconds):
+                    cfs = self._dice_counterfactuals(features_df, original_loan_amount)
+                    if cfs:
+                        return cfs
+            except (TimeoutError, Exception) as exc:
+                logger.info("DiCE counterfactuals failed/timed-out: %s — using fallback", exc)
 
         return self._fallback_binary_search(features_df, original_loan_amount)
 
@@ -254,9 +283,17 @@ class CounterfactualEngine:
 
     def _fallback_binary_search(self, features_df: pd.DataFrame, original_loan_amount: float) -> list[dict]:
         """Deterministic fallback: binary-search on loan_amount, then try
-        loan_term extension and cosigner toggle."""
+        loan_term extension and cosigner toggle.
+
+        Reads raw feature values from features_df (not indexed by feature_cols,
+        which may be the transformed model-input space that omits categorical
+        string columns like state/purpose).
+        """
         results: list[dict] = []
-        original = features_df[self.feature_cols].iloc[0]
+        # Read raw values directly — features_df is the applicant's raw row,
+        # which has loan_amount / loan_term_months / has_cosigner even when
+        # feature_cols describes the transformed model input space.
+        original = features_df.iloc[0]
 
         # --- 1. Binary-search on loan_amount ---
         flip_amount = self._binary_search_feature(features_df, "loan_amount", 5000.0, original_loan_amount)
@@ -277,7 +314,7 @@ class CounterfactualEngine:
                     continue
                 test_df = features_df.copy()
                 test_df["loan_term_months"] = candidate_term
-                prob = self.model.predict_proba(test_df[self.feature_cols])[0][1]
+                prob = self._predict_prob(test_df)
                 if prob >= self.threshold:
                     changes = {"loan_term_months": candidate_term}
                     results.append(
@@ -292,7 +329,7 @@ class CounterfactualEngine:
         if int(original["has_cosigner"]) == 0:
             test_df = features_df.copy()
             test_df["has_cosigner"] = 1
-            prob = self.model.predict_proba(test_df[self.feature_cols])[0][1]
+            prob = self._predict_prob(test_df)
             if prob >= self.threshold:
                 changes = {"has_cosigner": 1}
                 results.append(
@@ -383,7 +420,7 @@ class CounterfactualEngine:
             test_df = features_df.copy()
             test_df[feature] = mid
             try:
-                prob = self.model.predict_proba(test_df[self.feature_cols])[0][1]
+                prob = self._predict_prob(test_df)
                 if prob >= self.threshold:
                     flip_value = mid
                     # We want the *largest* value that still flips (closest
