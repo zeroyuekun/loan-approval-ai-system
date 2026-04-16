@@ -128,7 +128,13 @@ class CookieTokenRefreshView(generics.GenericAPIView):
         from django.contrib.auth import get_user_model
 
         User = get_user_model()
-        return User.objects.get(pk=token["user_id"])
+        try:
+            return User.objects.get(pk=token["user_id"])
+        except User.DoesNotExist as exc:
+            # Deleted-user race: token is cryptographically valid but its
+            # subject no longer exists. Treat as invalid token (401) rather
+            # than letting the outer handler return 500.
+            raise TokenError("user no longer exists") from exc
 
 
 class LoginRateThrottle(AnonRateThrottle):
