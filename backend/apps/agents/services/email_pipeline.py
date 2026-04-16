@@ -39,6 +39,7 @@ class EmailPipelineService:
         # the counterfactual_results saved by the CF step.
         if decision == "denied":
             from apps.loans.models import LoanDecision
+
             try:
                 decision_obj = LoanDecision.objects.get(application=application)
             except LoanDecision.DoesNotExist:

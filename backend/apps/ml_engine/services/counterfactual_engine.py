@@ -40,6 +40,7 @@ def _timeout_ctx(seconds: int):
         raise TimeoutError("timeout_seconds <= 0: immediate timeout")
 
     if platform.system() != "Windows" and hasattr(signal, "SIGALRM"):
+
         def _handler(signum, frame):
             raise TimeoutError(f"Counterfactual generation exceeded {seconds}s")
 
@@ -160,9 +161,7 @@ class CounterfactualEngine:
         df["_dice_outcome"] = (probs >= self.threshold).astype(int)
         return df
 
-    def _dice_counterfactuals(
-        self, features_df: pd.DataFrame, original_loan_amount: float
-    ) -> list[dict]:
+    def _dice_counterfactuals(self, features_df: pd.DataFrame, original_loan_amount: float) -> list[dict]:
         import dice_ml
 
         # DiCE's Data object needs a distribution with an outcome column.
@@ -170,9 +169,7 @@ class CounterfactualEngine:
         # from the orchestrator), synthesise one by perturbing the query.
         dice_df = self._build_dice_dataset(features_df)
 
-        continuous_features = [
-            c for c in self.feature_cols if c != "has_cosigner"
-        ]
+        continuous_features = [c for c in self.feature_cols if c != "has_cosigner"]
 
         d = dice_ml.Data(
             dataframe=dice_df,
@@ -206,9 +203,7 @@ class CounterfactualEngine:
 
         return self._parse_dice_result(cf_result, features_df, original_loan_amount)
 
-    def _parse_dice_result(
-        self, cf_result, features_df: pd.DataFrame, original_loan_amount: float
-    ) -> list[dict]:
+    def _parse_dice_result(self, cf_result, features_df: pd.DataFrame, original_loan_amount: float) -> list[dict]:
         """Extract the top-3-smallest-change CFs from a DiCE result."""
         if cf_result.cf_examples_list is None or len(cf_result.cf_examples_list) == 0:
             return []
@@ -257,24 +252,22 @@ class CounterfactualEngine:
     # Binary-search fallback
     # ------------------------------------------------------------------
 
-    def _fallback_binary_search(
-        self, features_df: pd.DataFrame, original_loan_amount: float
-    ) -> list[dict]:
+    def _fallback_binary_search(self, features_df: pd.DataFrame, original_loan_amount: float) -> list[dict]:
         """Deterministic fallback: binary-search on loan_amount, then try
         loan_term extension and cosigner toggle."""
         results: list[dict] = []
         original = features_df[self.feature_cols].iloc[0]
 
         # --- 1. Binary-search on loan_amount ---
-        flip_amount = self._binary_search_feature(
-            features_df, "loan_amount", 5000.0, original_loan_amount
-        )
+        flip_amount = self._binary_search_feature(features_df, "loan_amount", 5000.0, original_loan_amount)
         if flip_amount is not None:
             changes = {"loan_amount": round(flip_amount, 2)}
-            results.append({
-                "changes": changes,
-                "statement": self._format_statement(changes, features_df),
-            })
+            results.append(
+                {
+                    "changes": changes,
+                    "statement": self._format_statement(changes, features_df),
+                }
+            )
 
         # --- 2. Extend loan term ---
         current_term = int(original["loan_term_months"])
@@ -287,10 +280,12 @@ class CounterfactualEngine:
                 prob = self.model.predict_proba(test_df[self.feature_cols])[0][1]
                 if prob >= self.threshold:
                     changes = {"loan_term_months": candidate_term}
-                    results.append({
-                        "changes": changes,
-                        "statement": self._format_statement(changes, features_df),
-                    })
+                    results.append(
+                        {
+                            "changes": changes,
+                            "statement": self._format_statement(changes, features_df),
+                        }
+                    )
                     break
 
         # --- 3. Cosigner toggle ---
@@ -300,10 +295,12 @@ class CounterfactualEngine:
             prob = self.model.predict_proba(test_df[self.feature_cols])[0][1]
             if prob >= self.threshold:
                 changes = {"has_cosigner": 1}
-                results.append({
-                    "changes": changes,
-                    "statement": self._format_statement(changes, features_df),
-                })
+                results.append(
+                    {
+                        "changes": changes,
+                        "statement": self._format_statement(changes, features_df),
+                    }
+                )
 
         # --- 4. Combined: reduced amount + extended term ---
         if not results:
@@ -320,28 +317,30 @@ class CounterfactualEngine:
                     }
                     if candidate_term != current_term:
                         changes["loan_term_months"] = candidate_term
-                    results.append({
-                        "changes": changes,
-                        "statement": self._format_statement(changes, features_df),
-                    })
+                    results.append(
+                        {
+                            "changes": changes,
+                            "statement": self._format_statement(changes, features_df),
+                        }
+                    )
                     break
 
         # --- 5. Combined: reduced amount + cosigner ---
         if not results and int(original["has_cosigner"]) == 0:
             test_df = features_df.copy()
             test_df["has_cosigner"] = 1
-            flip_amount = self._binary_search_feature(
-                test_df, "loan_amount", 5000.0, original_loan_amount
-            )
+            flip_amount = self._binary_search_feature(test_df, "loan_amount", 5000.0, original_loan_amount)
             if flip_amount is not None:
                 changes = {
                     "loan_amount": round(flip_amount, 2),
                     "has_cosigner": 1,
                 }
-                results.append({
-                    "changes": changes,
-                    "statement": self._format_statement(changes, features_df),
-                })
+                results.append(
+                    {
+                        "changes": changes,
+                        "statement": self._format_statement(changes, features_df),
+                    }
+                )
 
         # --- 6. Heuristic last resort ---
         # When no combination flips the model (e.g. dominant immutable feature),
@@ -359,10 +358,12 @@ class CounterfactualEngine:
             if not best_changes and current_amount > 5000:
                 best_changes["loan_amount"] = 5000.0
             if best_changes:
-                results.append({
-                    "changes": best_changes,
-                    "statement": self._format_statement(best_changes, features_df),
-                })
+                results.append(
+                    {
+                        "changes": best_changes,
+                        "statement": self._format_statement(best_changes, features_df),
+                    }
+                )
 
         return results[:3]
 
@@ -406,16 +407,12 @@ class CounterfactualEngine:
         if "loan_amount" in changes:
             orig = float(original["loan_amount"])
             new = float(changes["loan_amount"])
-            parts.append(
-                f"Reduce your loan amount from ${orig:,.0f} to ${new:,.0f}"
-            )
+            parts.append(f"Reduce your loan amount from ${orig:,.0f} to ${new:,.0f}")
 
         if "loan_term_months" in changes:
             orig = int(original["loan_term_months"])
             new = int(changes["loan_term_months"])
-            parts.append(
-                f"Extend your loan term from {orig} to {new} months"
-            )
+            parts.append(f"Extend your loan term from {orig} to {new} months")
 
         if "has_cosigner" in changes:
             parts.append("Add a co-signer to your application")

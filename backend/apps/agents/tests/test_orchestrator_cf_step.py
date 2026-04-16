@@ -22,16 +22,20 @@ class TestRunCounterfactualStep:
         return PipelineOrchestrator()
 
     def _denied_prediction_result(self):
-        features_df = pd.DataFrame([{
-            "annual_income": 30000.0,
-            "credit_score": 400,
-            "loan_amount": 200000.0,
-            "loan_term_months": 36,
-            "debt_to_income": 8.0,
-            "employment_length": 1,
-            "has_cosigner": 0,
-            "monthly_expenses": 5000.0,
-        }])
+        features_df = pd.DataFrame(
+            [
+                {
+                    "annual_income": 30000.0,
+                    "credit_score": 400,
+                    "loan_amount": 200000.0,
+                    "loan_term_months": 36,
+                    "debt_to_income": 8.0,
+                    "employment_length": 1,
+                    "has_cosigner": 0,
+                    "monthly_expenses": 5000.0,
+                }
+            ]
+        )
         return {
             "prediction": "denied",
             "probability": 0.25,
@@ -42,16 +46,20 @@ class TestRunCounterfactualStep:
         }
 
     def _approved_prediction_result(self):
-        features_df = pd.DataFrame([{
-            "annual_income": 200000.0,
-            "credit_score": 1100,
-            "loan_amount": 10000.0,
-            "loan_term_months": 60,
-            "debt_to_income": 1.5,
-            "employment_length": 20,
-            "has_cosigner": 1,
-            "monthly_expenses": 2000.0,
-        }])
+        features_df = pd.DataFrame(
+            [
+                {
+                    "annual_income": 200000.0,
+                    "credit_score": 1100,
+                    "loan_amount": 10000.0,
+                    "loan_term_months": 60,
+                    "debt_to_income": 1.5,
+                    "employment_length": 20,
+                    "has_cosigner": 1,
+                    "monthly_expenses": 2000.0,
+                }
+            ]
+        )
         return {
             "prediction": "approved",
             "probability": 0.95,
