@@ -98,6 +98,10 @@ class PipelineOrchestrator:
                 feature_cols=predictor.feature_cols,
                 training_data=features_df,
                 threshold=predictor.model_version.optimal_threshold or 0.5,
+                # Pass the predictor's transform so candidate raw-feature
+                # values are scored through the same engineered + one-hot
+                # pipeline the live model expects.
+                transform_fn=predictor._transform,
             )
             return engine.generate(features_df, original_loan_amount, timeout_seconds=10)
         except Exception as e:
