@@ -23,6 +23,17 @@ Frontend: http://localhost:3000 | Backend API: http://localhost:8000 | Grafana: 
 
 Default login: `admin` / `admin1234`
 
+## One-time setup
+
+After cloning, install pre-commit hooks so they run on every commit:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Hooks run on staged files before commit. Run manually against everything with `pre-commit run --all-files`.
+
 ## Running Tests
 
 ```bash
