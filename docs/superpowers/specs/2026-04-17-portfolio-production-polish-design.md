@@ -12,7 +12,9 @@ Robustness must be verified through dedicated code-review passes, not just CI on
 
 ## 2. Scope
 
-### In scope — 12 items + 2 review passes
+### In scope — 16 items + 2 review passes
+
+(13 original items + 3 P0 fold-ins added 2026-04-17 after the baseline review surfaced them.)
 
 | ID | Title | Category | Size |
 |---|---|---|---|
@@ -26,8 +28,12 @@ Robustness must be verified through dedicated code-review passes, not just CI on
 | A7 | Australian lending compliance doc (NCCP audit, Privacy Act/APP PII, retention, consent) | docs | M |
 | A8 | `.github/dependabot.yml` | config | S |
 | A9 | `CODEOWNERS` + PR template + issue templates | config | S |
+| A10 | Engineering decision journal + interview talking points (`docs/engineering-journal.md`, `docs/interview-talking-points.md`) | docs | M |
 | B1 | DiCE timeout alignment + `total_CFs` 5→3 | fix | S |
 | B2 | Celery prefetch_multiplier per queue + `task_acks_late = True` | fix | S |
+| B3 | State-machine-bypass audit fix (P0 fold-in F-01/F-02/F-03) — replace raw `.update(status=...)` at 6 call sites with `transition_to()` so all final-decision transitions produce `AuditLog` | fix | S |
+| B4 | Redis fallback counter thread-safety + reset on recovery (P0 fold-in F-04) | fix | S |
+| B5 | Celery integration tests — replace `assert result is not None` with meaningful end-to-end assertions (P0 fold-in F-05) | fix | S |
 | C1 | Root-cause and fix the frontend container exit-243 crash loop | fix | S-M |
 | P4 | Phase 4 cumulative-diff review | review | S-M |
 
@@ -123,11 +129,15 @@ Phase 2 — Signal-heavy docs
   A5 runbooks
   A6 SLIs/SLOs
   A7 AU compliance
+  A10 engineering journal + interview talking points
   (additional ADRs — Celery queue separation, DiCE vs SHAP — are optional.
    Written as separate PRs if a decision-worth-documenting arises during
    Phase 2 work. Not required for completion.)
   ↓
-Phase 3 — Real bug
+Phase 3 — Real bugs
+  B3 state-machine-bypass audit fix (P0 fold-in)
+  B4 Redis fallback counter thread-safety + reset (P0 fold-in)
+  B5 Celery integration test assertions (P0 fold-in)
   C1 frontend exit-243 root-cause and fix
   ↓
 P4 (cumulative review)
@@ -146,7 +156,7 @@ Ordering rationale:
 The polish pass is done when all of the following hold:
 
 1. P0 and P4 review reports are filed under `docs/reviews/`.
-2. All 12 item PRs are merged to `master`.
+2. All 16 item PRs are merged to `master` (13 planned + 3 P0 fold-ins).
 3. CI is green on `master` end-to-end, including docker-build, DAST (master-only), and load test (master-only).
 4. Coverage floor is at least the current `--cov-fail-under=60`; no regression.
 5. No P0-identified critical issue remains open.
@@ -156,6 +166,7 @@ The polish pass is done when all of the following hold:
    - `docs/runbooks/` → at least 3 runbooks.
    - `docs/compliance/australia.md` exists and is substantive.
    - `docs/slo.md` exists with concrete SLIs and targets.
+   - `docs/engineering-journal.md` + `docs/interview-talking-points.md` exist, covering project origin → incidents → tradeoffs → ratings journey, each claim cited to a commit / ADR / memory entry.
    - `.pre-commit-config.yaml` at root.
    - `CODEOWNERS` + PR template visible in `.github/`.
    - Recent commit log is clean, conventional, and PR-linked.
