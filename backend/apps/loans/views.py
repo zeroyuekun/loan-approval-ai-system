@@ -100,15 +100,30 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 ip_address=self.request.META.get("REMOTE_ADDR"),
             )
 
-        # Auto-trigger AI pipeline for new applications (outside transaction
-        # so the committed data is visible to the Celery worker)
-        from apps.agents.tasks import orchestrate_pipeline_task
+            # Durable dispatch: on_commit so the row is visible to the worker,
+            # and an outbox fallback so a broker outage never swallows a submission.
+            from apps.agents.tasks import orchestrate_pipeline_task
+            from apps.loans.models import PipelineDispatchOutbox
 
-        try:
-            orchestrate_pipeline_task.delay(str(instance.pk))
-            logger.info("Auto-triggered pipeline for application %s", instance.pk)
-        except Exception as e:
-            logger.warning("Failed to auto-trigger pipeline for %s: %s", instance.pk, e)
+            def _dispatch():
+                try:
+                    orchestrate_pipeline_task.delay(str(instance.pk))
+                    logger.info("Auto-triggered pipeline for application %s", instance.pk)
+                except Exception as exc:
+                    logger.error(
+                        "Failed to auto-trigger pipeline for %s: %s — queued to outbox",
+                        instance.pk,
+                        exc,
+                    )
+                    PipelineDispatchOutbox.objects.get_or_create(
+                        application=instance,
+                        defaults={"last_error": str(exc)[:1000]},
+                    )
+                    LoanApplication.objects.filter(pk=instance.pk).update(
+                        status=LoanApplication.Status.QUEUE_FAILED
+                    )
+
+            transaction.on_commit(_dispatch)
 
     def perform_update(self, serializer):
         instance = serializer.save()
