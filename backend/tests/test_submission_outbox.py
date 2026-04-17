@@ -1,8 +1,7 @@
 """Tests for the submission outbox — Codex finding #4 (durable dispatch)."""
+
 from unittest.mock import patch
 
-import pytest
-from django.db import transaction
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -100,6 +99,7 @@ class TestSubmissionOutbox(TestCase):
 
     def _make_application(self):
         from decimal import Decimal
+
         return LoanApplication.objects.create(
             applicant=self.customer,
             annual_income=Decimal("75000.00"),

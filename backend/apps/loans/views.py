@@ -119,9 +119,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                         application=instance,
                         defaults={"last_error": str(exc)[:1000]},
                     )
-                    LoanApplication.objects.filter(pk=instance.pk).update(
-                        status=LoanApplication.Status.QUEUE_FAILED
-                    )
+                    LoanApplication.objects.filter(pk=instance.pk).update(status=LoanApplication.Status.QUEUE_FAILED)
 
             transaction.on_commit(_dispatch)
 
