@@ -83,9 +83,7 @@ def _payload(loan_application_id):
 
 @pytest.mark.django_db
 class TestComplaintTenantValidation:
-    def test_customer_cannot_file_on_other_customers_loan(
-        self, customer_a, loan_b
-    ):
+    def test_customer_cannot_file_on_other_customers_loan(self, customer_a, loan_b):
         client = APIClient()
         client.force_authenticate(user=customer_a)
 
@@ -94,9 +92,7 @@ class TestComplaintTenantValidation:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         body = response.json()
         assert "loan_application" in body
-        assert "You can only file complaints on your own applications." in str(
-            body["loan_application"]
-        )
+        assert "You can only file complaints on your own applications." in str(body["loan_application"])
         assert Complaint.objects.count() == 0
         assert not AuditLog.objects.filter(action="complaint_filed").exists()
 
@@ -114,9 +110,7 @@ class TestComplaintTenantValidation:
         assert audit.details["loan_application_id"] == str(loan_a.id)
         assert audit.details["category"] == "decision"
 
-    def test_officer_can_file_on_any_customer_loan(
-        self, officer_user, customer_b, loan_b
-    ):
+    def test_officer_can_file_on_any_customer_loan(self, officer_user, customer_b, loan_b):
         client = APIClient()
         client.force_authenticate(user=officer_user)
 
@@ -128,9 +122,7 @@ class TestComplaintTenantValidation:
         assert audit.user == officer_user
         assert audit.details["on_behalf_of_id"] == customer_b.id
 
-    def test_admin_can_file_on_any_customer_loan(
-        self, admin_user, customer_b, loan_b
-    ):
+    def test_admin_can_file_on_any_customer_loan(self, admin_user, customer_b, loan_b):
         client = APIClient()
         client.force_authenticate(user=admin_user)
 
@@ -140,9 +132,7 @@ class TestComplaintTenantValidation:
         audit = AuditLog.objects.get(action="complaint_filed")
         assert audit.details["on_behalf_of_id"] == customer_b.id
 
-    def test_complaint_without_loan_application_still_allowed(
-        self, customer_a
-    ):
+    def test_complaint_without_loan_application_still_allowed(self, customer_a):
         client = APIClient()
         client.force_authenticate(user=customer_a)
 
@@ -159,8 +149,6 @@ class TestComplaintTenantValidation:
         client = APIClient()
         client.force_authenticate(user=customer_a)
 
-        response = client.post(
-            COMPLAINTS_URL, _payload(uuid.uuid4()), format="json"
-        )
+        response = client.post(COMPLAINTS_URL, _payload(uuid.uuid4()), format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST

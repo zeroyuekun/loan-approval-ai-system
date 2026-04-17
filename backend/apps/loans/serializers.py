@@ -304,9 +304,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
         if getattr(user, "role", None) in ("admin", "officer"):
             return value
         if value.applicant_id != user.id:
-            raise serializers.ValidationError(
-                "You can only file complaints on your own applications."
-            )
+            raise serializers.ValidationError("You can only file complaints on your own applications.")
         return value
 
     def create(self, validated_data):
