@@ -278,12 +278,12 @@ class TestCookieAuthCSRFEnforcement:
             format="json",
             HTTP_X_CSRFTOKEN=csrf_cookie.value,
         )
-        assert resp.status_code != status.HTTP_403_FORBIDDEN or \
-            "CSRF" not in (resp.json().get("detail") or "")
+        assert resp.status_code != status.HTTP_403_FORBIDDEN or "CSRF" not in (resp.json().get("detail") or "")
 
     def test_bearer_header_auth_bypasses_csrf(self, auth_client, login_user):
         """Authorization: Bearer path (programmatic clients) must NOT require CSRF."""
         from rest_framework_simplejwt.tokens import RefreshToken
+
         token = str(RefreshToken.for_user(login_user).access_token)
         client = APIClient(enforce_csrf_checks=True)
         resp = client.post(
