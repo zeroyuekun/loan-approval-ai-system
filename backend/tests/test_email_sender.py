@@ -243,3 +243,28 @@ class TestCTAButton:
         html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
         assert "<a " in html
         assert "text-decoration:none" in html.replace(" ", "")
+
+
+class TestComplianceFooter:
+    def test_denial_has_afca_footer(self):
+        html = _plain_text_to_html(DENIAL_PLAIN, email_type="denial")
+        assert "AFCA" in html
+        assert "1800 931 678" in html
+        assert "afca.org.au" in html
+
+    def test_approval_has_no_afca_footer(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "AFCA" not in html
+        assert "1800 931 678" not in html
+
+    def test_marketing_has_no_afca_footer(self):
+        html = _plain_text_to_html(MARKETING_PLAIN, email_type="marketing")
+        assert "AFCA" not in html
+        assert "1800 931 678" not in html
+
+    def test_afca_footer_is_separated_from_main_signature(self):
+        html = _plain_text_to_html(DENIAL_PLAIN, email_type="denial")
+        email_idx = html.find("Email:")
+        afca_idx = html.find("AFCA")
+        assert email_idx != -1 and afca_idx != -1
+        assert afca_idx > email_idx

@@ -89,6 +89,18 @@ def _render_container_close() -> str:
     return '</table>'
 
 
+def _render_afca_footer() -> str:
+    return (
+        '<div style="padding:16px 32px 24px 32px; '
+        'border-top:1px solid #e5e7eb; margin-top:16px;">'
+        '<p style="margin:0; font-size:11px; font-weight:bold; '
+        'color:#6b7280;">External dispute resolution</p>'
+        '<p style="margin:4px 0 0 0; font-size:11px; color:#6b7280;">'
+        'AFCA &mdash; 1800 931 678 | afca.org.au</p>'
+        '</div>'
+    )
+
+
 def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
     """Convert a plain-text email body to styled HTML matching the dashboard preview.
 
@@ -241,6 +253,7 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
     html_parts.insert(insert_index, cta_html)
 
     body_html = "\n".join(html_parts)
+    compliance_html = _render_afca_footer() if email_type == "denial" else ""
     return (
         '<div style="background:#f6f6f6; padding:24px 0; '
         'font-family: Arial, Helvetica, sans-serif; font-size:16px; '
@@ -249,6 +262,7 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
         + '<tr><td style="padding:0 32px 16px 32px;">\n'
         + body_html
         + '\n</td></tr>\n'
+        + (f'<tr><td>{compliance_html}</td></tr>\n' if compliance_html else '')
         + _render_container_close()
         + '\n</div>'
     )
