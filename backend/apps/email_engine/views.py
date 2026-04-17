@@ -145,7 +145,12 @@ class SendLatestEmailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        result = send_decision_email(recipient, email.subject, email.body)
+        result = send_decision_email(
+            recipient,
+            email.subject,
+            email.body,
+            email_type="approval" if email.decision == "approved" else "denial",
+        )
         if result["sent"]:
             return Response(
                 {

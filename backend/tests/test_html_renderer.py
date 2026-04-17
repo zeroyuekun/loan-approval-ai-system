@@ -69,3 +69,12 @@ def test_render_html_includes_legacy_body():
     result = render_html("Dear John,\n\nHello.", email_type="approval")
     assert "Dear John," in result
     assert "Hello." in result
+
+
+def test_sender_uses_new_renderer():
+    """sender.py must import render_html from html_renderer, not define its own."""
+    from apps.email_engine.services import sender as sender_mod
+    assert not hasattr(sender_mod, "_plain_text_to_html"), (
+        "sender.py should no longer define _plain_text_to_html — "
+        "must import render_html from html_renderer instead."
+    )

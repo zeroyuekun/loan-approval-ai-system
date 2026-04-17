@@ -268,7 +268,12 @@ class EmailPipelineService:
 
                 recipient = application.applicant.email
                 if recipient and generated_email:
-                    send_result = send_decision_email(recipient, email_result["subject"], email_result["body"])
+                    send_result = send_decision_email(
+                        recipient,
+                        email_result["subject"],
+                        email_result["body"],
+                        email_type="approval" if decision == "approved" else "denial",
+                    )
                     if send_result["sent"]:
                         step = self.tracker.complete_step(
                             step,
