@@ -1,0 +1,42 @@
+name: email-renderer-parity
+
+on:
+  pull_request:
+    paths:
+      - 'backend/apps/email_engine/services/html_renderer.py'
+      - 'frontend/src/lib/emailHtmlRenderer.ts'
+      - 'backend/tests/fixtures/email_**'
+      - 'frontend/src/__tests__/fixtures/email_**'
+      - '.github/workflows/email-parity.yml'
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install backend deps
+        run: |
+          cd backend
+          pip install -r requirements/base.txt
+          pip install pytest
+      - name: Install frontend deps
+        run: |
+          cd frontend
+          npm ci
+      - name: Run Python renderer tests
+        run: |
+          cd backend
+          python -m pytest tests/test_html_renderer.py -v
+      - name: Diff fixture snapshots backend vs frontend
+        run: |
+          diff -r backend/tests/fixtures/email_snapshots frontend/src/__tests__/fixtures/email_snapshots
+      - name: Run TS parity tests
+        run: |
+          cd frontend
+          npx vitest run src/__tests__/lib/emailHtmlRenderer.test.ts
