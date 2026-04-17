@@ -296,13 +296,30 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    def validate_loan_application(self, value):
+        if value is None:
+            return value
+        request = self.context["request"]
+        user = request.user
+        if getattr(user, "role", None) in ("admin", "officer"):
+            return value
+        if value.applicant_id != user.id:
+            raise serializers.ValidationError(
+                "You can only file complaints on your own applications."
+            )
+        return value
+
     def create(self, validated_data):
         from datetime import timedelta
 
         from django.utils import timezone
 
         now = timezone.now()
-        validated_data["complainant"] = self.context["request"].user
+        request = self.context["request"]
+        user = request.user
+        loan_app = validated_data.get("loan_application")
+
+        validated_data["complainant"] = user
         validated_data["acknowledged_at"] = now
 
         # ASIC RG 271: 21 days for credit-related, 30 days for standard
@@ -310,4 +327,23 @@ class ComplaintSerializer(serializers.ModelSerializer):
         sla_days = 21 if category == "decision" else 30
         validated_data["sla_deadline"] = now + timedelta(days=sla_days)
 
-        return super().create(validated_data)
+        instance = super().create(validated_data)
+
+        on_behalf_of_id = None
+        if loan_app and loan_app.applicant_id != user.id:
+            on_behalf_of_id = loan_app.applicant_id
+
+        AuditLog.objects.create(
+            user=user,
+            action="complaint_filed",
+            resource_type="Complaint",
+            resource_id=str(instance.id),
+            details={
+                "category": category,
+                "loan_application_id": str(loan_app.id) if loan_app else None,
+                "on_behalf_of_id": on_behalf_of_id,
+            },
+            ip_address=request.META.get("REMOTE_ADDR"),
+        )
+
+        return instance
