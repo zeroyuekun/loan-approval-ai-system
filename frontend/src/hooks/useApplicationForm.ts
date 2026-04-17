@@ -93,12 +93,19 @@ export function useApplicationForm(onSuccessPath?: string) {
 
   // Persist form state to localStorage on every change
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
     const subscription = watch((values) => {
-      try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(values))
-      } catch (e) { console.warn('[useApplicationForm] Failed to save draft to localStorage:', e) }
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        try {
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(values))
+        } catch (e) { console.warn('[useApplicationForm] Failed to save draft to localStorage:', e) }
+      }, 500)
     })
-    return () => subscription.unsubscribe()
+    return () => {
+      if (timer) clearTimeout(timer)
+      subscription.unsubscribe()
+    }
   }, [watch])
 
   const submittingRef = useRef(false)

@@ -26,6 +26,7 @@ export function useAgentRun(loanId: string, options?: { pipelineQueued?: boolean
     },
     enabled: !!loanId,
     retry: false,
+    gcTime: 30_000, // 30s: polled data, drop fast after unmount
     refetchInterval: (query) => {
       const status = query.state.data?.status
       // Keep polling while the run is active, with exponential backoff
@@ -88,6 +89,7 @@ export function useTaskStatus(taskId: string, options?: { enabled?: boolean }) {
       return data
     },
     enabled: !!taskId && (options?.enabled ?? true),
+    gcTime: 30_000, // 30s: polled data, drop fast after unmount
     refetchInterval: (query) => {
       const status = query.state.data?.status
       if (status === 'SUCCESS' || status === 'FAILURE') {

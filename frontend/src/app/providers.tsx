@@ -11,6 +11,7 @@ export function Providers({ children }: { children: ReactNode }) {
         defaultOptions: {
           queries: {
             staleTime: 60 * 1000,
+            gcTime: 2 * 60 * 1000, // 2 min: cap heap growth from unused queries
             retry: 1,
           },
         },
