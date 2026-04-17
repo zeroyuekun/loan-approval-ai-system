@@ -160,3 +160,20 @@ class TestContainer:
         html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
         assert "<style" not in html
         assert "</style>" not in html
+
+
+class TestSectionHeaders:
+    def test_section_labels_have_accent_underline(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "Loan Details" in html
+        assert "border-bottom:2pxsolid#16a34a" in html.replace(" ", "")
+
+    def test_section_headers_are_18px_bold(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "font-size:18px" in html.replace(" ", "")
+        assert "font-weight:bold" in html.replace(" ", "")
+
+    def test_options_are_treated_as_section_headers(self):
+        html = _plain_text_to_html(MARKETING_PLAIN, email_type="marketing")
+        assert "Option 1: Secured Personal Loan" in html
+        assert "border-bottom:2pxsolid#7c3aed" in html.replace(" ", "")

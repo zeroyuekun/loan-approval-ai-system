@@ -39,6 +39,17 @@ def _get_accent_color(email_type: str) -> str:
     return ACCENT_COLORS.get(email_type, ACCENT_COLORS["approval"])
 
 
+def _render_section_header(label: str, accent: str) -> str:
+    return (
+        '<p style="margin:28px 0 8px 0;">'
+        f'<span style="font-size:18px; font-weight:bold; color:#111827; '
+        f'border-bottom:2px solid {accent}; padding-bottom:6px; '
+        'display:inline-block;">'
+        f'{label.rstrip(":")}'
+        '</span></p>'
+    )
+
+
 def _render_branded_header(accent: str) -> str:
     """Render the shared branded header — accent bar + app name."""
     return (
@@ -91,17 +102,17 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
 
         if is_section or is_option:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(_render_section_header(stripped, accent))
             continue
 
         if is_dear:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:0 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(f'<p style="margin:0 0 12px 0;">{stripped}</p>')
             continue
 
         if is_closing:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(f'<p style="margin:24px 0 4px 0;">{stripped}</p>')
             continue
 
         # Bullet points — render as plain text with bullet character
