@@ -41,3 +41,31 @@ def test_legacy_body_parser_detects_loan_detail_rows():
     assert "<table" in out
     assert "$25,000.00" in out
     assert "6.50% p.a." in out
+
+
+def test_skeleton_wraps_body_with_brand_header():
+    result = render_html("Dear John,\n\nHello.", email_type="approval")
+    assert TOKENS["BRAND_PRIMARY"] in result
+    assert "AussieLoanAI" in result
+    assert "Australian Credit Licence No. 012345" in result
+
+
+def test_skeleton_uses_600px_max_width():
+    result = render_html("Dear John,", email_type="approval")
+    assert "max-width:600px" in result
+
+
+def test_skeleton_wraps_in_outer_page_bg():
+    result = render_html("Dear John,", email_type="approval")
+    assert TOKENS["PAGE_BG"] in result
+
+
+def test_skeleton_has_role_presentation_tables():
+    result = render_html("Dear John,", email_type="approval")
+    assert 'role="presentation"' in result
+
+
+def test_render_html_includes_legacy_body():
+    result = render_html("Dear John,\n\nHello.", email_type="approval")
+    assert "Dear John," in result
+    assert "Hello." in result

@@ -153,6 +153,28 @@ def _render_legacy_body(body: str) -> str:
     return "\n".join(html_parts)
 
 
+def _render_header() -> str:
+    return (
+        f'<tr><td style="background-color:{TOKENS["BRAND_PRIMARY"]}; '
+        f'padding:16px 24px; border-radius:8px 8px 0 0;">'
+        f'<span style="color:#ffffff; font-size:16px; font-weight:600; '
+        f'letter-spacing:0.3px;">AussieLoanAI</span>'
+        f'<span style="color:#bfdbfe; font-size:12px; margin-left:8px;">'
+        f'Australian Credit Licence No. 012345</span>'
+        f'</td></tr>'
+    )
+
+
+def _render_footer_shell() -> str:
+    return (
+        f'<tr><td style="padding:24px; background-color:{TOKENS["CARD_BG"]}; '
+        f'border-radius:0 0 8px 8px; font-size:{TOKENS["FINE_SIZE"]}; '
+        f'color:{TOKENS["FINE"]};">'
+        f'&nbsp;'
+        f'</td></tr>'
+    )
+
+
 def render_html(plain_body: str, email_type: EmailType) -> str:
     """Convert plain-text email body into Gmail-safe HTML.
 
@@ -164,5 +186,23 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
         Gmail-safe HTML string with inline styles. Ready to pass to
         Django's send_mail(html_message=...).
     """
-    # PR 1 stub — real implementation in later steps.
-    return f'<table role="presentation"><tr><td>{plain_body}</td></tr></table>'
+    body_html = _render_legacy_body(plain_body)
+    return (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+        f'style="width:100%; background-color:{TOKENS["PAGE_BG"]}; margin:0; padding:0;">'
+        f'<tr><td style="padding:32px 16px;">'
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+        f'style="width:100%; max-width:{TOKENS["MAX_WIDTH"]}; margin:0 auto; '
+        f'background-color:#ffffff; border-radius:8px; '
+        f'box-shadow:0 1px 3px rgba(0,0,0,0.06);">'
+        f'{_render_header()}'
+        f'<tr><td style="padding:24px; font-family:{TOKENS["FONT_STACK"]}; '
+        f'font-size:{TOKENS["BODY_SIZE"]}; line-height:{TOKENS["LINE_HEIGHT"]}; '
+        f'color:{TOKENS["TEXT"]};">'
+        f'{body_html}'
+        f'</td></tr>'
+        f'{_render_footer_shell()}'
+        f'</table>'
+        f'</td></tr>'
+        f'</table>'
+    )
