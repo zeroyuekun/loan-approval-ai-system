@@ -9,6 +9,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.http import HttpResponse, JsonResponse
 from django.urls import include, path
+from django_prometheus.exports import ExportToDjangoView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework import status as http_status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
@@ -16,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.loans.models import LoanApplication
+from config.ops_auth import require_ops_auth
 
 
 class TaskStatusView(APIView):
@@ -105,9 +107,18 @@ def deep_health_check(request):
     """
     from django.conf import settings as django_settings
 
-    token = getattr(django_settings, "HEALTH_CHECK_TOKEN", "")
-    if token:
-        provided = request.headers.get("X-Health-Token", "")
+    token = getattr(django_settings, "HEALTH_CHECK_TOKEN", "") or ""
+    debug = getattr(django_settings, "DEBUG", False)
+
+    if not token:
+        if not debug:
+            return JsonResponse(
+                {"error": "deep health not configured — set HEALTH_CHECK_TOKEN"},
+                status=503,
+            )
+        # DEBUG=True: allow open access for local development
+    else:
+        provided = request.headers.get("X-Health-Token", "") or ""
         is_staff = getattr(request.user, "is_staff", False)
         if not hmac.compare_digest(provided.encode(), token.encode()) and not is_staff:
             return JsonResponse({"error": "unauthorized"}, status=403)
@@ -204,9 +215,9 @@ def deep_health_check(request):
 
 
 urlpatterns = [
-    # Prometheus metrics — restrict in production via reverse proxy or firewall.
-    # Only expose on internal network; do not route through public ingress.
-    path("", include("django_prometheus.urls")),
+    # Prometheus metrics — gated behind staff session or X-Health-Token header.
+    # Also excluded from public Kubernetes ingress (k8s/ingress.yaml).
+    path("metrics", require_ops_auth(ExportToDjangoView), name="prometheus-django-metrics"),
     path(".well-known/security.txt", security_txt, name="security-txt"),
     path("api/v1/health/", health_check, name="health-check"),
     path("api/v1/health/deep/", deep_health_check, name="deep-health-check"),

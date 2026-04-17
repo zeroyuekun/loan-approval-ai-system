@@ -56,8 +56,8 @@
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | `/api/v1/health/` | No | Basic liveness check |
-| GET | `/api/v1/health/deep/` | No | DB + Redis + ML model check |
-| GET | `/metrics` | No | Prometheus metrics (django-prometheus) |
+| GET | `/api/v1/health/deep/` | **Yes** (staff session or X-Health-Token) | DB + Redis + ML model check. Returns 503 in production if `HEALTH_CHECK_TOKEN` is unset. |
+| GET | `/metrics` | **Yes** (staff session or X-Health-Token) | Prometheus metrics (django-prometheus). Not publicly routed. |
 
 ### Authentication (`/api/v1/auth/`)
 

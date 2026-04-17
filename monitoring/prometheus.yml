@@ -16,6 +16,10 @@ scrape_configs:
     static_configs:
       - targets: ['backend:8000']
     scrape_interval: 10s
+    http_headers:
+      X-Health-Token:
+        values:
+          - ${HEALTH_CHECK_TOKEN}
 
   - job_name: 'redis'
     static_configs:
