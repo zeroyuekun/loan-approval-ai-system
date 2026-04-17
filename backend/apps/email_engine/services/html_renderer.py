@@ -299,6 +299,10 @@ DEFAULT_APPROVAL_ATTACHMENTS = [
 BULLET_LINE_RE = re.compile(r"^[\u2022•]\s*(.+)$")
 FACTOR_LINE_RE = re.compile(r"^([A-Z][A-Za-z\s\-/]+):\s+(.+)$")
 FACTOR_TRIGGER_PREFIX = "This decision was based on"
+OFFER_HEADER_RE = re.compile(r"^Option\s+(\d+)[\s:.\-\u2013\u2014]+(.+)$")
+UNSUBSCRIBE_LINE_RE = re.compile(r"^Unsubscribe:\s*(\S+)")
+CALL_SARAH_LINE_RE = re.compile(r"^Call Sarah on\s+(\d[\d\s]+)", re.I)
+MARKETING_BREAK_PREFIXES = ("ABN ", "Ph:", "Phone:", "Email:", "Website:", "Unsubscribe:")
 
 
 def _extract_section_bullets(body: str, section_label: str) -> tuple[list[str], int, int]:
@@ -532,6 +536,183 @@ def _render_denial_body(plain_body: str) -> str:
     return "".join(parts)
 
 
+def _extract_marketing_offers(body: str) -> tuple[list[dict], int, int]:
+    """Parse 'Option N:' sections. Returns (offers, combined_start, combined_end).
+
+    Each offer dict contains: label, title, bullets, fit.
+    Indices span the combined offers block (first header to last fit line).
+    Returns ([], -1, -1) if no offers found.
+    """
+    lines = body.split("\n")
+    header_idxs: list[tuple[int, re.Match[str]]] = []
+    for i, ln in enumerate(lines):
+        m = OFFER_HEADER_RE.match(ln.strip())
+        if m:
+            header_idxs.append((i, m))
+    if not header_idxs:
+        return [], -1, -1
+
+    def _offer_end(start_i: int, next_header_i: int | None) -> int:
+        upper = next_header_i - 1 if next_header_i is not None else len(lines) - 1
+        end_i = start_i
+        for j in range(start_i + 1, upper + 1):
+            s = lines[j].strip()
+            if (
+                s in CLOSINGS
+                or CALL_SARAH_LINE_RE.match(s)
+                or any(s.startswith(p) for p in MARKETING_BREAK_PREFIXES)
+            ):
+                return j - 1
+            end_i = j
+        return end_i
+
+    offers: list[dict] = []
+    for h_idx, (start_i, m) in enumerate(header_idxs):
+        next_header_i = header_idxs[h_idx + 1][0] if h_idx + 1 < len(header_idxs) else None
+        end_i = _offer_end(start_i, next_header_i)
+        while end_i > start_i and not lines[end_i].strip():
+            end_i -= 1
+
+        bullets: list[str] = []
+        fit = ""
+        for j in range(start_i + 1, end_i + 1):
+            s = lines[j].strip()
+            if not s:
+                continue
+            bm = BULLET_LINE_RE.match(s)
+            if bm:
+                bullets.append(bm.group(1))
+                continue
+            if bullets and not fit:
+                fit = s
+
+        offers.append(
+            {
+                "label": f"Option {m.group(1)}",
+                "title": m.group(2).strip(),
+                "bullets": bullets,
+                "fit": fit,
+            }
+        )
+
+    combined_start = header_idxs[0][0]
+    last_start = header_idxs[-1][0]
+    combined_end = _offer_end(last_start, None)
+    while combined_end > combined_start and not lines[combined_end].strip():
+        combined_end -= 1
+
+    return offers, combined_start, combined_end
+
+
+def _render_offer_card(offer: dict) -> str:
+    bullets_html = "".join(
+        f'<div style="font-size:14px; color:#374151; padding:4px 0;">'
+        f"&#8226;&nbsp;&nbsp;{b}</div>"
+        for b in offer["bullets"]
+    )
+    fit_html = (
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; color:{TOKENS["MUTED"]}; '
+        f"font-style:italic; padding-top:8px; margin-top:8px; "
+        f'border-top:1px solid {TOKENS["BORDER"]};">{offer["fit"]}</div>'
+        if offer["fit"]
+        else ""
+    )
+    return (
+        f'<div style="margin:12px 0;">'
+        f'<table role="presentation" cellspacing="0" cellpadding="0" '
+        f'style="width:100%; background-color:{TOKENS["CARD_BG"]}; '
+        f'border-left:4px solid {TOKENS["MARKETING"]}; border-radius:4px;">'
+        f'<tr><td style="padding:16px 20px;">'
+        f'<div style="font-size:11px; font-weight:600; '
+        f'color:{TOKENS["MARKETING"]}; text-transform:uppercase; '
+        f'letter-spacing:0.5px;">{offer["label"]}</div>'
+        f'<div style="font-size:17px; font-weight:600; '
+        f'color:{TOKENS["TEXT"]}; padding:4px 0 12px 0;">{offer["title"]}</div>'
+        f"{bullets_html}"
+        f"{fit_html}"
+        f"</td></tr></table>"
+        f"</div>"
+    )
+
+
+def _render_marketing_footer(body: str) -> str:
+    parts: list[str] = []
+    if "term deposit" in body.lower():
+        parts.append(
+            f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]}; '
+            f'padding:4px 0;">Deposits are protected by the Financial Claims Scheme '
+            f"(FCS) up to $250,000 per account holder per ADI.</div>"
+        )
+    if "bonus rate" in body.lower():
+        parts.append(
+            f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]}; '
+            f'padding:4px 0;">Bonus rates apply to eligible accounts subject to '
+            f"monthly deposit and transaction conditions.</div>"
+        )
+    m = UNSUBSCRIBE_LINE_RE.search(body)
+    unsub_url = m.group(1) if m else "https://aussieloanai.com.au/unsubscribe"
+    parts.append(
+        f'<div style="padding:16px 0 0 0; margin-top:16px; '
+        f'border-top:1px solid {TOKENS["BORDER"]};">'
+        f'<a href="{unsub_url}" '
+        f'style="font-size:{TOKENS["FINE_SIZE"]}; '
+        f'color:{TOKENS["BRAND_ACCENT"]}; '
+        f'text-decoration:underline;">Unsubscribe</a>'
+        f" &nbsp;&middot;&nbsp; "
+        f'<span style="font-size:{TOKENS["FINE_SIZE"]}; '
+        f'color:{TOKENS["FINE"]};">You received this email because you recently '
+        f"applied for a loan with AussieLoanAI.</span>"
+        f"</div>"
+    )
+    return "".join(parts)
+
+
+def _render_marketing_body(plain_body: str) -> str:
+    offers, o_start, o_end = _extract_marketing_offers(plain_body)
+    pre_sig, sig_lines, post_sig = _split_at_signature(plain_body)
+    pre_sig_end_idx = len(pre_sig.split("\n")) if pre_sig else 0
+
+    lines = plain_body.split("\n")
+    parts: list[str] = []
+    buffer: list[str] = []
+
+    def flush() -> None:
+        if buffer:
+            parts.append(_render_legacy_body("\n".join(buffer)))
+            buffer.clear()
+
+    i = 0
+    while i < pre_sig_end_idx:
+        if offers and i == o_start:
+            flush()
+            for offer in offers:
+                parts.append(_render_offer_card(offer))
+            parts.append(
+                _render_cta(
+                    "Call Sarah on 1300 000 000",
+                    "tel:1300000000",
+                    color=TOKENS["MARKETING"],
+                )
+            )
+            i = o_end + 1
+            continue
+        s = lines[i].strip()
+        if CALL_SARAH_LINE_RE.match(s):
+            i += 1
+            continue
+        buffer.append(lines[i])
+        i += 1
+    flush()
+
+    parts.append(_render_signature_block(sig_lines))
+    parts.append(_render_marketing_footer(plain_body))
+
+    if post_sig.strip():
+        parts.append(_render_legacy_body(post_sig))
+
+    return "".join(parts)
+
+
 def _render_approval_body(plain_body: str) -> str:
     ld_rows, ld_start, ld_end = _extract_loan_details(plain_body)
     ns_steps, ns_start, ns_end = _extract_numbered_steps(plain_body, "Next Steps:")
@@ -735,6 +916,8 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
         body_html = _render_approval_body(plain_body)
     elif email_type == "denial":
         body_html = _render_denial_body(plain_body)
+    elif email_type == "marketing":
+        body_html = _render_marketing_body(plain_body)
     else:
         body_html = _render_legacy_body(plain_body)
 
