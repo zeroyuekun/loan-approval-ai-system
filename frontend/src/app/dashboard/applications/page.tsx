@@ -47,6 +47,9 @@ export default function ApplicationsPage() {
   const handleCheckAll = async () => {
     setCheckAllState('loading')
     setCheckAllResult(null)
+    // Cancel any in-flight timers from a previous click
+    timersRef.current.forEach(clearTimeout)
+    timersRef.current = []
     try {
       const { data } = await agentsApi.orchestrateAll(true)
       setCheckAllResult({ queued: data.queued })
