@@ -41,11 +41,8 @@ class TestRetrySleepCap:
     @patch("apps.agents.utils.time.sleep")
     def test_sleep_has_jitter(self, mock_sleep):
         """Two identical retry sequences must not produce identical sleep values."""
-        sleeps_a: list[float] = []
-        sleeps_b: list[float] = []
 
-        for sink in (sleeps_a, sleeps_b):
-            mock_sleep.reset_mock()
+        def _run_flaky_sequence():
             attempts = {"n": 0}
 
             @retry_llm_call(max_attempts=3, base_delay=1.0)
@@ -56,7 +53,14 @@ class TestRetrySleepCap:
                 return "ok"
 
             _flaky()
-            sink.extend(c.args[0] for c in mock_sleep.call_args_list)
+
+        mock_sleep.reset_mock()
+        _run_flaky_sequence()
+        sleeps_a = [c.args[0] for c in mock_sleep.call_args_list]
+
+        mock_sleep.reset_mock()
+        _run_flaky_sequence()
+        sleeps_b = [c.args[0] for c in mock_sleep.call_args_list]
 
         # With jitter, two runs will almost never produce identical sleep sequences
         assert sleeps_a != sleeps_b

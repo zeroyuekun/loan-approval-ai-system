@@ -19,7 +19,7 @@ MAX_BACKOFF_SECONDS = 5.0
 
 def _bounded_sleep(delay):
     """Sleep for min(delay, MAX_BACKOFF_SECONDS) plus up to 0.5s jitter."""
-    capped = min(delay, MAX_BACKOFF_SECONDS) + random.uniform(0, 0.5)
+    capped = min(delay, MAX_BACKOFF_SECONDS) + random.uniform(0, 0.5)  # noqa: S311 - jitter, not cryptographic
     time.sleep(capped)
 
 
