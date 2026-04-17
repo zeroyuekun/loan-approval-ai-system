@@ -14,7 +14,6 @@ const pageTitles: Record<string, string> = {
   '/dashboard/profile': 'My Profile',
   '/dashboard/model-metrics': 'Model Metrics',
   '/dashboard/emails': 'Generated Emails',
-  '/dashboard/agents': 'Agent Workflows',
 }
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
