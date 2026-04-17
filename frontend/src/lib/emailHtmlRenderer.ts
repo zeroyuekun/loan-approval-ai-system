@@ -73,6 +73,59 @@ function extractApprovalLoanType(body: string): string {
   return m ? m[1] : 'Loan'
 }
 
+function extractLoanDetails(body: string): { rows: Array<[string, string]>; start: number; end: number } {
+  const lines = body.split('\n')
+  let start = -1
+  let end = -1
+  const rows: Array<[string, string]> = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (start === -1) {
+      if (line.trim() === 'Loan Details:') {
+        start = i
+        end = i
+      }
+      continue
+    }
+    const m = line.match(LOAN_DETAIL_RE)
+    if (m) {
+      rows.push([m[2].replace(/:+$/, '').trim(), m[3].trim()])
+      end = i
+      continue
+    }
+    if (line.trim() === '') continue
+    break
+  }
+  return { rows, start, end }
+}
+
+function renderLoanDetailsCard(rows: Array<[string, string]>): string {
+  let rowHtml = ''
+  rows.forEach(([label, value], i) => {
+    const isLast = i === rows.length - 1
+    const border = isLast ? '' : `border-bottom:1px solid ${TOKENS.BORDER};`
+    rowHtml += (
+      `<tr>` +
+      `<td style="padding:8px 0; font-size:14px; color:${TOKENS.MUTED}; ${border}">${label}</td>` +
+      `<td style="padding:8px 0; font-size:14px; color:${TOKENS.TEXT}; ` +
+      `font-weight:600; text-align:right; ${border}">${value}</td>` +
+      `</tr>`
+    )
+  })
+  return (
+    `<div style="margin:16px 0;">` +
+    `<table role="presentation" style="width:100%; background-color:${TOKENS.CARD_BG}; ` +
+    `border-left:4px solid ${TOKENS.SUCCESS}; border-radius:4px;">` +
+    `<tr><td style="padding:16px 20px;">` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; font-weight:600; ` +
+    `color:${TOKENS.BRAND_PRIMARY}; text-transform:uppercase; ` +
+    `letter-spacing:0.5px; padding-bottom:8px;">Loan Details</div>` +
+    `<table role="presentation" style="width:100%;">${rowHtml}</table>` +
+    `</td></tr></table>` +
+    `</div>`
+  )
+}
+
 function renderHero(emailType: EmailType, body: string): string {
   const cfg = HERO_CONFIG[emailType]
   const name = extractApplicantName(body)
@@ -219,7 +272,20 @@ function renderFooterShell(): string {
 }
 
 export function renderEmailHtml(plainBody: string, emailType: EmailType): string {
-  const bodyHtml = renderLegacyBody(plainBody)
+  let bodyHtml: string
+  if (emailType === 'approval') {
+    const { rows, start, end } = extractLoanDetails(plainBody)
+    if (rows.length) {
+      const lines = plainBody.split('\n')
+      const top = lines.slice(0, start).join('\n')
+      const rest = lines.slice(end + 1).join('\n')
+      bodyHtml = renderLegacyBody(top) + renderLoanDetailsCard(rows) + renderLegacyBody(rest)
+    } else {
+      bodyHtml = renderLegacyBody(plainBody)
+    }
+  } else {
+    bodyHtml = renderLegacyBody(plainBody)
+  }
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" ` +
     `style="width:100%; background-color:${TOKENS.PAGE_BG}; margin:0; padding:0;">` +
@@ -232,9 +298,7 @@ export function renderEmailHtml(plainBody: string, emailType: EmailType): string
     `${renderHero(emailType, plainBody)}` +
     `<tr><td style="padding:0 24px 24px 24px; font-family:${TOKENS.FONT_STACK}; ` +
     `font-size:${TOKENS.BODY_SIZE}; line-height:${TOKENS.LINE_HEIGHT}; ` +
-    `color:${TOKENS.TEXT};">` +
-    `${bodyHtml}` +
-    `</td></tr>` +
+    `color:${TOKENS.TEXT};">${bodyHtml}</td></tr>` +
     `${renderFooterShell()}` +
     `</table>` +
     `</td></tr>` +

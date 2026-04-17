@@ -88,6 +88,59 @@ def _extract_approval_loan_type(body: str) -> str:
     return m.group(1) if m else "Loan"
 
 
+def _extract_loan_details(body: str) -> tuple[list[tuple[str, str]], int, int]:
+    """Find the 'Loan Details:' block. Return (rows, start_idx, end_idx).
+
+    Block starts at "Loan Details:" line and ends at the last indented label:value row
+    before a non-matching line. Returns ([], -1, -1) if no block found.
+    """
+    lines = body.split("\n")
+    start = -1
+    end = -1
+    rows: list[tuple[str, str]] = []
+    for i, line in enumerate(lines):
+        if start == -1:
+            if line.strip() == "Loan Details:":
+                start = i
+                end = i
+            continue
+        m = LOAN_DETAIL_RE.match(line)
+        if m:
+            rows.append((m.group(2).rstrip(":").strip(), m.group(3).strip()))
+            end = i
+            continue
+        if line.strip() == "":
+            continue
+        break
+    return rows, start, end
+
+
+def _render_loan_details_card(rows: list[tuple[str, str]]) -> str:
+    row_html = ""
+    for i, (label, value) in enumerate(rows):
+        is_last = i == len(rows) - 1
+        border = "" if is_last else f"border-bottom:1px solid {TOKENS['BORDER']};"
+        row_html += (
+            f"<tr>"
+            f'<td style="padding:8px 0; font-size:14px; color:{TOKENS["MUTED"]}; {border}">{label}</td>'
+            f'<td style="padding:8px 0; font-size:14px; color:{TOKENS["TEXT"]}; '
+            f'font-weight:600; text-align:right; {border}">{value}</td>'
+            f"</tr>"
+        )
+    return (
+        f'<div style="margin:16px 0;">'
+        f'<table role="presentation" style="width:100%; background-color:{TOKENS["CARD_BG"]}; '
+        f'border-left:4px solid {TOKENS["SUCCESS"]}; border-radius:4px;">'
+        f'<tr><td style="padding:16px 20px;">'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
+        f'color:{TOKENS["BRAND_PRIMARY"]}; text-transform:uppercase; '
+        f'letter-spacing:0.5px; padding-bottom:8px;">Loan Details</div>'
+        f'<table role="presentation" style="width:100%;">{row_html}</table>'
+        f"</td></tr></table>"
+        f"</div>"
+    )
+
+
 def _render_hero(email_type: EmailType, body: str) -> str:
     cfg = HERO_CONFIG[email_type]
     name = _extract_applicant_name(body)
@@ -239,7 +292,21 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
         Gmail-safe HTML string with inline styles. Ready to pass to
         Django's send_mail(html_message=...).
     """
-    body_html = _render_legacy_body(plain_body)
+    if email_type == "approval":
+        rows, start, end = _extract_loan_details(plain_body)
+    else:
+        rows, start, end = [], -1, -1
+
+    if rows:
+        lines = plain_body.split("\n")
+        top_body = "\n".join(lines[:start])
+        rest_body = "\n".join(lines[end + 1 :])
+        body_html = (
+            _render_legacy_body(top_body) + _render_loan_details_card(rows) + _render_legacy_body(rest_body)
+        )
+    else:
+        body_html = _render_legacy_body(plain_body)
+
     return (
         f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
         f'style="width:100%; background-color:{TOKENS["PAGE_BG"]}; margin:0; padding:0;">'

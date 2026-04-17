@@ -145,6 +145,15 @@ def test_hero_approval_extracts_loan_type():
     assert "Your Home Loan Is Approved" in html
 
 
+def test_approval_loan_details_renders_as_card():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert f"border-left:4px solid {TOKENS['SUCCESS']}" in html
+    assert "LOAN DETAILS" in html.upper()
+    assert "$25,000.00" in html
+    assert "6.50% p.a." in html
+
+
 def test_sender_uses_new_renderer():
     """sender.py must import render_html from html_renderer, not define its own."""
     from apps.email_engine.services import sender as sender_mod
