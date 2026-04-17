@@ -110,9 +110,8 @@ def _plain_text_to_html(body: str) -> str:
             html_parts.append(f'<p style="margin:0;font-size:12px;color:#888;">{stripped}</p>')
             continue
 
-        # Empty lines
+        # Empty lines — paragraph margins already carry the gap, no extra spacer
         if stripped == "":
-            html_parts.append('<div style="height:12px;"></div>')
             continue
 
         # Body text — sentences get paragraph spacing

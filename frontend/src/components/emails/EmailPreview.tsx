@@ -27,7 +27,7 @@ export function HtmlEmailBody({ html }: { html: string }) {
 function plainTextToHtml(body: string): string {
   const escaped = body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   return '<div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">'
-    + escaped.split('\n\n').map(block =>
+    + escaped.split('\n\n').filter(block => block.trim()).map(block =>
         `<p style="margin: 0 0 16px 0;">${block.replace(/\n/g, '<br>')}</p>`
       ).join('')
     + '</div>'

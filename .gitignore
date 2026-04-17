@@ -76,3 +76,4 @@ CLAUDE.md
 # Windows artifacts
 nul
 backend/gunicorn.ctl
+.superpowers/
