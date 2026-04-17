@@ -185,6 +185,38 @@ def test_approval_attachments_chips_rendered():
     assert "Loan Contract.pdf" in html
 
 
+def test_denial_assessment_factors_card():
+    body = _load_fixture("denial_01_serviceability")
+    html = render_html(body, email_type="denial")
+    assert f"border-left:4px solid {TOKENS['CAUTION']}" in html
+    assert "ASSESSMENT FACTORS" in html.upper()
+    assert "Debt-to-income ratio" in html
+
+
+def test_denial_what_you_can_do_card():
+    body = _load_fixture("denial_01_serviceability")
+    html = render_html(body, email_type="denial")
+    assert f"border-left:4px solid {TOKENS['SUCCESS']}" in html
+    assert "WHAT YOU CAN DO" in html.upper()
+    assert "Reduce outstanding debts" in html
+
+
+def test_denial_credit_report_card():
+    body = _load_fixture("denial_01_serviceability")
+    html = render_html(body, email_type="denial")
+    assert "FREE CREDIT REPORT" in html.upper()
+    assert f"border-left:4px solid {TOKENS['BRAND_ACCENT']}" in html
+    assert "equifax.com.au" in html
+
+
+def test_denial_dual_cta():
+    body = _load_fixture("denial_01_serviceability")
+    html = render_html(body, email_type="denial")
+    assert 'href="tel:' in html
+    assert "Call Sarah" in html
+    assert "mailto:" in html
+
+
 def test_sender_uses_new_renderer():
     """sender.py must import render_html from html_renderer, not define its own."""
     from apps.email_engine.services import sender as sender_mod
@@ -201,6 +233,10 @@ ALL_FIXTURE_STEMS = [
     "approval_04_conditional",
     "approval_05_auto_loan",
     "denial_01_serviceability",
+    "denial_02_credit_score",
+    "denial_03_employment",
+    "denial_04_multiple_factors",
+    "denial_05_policy",
     "marketing_01_three_options",
 ]
 
