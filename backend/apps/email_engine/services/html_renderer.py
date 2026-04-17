@@ -51,6 +51,70 @@ CLOSINGS = ["Kind regards,", "Warm regards,"]
 
 OPTION_PATTERN = re.compile(r"^Option\s+\d+[\s:.\-\u2013\u2014]")
 LOAN_DETAIL_RE = re.compile(r"^(\s{2,})(\S[^:]+:)\s+(.+)$")
+APPROVAL_LOAN_TYPE_RE = re.compile(r"application for an? ([A-Z][A-Za-z]+ Loan)")
+
+HERO_CONFIG: dict[str, dict[str, str]] = {
+    "approval": {
+        "icon": "&#10003;",
+        "color": TOKENS["SUCCESS"],
+        "default_headline": "Your Loan Is Approved",
+    },
+    "denial": {
+        "icon": "&#9432;",
+        "color": TOKENS["CAUTION"],
+        "default_headline": "Update on Your Application",
+    },
+    "marketing": {
+        "icon": "&#10022;",
+        "color": TOKENS["MARKETING"],
+        "default_headline": "A Few Options for You",
+    },
+}
+
+
+def _extract_applicant_name(body: str) -> str:
+    for line in body.split("\n")[:5]:
+        s = line.strip()
+        if s.startswith("Dear "):
+            rest = s[5:].rstrip(",").strip()
+            if not rest:
+                return "there"
+            return rest.split()[0]
+    return "there"
+
+
+def _extract_approval_loan_type(body: str) -> str:
+    m = APPROVAL_LOAN_TYPE_RE.search(body)
+    return m.group(1) if m else "Loan"
+
+
+def _render_hero(email_type: EmailType, body: str) -> str:
+    cfg = HERO_CONFIG[email_type]
+    name = _extract_applicant_name(body)
+    if email_type == "approval":
+        loan_type = _extract_approval_loan_type(body)
+        headline = f"Your {loan_type} Is Approved"
+        subtitle = f"Congratulations, {name}!"
+    elif email_type == "denial":
+        headline = cfg["default_headline"]
+        subtitle = f"{name}, we've reviewed your application"
+    else:
+        headline = cfg["default_headline"]
+        subtitle = "A few options tailored to you"
+    return (
+        f'<tr><td style="padding:32px 24px 16px 24px; '
+        f'font-family:{TOKENS["FONT_STACK"]};">'
+        f'<div style="width:48px; height:48px; border-radius:24px; '
+        f'background-color:{cfg["color"]}; text-align:center; '
+        f'line-height:48px; color:#ffffff; font-size:24px; '
+        f'font-weight:600;">{cfg["icon"]}</div>'
+        f'<h1 style="font-size:{TOKENS["HEAD_SIZE"]}; line-height:28px; '
+        f'color:{TOKENS["TEXT"]}; margin:12px 0 4px 0; font-weight:600;">'
+        f"{headline}</h1>"
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; '
+        f'color:{TOKENS["MUTED"]};">{subtitle}</div>'
+        f"</td></tr>"
+    )
 
 
 def _render_legacy_body(body: str) -> str:
@@ -185,7 +249,8 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
         f"background-color:#ffffff; border-radius:8px; "
         f'box-shadow:0 1px 3px rgba(0,0,0,0.06);">'
         f"{_render_header()}"
-        f'<tr><td style="padding:24px; font-family:{TOKENS["FONT_STACK"]}; '
+        f"{_render_hero(email_type, plain_body)}"
+        f'<tr><td style="padding:0 24px 24px 24px; font-family:{TOKENS["FONT_STACK"]}; '
         f"font-size:{TOKENS['BODY_SIZE']}; line-height:{TOKENS['LINE_HEIGHT']}; "
         f'color:{TOKENS["TEXT"]};">'
         f"{body_html}"

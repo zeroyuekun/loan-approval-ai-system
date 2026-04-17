@@ -46,6 +46,64 @@ const LOAN_DETAIL_RE = /^(\s{2,})(\S[^:]+:)\s+(.+)$/
 const HR_RE = /^[\u2500\u2501\-]{5,}$/
 const BULLET_RE = /^[\u2022•]\s*(.+)$/
 const NUM_RE = /^\s+(\d+)\.\s+(.+)$/
+const APPROVAL_LOAN_TYPE_RE = /application for an? ([A-Z][A-Za-z]+ Loan)/
+
+type HeroEntry = { icon: string; color: string; defaultHeadline: string }
+const HERO_CONFIG: Record<EmailType, HeroEntry> = {
+  approval: { icon: '&#10003;', color: TOKENS.SUCCESS, defaultHeadline: 'Your Loan Is Approved' },
+  denial: { icon: '&#9432;', color: TOKENS.CAUTION, defaultHeadline: 'Update on Your Application' },
+  marketing: { icon: '&#10022;', color: TOKENS.MARKETING, defaultHeadline: 'A Few Options for You' },
+}
+
+function extractApplicantName(body: string): string {
+  const lines = body.split('\n').slice(0, 5)
+  for (const line of lines) {
+    const s = line.trim()
+    if (s.startsWith('Dear ')) {
+      const rest = s.substring(5).replace(/,+$/, '').trim()
+      if (!rest) return 'there'
+      return rest.split(/\s+/)[0]
+    }
+  }
+  return 'there'
+}
+
+function extractApprovalLoanType(body: string): string {
+  const m = body.match(APPROVAL_LOAN_TYPE_RE)
+  return m ? m[1] : 'Loan'
+}
+
+function renderHero(emailType: EmailType, body: string): string {
+  const cfg = HERO_CONFIG[emailType]
+  const name = extractApplicantName(body)
+  let headline: string
+  let subtitle: string
+  if (emailType === 'approval') {
+    const loanType = extractApprovalLoanType(body)
+    headline = `Your ${loanType} Is Approved`
+    subtitle = `Congratulations, ${name}!`
+  } else if (emailType === 'denial') {
+    headline = cfg.defaultHeadline
+    subtitle = `${name}, we've reviewed your application`
+  } else {
+    headline = cfg.defaultHeadline
+    subtitle = 'A few options tailored to you'
+  }
+  return (
+    `<tr><td style="padding:32px 24px 16px 24px; ` +
+    `font-family:${TOKENS.FONT_STACK};">` +
+    `<div style="width:48px; height:48px; border-radius:24px; ` +
+    `background-color:${cfg.color}; text-align:center; ` +
+    `line-height:48px; color:#ffffff; font-size:24px; ` +
+    `font-weight:600;">${cfg.icon}</div>` +
+    `<h1 style="font-size:${TOKENS.HEAD_SIZE}; line-height:28px; ` +
+    `color:${TOKENS.TEXT}; margin:12px 0 4px 0; font-weight:600;">` +
+    `${headline}</h1>` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; ` +
+    `color:${TOKENS.MUTED};">${subtitle}</div>` +
+    `</td></tr>`
+  )
+}
 
 function renderLegacyBody(body: string): string {
   const lines = body.split('\n')
@@ -161,7 +219,6 @@ function renderFooterShell(): string {
 }
 
 export function renderEmailHtml(plainBody: string, emailType: EmailType): string {
-  void emailType
   const bodyHtml = renderLegacyBody(plainBody)
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" ` +
@@ -172,7 +229,8 @@ export function renderEmailHtml(plainBody: string, emailType: EmailType): string
     `background-color:#ffffff; border-radius:8px; ` +
     `box-shadow:0 1px 3px rgba(0,0,0,0.06);">` +
     `${renderHeader()}` +
-    `<tr><td style="padding:24px; font-family:${TOKENS.FONT_STACK}; ` +
+    `${renderHero(emailType, plainBody)}` +
+    `<tr><td style="padding:0 24px 24px 24px; font-family:${TOKENS.FONT_STACK}; ` +
     `font-size:${TOKENS.BODY_SIZE}; line-height:${TOKENS.LINE_HEIGHT}; ` +
     `color:${TOKENS.TEXT};">` +
     `${bodyHtml}` +

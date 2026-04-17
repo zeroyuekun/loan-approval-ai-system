@@ -111,6 +111,40 @@ def test_render_html_includes_legacy_body():
     assert "Hello." in result
 
 
+def test_approval_renders_success_hero():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert f"background-color:{TOKENS['SUCCESS']}" in html
+    assert "&#10003;" in html
+    assert "Congratulations" in html
+
+
+def test_denial_renders_caution_hero():
+    body = "Dear John,\n\nWe reviewed your application.\n"
+    html = render_html(body, email_type="denial")
+    assert f"background-color:{TOKENS['CAUTION']}" in html
+    assert "&#9432;" in html
+
+
+def test_marketing_renders_marketing_hero():
+    body = "Dear John,\n\nHere are some options.\n"
+    html = render_html(body, email_type="marketing")
+    assert f"background-color:{TOKENS['MARKETING']}" in html
+    assert "&#10022;" in html
+
+
+def test_hero_extracts_first_name_from_greeting():
+    body = "Dear Priya,\n\nApplication approved.\n"
+    html = render_html(body, email_type="approval")
+    assert "Congratulations, Priya!" in html
+
+
+def test_hero_approval_extracts_loan_type():
+    body = "Dear Emma,\n\nWe are pleased to advise that your application for a Home Loan has been approved.\n"
+    html = render_html(body, email_type="approval")
+    assert "Your Home Loan Is Approved" in html
+
+
 def test_sender_uses_new_renderer():
     """sender.py must import render_html from html_renderer, not define its own."""
     from apps.email_engine.services import sender as sender_mod
