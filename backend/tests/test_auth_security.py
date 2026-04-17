@@ -241,3 +241,55 @@ class TestAccountLockout:
         assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
             "Login with correct password should fail while account is locked"
         )
+
+
+@pytest.mark.django_db
+@patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
+class TestCookieAuthCSRFEnforcement:
+    """Cookie-based JWT auth must enforce CSRF on mutating requests."""
+
+    def _login(self, client, user):
+        resp = client.post(
+            LOGIN_URL,
+            {"username": user.username, "password": PASSWORD},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_200_OK, resp.content
+        return resp
+
+    def test_cookie_auth_without_csrf_header_rejected(self, auth_client, login_user):
+        """POST with cookie auth but no X-CSRFToken must return 403 CSRF Failed."""
+        client = APIClient(enforce_csrf_checks=True)
+        self._login(client, login_user)
+        resp = client.post("/api/v1/loans/", data={"loan_amount": 1000}, format="json")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        body = resp.json() if resp.content else {}
+        assert "CSRF" in (body.get("detail") or "")
+
+    def test_cookie_auth_with_valid_csrf_header_accepted(self, auth_client, login_user):
+        """POST with cookie auth AND a valid X-CSRFToken must pass CSRF."""
+        client = APIClient(enforce_csrf_checks=True)
+        self._login(client, login_user)
+        csrf_cookie = client.cookies.get("csrftoken")
+        assert csrf_cookie is not None, "Login should set csrftoken cookie"
+        resp = client.post(
+            "/api/v1/loans/",
+            data={},
+            format="json",
+            HTTP_X_CSRFTOKEN=csrf_cookie.value,
+        )
+        assert resp.status_code != status.HTTP_403_FORBIDDEN or "CSRF" not in (resp.json().get("detail") or "")
+
+    def test_bearer_header_auth_bypasses_csrf(self, auth_client, login_user):
+        """Authorization: Bearer path (programmatic clients) must NOT require CSRF."""
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        token = str(RefreshToken.for_user(login_user).access_token)
+        client = APIClient(enforce_csrf_checks=True)
+        resp = client.post(
+            "/api/v1/loans/",
+            data={},
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+        assert not (resp.status_code == 403 and "CSRF" in (resp.json().get("detail") or ""))
