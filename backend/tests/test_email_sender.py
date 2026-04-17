@@ -137,3 +137,26 @@ class TestAccentColors:
     def test_unknown_email_type_defaults_to_approval_accent(self):
         html = _plain_text_to_html(APPROVAL_PLAIN, email_type="anything_else")
         assert "#16a34a" in html
+
+
+class TestContainer:
+    def test_container_uses_table_with_600px_width(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "<table" in html
+        assert "width:600px" in html.replace(" ", "")
+        assert "max-width:100%" in html.replace(" ", "")
+
+    def test_branded_header_contains_app_name(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "Aussie Loan AI" in html
+
+    def test_header_accent_bar_matches_email_type(self):
+        html = _plain_text_to_html(DENIAL_PLAIN, email_type="denial")
+        compact = html.replace(" ", "")
+        assert "background-color:#374151" in compact or "background:#374151" in compact
+
+    def test_html_uses_inline_styles_only(self):
+        """Gmail strips <style> blocks — verify we never emit one."""
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "<style" not in html
+        assert "</style>" not in html

@@ -39,6 +39,26 @@ def _get_accent_color(email_type: str) -> str:
     return ACCENT_COLORS.get(email_type, ACCENT_COLORS["approval"])
 
 
+def _render_branded_header(accent: str) -> str:
+    """Render the shared branded header — accent bar + app name."""
+    return (
+        '<table align="center" cellpadding="0" cellspacing="0" '
+        'style="width:600px; max-width:100%; margin:0 auto; '
+        'background:#ffffff; border:1px solid #e5e7eb; border-radius:8px;">'
+        '<tr><td style="background-color:' + accent + '; height:4px; '
+        'font-size:0; line-height:0;">&nbsp;</td></tr>'
+        '<tr><td style="padding:20px 32px;">'
+        '<span style="font-size:18px; font-weight:bold; color:#111827;">'
+        'Aussie Loan AI</span>'
+        '</td></tr>'
+    )
+
+
+def _render_container_close() -> str:
+    """Close the branded container table."""
+    return '</table>'
+
+
 def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
     """Convert a plain-text email body to styled HTML matching the dashboard preview.
 
@@ -137,13 +157,17 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
 
     _flush_detail_rows()
 
-    html_body = "\n".join(html_parts)
+    body_html = "\n".join(html_parts)
     return (
-        f'<div style="font-family: Arial, Helvetica, sans-serif; '
-        f'font-size: 16px; line-height: 1.6; color: #1f2937; '
-        f'border-top: 4px solid {accent};">\n'
-        f"{html_body}\n"
-        "</div>"
+        '<div style="background:#f6f6f6; padding:24px 0; '
+        'font-family: Arial, Helvetica, sans-serif; font-size:16px; '
+        'line-height:1.6; color:#1f2937;">\n'
+        + _render_branded_header(accent)
+        + '<tr><td style="padding:0 32px 16px 32px;">\n'
+        + body_html
+        + '\n</td></tr>\n'
+        + _render_container_close()
+        + '\n</div>'
     )
 
 
