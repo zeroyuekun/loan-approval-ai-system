@@ -168,3 +168,44 @@ describe('useApplicationForm', () => {
     expect(result.current.watch().applicant_type).toBe('single')
   })
 })
+
+describe('useApplicationForm — localStorage debounce', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    localStorage.clear()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('writes to localStorage at most once per 500ms window', () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem')
+    const { result } = renderHook(() => useApplicationForm(), {
+      wrapper: createWrapper(),
+    })
+
+    act(() => {
+      for (let i = 0; i < 10; i++) {
+        result.current.form.setValue('annual_income', 1000 + i)
+      }
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+    const callsBefore = setItemSpy.mock.calls.filter(
+      (c) => c[0] === DRAFT_KEY,
+    ).length
+    expect(callsBefore).toBeLessThanOrEqual(1)
+
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+    const callsAfter = setItemSpy.mock.calls.filter(
+      (c) => c[0] === DRAFT_KEY,
+    ).length
+    expect(callsAfter).toBe(1)
+
+    setItemSpy.mockRestore()
+  })
+})
