@@ -2,6 +2,7 @@
 
 import functools
 import logging
+import random
 import time
 
 import anthropic
@@ -9,6 +10,17 @@ import anthropic
 from .exceptions import LLMAuthError, LLMRateLimitError, LLMServiceError, LLMTimeoutError
 
 logger = logging.getLogger("agents.utils")
+
+# Cap any single sleep to avoid blocking Celery workers for long stretches.
+# Exponential backoff can exceed a minute on repeated failures, which starves
+# the worker pool — bound it + add jitter to prevent thundering-herd retries.
+MAX_BACKOFF_SECONDS = 5.0
+
+
+def _bounded_sleep(delay):
+    """Sleep for min(delay, MAX_BACKOFF_SECONDS) plus up to 0.5s jitter."""
+    capped = min(delay, MAX_BACKOFF_SECONDS) + random.uniform(0, 0.5)
+    time.sleep(capped)
 
 
 def retry_llm_call(max_attempts=3, base_delay=1.0):
@@ -42,7 +54,7 @@ def retry_llm_call(max_attempts=3, base_delay=1.0):
                             delay,
                             e,
                         )
-                        time.sleep(delay)
+                        _bounded_sleep(delay)
                     else:
                         raise LLMRateLimitError(str(e)) from e
                 except anthropic.APITimeoutError as e:
@@ -56,7 +68,7 @@ def retry_llm_call(max_attempts=3, base_delay=1.0):
                             delay,
                             e,
                         )
-                        time.sleep(delay)
+                        _bounded_sleep(delay)
                     else:
                         raise LLMTimeoutError(str(e)) from e
                 except anthropic.APIConnectionError as e:
@@ -70,7 +82,7 @@ def retry_llm_call(max_attempts=3, base_delay=1.0):
                             delay,
                             e,
                         )
-                        time.sleep(delay)
+                        _bounded_sleep(delay)
                     else:
                         raise LLMServiceError(str(e)) from e
                 except anthropic.APIStatusError as e:
@@ -86,7 +98,7 @@ def retry_llm_call(max_attempts=3, base_delay=1.0):
                                 delay,
                                 e,
                             )
-                            time.sleep(delay)
+                            _bounded_sleep(delay)
                         else:
                             raise LLMServiceError(str(e)) from e
                     else:
