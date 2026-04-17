@@ -217,6 +217,50 @@ def test_denial_dual_cta():
     assert "mailto:" in html
 
 
+def test_marketing_offer_cards():
+    body = _load_fixture("marketing_01_three_options")
+    html = render_html(body, email_type="marketing")
+    assert f"border-left:4px solid {TOKENS['MARKETING']}" in html
+    assert "OPTION 1" in html.upper()
+    assert "OPTION 2" in html.upper()
+    assert "OPTION 3" in html.upper()
+    assert "Smaller Personal Loan" in html
+    assert "Secured Car Loan" in html
+
+
+def test_marketing_unsubscribe_mandatory():
+    body = _load_fixture("marketing_01_three_options")
+    html = render_html(body, email_type="marketing")
+    assert "Unsubscribe" in html
+    assert 'href="https://aussieloanai.com.au/unsubscribe' in html
+
+
+def test_marketing_term_deposit_fcs_disclaimer():
+    body = _load_fixture("marketing_04_term_deposit")
+    html = render_html(body, email_type="marketing")
+    assert "Financial Claims Scheme" in html or "FCS" in html
+
+
+def test_marketing_bonus_rate_disclaimer():
+    body = _load_fixture("marketing_05_bonus_rate")
+    html = render_html(body, email_type="marketing")
+    assert "Bonus rates apply" in html or "bonus rate" in html.lower()
+
+
+def test_marketing_single_option_does_not_over_render():
+    body = _load_fixture("marketing_03_single_option")
+    html = render_html(body, email_type="marketing")
+    assert "OPTION 1" in html.upper()
+    assert "OPTION 2" not in html.upper()
+
+
+def test_marketing_call_cta_uses_marketing_color():
+    body = _load_fixture("marketing_01_three_options")
+    html = render_html(body, email_type="marketing")
+    assert 'href="tel:1300000000"' in html
+    assert "Call Sarah" in html
+
+
 def test_sender_uses_new_renderer():
     """sender.py must import render_html from html_renderer, not define its own."""
     from apps.email_engine.services import sender as sender_mod

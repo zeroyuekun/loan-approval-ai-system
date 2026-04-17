@@ -271,6 +271,10 @@ function renderSignatureBlock(sigLines: string[]): string {
 const BULLET_LINE_RE = /^[\u2022•]\s*(.+)$/
 const FACTOR_LINE_RE = /^([A-Z][A-Za-z\s\-/]+):\s+(.+)$/
 const FACTOR_TRIGGER_PREFIX = 'This decision was based on'
+const OFFER_HEADER_RE = /^Option\s+(\d+)[\s:.\-\u2013\u2014]+(.+)$/
+const UNSUBSCRIBE_LINE_RE = /^Unsubscribe:\s*(\S+)/
+const CALL_SARAH_LINE_RE = /^Call Sarah on\s+(\d[\d\s]+)/i
+const MARKETING_BREAK_PREFIXES = ['ABN ', 'Ph:', 'Phone:', 'Email:', 'Website:', 'Unsubscribe:']
 
 function extractSectionBullets(body: string, sectionLabel: string): { bullets: string[]; start: number; end: number } {
   const lines = body.split('\n')
@@ -548,6 +552,178 @@ function renderApprovalBody(plainBody: string): string {
   return parts.join('')
 }
 
+type MarketingOffer = { label: string; title: string; bullets: string[]; fit: string }
+
+function extractMarketingOffers(body: string): { offers: MarketingOffer[]; start: number; end: number } {
+  const lines = body.split('\n')
+  const headers: Array<{ i: number; m: RegExpMatchArray }> = []
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].trim().match(OFFER_HEADER_RE)
+    if (m) headers.push({ i, m })
+  }
+  if (headers.length === 0) return { offers: [], start: -1, end: -1 }
+
+  const offerEnd = (startI: number, nextHeaderI: number | null): number => {
+    const upper = nextHeaderI !== null ? nextHeaderI - 1 : lines.length - 1
+    let endI = startI
+    for (let j = startI + 1; j <= upper; j++) {
+      const s = lines[j].trim()
+      if (
+        CLOSINGS.includes(s) ||
+        CALL_SARAH_LINE_RE.test(s) ||
+        MARKETING_BREAK_PREFIXES.some((p) => s.startsWith(p))
+      ) {
+        return j - 1
+      }
+      endI = j
+    }
+    return endI
+  }
+
+  const offers: MarketingOffer[] = []
+  for (let h = 0; h < headers.length; h++) {
+    const { i: startI, m } = headers[h]
+    const nextHeaderI = h + 1 < headers.length ? headers[h + 1].i : null
+    let endI = offerEnd(startI, nextHeaderI)
+    while (endI > startI && !lines[endI].trim()) endI--
+
+    const bullets: string[] = []
+    let fit = ''
+    for (let j = startI + 1; j <= endI; j++) {
+      const s = lines[j].trim()
+      if (!s) continue
+      const bm = s.match(BULLET_LINE_RE)
+      if (bm) {
+        bullets.push(bm[1])
+        continue
+      }
+      if (bullets.length && !fit) fit = s
+    }
+
+    offers.push({
+      label: `Option ${m[1]}`,
+      title: m[2].trim(),
+      bullets,
+      fit,
+    })
+  }
+
+  const combinedStart = headers[0].i
+  const lastStart = headers[headers.length - 1].i
+  let combinedEnd = offerEnd(lastStart, null)
+  while (combinedEnd > combinedStart && !lines[combinedEnd].trim()) combinedEnd--
+
+  return { offers, start: combinedStart, end: combinedEnd }
+}
+
+function renderOfferCard(offer: MarketingOffer): string {
+  const bulletsHtml = offer.bullets
+    .map(
+      (b) =>
+        `<div style="font-size:14px; color:#374151; padding:4px 0;">` +
+        `&#8226;&nbsp;&nbsp;${b}</div>`
+    )
+    .join('')
+  const fitHtml = offer.fit
+    ? `<div style="font-size:${TOKENS.LABEL_SIZE}; color:${TOKENS.MUTED}; ` +
+      `font-style:italic; padding-top:8px; margin-top:8px; ` +
+      `border-top:1px solid ${TOKENS.BORDER};">${offer.fit}</div>`
+    : ''
+  return (
+    `<div style="margin:12px 0;">` +
+    `<table role="presentation" cellspacing="0" cellpadding="0" ` +
+    `style="width:100%; background-color:${TOKENS.CARD_BG}; ` +
+    `border-left:4px solid ${TOKENS.MARKETING}; border-radius:4px;">` +
+    `<tr><td style="padding:16px 20px;">` +
+    `<div style="font-size:11px; font-weight:600; ` +
+    `color:${TOKENS.MARKETING}; text-transform:uppercase; ` +
+    `letter-spacing:0.5px;">${offer.label}</div>` +
+    `<div style="font-size:17px; font-weight:600; ` +
+    `color:${TOKENS.TEXT}; padding:4px 0 12px 0;">${offer.title}</div>` +
+    `${bulletsHtml}` +
+    `${fitHtml}` +
+    `</td></tr></table>` +
+    `</div>`
+  )
+}
+
+function renderMarketingFooter(body: string): string {
+  const parts: string[] = []
+  if (body.toLowerCase().includes('term deposit')) {
+    parts.push(
+      `<div style="font-size:${TOKENS.FINE_SIZE}; color:${TOKENS.FINE}; ` +
+        `padding:4px 0;">Deposits are protected by the Financial Claims Scheme ` +
+        `(FCS) up to $250,000 per account holder per ADI.</div>`
+    )
+  }
+  if (body.toLowerCase().includes('bonus rate')) {
+    parts.push(
+      `<div style="font-size:${TOKENS.FINE_SIZE}; color:${TOKENS.FINE}; ` +
+        `padding:4px 0;">Bonus rates apply to eligible accounts subject to ` +
+        `monthly deposit and transaction conditions.</div>`
+    )
+  }
+  const m = body.match(UNSUBSCRIBE_LINE_RE)
+  const unsubUrl = m ? m[1] : 'https://aussieloanai.com.au/unsubscribe'
+  parts.push(
+    `<div style="padding:16px 0 0 0; margin-top:16px; ` +
+      `border-top:1px solid ${TOKENS.BORDER};">` +
+      `<a href="${unsubUrl}" ` +
+      `style="font-size:${TOKENS.FINE_SIZE}; ` +
+      `color:${TOKENS.BRAND_ACCENT}; ` +
+      `text-decoration:underline;">Unsubscribe</a>` +
+      ` &nbsp;&middot;&nbsp; ` +
+      `<span style="font-size:${TOKENS.FINE_SIZE}; ` +
+      `color:${TOKENS.FINE};">You received this email because you recently ` +
+      `applied for a loan with AussieLoanAI.</span>` +
+      `</div>`
+  )
+  return parts.join('')
+}
+
+function renderMarketingBody(plainBody: string): string {
+  const { offers, start: oStart, end: oEnd } = extractMarketingOffers(plainBody)
+  const { preSig, sigLines, postSig } = splitAtSignature(plainBody)
+  const preSigEndIdx = preSig ? preSig.split('\n').length : 0
+
+  const lines = plainBody.split('\n')
+  const parts: string[] = []
+  let buffer: string[] = []
+
+  const flush = () => {
+    if (buffer.length) {
+      parts.push(renderLegacyBody(buffer.join('\n')))
+      buffer = []
+    }
+  }
+
+  let i = 0
+  while (i < preSigEndIdx) {
+    if (offers.length && i === oStart) {
+      flush()
+      for (const offer of offers) parts.push(renderOfferCard(offer))
+      parts.push(renderCta('Call Sarah on 1300 000 000', 'tel:1300000000', TOKENS.MARKETING))
+      i = oEnd + 1
+      continue
+    }
+    const s = lines[i].trim()
+    if (CALL_SARAH_LINE_RE.test(s)) {
+      i++
+      continue
+    }
+    buffer.push(lines[i])
+    i++
+  }
+  flush()
+
+  parts.push(renderSignatureBlock(sigLines))
+  parts.push(renderMarketingFooter(plainBody))
+
+  if (postSig.trim()) parts.push(renderLegacyBody(postSig))
+
+  return parts.join('')
+}
+
 function renderHero(emailType: EmailType, body: string): string {
   const cfg = HERO_CONFIG[emailType]
   const name = extractApplicantName(body)
@@ -697,6 +873,7 @@ export function renderEmailHtml(plainBody: string, emailType: EmailType): string
   let bodyHtml: string
   if (emailType === 'approval') bodyHtml = renderApprovalBody(plainBody)
   else if (emailType === 'denial') bodyHtml = renderDenialBody(plainBody)
+  else if (emailType === 'marketing') bodyHtml = renderMarketingBody(plainBody)
   else bodyHtml = renderLegacyBody(plainBody)
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" ` +
