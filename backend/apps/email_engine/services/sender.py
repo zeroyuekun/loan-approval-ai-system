@@ -146,11 +146,19 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
             )
             continue
 
-        # Numbered list items (e.g. "  1. Document.pdf")
+        # Numbered list items (e.g. "  1. Document.pdf") — semantic <ol>/<li>
         num_match = re.match(r"^\s+(\d+)\.\s+(.+)$", line)
         if num_match:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:2px 0 2px 16px;">{num_match.group(1)}. {num_match.group(2)}</p>')
+            content = num_match.group(2)
+            if list_state["type"] and list_state["type"] != "ol":
+                _flush_list()
+            list_state["type"] = "ol"
+            list_state["items"].append(
+                '<li style="margin-bottom:6px; font-size:16px; '
+                'color:#1f2937; line-height:1.6;">'
+                f'{content}</li>'
+            )
             continue
 
         # Loan detail key-value lines (e.g. "  Loan Amount:   $35,000.00")

@@ -193,3 +193,15 @@ class TestBulletLists:
     def test_bullet_items_are_16px(self):
         html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
         assert "font-size:16px" in html.replace(" ", "")
+
+
+class TestNumberedLists:
+    def test_consecutive_numbered_items_collapse_into_single_ol(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert html.count("<ol") >= 1
+        assert '<p style="margin:2px 0 2px 16px;">1.' not in html
+
+    def test_numbered_list_preserves_order(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert html.index("Bank statements") < html.index("Photo ID")
+        assert html.index("Photo ID") < html.index("Signed loan contract")
