@@ -133,7 +133,7 @@ def _render_loan_details_card(rows: list[tuple[str, str]]) -> str:
         f'border-left:4px solid {TOKENS["SUCCESS"]}; border-radius:4px;">'
         f'<tr><td style="padding:16px 20px;">'
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
-        f'color:{TOKENS["BRAND_PRIMARY"]}; text-transform:uppercase; '
+        f"color:{TOKENS['BRAND_PRIMARY']}; text-transform:uppercase; "
         f'letter-spacing:0.5px; padding-bottom:8px;">Loan Details</div>'
         f'<table role="presentation" style="width:100%;">{row_html}</table>'
         f"</td></tr></table>"
@@ -179,7 +179,7 @@ def _render_next_steps_block(steps: list[str]) -> str:
             f"<tr>"
             f'<td style="width:28px; padding:0 0 12px 0; vertical-align:top;">'
             f'<div style="width:24px; height:24px; border-radius:12px; '
-            f'background-color:{TOKENS["BRAND_PRIMARY"]}; color:#ffffff; '
+            f"background-color:{TOKENS['BRAND_PRIMARY']}; color:#ffffff; "
             f'font-size:12px; font-weight:600; line-height:24px; text-align:center;">{i}</div>'
             f"</td>"
             f'<td style="padding:0 0 12px 12px; font-size:{TOKENS["BODY_SIZE"]}; '
@@ -189,7 +189,7 @@ def _render_next_steps_block(steps: list[str]) -> str:
     return (
         f'<div style="padding:8px 0 16px 0;">'
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
-        f'color:{TOKENS["MUTED"]}; text-transform:uppercase; letter-spacing:0.5px; '
+        f"color:{TOKENS['MUTED']}; text-transform:uppercase; letter-spacing:0.5px; "
         f'padding-bottom:12px;">Next Steps</div>'
         f'<table role="presentation" style="width:100%;">{rows}</table>'
         f"</div>"
@@ -205,8 +205,8 @@ def _render_cta(text: str, href: str, color: str | None = None) -> str:
         f'<tr><td style="background-color:{bg}; border-radius:6px;">'
         f'<a href="{href}" target="_blank" '
         f'style="display:inline-block; padding:12px 28px; color:#ffffff; '
-        f'font-size:{TOKENS["BODY_SIZE"]}; font-weight:600; '
-        f"text-decoration:none;\">{text}</a>"
+        f"font-size:{TOKENS['BODY_SIZE']}; font-weight:600; "
+        f'text-decoration:none;">{text}</a>'
         f"</td></tr></table>"
         f"</div>"
     )
@@ -217,14 +217,14 @@ def _render_attachments_chips(names: list[str]) -> str:
         return ""
     chips = '<td style="width:8px;"></td>'.join(
         f'<td style="padding:6px 12px; background-color:{TOKENS["PAGE_BG"]}; '
-        f'border:1px solid {TOKENS["BORDER"]}; border-radius:4px; '
+        f"border:1px solid {TOKENS['BORDER']}; border-radius:4px; "
         f'font-size:{TOKENS["LABEL_SIZE"]}; color:#374151;">&#128206; {n}</td>'
         for n in names
     )
     return (
         f'<div style="padding:8px 0 16px 0;">'
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
-        f'color:{TOKENS["MUTED"]}; text-transform:uppercase; letter-spacing:0.5px; '
+        f"color:{TOKENS['MUTED']}; text-transform:uppercase; letter-spacing:0.5px; "
         f'padding-bottom:8px;">Attachments</div>'
         f'<table role="presentation"><tr>{chips}</tr></table>'
         f"</div>"
@@ -266,14 +266,9 @@ def _render_signature_block(sig_lines: list[str]) -> str:
     name = non_blank[0] if len(non_blank) > 0 else ""
     title = non_blank[1] if len(non_blank) > 1 else ""
     company = non_blank[2] if len(non_blank) > 2 else ""
-    contact = [
-        ln
-        for ln in non_blank[3:]
-        if ln.startswith(("ABN ", "Ph:", "Phone:", "Email:", "Website:"))
-    ]
+    contact = [ln for ln in non_blank[3:] if ln.startswith(("ABN ", "Ph:", "Phone:", "Email:", "Website:"))]
     contact_html = "".join(
-        f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]};">{ln}</div>'
-        for ln in contact
+        f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]};">{ln}</div>' for ln in contact
     )
     return (
         f'<div style="padding:24px 0 0 0; margin-top:16px; '
@@ -405,11 +400,11 @@ def _render_factor_card(factors: list[tuple[str, str]]) -> str:
     return (
         f'<div style="margin:16px 0;">'
         f'<table role="presentation" style="width:100%; '
-        f'background-color:{TOKENS["CARD_BG"]}; '
+        f"background-color:{TOKENS['CARD_BG']}; "
         f'border-left:4px solid {TOKENS["CAUTION"]}; border-radius:4px;">'
         f'<tr><td style="padding:16px 20px;">'
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
-        f'color:{TOKENS["CAUTION"]}; text-transform:uppercase; '
+        f"color:{TOKENS['CAUTION']}; text-transform:uppercase; "
         f'letter-spacing:0.5px; padding-bottom:8px;">Assessment Factors</div>'
         f'<table role="presentation" style="width:100%;">{rows}</table>'
         f"</td></tr></table>"
@@ -425,19 +420,18 @@ def _render_what_you_can_do_card(bullets: list[str], intro: str = "") -> str:
         for b in bullets
     )
     intro_html = (
-        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
-        f'padding-bottom:8px;">{intro}</div>'
+        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; padding-bottom:8px;">{intro}</div>'
         if intro
         else ""
     )
     return (
         f'<div style="margin:16px 0;">'
         f'<table role="presentation" style="width:100%; '
-        f'background-color:{TOKENS["CARD_BG"]}; '
+        f"background-color:{TOKENS['CARD_BG']}; "
         f'border-left:4px solid {TOKENS["SUCCESS"]}; border-radius:4px;">'
         f'<tr><td style="padding:16px 20px;">'
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
-        f'color:{TOKENS["SUCCESS"]}; text-transform:uppercase; '
+        f"color:{TOKENS['SUCCESS']}; text-transform:uppercase; "
         f'letter-spacing:0.5px; padding-bottom:8px;">What You Can Do</div>'
         f"{intro_html}{items}"
         f"</td></tr></table>"
@@ -455,18 +449,18 @@ def _render_credit_report_card() -> str:
         f'<tr><td style="padding:6px 0; font-size:14px; color:{TOKENS["TEXT"]};">'
         f"<strong>{name}</strong> &mdash; "
         f'<a href="{url}" style="color:{TOKENS["BRAND_ACCENT"]};">'
-        f'{url.replace("https://", "")}</a>'
+        f"{url.replace('https://', '')}</a>"
         f"</td></tr>"
         for name, url in bureaus
     )
     return (
         f'<div style="margin:16px 0;">'
         f'<table role="presentation" style="width:100%; '
-        f'background-color:{TOKENS["CARD_BG"]}; '
+        f"background-color:{TOKENS['CARD_BG']}; "
         f'border-left:4px solid {TOKENS["BRAND_ACCENT"]}; border-radius:4px;">'
         f'<tr><td style="padding:16px 20px;">'
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
-        f'color:{TOKENS["BRAND_ACCENT"]}; text-transform:uppercase; '
+        f"color:{TOKENS['BRAND_ACCENT']}; text-transform:uppercase; "
         f'letter-spacing:0.5px; padding-bottom:8px;">Free Credit Report</div>'
         f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
         f'padding-bottom:8px;">You are entitled to a free credit report from each bureau once per year:</div>'
@@ -514,9 +508,7 @@ def _render_denial_body(plain_body: str) -> str:
         if wycd and i == w_start:
             flush()
             parts.append(
-                _render_what_you_can_do_card(
-                    wycd, intro="Here are some ways to strengthen a future application:"
-                )
+                _render_what_you_can_do_card(wycd, intro="Here are some ways to strengthen a future application:")
             )
             i = w_end + 1
             continue
@@ -557,11 +549,7 @@ def _extract_marketing_offers(body: str) -> tuple[list[dict], int, int]:
         end_i = start_i
         for j in range(start_i + 1, upper + 1):
             s = lines[j].strip()
-            if (
-                s in CLOSINGS
-                or CALL_SARAH_LINE_RE.match(s)
-                or any(s.startswith(p) for p in MARKETING_BREAK_PREFIXES)
-            ):
+            if s in CLOSINGS or CALL_SARAH_LINE_RE.match(s) or any(s.startswith(p) for p in MARKETING_BREAK_PREFIXES):
                 return j - 1
             end_i = j
         return end_i
@@ -606,8 +594,7 @@ def _extract_marketing_offers(body: str) -> tuple[list[dict], int, int]:
 
 def _render_offer_card(offer: dict) -> str:
     bullets_html = "".join(
-        f'<div style="font-size:14px; color:#374151; padding:4px 0;">'
-        f"&#8226;&nbsp;&nbsp;{b}</div>"
+        f'<div style="font-size:14px; color:#374151; padding:4px 0;">&#8226;&nbsp;&nbsp;{b}</div>'
         for b in offer["bullets"]
     )
     fit_html = (
@@ -624,7 +611,7 @@ def _render_offer_card(offer: dict) -> str:
         f'border-left:4px solid {TOKENS["MARKETING"]}; border-radius:4px;">'
         f'<tr><td style="padding:16px 20px;">'
         f'<div style="font-size:11px; font-weight:600; '
-        f'color:{TOKENS["MARKETING"]}; text-transform:uppercase; '
+        f"color:{TOKENS['MARKETING']}; text-transform:uppercase; "
         f'letter-spacing:0.5px;">{offer["label"]}</div>'
         f'<div style="font-size:17px; font-weight:600; '
         f'color:{TOKENS["TEXT"]}; padding:4px 0 12px 0;">{offer["title"]}</div>'
@@ -656,7 +643,7 @@ def _render_marketing_footer(body: str) -> str:
         f'border-top:1px solid {TOKENS["BORDER"]};">'
         f'<a href="{unsub_url}" '
         f'style="font-size:{TOKENS["FINE_SIZE"]}; '
-        f'color:{TOKENS["BRAND_ACCENT"]}; '
+        f"color:{TOKENS['BRAND_ACCENT']}; "
         f'text-decoration:underline;">Unsubscribe</a>'
         f" &nbsp;&middot;&nbsp; "
         f'<span style="font-size:{TOKENS["FINE_SIZE"]}; '
@@ -778,8 +765,8 @@ def _render_hero(email_type: EmailType, body: str) -> str:
         f'<tr><td style="padding:32px 24px 16px 24px; '
         f'font-family:{TOKENS["FONT_STACK"]};">'
         f'<div style="width:48px; height:48px; border-radius:24px; '
-        f'background-color:{cfg["color"]}; text-align:center; '
-        f'line-height:48px; color:#ffffff; font-size:24px; '
+        f"background-color:{cfg['color']}; text-align:center; "
+        f"line-height:48px; color:#ffffff; font-size:24px; "
         f'font-weight:600;">{cfg["icon"]}</div>'
         f'<h1 style="font-size:{TOKENS["HEAD_SIZE"]}; line-height:28px; '
         f'color:{TOKENS["TEXT"]}; margin:12px 0 4px 0; font-weight:600;">'

@@ -372,16 +372,16 @@ def test_cta_anchors_have_inline_white_color():
     body = _load_fixture("approval_01_personal")
     html = render_html(body, email_type="approval")
     # Find the anchor wrapping "Review & Sign Documents" text
-    assert re.search(
-        r'<a\s[^>]*color:#ffffff[^>]*>Review &amp; Sign Documents</a>', html
-    ), "Approval CTA anchor missing inline color:#ffffff"
+    assert re.search(r"<a\s[^>]*color:#ffffff[^>]*>Review &amp; Sign Documents</a>", html), (
+        "Approval CTA anchor missing inline color:#ffffff"
+    )
 
     # Marketing CTA: Call Sarah on …
     body = _load_fixture("marketing_01_three_options")
     html = render_html(body, email_type="marketing")
-    assert re.search(
-        r'<a\s[^>]*color:#ffffff[^>]*>Call Sarah on 1300 000 000</a>', html
-    ), "Marketing CTA anchor missing inline color:#ffffff"
+    assert re.search(r"<a\s[^>]*color:#ffffff[^>]*>Call Sarah on 1300 000 000</a>", html), (
+        "Marketing CTA anchor missing inline color:#ffffff"
+    )
 
 
 def test_no_javascript_urls():
@@ -407,9 +407,8 @@ def test_tables_have_role_presentation():
         body = _load_fixture(stem)
         html = render_html(body, email_type=_type_for_fixture(stem))
         # Count <table ...> occurrences
-        table_count = len(re.findall(r'<table\b', html))
+        table_count = len(re.findall(r"<table\b", html))
         role_count = len(re.findall(r'<table[^>]*role="presentation"', html))
         assert role_count == table_count, (
-            f"{stem}: {table_count - role_count} of {table_count} <table> tags "
-            f"missing role=presentation"
+            f"{stem}: {table_count - role_count} of {table_count} <table> tags missing role=presentation"
         )
