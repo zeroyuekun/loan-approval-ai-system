@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.9.5 — Workstream D: Dead-Code Cleanup (2026-04-18)
+
+### Housekeeping
+
+- Removed 8 unused frontend components (608 lines) confirmed orphaned via `knip` + manual import grep. None were referenced by pages, tests, or docs.
+  - `components/agents/PipelineSummaryBar.tsx`, `components/agents/StepLatencyChart.tsx` (superseded by PR #75 agents-UI removal).
+  - `components/applications/CustomerDenialExplanation.tsx` (replaced by `components/loans/DenialExplanation.tsx`).
+  - `components/dashboard/ApprovalTrendChart.tsx`, `components/dashboard/PipelineStats.tsx` (dashboard redesign left them stranded).
+  - `components/layout/ComplianceFooter.tsx` (compliance moved into page-level disclosures).
+  - `components/metrics/DriftFeatureTable.tsx`, `components/metrics/ModelComparison.tsx` (model-metrics page re-implemented inline).
+- Dropped `@types/dompurify` from `frontend/package.json` — `dompurify` 3.x ships its own type definitions at `dist/purify.cjs.d.ts`, so the external types package is a no-op.
+- Minor lint fix in `loadtests/locustfile.py`: removed unused `resp = ` assignment in `ApplicantUser.create_application`.
+
+No behaviour change; `npm run build`, `tsc --noEmit`, and backend pytest suite remain green.
+
 ## v1.9.4 — Security & Reliability Follow-ups (2026-04-18)
 
 ### Security
