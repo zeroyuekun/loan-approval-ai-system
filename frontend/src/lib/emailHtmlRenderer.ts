@@ -268,6 +268,239 @@ function renderSignatureBlock(sigLines: string[]): string {
   )
 }
 
+const BULLET_LINE_RE = /^[\u2022•]\s*(.+)$/
+const FACTOR_LINE_RE = /^([A-Z][A-Za-z\s\-/]+):\s+(.+)$/
+const FACTOR_TRIGGER_PREFIX = 'This decision was based on'
+
+function extractSectionBullets(body: string, sectionLabel: string): { bullets: string[]; start: number; end: number } {
+  const lines = body.split('\n')
+  let start = -1
+  let lastBullet = -1
+  const bullets: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (start === -1) {
+      if (line.trim() === sectionLabel) start = i
+      continue
+    }
+    const m = line.trim().match(BULLET_LINE_RE)
+    if (m) {
+      bullets.push(m[1].trim())
+      lastBullet = i
+      continue
+    }
+    if (bullets.length && line.trim() === '') continue
+    if (bullets.length && line.trim() !== '') break
+  }
+  return { bullets, start, end: lastBullet }
+}
+
+function extractFactorParagraphs(body: string): { factors: Array<[string, string]>; start: number; end: number } {
+  const lines = body.split('\n')
+  let triggerIdx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith(FACTOR_TRIGGER_PREFIX)) {
+      triggerIdx = i
+      break
+    }
+  }
+  if (triggerIdx === -1) return { factors: [], start: -1, end: -1 }
+  const factors: Array<[string, string]> = []
+  let end = triggerIdx
+  let i = triggerIdx + 1
+  while (i < lines.length) {
+    const s = lines[i].trim()
+    if (s === '') {
+      i++
+      continue
+    }
+    const m = s.match(FACTOR_LINE_RE)
+    if (m) {
+      factors.push([m[1].trim(), m[2].trim()])
+      end = i
+      i++
+      continue
+    }
+    break
+  }
+  return { factors, start: triggerIdx, end }
+}
+
+function extractFreeCreditReportBlock(body: string): { start: number; end: number } {
+  const lines = body.split('\n')
+  let start = -1
+  let end = -1
+  for (let i = 0; i < lines.length; i++) {
+    const s = lines[i].trim()
+    if (start === -1) {
+      if (s === 'Free Credit Report:') {
+        start = i
+        end = i
+      }
+      continue
+    }
+    if (s === '') continue
+    const low = s.toLowerCase()
+    if (low.includes('equifax') || low.includes('experian') || low.includes('illion')) {
+      end = i
+      continue
+    }
+    break
+  }
+  return { start, end }
+}
+
+function renderFactorCard(factors: Array<[string, string]>): string {
+  let rows = ''
+  factors.forEach(([label, text], i) => {
+    const isLast = i === factors.length - 1
+    const border = isLast ? '' : `border-bottom:1px solid ${TOKENS.BORDER};`
+    rows += (
+      `<tr><td style="padding:12px 0; ${border}">` +
+      `<div style="font-size:14px; font-weight:600; ` +
+      `color:${TOKENS.TEXT};">${label}</div>` +
+      `<div style="font-size:14px; color:${TOKENS.TEXT}; ` +
+      `padding-top:4px;">${text}</div>` +
+      `</td></tr>`
+    )
+  })
+  return (
+    `<div style="margin:16px 0;">` +
+    `<table role="presentation" style="width:100%; ` +
+    `background-color:${TOKENS.CARD_BG}; ` +
+    `border-left:4px solid ${TOKENS.CAUTION}; border-radius:4px;">` +
+    `<tr><td style="padding:16px 20px;">` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; font-weight:600; ` +
+    `color:${TOKENS.CAUTION}; text-transform:uppercase; ` +
+    `letter-spacing:0.5px; padding-bottom:8px;">Assessment Factors</div>` +
+    `<table role="presentation" style="width:100%;">${rows}</table>` +
+    `</td></tr></table>` +
+    `</div>`
+  )
+}
+
+function renderWhatYouCanDoCard(bullets: string[], intro: string = ''): string {
+  const items = bullets
+    .map(
+      (b) =>
+        `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
+        `padding:4px 0;">` +
+        `<span style="color:${TOKENS.SUCCESS}; font-weight:600;">&#10003;</span> &nbsp;${b}</div>`
+    )
+    .join('')
+  const introHtml = intro
+    ? `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
+      `padding-bottom:8px;">${intro}</div>`
+    : ''
+  return (
+    `<div style="margin:16px 0;">` +
+    `<table role="presentation" style="width:100%; ` +
+    `background-color:${TOKENS.CARD_BG}; ` +
+    `border-left:4px solid ${TOKENS.SUCCESS}; border-radius:4px;">` +
+    `<tr><td style="padding:16px 20px;">` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; font-weight:600; ` +
+    `color:${TOKENS.SUCCESS}; text-transform:uppercase; ` +
+    `letter-spacing:0.5px; padding-bottom:8px;">What You Can Do</div>` +
+    `${introHtml}${items}` +
+    `</td></tr></table>` +
+    `</div>`
+  )
+}
+
+function renderCreditReportCard(): string {
+  const bureaus: Array<[string, string]> = [
+    ['Equifax', 'https://equifax.com.au'],
+    ['Experian', 'https://experian.com.au'],
+    ['Illion', 'https://illion.com.au'],
+  ]
+  const rows = bureaus
+    .map(
+      ([name, url]) =>
+        `<tr><td style="padding:6px 0; font-size:14px; color:${TOKENS.TEXT};">` +
+        `<strong>${name}</strong> &mdash; ` +
+        `<a href="${url}" style="color:${TOKENS.BRAND_ACCENT};">` +
+        `${url.replace('https://', '')}</a>` +
+        `</td></tr>`
+    )
+    .join('')
+  return (
+    `<div style="margin:16px 0;">` +
+    `<table role="presentation" style="width:100%; ` +
+    `background-color:${TOKENS.CARD_BG}; ` +
+    `border-left:4px solid ${TOKENS.BRAND_ACCENT}; border-radius:4px;">` +
+    `<tr><td style="padding:16px 20px;">` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; font-weight:600; ` +
+    `color:${TOKENS.BRAND_ACCENT}; text-transform:uppercase; ` +
+    `letter-spacing:0.5px; padding-bottom:8px;">Free Credit Report</div>` +
+    `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
+    `padding-bottom:8px;">You are entitled to a free credit report from each bureau once per year:</div>` +
+    `<table role="presentation" style="width:100%;">${rows}</table>` +
+    `</td></tr></table>` +
+    `</div>`
+  )
+}
+
+function renderDualCta(): string {
+  const primary = renderCta('Call Sarah on 1300 000 000', 'tel:1300000000')
+  const secondary = (
+    `<div style="text-align:center; padding:0 0 16px 0;">` +
+    `<a href="mailto:aussieloanai@gmail.com" ` +
+    `style="font-size:${TOKENS.LABEL_SIZE}; color:${TOKENS.BRAND_ACCENT}; ` +
+    `text-decoration:underline;">Or reply to this email</a>` +
+    `</div>`
+  )
+  return primary + secondary
+}
+
+function renderDenialBody(plainBody: string): string {
+  const { factors, start: fStart, end: fEnd } = extractFactorParagraphs(plainBody)
+  const { bullets: wycd, start: wStart, end: wEnd } = extractSectionBullets(plainBody, 'What You Can Do:')
+  const { start: crStart, end: crEnd } = extractFreeCreditReportBlock(plainBody)
+  const { preSig, sigLines, postSig } = splitAtSignature(plainBody)
+  const preSigEndIdx = preSig ? preSig.split('\n').length : 0
+
+  const lines = plainBody.split('\n')
+  const parts: string[] = []
+  let buffer: string[] = []
+
+  const flush = () => {
+    if (buffer.length) {
+      parts.push(renderLegacyBody(buffer.join('\n')))
+      buffer = []
+    }
+  }
+
+  let i = 0
+  while (i < preSigEndIdx) {
+    if (factors.length && i === fStart) {
+      flush()
+      parts.push(renderFactorCard(factors))
+      i = fEnd + 1
+      continue
+    }
+    if (wycd.length && i === wStart) {
+      flush()
+      parts.push(renderWhatYouCanDoCard(wycd, 'Here are some ways to strengthen a future application:'))
+      i = wEnd + 1
+      continue
+    }
+    if (crStart !== -1 && i === crStart) {
+      flush()
+      parts.push(renderCreditReportCard())
+      i = crEnd + 1
+      continue
+    }
+    buffer.push(lines[i])
+    i++
+  }
+  flush()
+
+  parts.push(renderDualCta())
+  parts.push(renderSignatureBlock(sigLines))
+  if (postSig.trim()) parts.push(renderLegacyBody(postSig))
+  return parts.join('')
+}
+
 function renderApprovalBody(plainBody: string): string {
   const { rows: ldRows, start: ldStart, end: ldEnd } = extractLoanDetails(plainBody)
   const { steps: nsSteps, start: nsStart, end: nsEnd } = extractNumberedSteps(plainBody, 'Next Steps:')
@@ -461,7 +694,10 @@ function renderFooterShell(): string {
 }
 
 export function renderEmailHtml(plainBody: string, emailType: EmailType): string {
-  const bodyHtml = emailType === 'approval' ? renderApprovalBody(plainBody) : renderLegacyBody(plainBody)
+  let bodyHtml: string
+  if (emailType === 'approval') bodyHtml = renderApprovalBody(plainBody)
+  else if (emailType === 'denial') bodyHtml = renderDenialBody(plainBody)
+  else bodyHtml = renderLegacyBody(plainBody)
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" ` +
     `style="width:100%; background-color:${TOKENS.PAGE_BG}; margin:0; padding:0;">` +

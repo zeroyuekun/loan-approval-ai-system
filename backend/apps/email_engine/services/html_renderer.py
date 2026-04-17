@@ -296,6 +296,241 @@ DEFAULT_APPROVAL_ATTACHMENTS = [
     "Credit Guide.pdf",
 ]
 
+BULLET_LINE_RE = re.compile(r"^[\u2022•]\s*(.+)$")
+FACTOR_LINE_RE = re.compile(r"^([A-Z][A-Za-z\s\-/]+):\s+(.+)$")
+FACTOR_TRIGGER_PREFIX = "This decision was based on"
+
+
+def _extract_section_bullets(body: str, section_label: str) -> tuple[list[str], int, int]:
+    """Find '{label}:' followed by bullet-point lines.
+
+    Intro paragraph between label and first bullet is included in the block range
+    (so it gets removed from the legacy body), but the bullets are what's returned.
+    """
+    lines = body.split("\n")
+    start = -1
+    last_bullet = -1
+    bullets: list[str] = []
+    for i, line in enumerate(lines):
+        if start == -1:
+            if line.strip() == section_label:
+                start = i
+            continue
+        m = BULLET_LINE_RE.match(line.strip())
+        if m:
+            bullets.append(m.group(1).strip())
+            last_bullet = i
+            continue
+        if bullets and line.strip() == "":
+            continue
+        if bullets and line.strip() != "":
+            break
+    return bullets, start, last_bullet
+
+
+def _extract_factor_paragraphs(body: str) -> tuple[list[tuple[str, str]], int, int]:
+    """Find factor-label paragraphs after the 'This decision was based on…' line.
+
+    Each factor is 'Label: explanation.' on its own line. Returns (factors, start_idx, end_idx)
+    where start_idx is the trigger line and end_idx is the last factor line.
+    """
+    lines = body.split("\n")
+    trigger_idx = -1
+    for i, line in enumerate(lines):
+        if line.strip().startswith(FACTOR_TRIGGER_PREFIX):
+            trigger_idx = i
+            break
+    if trigger_idx == -1:
+        return [], -1, -1
+    factors: list[tuple[str, str]] = []
+    end = trigger_idx
+    i = trigger_idx + 1
+    while i < len(lines):
+        s = lines[i].strip()
+        if s == "":
+            i += 1
+            continue
+        m = FACTOR_LINE_RE.match(s)
+        if m:
+            factors.append((m.group(1).strip(), m.group(2).strip()))
+            end = i
+            i += 1
+            continue
+        break
+    return factors, trigger_idx, end
+
+
+def _extract_free_credit_report_block(body: str) -> tuple[int, int]:
+    """Locate the 'Free Credit Report:' section so it can be replaced by the structured card.
+
+    Returns (start, end) spanning the label line through the last bureau URL line,
+    or (-1, -1) if not found.
+    """
+    lines = body.split("\n")
+    start = -1
+    end = -1
+    for i, line in enumerate(lines):
+        if start == -1:
+            if line.strip() == "Free Credit Report:":
+                start = i
+                end = i
+            continue
+        s = line.strip()
+        if s == "":
+            continue
+        if "equifax" in s.lower() or "experian" in s.lower() or "illion" in s.lower():
+            end = i
+            continue
+        break
+    return start, end
+
+
+def _render_factor_card(factors: list[tuple[str, str]]) -> str:
+    rows = ""
+    for i, (label, text) in enumerate(factors):
+        is_last = i == len(factors) - 1
+        border = "" if is_last else f"border-bottom:1px solid {TOKENS['BORDER']};"
+        rows += (
+            f'<tr><td style="padding:12px 0; {border}">'
+            f'<div style="font-size:14px; font-weight:600; '
+            f'color:{TOKENS["TEXT"]};">{label}</div>'
+            f'<div style="font-size:14px; color:{TOKENS["TEXT"]}; '
+            f'padding-top:4px;">{text}</div>'
+            f"</td></tr>"
+        )
+    return (
+        f'<div style="margin:16px 0;">'
+        f'<table role="presentation" style="width:100%; '
+        f'background-color:{TOKENS["CARD_BG"]}; '
+        f'border-left:4px solid {TOKENS["CAUTION"]}; border-radius:4px;">'
+        f'<tr><td style="padding:16px 20px;">'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
+        f'color:{TOKENS["CAUTION"]}; text-transform:uppercase; '
+        f'letter-spacing:0.5px; padding-bottom:8px;">Assessment Factors</div>'
+        f'<table role="presentation" style="width:100%;">{rows}</table>'
+        f"</td></tr></table>"
+        f"</div>"
+    )
+
+
+def _render_what_you_can_do_card(bullets: list[str], intro: str = "") -> str:
+    items = "".join(
+        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
+        f'padding:4px 0;">'
+        f'<span style="color:{TOKENS["SUCCESS"]}; font-weight:600;">&#10003;</span> &nbsp;{b}</div>'
+        for b in bullets
+    )
+    intro_html = (
+        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
+        f'padding-bottom:8px;">{intro}</div>'
+        if intro
+        else ""
+    )
+    return (
+        f'<div style="margin:16px 0;">'
+        f'<table role="presentation" style="width:100%; '
+        f'background-color:{TOKENS["CARD_BG"]}; '
+        f'border-left:4px solid {TOKENS["SUCCESS"]}; border-radius:4px;">'
+        f'<tr><td style="padding:16px 20px;">'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
+        f'color:{TOKENS["SUCCESS"]}; text-transform:uppercase; '
+        f'letter-spacing:0.5px; padding-bottom:8px;">What You Can Do</div>'
+        f"{intro_html}{items}"
+        f"</td></tr></table>"
+        f"</div>"
+    )
+
+
+def _render_credit_report_card() -> str:
+    bureaus = [
+        ("Equifax", "https://equifax.com.au"),
+        ("Experian", "https://experian.com.au"),
+        ("Illion", "https://illion.com.au"),
+    ]
+    rows = "".join(
+        f'<tr><td style="padding:6px 0; font-size:14px; color:{TOKENS["TEXT"]};">'
+        f"<strong>{name}</strong> &mdash; "
+        f'<a href="{url}" style="color:{TOKENS["BRAND_ACCENT"]};">'
+        f'{url.replace("https://", "")}</a>'
+        f"</td></tr>"
+        for name, url in bureaus
+    )
+    return (
+        f'<div style="margin:16px 0;">'
+        f'<table role="presentation" style="width:100%; '
+        f'background-color:{TOKENS["CARD_BG"]}; '
+        f'border-left:4px solid {TOKENS["BRAND_ACCENT"]}; border-radius:4px;">'
+        f'<tr><td style="padding:16px 20px;">'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
+        f'color:{TOKENS["BRAND_ACCENT"]}; text-transform:uppercase; '
+        f'letter-spacing:0.5px; padding-bottom:8px;">Free Credit Report</div>'
+        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
+        f'padding-bottom:8px;">You are entitled to a free credit report from each bureau once per year:</div>'
+        f'<table role="presentation" style="width:100%;">{rows}</table>'
+        f"</td></tr></table>"
+        f"</div>"
+    )
+
+
+def _render_dual_cta() -> str:
+    primary = _render_cta("Call Sarah on 1300 000 000", "tel:1300000000")
+    secondary = (
+        f'<div style="text-align:center; padding:0 0 16px 0;">'
+        f'<a href="mailto:aussieloanai@gmail.com" '
+        f'style="font-size:{TOKENS["LABEL_SIZE"]}; color:{TOKENS["BRAND_ACCENT"]}; '
+        f'text-decoration:underline;">Or reply to this email</a>'
+        f"</div>"
+    )
+    return primary + secondary
+
+
+def _render_denial_body(plain_body: str) -> str:
+    factors, f_start, f_end = _extract_factor_paragraphs(plain_body)
+    wycd, w_start, w_end = _extract_section_bullets(plain_body, "What You Can Do:")
+    cr_start, cr_end = _extract_free_credit_report_block(plain_body)
+    pre_sig, sig_lines, post_sig = _split_at_signature(plain_body)
+    pre_sig_end_idx = len(pre_sig.split("\n")) if pre_sig else 0
+
+    lines = plain_body.split("\n")
+    parts: list[str] = []
+    buffer: list[str] = []
+
+    def flush() -> None:
+        if buffer:
+            parts.append(_render_legacy_body("\n".join(buffer)))
+            buffer.clear()
+
+    i = 0
+    while i < pre_sig_end_idx:
+        if factors and i == f_start:
+            flush()
+            parts.append(_render_factor_card(factors))
+            i = f_end + 1
+            continue
+        if wycd and i == w_start:
+            flush()
+            parts.append(
+                _render_what_you_can_do_card(
+                    wycd, intro="Here are some ways to strengthen a future application:"
+                )
+            )
+            i = w_end + 1
+            continue
+        if cr_start != -1 and i == cr_start:
+            flush()
+            parts.append(_render_credit_report_card())
+            i = cr_end + 1
+            continue
+        buffer.append(lines[i])
+        i += 1
+    flush()
+
+    parts.append(_render_dual_cta())
+    parts.append(_render_signature_block(sig_lines))
+    if post_sig.strip():
+        parts.append(_render_legacy_body(post_sig))
+    return "".join(parts)
+
 
 def _render_approval_body(plain_body: str) -> str:
     ld_rows, ld_start, ld_end = _extract_loan_details(plain_body)
@@ -498,6 +733,8 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
     """
     if email_type == "approval":
         body_html = _render_approval_body(plain_body)
+    elif email_type == "denial":
+        body_html = _render_denial_body(plain_body)
     else:
         body_html = _render_legacy_body(plain_body)
 

@@ -66,6 +66,10 @@ describe('snapshot parity with Python renderer', () => {
     'approval_04_conditional',
     'approval_05_auto_loan',
     'denial_01_serviceability',
+    'denial_02_credit_score',
+    'denial_03_employment',
+    'denial_04_multiple_factors',
+    'denial_05_policy',
     'marketing_01_three_options',
   ]
   for (const stem of stems) {
