@@ -154,6 +154,37 @@ def test_approval_loan_details_renders_as_card():
     assert "6.50% p.a." in html
 
 
+def test_approval_next_steps_renders_numbered_pills():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert "border-radius:12px" in html
+    assert f"background-color:{TOKENS['BRAND_PRIMARY']}" in html
+    assert "Sign and return your documents by 22 April 2026." in html
+
+
+def test_approval_has_cta_button():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert "Review &amp; Sign Documents" in html
+    assert f"background-color:{TOKENS['BRAND_ACCENT']}" in html
+
+
+def test_approval_signature_has_divider():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert f"border-top:1px solid {TOKENS['BORDER']}" in html
+    assert "Sarah Mitchell" in html
+    assert "Senior Lending Officer" in html
+
+
+def test_approval_attachments_chips_rendered():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert "ATTACHMENTS" in html.upper()
+    assert "&#128206;" in html  # paperclip
+    assert "Loan Contract.pdf" in html
+
+
 def test_sender_uses_new_renderer():
     """sender.py must import render_html from html_renderer, not define its own."""
     from apps.email_engine.services import sender as sender_mod

@@ -126,6 +126,195 @@ function renderLoanDetailsCard(rows: Array<[string, string]>): string {
   )
 }
 
+const NUMBERED_STEP_RE = /^\s+(\d+)\.\s+(.+)$/
+const HR_LINE_RE = /^[\u2500\u2501\-]{5,}$/
+
+const DEFAULT_APPROVAL_ATTACHMENTS = [
+  'Loan Contract.pdf',
+  'Key Facts Sheet.pdf',
+  'Credit Guide.pdf',
+]
+
+function extractNumberedSteps(body: string, sectionLabel: string): { steps: string[]; start: number; end: number } {
+  const lines = body.split('\n')
+  let start = -1
+  let lastNum = -1
+  const steps: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (start === -1) {
+      if (line.trim() === sectionLabel) start = i
+      continue
+    }
+    const m = line.match(NUMBERED_STEP_RE)
+    if (m) {
+      steps.push(m[2].trim())
+      lastNum = i
+      continue
+    }
+    if (steps.length && line.trim() === '') continue
+    if (steps.length && line.trim() !== '') break
+  }
+  return { steps, start, end: lastNum }
+}
+
+function renderNextStepsBlock(steps: string[]): string {
+  let rows = ''
+  steps.forEach((text, idx) => {
+    const i = idx + 1
+    rows += (
+      `<tr>` +
+      `<td style="width:28px; padding:0 0 12px 0; vertical-align:top;">` +
+      `<div style="width:24px; height:24px; border-radius:12px; ` +
+      `background-color:${TOKENS.BRAND_PRIMARY}; color:#ffffff; ` +
+      `font-size:12px; font-weight:600; line-height:24px; text-align:center;">${i}</div>` +
+      `</td>` +
+      `<td style="padding:0 0 12px 12px; font-size:${TOKENS.BODY_SIZE}; ` +
+      `color:${TOKENS.TEXT};">${text}</td>` +
+      `</tr>`
+    )
+  })
+  return (
+    `<div style="padding:8px 0 16px 0;">` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; font-weight:600; ` +
+    `color:${TOKENS.MUTED}; text-transform:uppercase; letter-spacing:0.5px; ` +
+    `padding-bottom:12px;">Next Steps</div>` +
+    `<table role="presentation" style="width:100%;">${rows}</table>` +
+    `</div>`
+  )
+}
+
+function renderCta(text: string, href: string, color?: string): string {
+  const bg = color ?? TOKENS.BRAND_ACCENT
+  return (
+    `<div style="padding:8px 0 24px 0; text-align:center;">` +
+    `<table role="presentation" cellspacing="0" cellpadding="0" ` +
+    `style="margin:0 auto;">` +
+    `<tr><td style="background-color:${bg}; border-radius:6px;">` +
+    `<a href="${href}" target="_blank" ` +
+    `style="display:inline-block; padding:12px 28px; color:#ffffff; ` +
+    `font-size:${TOKENS.BODY_SIZE}; font-weight:600; ` +
+    `text-decoration:none;">${text}</a>` +
+    `</td></tr></table>` +
+    `</div>`
+  )
+}
+
+function renderAttachmentsChips(names: string[]): string {
+  if (!names.length) return ''
+  const chips = names
+    .map(
+      (n) =>
+        `<td style="padding:6px 12px; background-color:${TOKENS.PAGE_BG}; ` +
+        `border:1px solid ${TOKENS.BORDER}; border-radius:4px; ` +
+        `font-size:${TOKENS.LABEL_SIZE}; color:#374151;">&#128206; ${n}</td>`
+    )
+    .join('<td style="width:8px;"></td>')
+  return (
+    `<div style="padding:8px 0 16px 0;">` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; font-weight:600; ` +
+    `color:${TOKENS.MUTED}; text-transform:uppercase; letter-spacing:0.5px; ` +
+    `padding-bottom:8px;">Attachments</div>` +
+    `<table role="presentation"><tr>${chips}</tr></table>` +
+    `</div>`
+  )
+}
+
+function splitAtSignature(body: string): { preSig: string; sigLines: string[]; postSig: string } {
+  const lines = body.split('\n')
+  const sigStart = lines.findIndex((ln) => CLOSINGS.includes(ln.trim()))
+  if (sigStart === -1) return { preSig: body, sigLines: [], postSig: '' }
+  let sigEnd = lines.length
+  for (let j = sigStart + 1; j < lines.length; j++) {
+    if (HR_LINE_RE.test(lines[j].trim())) {
+      sigEnd = j
+      break
+    }
+  }
+  return {
+    preSig: lines.slice(0, sigStart).join('\n'),
+    sigLines: lines.slice(sigStart, sigEnd),
+    postSig: lines.slice(sigEnd).join('\n'),
+  }
+}
+
+function renderSignatureBlock(sigLines: string[]): string {
+  if (!sigLines.length) return ''
+  const closing = sigLines[0].trim()
+  const nonBlank = sigLines.slice(1).map((ln) => ln.trim()).filter(Boolean)
+  const name = nonBlank[0] ?? ''
+  const title = nonBlank[1] ?? ''
+  const company = nonBlank[2] ?? ''
+  const contactPrefixes = ['ABN ', 'Ph:', 'Phone:', 'Email:', 'Website:']
+  const contact = nonBlank.slice(3).filter((ln) => contactPrefixes.some((p) => ln.startsWith(p)))
+  const contactHtml = contact
+    .map(
+      (ln) =>
+        `<div style="font-size:${TOKENS.FINE_SIZE}; color:${TOKENS.FINE};">${ln}</div>`
+    )
+    .join('')
+  return (
+    `<div style="padding:24px 0 0 0; margin-top:16px; ` +
+    `border-top:1px solid ${TOKENS.BORDER};">` +
+    `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
+    `padding-bottom:8px;">${closing}</div>` +
+    `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
+    `font-weight:600;">${name}</div>` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; color:${TOKENS.MUTED};">${title}</div>` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; color:${TOKENS.MUTED}; ` +
+    `padding-bottom:8px;">${company}</div>` +
+    `${contactHtml}` +
+    `</div>`
+  )
+}
+
+function renderApprovalBody(plainBody: string): string {
+  const { rows: ldRows, start: ldStart, end: ldEnd } = extractLoanDetails(plainBody)
+  const { steps: nsSteps, start: nsStart, end: nsEnd } = extractNumberedSteps(plainBody, 'Next Steps:')
+  const { preSig, sigLines, postSig } = splitAtSignature(plainBody)
+  const preSigEndIdx = preSig ? preSig.split('\n').length : 0
+
+  const lines = plainBody.split('\n')
+  const parts: string[] = []
+  let buffer: string[] = []
+
+  const flush = () => {
+    if (buffer.length) {
+      parts.push(renderLegacyBody(buffer.join('\n')))
+      buffer = []
+    }
+  }
+
+  let i = 0
+  while (i < preSigEndIdx) {
+    if (ldRows.length && i === ldStart) {
+      flush()
+      parts.push(renderLoanDetailsCard(ldRows))
+      i = ldEnd + 1
+      continue
+    }
+    if (nsSteps.length && i === nsStart) {
+      flush()
+      parts.push(renderNextStepsBlock(nsSteps))
+      parts.push(renderCta('Review &amp; Sign Documents', 'https://portal.aussieloanai.com.au/sign'))
+      i = nsEnd + 1
+      continue
+    }
+    buffer.push(lines[i])
+    i++
+  }
+  flush()
+
+  if (nsSteps.length) {
+    parts.push(renderAttachmentsChips(DEFAULT_APPROVAL_ATTACHMENTS))
+  }
+  parts.push(renderSignatureBlock(sigLines))
+  if (postSig.trim()) {
+    parts.push(renderLegacyBody(postSig))
+  }
+  return parts.join('')
+}
+
 function renderHero(emailType: EmailType, body: string): string {
   const cfg = HERO_CONFIG[emailType]
   const name = extractApplicantName(body)
@@ -272,20 +461,7 @@ function renderFooterShell(): string {
 }
 
 export function renderEmailHtml(plainBody: string, emailType: EmailType): string {
-  let bodyHtml: string
-  if (emailType === 'approval') {
-    const { rows, start, end } = extractLoanDetails(plainBody)
-    if (rows.length) {
-      const lines = plainBody.split('\n')
-      const top = lines.slice(0, start).join('\n')
-      const rest = lines.slice(end + 1).join('\n')
-      bodyHtml = renderLegacyBody(top) + renderLoanDetailsCard(rows) + renderLegacyBody(rest)
-    } else {
-      bodyHtml = renderLegacyBody(plainBody)
-    }
-  } else {
-    bodyHtml = renderLegacyBody(plainBody)
-  }
+  const bodyHtml = emailType === 'approval' ? renderApprovalBody(plainBody) : renderLegacyBody(plainBody)
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" ` +
     `style="width:100%; background-color:${TOKENS.PAGE_BG}; margin:0; padding:0;">` +

@@ -141,6 +141,210 @@ def _render_loan_details_card(rows: list[tuple[str, str]]) -> str:
     )
 
 
+NUMBERED_STEP_RE = re.compile(r"^\s+(\d+)\.\s+(.+)$")
+HR_RE = re.compile(r"^[\u2500\u2501\-]{5,}$")
+
+
+def _extract_numbered_steps(body: str, section_label: str) -> tuple[list[str], int, int]:
+    """Find a section like 'Next Steps:' followed by indented numbered steps.
+
+    The numbered list may be preceded by intro paragraphs. Indices span from
+    the section label through the last numbered step.
+    """
+    lines = body.split("\n")
+    start = -1
+    last_num = -1
+    steps: list[str] = []
+    for i, line in enumerate(lines):
+        if start == -1:
+            if line.strip() == section_label:
+                start = i
+            continue
+        m = NUMBERED_STEP_RE.match(line)
+        if m:
+            steps.append(m.group(2).strip())
+            last_num = i
+            continue
+        if steps and line.strip() == "":
+            continue
+        if steps and line.strip() != "":
+            break
+    return steps, start, last_num
+
+
+def _render_next_steps_block(steps: list[str]) -> str:
+    rows = ""
+    for i, text in enumerate(steps, start=1):
+        rows += (
+            f"<tr>"
+            f'<td style="width:28px; padding:0 0 12px 0; vertical-align:top;">'
+            f'<div style="width:24px; height:24px; border-radius:12px; '
+            f'background-color:{TOKENS["BRAND_PRIMARY"]}; color:#ffffff; '
+            f'font-size:12px; font-weight:600; line-height:24px; text-align:center;">{i}</div>'
+            f"</td>"
+            f'<td style="padding:0 0 12px 12px; font-size:{TOKENS["BODY_SIZE"]}; '
+            f'color:{TOKENS["TEXT"]};">{text}</td>'
+            f"</tr>"
+        )
+    return (
+        f'<div style="padding:8px 0 16px 0;">'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
+        f'color:{TOKENS["MUTED"]}; text-transform:uppercase; letter-spacing:0.5px; '
+        f'padding-bottom:12px;">Next Steps</div>'
+        f'<table role="presentation" style="width:100%;">{rows}</table>'
+        f"</div>"
+    )
+
+
+def _render_cta(text: str, href: str, color: str | None = None) -> str:
+    bg = color or TOKENS["BRAND_ACCENT"]
+    return (
+        f'<div style="padding:8px 0 24px 0; text-align:center;">'
+        f'<table role="presentation" cellspacing="0" cellpadding="0" '
+        f'style="margin:0 auto;">'
+        f'<tr><td style="background-color:{bg}; border-radius:6px;">'
+        f'<a href="{href}" target="_blank" '
+        f'style="display:inline-block; padding:12px 28px; color:#ffffff; '
+        f'font-size:{TOKENS["BODY_SIZE"]}; font-weight:600; '
+        f"text-decoration:none;\">{text}</a>"
+        f"</td></tr></table>"
+        f"</div>"
+    )
+
+
+def _render_attachments_chips(names: list[str]) -> str:
+    if not names:
+        return ""
+    chips = '<td style="width:8px;"></td>'.join(
+        f'<td style="padding:6px 12px; background-color:{TOKENS["PAGE_BG"]}; '
+        f'border:1px solid {TOKENS["BORDER"]}; border-radius:4px; '
+        f'font-size:{TOKENS["LABEL_SIZE"]}; color:#374151;">&#128206; {n}</td>'
+        for n in names
+    )
+    return (
+        f'<div style="padding:8px 0 16px 0;">'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; font-weight:600; '
+        f'color:{TOKENS["MUTED"]}; text-transform:uppercase; letter-spacing:0.5px; '
+        f'padding-bottom:8px;">Attachments</div>'
+        f'<table role="presentation"><tr>{chips}</tr></table>'
+        f"</div>"
+    )
+
+
+def _split_at_signature(body: str) -> tuple[str, list[str], str]:
+    """Split body into (pre_signature, signature_lines, post_signature).
+
+    Signature spans from the 'Kind regards,'/'Warm regards,' line to the first
+    horizontal-rule divider after it (exclusive). Post-signature (HR + fine
+    print) returns as its own string for legacy rendering.
+    """
+    lines = body.split("\n")
+    sig_start = next((i for i, ln in enumerate(lines) if ln.strip() in CLOSINGS), -1)
+    if sig_start == -1:
+        return body, [], ""
+    sig_end = len(lines)
+    for j in range(sig_start + 1, len(lines)):
+        if HR_RE.match(lines[j].strip()):
+            sig_end = j
+            break
+    pre = "\n".join(lines[:sig_start])
+    sig = lines[sig_start:sig_end]
+    post = "\n".join(lines[sig_end:])
+    return pre, sig, post
+
+
+def _render_signature_block(sig_lines: list[str]) -> str:
+    """Render closing + name/title/company + contact lines with top divider.
+
+    sig_lines[0] is the closing ('Kind regards,'). Subsequent non-blank lines
+    are name, title, company, then contact lines (ABN/Ph/Email/Website).
+    """
+    if not sig_lines:
+        return ""
+    closing = sig_lines[0].strip()
+    non_blank = [ln.strip() for ln in sig_lines[1:] if ln.strip()]
+    name = non_blank[0] if len(non_blank) > 0 else ""
+    title = non_blank[1] if len(non_blank) > 1 else ""
+    company = non_blank[2] if len(non_blank) > 2 else ""
+    contact = [
+        ln
+        for ln in non_blank[3:]
+        if ln.startswith(("ABN ", "Ph:", "Phone:", "Email:", "Website:"))
+    ]
+    contact_html = "".join(
+        f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]};">{ln}</div>'
+        for ln in contact
+    )
+    return (
+        f'<div style="padding:24px 0 0 0; margin-top:16px; '
+        f'border-top:1px solid {TOKENS["BORDER"]};">'
+        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
+        f'padding-bottom:8px;">{closing}</div>'
+        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
+        f'font-weight:600;">{name}</div>'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; color:{TOKENS["MUTED"]};">{title}</div>'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; color:{TOKENS["MUTED"]}; '
+        f'padding-bottom:8px;">{company}</div>'
+        f"{contact_html}"
+        f"</div>"
+    )
+
+
+DEFAULT_APPROVAL_ATTACHMENTS = [
+    "Loan Contract.pdf",
+    "Key Facts Sheet.pdf",
+    "Credit Guide.pdf",
+]
+
+
+def _render_approval_body(plain_body: str) -> str:
+    ld_rows, ld_start, ld_end = _extract_loan_details(plain_body)
+    ns_steps, ns_start, ns_end = _extract_numbered_steps(plain_body, "Next Steps:")
+    pre_sig, sig_lines, post_sig = _split_at_signature(plain_body)
+    pre_sig_end_idx = len(pre_sig.split("\n")) if pre_sig else 0
+
+    lines = plain_body.split("\n")
+    parts: list[str] = []
+    buffer: list[str] = []
+
+    def flush() -> None:
+        if buffer:
+            parts.append(_render_legacy_body("\n".join(buffer)))
+            buffer.clear()
+
+    i = 0
+    while i < pre_sig_end_idx:
+        if ld_rows and i == ld_start:
+            flush()
+            parts.append(_render_loan_details_card(ld_rows))
+            i = ld_end + 1
+            continue
+        if ns_steps and i == ns_start:
+            flush()
+            parts.append(_render_next_steps_block(ns_steps))
+            parts.append(
+                _render_cta(
+                    "Review &amp; Sign Documents",
+                    "https://portal.aussieloanai.com.au/sign",
+                )
+            )
+            i = ns_end + 1
+            continue
+        buffer.append(lines[i])
+        i += 1
+    flush()
+
+    if ns_steps:
+        parts.append(_render_attachments_chips(DEFAULT_APPROVAL_ATTACHMENTS))
+
+    parts.append(_render_signature_block(sig_lines))
+
+    if post_sig.strip():
+        parts.append(_render_legacy_body(post_sig))
+
+    return "".join(parts)
+
+
 def _render_hero(email_type: EmailType, body: str) -> str:
     cfg = HERO_CONFIG[email_type]
     name = _extract_applicant_name(body)
@@ -293,17 +497,7 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
         Django's send_mail(html_message=...).
     """
     if email_type == "approval":
-        rows, start, end = _extract_loan_details(plain_body)
-    else:
-        rows, start, end = [], -1, -1
-
-    if rows:
-        lines = plain_body.split("\n")
-        top_body = "\n".join(lines[:start])
-        rest_body = "\n".join(lines[end + 1 :])
-        body_html = (
-            _render_legacy_body(top_body) + _render_loan_details_card(rows) + _render_legacy_body(rest_body)
-        )
+        body_html = _render_approval_body(plain_body)
     else:
         body_html = _render_legacy_body(plain_body)
 
