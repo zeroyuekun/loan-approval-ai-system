@@ -12,6 +12,29 @@ from .property_data_service import PropertyDataService
 from .underwriting_engine import UnderwritingEngine
 
 
+# Columns emitted by DataGenerator that encode information only available
+# AFTER a lending decision. Using any of these as a model input is target
+# leakage: validation AUC goes up but the model does not generalise to
+# real prediction-time data where these values do not exist.
+#
+# Referenced by backend/tests/test_data_generator_no_leak.py — deleting
+# entries here would silently weaken the regression test.
+POST_OUTCOME_FEATURES: frozenset[str] = frozenset(
+    {
+        # Calibration target the synthetic label is derived from — would leak
+        # the answer directly if used as a feature.
+        "default_probability",
+        # Computed after approval (see "2E. Prepayment buffer" block in
+        # DataGenerator.generate()). Requires knowing the loan was approved
+        # AND has been running long enough to accumulate buffer months.
+        "prepayment_buffer_months",
+        # Negative-equity flag derived from post-disbursement property-value
+        # movements — not knowable at application time.
+        "has_negative_equity",
+    }
+)
+
+
 class DataGenerator:
     """Creates synthetic loan data calibrated against official Australian sources.
 
