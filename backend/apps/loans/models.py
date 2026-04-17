@@ -44,6 +44,7 @@ class LoanApplication(SoftDeleteModel):
         APPROVED = "approved", "Approved"
         DENIED = "denied", "Denied"
         REVIEW = "review", "Under Review"
+        QUEUE_FAILED = "queue_failed", "Queue Dispatch Failed"
 
     class Purpose(models.TextChoices):
         HOME = "home", "Home Purchase"
@@ -465,3 +466,33 @@ class Complaint(models.Model):
 
     def __str__(self):
         return f"Complaint {self.id} - {self.get_status_display()}"
+
+
+class PipelineDispatchOutbox(models.Model):
+    """Outbox row for loan applications whose Celery dispatch failed.
+
+    A beat task drains this table on a 60s cadence. Rows that reach
+    MAX_DISPATCH_ATTEMPTS remain for operator visibility — they are NOT
+    retried further by the automated loop.
+    """
+
+    MAX_DISPATCH_ATTEMPTS = 5
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.OneToOneField(
+        LoanApplication,
+        on_delete=models.CASCADE,
+        related_name="dispatch_outbox",
+    )
+    attempts = models.PositiveSmallIntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Pipeline Dispatch Outbox Entry"
+        verbose_name_plural = "Pipeline Dispatch Outbox"
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"outbox<{self.application_id}> attempts={self.attempts}"

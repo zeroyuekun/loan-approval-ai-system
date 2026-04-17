@@ -10,6 +10,7 @@
 ### Reliability
 
 - Orchestrate endpoint is now idempotent by default. The non-force path short-circuits when a completed `AgentRun` exists and returns the existing run ID instead of dispatching. `force=true` requires `admin`/`officer` role AND a non-empty `reason` query/body param; writes an `AuditLog(action="pipeline_force_rerun")` entry before dispatch so every force rerun is traceable to a named user and a reason. Frontend drops the unconditional `?force=true` from `orchestrate()` and exposes a separate `useForceRerun` hook wired into the staff-only human-review page behind a reason-collecting dialog. Addresses Codex adversarial review finding #3.
+- Submission-path durability: loan `perform_create` now dispatches `orchestrate_pipeline_task` under `transaction.on_commit`, and a broker outage no longer swallows submissions. Failed dispatches land in a new `PipelineDispatchOutbox` table and the loan transitions to `status=queue_failed`. A Celery beat task `retry_failed_dispatches` drains the outbox every 60s with a 5-attempt cap; exhausted rows surface in the admin. Addresses Codex adversarial review finding #4.
 
 ## 1.9.2 — 2026-04-18
 

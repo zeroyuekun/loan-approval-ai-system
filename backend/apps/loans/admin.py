@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Complaint, LoanApplication, LoanDecision
+from .models import Complaint, LoanApplication, LoanDecision, PipelineDispatchOutbox
 
 
 @admin.register(LoanApplication)
@@ -34,3 +34,12 @@ class ComplaintAdmin(admin.ModelAdmin):
     list_filter = ("status", "category")
     search_fields = ("complainant__username", "subject", "description")
     readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(PipelineDispatchOutbox)
+class PipelineDispatchOutboxAdmin(admin.ModelAdmin):
+    list_display = ("application", "attempts", "last_attempt_at", "created_at")
+    list_filter = ("attempts",)
+    search_fields = ("application__id",)
+    readonly_fields = ("id", "application", "attempts", "last_error", "last_attempt_at", "created_at")
+    ordering = ("-created_at",)

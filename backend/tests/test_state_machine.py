@@ -169,5 +169,5 @@ class TestLoanStatusTransitions(TestCase):
     def test_valid_status_choices(self):
         """All status values should be from the defined choices."""
         valid_statuses = {choice[0] for choice in LoanApplication.Status.choices}
-        expected = {"pending", "processing", "approved", "denied", "review"}
+        expected = {"pending", "processing", "approved", "denied", "review", "queue_failed"}
         assert valid_statuses == expected

@@ -325,6 +325,20 @@ sleep 10
 docker compose restart backend celery_worker_ml celery_worker_io celery_beat
 ```
 
+**If loans submitted during the outage:**
+Submissions that could not reach the broker are written to
+`loans_pipelinedispatchoutbox` and the loan transitions to
+`status=queue_failed`. The beat task `retry_failed_dispatches` drains the
+outbox on a 60s cadence once Redis returns — loans auto-transition back to
+`pending`. Rows that reach `MAX_DISPATCH_ATTEMPTS` (5) are surfaced in
+`/admin/loans/pipelinedispatchoutbox/` for operator review:
+
+```bash
+# Manually drain (e.g. after an extended outage):
+docker exec loan-approval-ai-system-backend-1 python manage.py shell -c \
+  "from apps.loans.tasks import retry_failed_dispatches; print(retry_failed_dispatches())"
+```
+
 ### 7. Frontend Not Loading
 
 **Symptoms:** Blank page at http://localhost:3000; health check failing

@@ -96,4 +96,8 @@ app.conf.beat_schedule = {
         "task": "apps.loans.tasks.enforce_data_retention",
         "schedule": crontab(hour=6, minute=0, day_of_week="sunday"),
     },
+    "retry-failed-dispatches": {
+        "task": "apps.loans.tasks.retry_failed_dispatches",
+        "schedule": 60.0,
+    },
 }
