@@ -5,6 +5,7 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from apps.email_engine.models import GeneratedEmail
+from apps.email_engine.services.html_renderer import render_html
 from apps.email_engine.tasks import generate_email_task
 from apps.loans.permissions import check_loan_access
 
@@ -52,7 +53,6 @@ class EmailListView(APIView):
                 for log in email.guardrail_checks.all()
             ]
             applicant = email.application.applicant
-            from apps.email_engine.services.sender import _plain_text_to_html
 
             results.append(
                 {
@@ -63,7 +63,10 @@ class EmailListView(APIView):
                     "decision": email.decision,
                     "subject": email.subject,
                     "body": email.body,
-                    "html_body": _plain_text_to_html(email.body),
+                    "html_body": render_html(
+                        email.body,
+                        email_type="approval" if email.decision == "approved" else "denial",
+                    ),
                     "model_used": email.model_used,
                     "generation_time_ms": email.generation_time_ms,
                     "attempt_number": email.attempt_number,
@@ -145,7 +148,12 @@ class SendLatestEmailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        result = send_decision_email(recipient, email.subject, email.body)
+        result = send_decision_email(
+            recipient,
+            email.subject,
+            email.body,
+            email_type="approval" if email.decision == "approved" else "denial",
+        )
         if result["sent"]:
             return Response(
                 {
@@ -191,8 +199,6 @@ class EmailDetailView(APIView):
             for log in email.guardrail_checks.all()
         ]
 
-        from apps.email_engine.services.sender import _plain_text_to_html
-
         applicant = email.application.applicant
         return Response(
             {
@@ -203,7 +209,10 @@ class EmailDetailView(APIView):
                 "decision": email.decision,
                 "subject": email.subject,
                 "body": email.body,
-                "html_body": _plain_text_to_html(email.body),
+                "html_body": render_html(
+                    email.body,
+                    email_type="approval" if email.decision == "approved" else "denial",
+                ),
                 "model_used": email.model_used,
                 "generation_time_ms": email.generation_time_ms,
                 "attempt_number": email.attempt_number,

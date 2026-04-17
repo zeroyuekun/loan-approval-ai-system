@@ -188,6 +188,7 @@ class MarketingPipelineService:
                                 recipient,
                                 email_result_marketing["subject"],
                                 email_result_marketing["body"],
+                                email_type="marketing",
                             )
                             if send_result["sent"]:
                                 from django.utils import timezone as tz

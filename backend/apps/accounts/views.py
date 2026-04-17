@@ -15,6 +15,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.agents.models import AgentRun
 from apps.email_engine.models import GeneratedEmail
+from apps.email_engine.services.html_renderer import render_html
 from apps.loans.models import AuditLog
 
 from .models import CustomerProfile, CustomUser
@@ -357,8 +358,6 @@ class StaffCustomerActivityView(generics.GenericAPIView):
                 {"check_name": log.check_name, "passed": log.passed, "details": log.details}
                 for log in email.guardrail_checks.all()
             ]
-            from apps.email_engine.services.sender import _plain_text_to_html
-
             emails.append(
                 {
                     "id": str(email.id),
@@ -366,7 +365,10 @@ class StaffCustomerActivityView(generics.GenericAPIView):
                     "decision": email.decision,
                     "subject": escape(email.subject),
                     "body": escape(email.body),
-                    "html_body": _plain_text_to_html(email.body),
+                    "html_body": render_html(
+                        email.body,
+                        email_type="approval" if email.decision == "approved" else "denial",
+                    ),
                     "model_used": email.model_used,
                     "generation_time_ms": email.generation_time_ms,
                     "attempt_number": email.attempt_number,
@@ -417,7 +419,7 @@ class StaffCustomerActivityView(generics.GenericAPIView):
                     "id": str(me.id),
                     "subject": escape(me.subject),
                     "body": escape(me.body),
-                    "html_body": _plain_text_to_html(me.body),
+                    "html_body": render_html(me.body, email_type="marketing"),
                     "passed_guardrails": me.passed_guardrails,
                     "guardrail_results": me.guardrail_results,
                     "generation_time_ms": me.generation_time_ms,
