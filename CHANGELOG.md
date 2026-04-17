@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.3 — Security & Reliability Hardening (2026-04-18)
+
+### Security
+
+- Enforce Django CSRF validation on cookie-based JWT authentication. Mutating requests authenticated via the `access_token` HttpOnly cookie now require a matching `X-CSRFToken` header. Bearer-header auth is unchanged. Addresses Codex adversarial review finding #1.
+
 ## 1.9.2 — 2026-04-18
 
 Email aesthetic v2 redesign — 6-PR stack (#69–#74) rebuilt approval, denial, and marketing emails as Gmail-safe HTML with proper visual hierarchy, while preserving the plain-text-first pipeline and existing compliant content (Sarah Mitchell tone, Banking Code alignment, apology-free denial wording).
