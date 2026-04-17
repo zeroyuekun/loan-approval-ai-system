@@ -11,7 +11,6 @@ from .loan_performance_simulator import LoanPerformanceSimulator
 from .property_data_service import PropertyDataService
 from .underwriting_engine import UnderwritingEngine
 
-
 # Columns emitted by DataGenerator that encode information only available
 # AFTER a lending decision. Using any of these as a model input is target
 # leakage: validation AUC goes up but the model does not generalise to
