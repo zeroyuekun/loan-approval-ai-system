@@ -37,6 +37,7 @@ def officer(db):
 @pytest.fixture
 def loan_app(db, customer):
     from apps.loans.models import LoanApplication
+
     return LoanApplication.objects.create(
         applicant=customer,
         loan_amount=20000,
@@ -53,6 +54,7 @@ def loan_app(db, customer):
 @pytest.fixture
 def completed_run(db, loan_app):
     from apps.agents.models import AgentRun
+
     return AgentRun.objects.create(
         application_id=loan_app.id,
         status=AgentRun.Status.COMPLETED,
@@ -80,15 +82,11 @@ class TestOrchestrationForceGuard:
         assert mock_delay.call_count == 0
 
     @patch("apps.agents.views.orchestrate_pipeline_task.delay")
-    def test_staff_force_with_reason_dispatches_and_audits(
-        self, mock_delay, officer, loan_app
-    ):
+    def test_staff_force_with_reason_dispatches_and_audits(self, mock_delay, officer, loan_app):
         mock_delay.return_value.id = "task-abc"
         client = APIClient()
         client.force_authenticate(user=officer)
-        resp = client.post(
-            f"/api/v1/agents/orchestrate/{loan_app.id}/?force=true&reason=bias_fix"
-        )
+        resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/?force=true&reason=bias_fix")
         assert resp.status_code == status.HTTP_202_ACCEPTED
         mock_delay.assert_called_once_with(str(loan_app.id), force=True)
 
@@ -100,9 +98,7 @@ class TestOrchestrationForceGuard:
         assert audit_entries.first().details.get("reason") == "bias_fix"
 
     @patch("apps.agents.views.orchestrate_pipeline_task.delay")
-    def test_customer_non_force_on_completed_returns_existing(
-        self, mock_delay, customer, loan_app, completed_run
-    ):
+    def test_customer_non_force_on_completed_returns_existing(self, mock_delay, customer, loan_app, completed_run):
         """Non-force path on a completed loan returns existing run without dispatching."""
         mock_delay.return_value.id = "should-not-dispatch"
         client = APIClient()
