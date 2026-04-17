@@ -5,6 +5,7 @@ from django.db import models, transaction
 from rest_framework import permissions, viewsets
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
@@ -256,6 +257,13 @@ class DashboardStatsView(APIView):
         }
 
 
+class ComplaintFilingThrottle(UserRateThrottle):
+    """Tight cap on complaint filing — sensitive + spam vector."""
+
+    scope = "complaint_filing"
+    rate = "10/hour"
+
+
 class ComplaintViewSet(viewsets.ModelViewSet):
     """Complaint management: customers create/view own, staff view/update all."""
 
@@ -272,3 +280,8 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         if self.action in ("update", "partial_update", "destroy"):
             return [permissions.IsAuthenticated(), IsAdminOrOfficer()]
         return [permissions.IsAuthenticated()]
+
+    def get_throttles(self):
+        if self.action == "create":
+            return [ComplaintFilingThrottle()]
+        return super().get_throttles()

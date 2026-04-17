@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.9.6 — Workstream B (partial): Throttle & Version Fixes (2026-04-18)
+
+### Security
+
+- Scoped throttle on `ComplaintViewSet.create` — `ComplaintFilingThrottle` (`complaint_filing` scope, 10/hour per user). Complaint filing was previously governed only by the default 60/min user throttle, which left the endpoint open to spam and potentially abusive complaint floods. List/retrieve paths are unaffected.
+- Scoped throttle on `CustomerDataExportView` — `DataExportThrottle` (`data_export` scope, 10/hour per user). Privacy Act APP-12 self-service export is inherently low-frequency; the view also performs a heavy `prefetch_related` across loans, decisions, emails, agent runs, bias reports, and marketing emails, so a tight cap is a modest hardening against accidental or deliberate resource exhaustion.
+- Three new tests in `backend/tests/test_security_throttles.py` assert 10 successful calls then 429 on the 11th, and that the filing cap does not affect complaint list access.
+
+### Housekeeping
+
+- Bumped `APP_VERSION` in `backend/config/settings/base.py` from `1.8.1` → `1.9.6` (was stale since v1.8.2). Surfaces in `/api/v1/health/` output.
+
+Deferred to future sweeps: CSP `REPORT_ONLY` → enforce (needs prod-report review first), `CustomerDataExportView` field allowlist (current reflective `_meta.get_fields()` is APP-12-safe but fragile).
+
 ## v1.9.5 — Workstream D: Dead-Code Cleanup (2026-04-18)
 
 ### Housekeeping
