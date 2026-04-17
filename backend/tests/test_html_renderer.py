@@ -120,14 +120,18 @@ def test_sender_uses_new_renderer():
     )
 
 
-@pytest.mark.parametrize(
-    "stem",
-    [
-        "approval_01_personal",
-        "denial_01_serviceability",
-        "marketing_01_three_options",
-    ],
-)
+ALL_FIXTURE_STEMS = [
+    "approval_01_personal",
+    "approval_02_home_loan",
+    "approval_03_with_cosigner",
+    "approval_04_conditional",
+    "approval_05_auto_loan",
+    "denial_01_serviceability",
+    "marketing_01_three_options",
+]
+
+
+@pytest.mark.parametrize("stem", ALL_FIXTURE_STEMS)
 def test_snapshot_matches(stem):
     body = _load_fixture(stem)
     actual = render_html(body, email_type=_type_for_fixture(stem))
@@ -141,7 +145,7 @@ def test_snapshot_matches(stem):
 
 
 def test_no_flexbox_or_grid():
-    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+    for stem in ALL_FIXTURE_STEMS:
         body = _load_fixture(stem)
         html = render_html(body, email_type=_type_for_fixture(stem))
         for forbidden in ["display:flex", "display: flex", "display:grid", "display: grid", "display:inline-flex"]:
@@ -149,14 +153,14 @@ def test_no_flexbox_or_grid():
 
 
 def test_no_style_tag():
-    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+    for stem in ALL_FIXTURE_STEMS:
         body = _load_fixture(stem)
         html = render_html(body, email_type=_type_for_fixture(stem))
         assert "<style" not in html.lower(), f"{stem}: found <style> tag (Gmail strips these)"
 
 
 def test_size_under_102kb():
-    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+    for stem in ALL_FIXTURE_STEMS:
         body = _load_fixture(stem)
         html = render_html(body, email_type=_type_for_fixture(stem))
         size_kb = len(html.encode("utf-8")) / 1024
