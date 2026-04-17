@@ -4,6 +4,7 @@ These tests protect Celery workers from long blocking sleeps: the original
 implementation computed 2**(attempt+1) * base_delay without a cap, which
 could block a worker for 40s+ per retry cycle on rate-limit paths.
 """
+
 from unittest.mock import patch
 
 import anthropic

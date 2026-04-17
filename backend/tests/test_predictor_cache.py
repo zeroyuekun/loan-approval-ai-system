@@ -1,4 +1,5 @@
 """TTL behavior for the ML model cache."""
+
 import time
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +15,7 @@ def _make_mock_version(pk=1, path="/tmp/fake.joblib", file_hash=None):
 class TestModelCacheTTL:
     def setup_method(self):
         from apps.ml_engine.services import predictor
+
         predictor.clear_model_cache()
 
     @patch("apps.ml_engine.services.predictor._verify_model_hash")
