@@ -90,7 +90,7 @@ class ApplicantUser(HttpUser):
     @task(1)
     def create_application(self):
         """Submit a loan application."""
-        resp = self.client.post('/api/v1/loans/', json={
+        self.client.post('/api/v1/loans/', json={
             'annual_income': random.randint(50000, 200000),
             'credit_score': random.randint(650, 1000),
             'loan_amount': random.randint(10000, 500000),
