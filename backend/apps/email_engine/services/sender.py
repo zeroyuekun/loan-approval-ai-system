@@ -85,7 +85,11 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
     def _flush_detail_rows():
         if detail_rows:
             html_parts.append(
-                '<table style="width:100%;border-collapse:collapse;margin:8px 0;">' + "".join(detail_rows) + "</table>"
+                '<table style="width:100%; border-collapse:collapse; '
+                'background:#f9fafb; border-radius:6px; '
+                'margin:8px 0; padding:16px;">'
+                + "".join(detail_rows)
+                + "</table>"
             )
             detail_rows.clear()
 
@@ -101,8 +105,14 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
             list_state["items"] = []
             list_state["type"] = None
 
-    td_label = 'style="padding:4px 8px 4px 0;color:#888;border-bottom:1px solid #f0f0f0;"'
-    td_value = 'style="padding:4px 0 4px 8px;text-align:right;border-bottom:1px solid #f0f0f0;"'
+    td_label = (
+        'style="padding:8px 0; font-size:13px; color:#6b7280; '
+        'border-bottom:1px solid #e5e7eb;"'
+    )
+    td_value = (
+        'style="padding:8px 0; font-size:15px; font-weight:bold; '
+        'color:#111827; text-align:right; border-bottom:1px solid #e5e7eb;"'
+    )
 
     for line in lines:
         stripped = line.strip()

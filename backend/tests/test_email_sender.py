@@ -205,3 +205,21 @@ class TestNumberedLists:
         html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
         assert html.index("Bank statements") < html.index("Photo ID")
         assert html.index("Photo ID") < html.index("Signed loan contract")
+
+
+class TestDetailsCard:
+    def test_detail_rows_render_inside_card(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "#f9fafb" in html.lower()
+        assert "$35,000.00" in html
+        assert "8.95% p.a." in html
+
+    def test_label_is_grey_value_is_bold_dark(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        compact = html.replace(" ", "")
+        assert "font-size:13px" in compact
+        assert "font-size:15px" in compact
+
+    def test_marketing_each_option_gets_its_own_card(self):
+        html = _plain_text_to_html(MARKETING_PLAIN, email_type="marketing")
+        assert html.count("#f9fafb") >= 2
