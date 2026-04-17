@@ -121,3 +121,32 @@ def test_snapshot_matches(stem):
         f"Snapshot drift in {stem}. "
         f"Delete {snapshot} and re-run to accept the new output."
     )
+
+
+def test_no_flexbox_or_grid():
+    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        for forbidden in ["display:flex", "display: flex", "display:grid",
+                          "display: grid", "display:inline-flex"]:
+            assert forbidden not in html, f"{stem}: forbidden `{forbidden}` in output"
+
+
+def test_no_style_tag():
+    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        assert "<style" not in html.lower(), f"{stem}: found <style> tag (Gmail strips these)"
+
+
+def test_size_under_102kb():
+    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        size_kb = len(html.encode("utf-8")) / 1024
+        assert size_kb < 102, f"{stem}: {size_kb:.1f} KB — Gmail clips at 102 KB"
+
+
+def test_inner_max_width_600():
+    html = render_html("Dear John,", email_type="approval")
+    assert "max-width:600px" in html
