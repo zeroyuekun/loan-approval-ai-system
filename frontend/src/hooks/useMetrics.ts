@@ -127,6 +127,7 @@ export function useTrainModel() {
       return data
     },
     enabled: !!taskId && trainingStatus === 'training',
+    gcTime: 30_000, // 30s: polled data, drop fast after unmount
     refetchInterval: (query) => {
       const status = query.state.data?.status
       if (status === 'SUCCESS') {
