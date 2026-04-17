@@ -190,7 +190,13 @@ export const emailApi = {
 
 // Agents
 export const agentsApi = {
-  orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/?force=true`, null, { timeout: 60000 }),
+  orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/`, null, { timeout: 60000 }),
+  forceRerun: (loanId: string, reason: string) =>
+    api.post(
+      `/agents/orchestrate/${loanId}/?force=true&reason=${encodeURIComponent(reason)}`,
+      null,
+      { timeout: 60000 },
+    ),
   orchestrateAll: (recheck?: boolean) => api.post(`/agents/orchestrate-all/${recheck ? '?recheck=true' : ''}`, null, { timeout: 60000 }),
   getRuns: (params?: PaginationParams) => api.get('/agents/runs/', { params }),
   getRun: (loanId: string) => api.get(`/agents/runs/${loanId}/`),

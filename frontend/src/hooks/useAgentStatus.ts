@@ -76,6 +76,36 @@ export function useOrchestrate() {
   })
 }
 
+export function useForceRerun() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ loanId, reason }: { loanId: string; reason: string }) => {
+      const { data } = await agentsApi.forceRerun(loanId, reason)
+      return data
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['agentRun', variables.loanId] })
+      queryClient.invalidateQueries({ queryKey: ['application', variables.loanId] })
+      queryClient.invalidateQueries({ queryKey: ['email', variables.loanId] })
+    },
+    onError: (error: any) => {
+      if (error?.response?.status === 403) {
+        throw new Error('Force rerun requires staff role.')
+      }
+      if (error?.response?.status === 400) {
+        throw new Error(error?.response?.data?.detail || 'A reason is required.')
+      }
+      if (error?.response?.status === 429) {
+        const retryAfter = error.response.headers?.['retry-after']
+        const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
+        throw new Error(`Rate limited — try again in ${waitSec}s`)
+      }
+      throw error
+    },
+  })
+}
+
 export function useTaskStatus(taskId: string, options?: { enabled?: boolean }) {
   const taskPollCountRef = useRef(0)
 

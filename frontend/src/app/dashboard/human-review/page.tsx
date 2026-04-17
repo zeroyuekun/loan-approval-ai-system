@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useEscalatedRuns, useSubmitReview } from '@/hooks/useHumanReview'
+import { useForceRerun } from '@/hooks/useAgentStatus'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -153,6 +154,63 @@ function ReviewActionModal({
   )
 }
 
+function ForceRerunButton({ loanId }: { loanId: string }) {
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const force = useForceRerun()
+
+  const submit = async () => {
+    setError(null)
+    try {
+      await force.mutateAsync({ loanId, reason })
+      setOpen(false)
+      setReason('')
+    } catch (e: unknown) {
+      setError((e as Error)?.message || 'Force rerun failed')
+    }
+  }
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(true)}
+        className="border-red-200 text-red-700 hover:bg-red-50"
+      >
+        Force Rerun
+      </Button>
+      <Dialog open={open} onOpenChange={(o) => !force.isPending && setOpen(o)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Force pipeline rerun</DialogTitle>
+            <DialogDescription>
+              A reason is required and the action is audited.
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            className="w-full min-h-[80px] rounded-md border border-slate-200 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="Reason (required) — e.g. bias flag resolved, model retrained"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            disabled={force.isPending}
+          />
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={force.isPending}>
+              Cancel
+            </Button>
+            <Button onClick={submit} disabled={!reason.trim() || force.isPending}>
+              {force.isPending ? 'Submitting…' : 'Confirm force rerun'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 export default function HumanReviewPage() {
   const [page, setPage] = useState(1)
   const [selectedRun, setSelectedRun] = useState<AgentRun | null>(null)
@@ -282,9 +340,12 @@ export default function HumanReviewPage() {
                       {formatDate(run.created_at)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" onClick={() => setSelectedRun(run)}>
-                        Review
-                      </Button>
+                      <div className="flex items-center justify-end gap-2">
+                        <ForceRerunButton loanId={run.application_id} />
+                        <Button size="sm" onClick={() => setSelectedRun(run)}>
+                          Review
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 )

@@ -169,18 +169,67 @@ class OrchestrateView(APIView):
     throttle_classes = [OrchestrationThrottle]
 
     def post(self, request, loan_id):
-        """Trigger the full pipeline orchestration for a loan application."""
+        """Trigger pipeline orchestration for a loan application.
+
+        Non-force path (default): idempotent. If a completed AgentRun exists, return
+        it without dispatching. Otherwise dispatch a new run.
+
+        Force path: staff-only, requires `reason` query/body param, writes an
+        AuditLog entry before dispatching.
+        """
         check_loan_access(request, loan_id)
 
         force = request.query_params.get("force", "").lower() == "true"
+        reason = (
+            request.query_params.get("reason")
+            or (request.data.get("reason") if isinstance(request.data, dict) else None)
+            or ""
+        ).strip()
+
+        if force:
+            if request.user.role not in ("admin", "officer"):
+                return Response(
+                    {"detail": "force rerun requires staff role"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if not reason:
+                return Response(
+                    {"detail": "reason is required for force rerun"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            from apps.agents.models import AgentRun
+
+            existing = (
+                AgentRun.objects.filter(
+                    application_id=loan_id,
+                    status=AgentRun.Status.COMPLETED,
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            if existing is not None:
+                return Response(
+                    {
+                        "status": "already_completed",
+                        "existing_run_id": str(existing.id),
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
         task = orchestrate_pipeline_task.delay(str(loan_id), force=force)
+
+        audit_action = "pipeline_force_rerun" if force else "pipeline_triggered"
+        audit_details = {"task_id": task.id}
+        if force:
+            audit_details["reason"] = reason
 
         AuditLog.objects.create(
             user=request.user,
-            action="pipeline_triggered",
+            action=audit_action,
             resource_type="LoanApplication",
             resource_id=str(loan_id),
-            details={"task_id": task.id},
+            details=audit_details,
             ip_address=request.META.get("REMOTE_ADDR"),
         )
 
