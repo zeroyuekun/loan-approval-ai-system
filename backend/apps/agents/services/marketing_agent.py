@@ -142,6 +142,24 @@ class MarketingAgent:
         """Generate a marketing follow-up email based on NBO offers."""
         start_time = time.time()
 
+        # Template-only path: skip Claude API entirely when flag is off (default).
+        from django.conf import settings as django_settings
+
+        if not getattr(django_settings, "EMAIL_USE_CLAUDE_API", False):
+            nbo_amounts = []
+            for offer in nbo_result.get("offers", []):
+                if offer.get("amount"):
+                    nbo_amounts.append(float(offer["amount"]))
+                if offer.get("monthly_repayment"):
+                    nbo_amounts.append(float(offer["monthly_repayment"]))
+                if offer.get("fortnightly_repayment"):
+                    nbo_amounts.append(float(offer["fortnightly_repayment"]))
+            result = self._marketing_template_fallback(
+                application, nbo_amounts, start_time, nbo_result=nbo_result
+            )
+            result["prompt_used"] = "[TEMPLATE — Claude disabled by config]"
+            return result
+
         applicant_name = _sanitize_prompt_input(
             f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
             max_length=200,
