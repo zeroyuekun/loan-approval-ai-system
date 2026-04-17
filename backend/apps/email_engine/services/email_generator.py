@@ -153,6 +153,14 @@ class EmailGenerator:
 
         start_time = time.time()
 
+        # Template-only path: skip Claude API entirely when flag is off (default).
+        # _generate_fallback handles pricing / denial-reason context itself when passed {}.
+        from django.conf import settings as django_settings
+        if not getattr(django_settings, "EMAIL_USE_CLAUDE_API", False):
+            result = self._generate_fallback(application, decision, {}, start_time)
+            result["prompt_used"] = "[TEMPLATE — Claude disabled by config]"
+            return result
+
         applicant_name = _sanitize_prompt_input(
             f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
             max_length=200,

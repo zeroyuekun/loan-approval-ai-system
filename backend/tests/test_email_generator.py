@@ -150,6 +150,11 @@ def _make_mock_application(decision="approved", loan_amount=25000, purpose_displ
 
 
 class TestEmailGenerator:
+    @pytest.fixture(autouse=True)
+    def _enable_claude_api(self, settings):
+        """Existing tests exercise the Claude API path — enable the flag for this class."""
+        settings.EMAIL_USE_CLAUDE_API = True
+
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
     @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
     @patch("apps.agents.services.api_budget.ApiBudgetGuard")
@@ -255,3 +260,50 @@ class TestEmailGenerator:
         # The generator should raise on first failure; it falls back after 3 consecutive
         with pytest.raises(Exception):
             gen.generate(app, "approved", confidence=0.92)
+
+
+class TestClaudeApiGate:
+    """EMAIL_USE_CLAUDE_API gate: when False (default), Claude is bypassed entirely."""
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
+    @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
+    def test_gate_off_skips_claude_entirely(self, mock_anthropic_cls, settings):
+        """When EMAIL_USE_CLAUDE_API is False, Anthropic.messages.create must NOT be called."""
+        settings.EMAIL_USE_CLAUDE_API = False
+        mock_client = MagicMock()
+        mock_anthropic_cls.return_value = mock_client
+
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        app = _make_mock_application(decision="approved")
+        result = gen.generate(app, "approved", confidence=0.92)
+
+        # Claude client must never be touched
+        assert mock_client.messages.create.call_count == 0
+        # Template fallback path was taken
+        assert result["template_fallback"] is True
+        assert "TEMPLATE" in result.get("prompt_used", "")
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
+    @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
+    @patch("apps.agents.services.api_budget.ApiBudgetGuard")
+    def test_gate_on_uses_claude(self, mock_budget_cls, mock_anthropic_cls, settings):
+        """When EMAIL_USE_CLAUDE_API is True, Claude path is exercised."""
+        settings.EMAIL_USE_CLAUDE_API = True
+        mock_client = MagicMock()
+        mock_anthropic_cls.return_value = mock_client
+        mock_client.messages.create.return_value = _make_mock_tool_response(
+            "Congratulations! Your Personal Loan is Approved",
+            GOOD_APPROVAL_BODY,
+        )
+        mock_budget_cls.return_value = MagicMock()
+
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        app = _make_mock_application(decision="approved")
+        result = gen.generate(app, "approved", confidence=0.92)
+
+        assert mock_client.messages.create.call_count >= 1
+        assert result["template_fallback"] is False

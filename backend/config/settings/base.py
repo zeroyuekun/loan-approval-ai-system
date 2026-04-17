@@ -270,6 +270,12 @@ EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
 EMAIL_USE_TLS = True
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "aussieloanai@gmail.com")
 
+# Email generation: default to template-only to save Claude API cost.
+# Flip to True to use Claude for approval/denial/marketing email copy.
+EMAIL_USE_CLAUDE_API = os.environ.get("EMAIL_USE_CLAUDE_API", "False").lower() in (
+    "true", "1", "yes",
+)
+
 # AI Budget Controls
 AI_DAILY_CALL_LIMIT = int(os.environ.get("AI_DAILY_CALL_LIMIT", "500"))
 AI_DAILY_BUDGET_LIMIT_USD = float(os.environ.get("AI_DAILY_BUDGET_LIMIT_USD", "5.0"))
