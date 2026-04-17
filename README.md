@@ -24,9 +24,6 @@ Full-stack loan approval system built for Australian lending. ML scores applican
 ### Generated Emails
 ![Emails](docs/screenshots/05-emails.png)
 
-### Agent Workflows
-![Agent Workflows](docs/screenshots/06-agent-workflows.png)
-
 </details>
 
 ## How the pipeline works
