@@ -73,6 +73,10 @@ CLAUDE.md
 # Playwright MCP artifacts
 .playwright-mcp/
 
+# Playwright test artifacts
+frontend/playwright-report/
+frontend/test-results/
+
 # Windows artifacts
 nul
 backend/gunicorn.ctl

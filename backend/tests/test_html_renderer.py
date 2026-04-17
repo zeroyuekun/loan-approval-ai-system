@@ -1,5 +1,6 @@
 """Unit tests for email html_renderer."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -328,3 +329,87 @@ def test_size_under_102kb():
 def test_inner_max_width_600():
     html = render_html("Dear John,", email_type="approval")
     assert "max-width:600px" in html
+
+
+# ----------------------------------------------------------------------------
+# Gmail-safe lint hardening (PR 6 Task 6.3)
+# ----------------------------------------------------------------------------
+
+
+def test_no_margin_on_td():
+    """Gmail ignores `margin` on `<td>`. Padding only."""
+    for stem in ALL_FIXTURE_STEMS:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        assert not re.search(r'<td[^>]*style="[^"]*margin', html), (
+            f"{stem}: found margin on <td>. Gmail ignores this — use padding."
+        )
+
+
+def test_all_urls_https_or_tel_or_mailto():
+    """Every href must be a safe scheme (https/tel/mailto/anchor)."""
+    for stem in ALL_FIXTURE_STEMS:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        for m in re.finditer(r'href="([^"]+)"', html):
+            url = m.group(1)
+            assert url.startswith(("https://", "tel:", "mailto:", "#")), (
+                f"{stem}: href {url!r} must be https, tel, mailto, or anchor"
+            )
+
+
+def test_no_image_tags():
+    """Brand is CSS + unicode — no <img> can fail to load."""
+    for stem in ALL_FIXTURE_STEMS:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        assert "<img" not in html.lower(), f"{stem}: found <img> — brand is CSS-only"
+
+
+def test_cta_anchors_have_inline_white_color():
+    """Dark-mode readability: CTA buttons must have inline white color on <a>."""
+    # Approval CTA: Review & Sign
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    # Find the anchor wrapping "Review & Sign Documents" text
+    assert re.search(
+        r'<a\s[^>]*color:#ffffff[^>]*>Review &amp; Sign Documents</a>', html
+    ), "Approval CTA anchor missing inline color:#ffffff"
+
+    # Marketing CTA: Call Sarah on …
+    body = _load_fixture("marketing_01_three_options")
+    html = render_html(body, email_type="marketing")
+    assert re.search(
+        r'<a\s[^>]*color:#ffffff[^>]*>Call Sarah on 1300 000 000</a>', html
+    ), "Marketing CTA anchor missing inline color:#ffffff"
+
+
+def test_no_javascript_urls():
+    """No javascript: or data: URIs — security hardening."""
+    for stem in ALL_FIXTURE_STEMS:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        assert "javascript:" not in html.lower(), f"{stem}: javascript: scheme found"
+        assert "data:" not in html.lower(), f"{stem}: data: URI found"
+
+
+def test_outlook_conditional_comments_absent():
+    """No Outlook conditional comments — we don't target Outlook-specific rendering."""
+    for stem in ALL_FIXTURE_STEMS:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        assert "<!--[if" not in html, f"{stem}: found Outlook conditional comment"
+
+
+def test_tables_have_role_presentation():
+    """All content <table> must have role=presentation for screen readers."""
+    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+        body = _load_fixture(stem)
+        html = render_html(body, email_type=_type_for_fixture(stem))
+        # Count <table ...> occurrences
+        table_count = len(re.findall(r'<table\b', html))
+        role_count = len(re.findall(r'<table[^>]*role="presentation"', html))
+        assert role_count == table_count, (
+            f"{stem}: {table_count - role_count} of {table_count} <table> tags "
+            f"missing role=presentation"
+        )
