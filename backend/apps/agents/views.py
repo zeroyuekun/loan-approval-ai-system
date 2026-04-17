@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsAdminOrOfficer
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
-from apps.email_engine.services.sender import _plain_text_to_html
+from apps.email_engine.services.html_renderer import render_html
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 from apps.loans.permissions import check_loan_access
 
@@ -117,7 +117,7 @@ class AgentRunListView(APIView):
                     "id": str(me.id),
                     "subject": me.subject,
                     "body": me.body,
-                    "html_body": _plain_text_to_html(me.body),
+                    "html_body": render_html(me.body, email_type="marketing"),
                     "passed_guardrails": me.passed_guardrails,
                     "guardrail_results": me.guardrail_results,
                     "generation_time_ms": me.generation_time_ms,
@@ -322,7 +322,7 @@ class AgentRunView(APIView):
                 "id": str(me.id),
                 "subject": me.subject,
                 "body": me.body,
-                "html_body": _plain_text_to_html(me.body),
+                "html_body": render_html(me.body, email_type="marketing"),
                 "passed_guardrails": me.passed_guardrails,
                 "guardrail_results": me.guardrail_results,
                 "generation_time_ms": me.generation_time_ms,
