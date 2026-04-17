@@ -2,6 +2,10 @@
 
 ## v1.9.4 — Security & Reliability Follow-ups (2026-04-18)
 
+### Security
+
+- Validate complaint ownership on create. `ComplaintSerializer` now rejects (400) a complaint whose `loan_application` belongs to another customer; staff (`admin`/`officer`) may still file on behalf of customers, which is recorded as `details.on_behalf_of_id` on the new `complaint_filed` audit entry. Addresses Codex adversarial review finding #3 (second pass).
+
 ### Reliability
 
 - Hard-cap batch orchestration default path at 100 applications (was unbounded). The `recheck=true` path already had the cap; the default `POST /api/v1/agents/orchestrate-all/` now applies the same limit, orders oldest-first, and reports `skipped` + a drain-hint `detail` when the backlog exceeds the cap. The `batch_pipeline_triggered` audit entry gains a `skipped_count` field. Addresses Codex adversarial review finding #2 (second pass).
