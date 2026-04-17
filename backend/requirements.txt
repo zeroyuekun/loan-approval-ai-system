@@ -68,7 +68,7 @@ referencing==0.37.0
 rpds-py==0.30.0
 scikit-learn==1.8.0
 scipy==1.17.1
-sentry-sdk[celery,django]==2.19.2
+sentry-sdk[celery,django]==2.58.0
 shap==0.51.0
 six==1.17.0
 slicer==0.0.8
