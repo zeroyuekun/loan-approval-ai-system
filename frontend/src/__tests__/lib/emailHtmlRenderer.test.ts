@@ -71,6 +71,10 @@ describe('snapshot parity with Python renderer', () => {
     'denial_04_multiple_factors',
     'denial_05_policy',
     'marketing_01_three_options',
+    'marketing_02_two_options',
+    'marketing_03_single_option',
+    'marketing_04_term_deposit',
+    'marketing_05_bonus_rate',
   ]
   for (const stem of stems) {
     it(`${stem} matches Python snapshot byte-for-byte`, () => {
