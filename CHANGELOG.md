@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.1 — 2026-04-17
+
+Portfolio-polish pass responding to external Claude review (same day, 9.2/10 baseline). Four atomic PRs landed on `master`.
+
+- **A — DataGenerator post-outcome leak regression test** (#63). Extracted `POST_OUTCOME_FEATURES` frozenset in `apps/ml_engine/services/data_generator.py` and added `test_training_features_exclude_post_outcome_columns` + `test_post_outcome_features_constant_is_not_empty` to fail CI if any post-outcome field joins the training feature set, or if the constant is emptied to vacuously pass.
+- **B — Backend test collection + coverage gate bump; frontend multi-metric threshold** (#64). `testpaths = ["tests", "apps"]` in `backend/pyproject.toml` picked up 20 previously-uncollected tests (counterfactual engine, orchestrator CF, CF integration, serializer CF). Coverage 61.35% → 63.98%; `--cov-fail-under` 60 → 63. Frontend vitest now enforces `lines: 65, statements: 65, functions: 75, branches: 75` (previously `lines: 60` only), anchored at the measured floor.
+- **C — Stale `feat/*` PR triage** (#1, #3, #4, #5 closed with rationale). Four stale `feat/*` PRs from an older Claude Code session audited; #1 closed ("too large to review as one PR"), #3/#4 closed (base diverged, force-push policy blocked clean rebase), #5 closed (half-finished placeholder per user preference).
+- **D — 431-line `ci.yml` split into lint/test/security/build** (#65). Four focused workflows matching concern boundaries. Deploy's `needs:` shrinks to `[docker-build, dast-scan]` — cross-workflow `needs:` unsupported by GitHub Actions — with branch-protection rules enforcing upstream green. Nine required-status-check job names preserved verbatim; no admin UI action needed.
+
+Response document: `docs/reviews/2026-04-17-v1.9.1-review-response.md`.
+
+Tracked follow-up (not this pass): Coverage phase 2 — targeted tests for `counterfactual_engine` (11%), `marketing_agent` (11%), `next_best_offer` (13%) to push toward the external review's 75% target.
+
 ## 1.9.0 — 2026-04-17
 
 Portfolio production-polish pass: 18 tasks across two tiers — governance/operability documentation (Tier A) and latent-bug fixes with regression tests (Tier B). 20 PRs shipped (#15–#48).
