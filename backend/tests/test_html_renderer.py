@@ -134,9 +134,9 @@ def test_snapshot_matches(stem):
     snapshot = _snapshot_path(stem)
     if not snapshot.exists():
         snapshot.parent.mkdir(parents=True, exist_ok=True)
-        snapshot.write_text(actual, encoding="utf-8")
+        snapshot.write_bytes(actual.encode("utf-8"))
         pytest.skip(f"Wrote new snapshot {snapshot.name} — re-run to assert.")
-    expected = snapshot.read_text(encoding="utf-8")
+    expected = snapshot.read_bytes().decode("utf-8")
     assert actual == expected, f"Snapshot drift in {stem}. Delete {snapshot} and re-run to accept the new output."
 
 

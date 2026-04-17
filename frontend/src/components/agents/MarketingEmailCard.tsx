@@ -6,16 +6,7 @@ import { MarketingEmail } from '@/types'
 import { ShieldCheck, ShieldAlert, Clock, Star, Reply, Forward, MoreVertical, RefreshCw } from 'lucide-react'
 import { GuardrailLogDisplay } from '@/components/emails/GuardrailLogDisplay'
 import { HtmlEmailBody } from '@/components/emails/EmailPreview'
-
-/** Fallback: convert plain text to basic HTML paragraphs when no html_body exists */
-function plainTextToHtml(body: string): string {
-  const escaped = body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  return '<div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">'
-    + escaped.split('\n\n').map(block =>
-        `<p style="margin: 0 0 16px 0;">${block.replace(/\n/g, '<br>')}</p>`
-      ).join('')
-    + '</div>'
-}
+import { renderEmailHtml } from '@/lib/emailHtmlRenderer'
 
 function formatTime() {
   const now = new Date()
@@ -31,7 +22,7 @@ interface MarketingEmailCardProps {
 }
 
 export function MarketingEmailCard({ email }: MarketingEmailCardProps) {
-  const htmlContent = email.html_body || plainTextToHtml(email.body)
+  const htmlContent = email.html_body || renderEmailHtml(email.body, 'marketing')
   const senderName = 'Sarah Mitchell'
   const senderEmail = 'alternatives@aussieloanai.com.au'
 

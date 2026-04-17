@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { GeneratedEmail } from '@/types'
+import { renderEmailHtml } from '@/lib/emailHtmlRenderer'
 import { GuardrailLogDisplay } from './GuardrailLogDisplay'
 import { CheckCircle, XCircle, Clock, Star, Reply, Forward, MoreVertical, Paperclip } from 'lucide-react'
 
@@ -12,7 +13,7 @@ export function HtmlEmailBody({ html }: { html: string }) {
   // Content is sanitized with DOMPurify before rendering — safe against XSS
   const sanitized = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ['div', 'p', 'strong', 'em', 'br', 'hr', 'table', 'tr', 'td', 'th', 'span', 'b', 'i', 'u', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3'],
-    ALLOWED_ATTR: ['style', 'href'],
+    ALLOWED_ATTR: ['style', 'href', 'role', 'cellpadding', 'cellspacing', 'border', 'align', 'target'],
   })
 
   return (
@@ -21,16 +22,6 @@ export function HtmlEmailBody({ html }: { html: string }) {
       dangerouslySetInnerHTML={{ __html: sanitized }}
     />
   )
-}
-
-/** Fallback: convert plain text to basic HTML paragraphs when no html_body exists */
-function plainTextToHtml(body: string): string {
-  const escaped = body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  return '<div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">'
-    + escaped.split('\n\n').map(block =>
-        `<p style="margin: 0 0 16px 0;">${block.replace(/\n/g, '<br>')}</p>`
-      ).join('')
-    + '</div>'
 }
 
 function formatTime() {
@@ -47,7 +38,10 @@ interface EmailPreviewProps {
 }
 
 export function EmailPreview({ email }: EmailPreviewProps) {
-  const htmlContent = useMemo(() => email.html_body || plainTextToHtml(email.body), [email.html_body, email.body])
+  const htmlContent = useMemo(
+    () => email.html_body || renderEmailHtml(email.body, email.decision === 'approved' ? 'approval' : 'denial'),
+    [email.html_body, email.body, email.decision],
+  )
   const isApproval = email.decision === 'approved'
   const senderInitial = 'S'
   const senderName = 'Sarah Mitchell'
