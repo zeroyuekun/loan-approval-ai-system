@@ -7,6 +7,10 @@
 - Enforce Django CSRF validation on cookie-based JWT authentication. Mutating requests authenticated via the `access_token` HttpOnly cookie now require a matching `X-CSRFToken` header. Bearer-header auth is unchanged. Addresses Codex adversarial review finding #1.
 - Gate `/metrics` and deep-health behind auth. `/metrics` now requires staff session or `X-Health-Token` header (previously unauthenticated). Removed `/metrics` from the public Kubernetes ingress — still reachable on the internal network for Prometheus. `deep_health_check` refuses to respond (503) in non-DEBUG environments when `HEALTH_CHECK_TOKEN` is unset, so production won't silently leak diagnostics. Prometheus scrape config carries the token via `http_headers`. Addresses Codex adversarial review finding #2.
 
+### Reliability
+
+- Orchestrate endpoint is now idempotent by default. The non-force path short-circuits when a completed `AgentRun` exists and returns the existing run ID instead of dispatching. `force=true` requires `admin`/`officer` role AND a non-empty `reason` query/body param; writes an `AuditLog(action="pipeline_force_rerun")` entry before dispatch so every force rerun is traceable to a named user and a reason. Frontend drops the unconditional `?force=true` from `orchestrate()` and exposes a separate `useForceRerun` hook wired into the staff-only human-review page behind a reason-collecting dialog. Addresses Codex adversarial review finding #3.
+
 ## 1.9.2 — 2026-04-18
 
 Email aesthetic v2 redesign — 6-PR stack (#69–#74) rebuilt approval, denial, and marketing emails as Gmail-safe HTML with proper visual hierarchy, while preserving the plain-text-first pipeline and existing compliant content (Sarah Mitchell tone, Banking Code alignment, apology-free denial wording).
