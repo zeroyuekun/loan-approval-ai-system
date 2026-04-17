@@ -111,6 +111,80 @@ def test_render_html_includes_legacy_body():
     assert "Hello." in result
 
 
+def test_approval_renders_success_hero():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert f"background-color:{TOKENS['SUCCESS']}" in html
+    assert "&#10003;" in html
+    assert "Congratulations" in html
+
+
+def test_denial_renders_caution_hero():
+    body = "Dear John,\n\nWe reviewed your application.\n"
+    html = render_html(body, email_type="denial")
+    assert f"background-color:{TOKENS['CAUTION']}" in html
+    assert "&#9432;" in html
+
+
+def test_marketing_renders_marketing_hero():
+    body = "Dear John,\n\nHere are some options.\n"
+    html = render_html(body, email_type="marketing")
+    assert f"background-color:{TOKENS['MARKETING']}" in html
+    assert "&#10022;" in html
+
+
+def test_hero_extracts_first_name_from_greeting():
+    body = "Dear Priya,\n\nApplication approved.\n"
+    html = render_html(body, email_type="approval")
+    assert "Congratulations, Priya!" in html
+
+
+def test_hero_approval_extracts_loan_type():
+    body = "Dear Emma,\n\nWe are pleased to advise that your application for a Home Loan has been approved.\n"
+    html = render_html(body, email_type="approval")
+    assert "Your Home Loan Is Approved" in html
+
+
+def test_approval_loan_details_renders_as_card():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert f"border-left:4px solid {TOKENS['SUCCESS']}" in html
+    assert "LOAN DETAILS" in html.upper()
+    assert "$25,000.00" in html
+    assert "6.50% p.a." in html
+
+
+def test_approval_next_steps_renders_numbered_pills():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert "border-radius:12px" in html
+    assert f"background-color:{TOKENS['BRAND_PRIMARY']}" in html
+    assert "Sign and return your documents by 22 April 2026." in html
+
+
+def test_approval_has_cta_button():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert "Review &amp; Sign Documents" in html
+    assert f"background-color:{TOKENS['BRAND_ACCENT']}" in html
+
+
+def test_approval_signature_has_divider():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert f"border-top:1px solid {TOKENS['BORDER']}" in html
+    assert "Sarah Mitchell" in html
+    assert "Senior Lending Officer" in html
+
+
+def test_approval_attachments_chips_rendered():
+    body = _load_fixture("approval_01_personal")
+    html = render_html(body, email_type="approval")
+    assert "ATTACHMENTS" in html.upper()
+    assert "&#128206;" in html  # paperclip
+    assert "Loan Contract.pdf" in html
+
+
 def test_sender_uses_new_renderer():
     """sender.py must import render_html from html_renderer, not define its own."""
     from apps.email_engine.services import sender as sender_mod
@@ -120,14 +194,18 @@ def test_sender_uses_new_renderer():
     )
 
 
-@pytest.mark.parametrize(
-    "stem",
-    [
-        "approval_01_personal",
-        "denial_01_serviceability",
-        "marketing_01_three_options",
-    ],
-)
+ALL_FIXTURE_STEMS = [
+    "approval_01_personal",
+    "approval_02_home_loan",
+    "approval_03_with_cosigner",
+    "approval_04_conditional",
+    "approval_05_auto_loan",
+    "denial_01_serviceability",
+    "marketing_01_three_options",
+]
+
+
+@pytest.mark.parametrize("stem", ALL_FIXTURE_STEMS)
 def test_snapshot_matches(stem):
     body = _load_fixture(stem)
     actual = render_html(body, email_type=_type_for_fixture(stem))
@@ -141,7 +219,7 @@ def test_snapshot_matches(stem):
 
 
 def test_no_flexbox_or_grid():
-    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+    for stem in ALL_FIXTURE_STEMS:
         body = _load_fixture(stem)
         html = render_html(body, email_type=_type_for_fixture(stem))
         for forbidden in ["display:flex", "display: flex", "display:grid", "display: grid", "display:inline-flex"]:
@@ -149,14 +227,14 @@ def test_no_flexbox_or_grid():
 
 
 def test_no_style_tag():
-    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+    for stem in ALL_FIXTURE_STEMS:
         body = _load_fixture(stem)
         html = render_html(body, email_type=_type_for_fixture(stem))
         assert "<style" not in html.lower(), f"{stem}: found <style> tag (Gmail strips these)"
 
 
 def test_size_under_102kb():
-    for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
+    for stem in ALL_FIXTURE_STEMS:
         body = _load_fixture(stem)
         html = render_html(body, email_type=_type_for_fixture(stem))
         size_kb = len(html.encode("utf-8")) / 1024

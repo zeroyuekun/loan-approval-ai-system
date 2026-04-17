@@ -59,7 +59,15 @@ function typeForFixture(name: string): EmailType {
 }
 
 describe('snapshot parity with Python renderer', () => {
-  const stems = ['approval_01_personal', 'denial_01_serviceability', 'marketing_01_three_options']
+  const stems = [
+    'approval_01_personal',
+    'approval_02_home_loan',
+    'approval_03_with_cosigner',
+    'approval_04_conditional',
+    'approval_05_auto_loan',
+    'denial_01_serviceability',
+    'marketing_01_three_options',
+  ]
   for (const stem of stems) {
     it(`${stem} matches Python snapshot byte-for-byte`, () => {
       const body = fs.readFileSync(path.join(FIXTURE_DIR, `${stem}.txt`), 'utf-8')
