@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.2 — 2026-04-18
+
+Email aesthetic v2 redesign — 6-PR stack (#69–#74) rebuilt approval, denial, and marketing emails as Gmail-safe HTML with proper visual hierarchy, while preserving the plain-text-first pipeline and existing compliant content (Sarah Mitchell tone, Banking Code alignment, apology-free denial wording).
+
+- **PR #69** — Shared `html_renderer.py` with design tokens (brand colors, type scale, spacing), inline CSS, 600px max-width, `<table role="presentation">` skeleton. Pure-Python renderer drives both the dashboard preview and the Gmail recipient view.
+- **PR #70** — TypeScript port at `frontend/src/lib/emailHtmlRenderer.ts` with mirrored tokens. Byte-for-byte parity between Python and TypeScript snapshots enforced by a new CI gate (`.github/workflows/email-parity.yml`), so the preview cannot drift from what Gmail renders.
+- **PR #71** — Approval-specific blocks: success hero with loan-type line, loan-details card with `SUCCESS`-colored left border, next-steps pill rows, CTA button, attachments chips, signature block.
+- **PR #72** — Denial-specific blocks: caution hero, assessment-factors card (plain-English factor list), what-you-can-do card, free credit report card, dual CTA (call Sarah + email). No apology language.
+- **PR #73** — Marketing offer cards with `MARKETING`-colored left border, 11px uppercase label, 17px title, bulleted benefits, italic "why it fits" line. Mandatory unsubscribe footer (Spam Act 2003), conditional FCS disclaimer when body mentions term deposits, conditional bonus-rate disclaimer.
+- **PR #74** — Playwright visual regression via `page.setContent()` on the shared HTML snapshots (no backend/dashboard dependency), plus 7 Gmail-safe lint tests (`<td>` margin ban, https/tel/mailto only, zero `<img>`, CTA contrast, no `javascript:` URLs, no Outlook conditional comments, `role="presentation"` on all tables). Pixel screenshots are opt-in via `PLAYWRIGHT_SCREENSHOTS=1`; CI runs cross-platform content assertions.
+
+Design tokens and snapshots are the source of truth — drifting either renderer breaks CI. Unicode icons (✓ ✦ Ⓘ 📎) replace images so Gmail's default image-blocking doesn't degrade the brand.
+
+Post-merge manual Gmail smoke: approval + denial + marketing sent to the dev inbox — all three render with intended hero blocks, cards, and CTAs on Gmail web.
+
 ## 1.9.1 — 2026-04-17
 
 Portfolio-polish pass responding to external Claude review (same day, 9.2/10 baseline). Four atomic PRs landed on `master`.
