@@ -38,7 +38,7 @@ The original data generator produced clean, label-leaked synthetic records that 
 - Underwriter disagreement noise and measurement error
 - A 1000-line rules-based underwriting engine producing the labels, with outcomes run through a separate loan-performance simulator
 
-Result: test AUC settled at 0.87–0.88 with Optuna-tuned XGBoost, 0.84–0.85 with default hyperparameters. That number is honest — a reproducible benchmark on a 2,000-record subset is recorded in `docs/experiments/benchmark.md` for exactly this reason. ADR 001 covers the copula choice.
+Result: test AUC settled at 0.87–0.88 with Optuna-tuned XGBoost, 0.84–0.85 with default hyperparameters. That number is honest — measured on a held-out test set, reproducible via `python manage.py train_model --algorithm xgb` with the seeded generator config in `backend/apps/ml_engine/services/data_generator.py`. ADR 001 covers the copula choice.
 
 ## 4. The model — XGBoost with guardrails on top
 
