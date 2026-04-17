@@ -1,4 +1,5 @@
 """Unit tests for email html_renderer."""
+
 from pathlib import Path
 
 import pytest
@@ -27,10 +28,24 @@ def _snapshot_path(stem: str) -> Path:
 
 def test_tokens_has_required_keys():
     required = {
-        "BRAND_PRIMARY", "BRAND_ACCENT", "SUCCESS", "CAUTION", "MARKETING",
-        "TEXT", "MUTED", "FINE", "CARD_BG", "BORDER", "PAGE_BG",
-        "FONT_STACK", "BODY_SIZE", "HEAD_SIZE", "LABEL_SIZE", "FINE_SIZE",
-        "LINE_HEIGHT", "MAX_WIDTH",
+        "BRAND_PRIMARY",
+        "BRAND_ACCENT",
+        "SUCCESS",
+        "CAUTION",
+        "MARKETING",
+        "TEXT",
+        "MUTED",
+        "FINE",
+        "CARD_BG",
+        "BORDER",
+        "PAGE_BG",
+        "FONT_STACK",
+        "BODY_SIZE",
+        "HEAD_SIZE",
+        "LABEL_SIZE",
+        "FINE_SIZE",
+        "LINE_HEIGHT",
+        "MAX_WIDTH",
     }
     assert required <= set(TOKENS.keys())
 
@@ -51,6 +66,7 @@ def test_render_html_returns_string():
 
 def test_legacy_body_parser_detects_section_labels():
     from apps.email_engine.services.html_renderer import _render_legacy_body
+
     body = "Dear John,\n\nLoan Details:\n\n  Loan Amount:   $50,000.00"
     out = _render_legacy_body(body)
     assert "<strong>Loan Details:</strong>" in out
@@ -59,6 +75,7 @@ def test_legacy_body_parser_detects_section_labels():
 
 def test_legacy_body_parser_detects_loan_detail_rows():
     from apps.email_engine.services.html_renderer import _render_legacy_body
+
     body = "  Loan Amount:             $25,000.00\n  Interest Rate:           6.50% p.a."
     out = _render_legacy_body(body)
     assert "<table" in out
@@ -97,17 +114,20 @@ def test_render_html_includes_legacy_body():
 def test_sender_uses_new_renderer():
     """sender.py must import render_html from html_renderer, not define its own."""
     from apps.email_engine.services import sender as sender_mod
+
     assert not hasattr(sender_mod, "_plain_text_to_html"), (
-        "sender.py should no longer define _plain_text_to_html — "
-        "must import render_html from html_renderer instead."
+        "sender.py should no longer define _plain_text_to_html — must import render_html from html_renderer instead."
     )
 
 
-@pytest.mark.parametrize("stem", [
-    "approval_01_personal",
-    "denial_01_serviceability",
-    "marketing_01_three_options",
-])
+@pytest.mark.parametrize(
+    "stem",
+    [
+        "approval_01_personal",
+        "denial_01_serviceability",
+        "marketing_01_three_options",
+    ],
+)
 def test_snapshot_matches(stem):
     body = _load_fixture(stem)
     actual = render_html(body, email_type=_type_for_fixture(stem))
@@ -117,18 +137,14 @@ def test_snapshot_matches(stem):
         snapshot.write_text(actual, encoding="utf-8")
         pytest.skip(f"Wrote new snapshot {snapshot.name} — re-run to assert.")
     expected = snapshot.read_text(encoding="utf-8")
-    assert actual == expected, (
-        f"Snapshot drift in {stem}. "
-        f"Delete {snapshot} and re-run to accept the new output."
-    )
+    assert actual == expected, f"Snapshot drift in {stem}. Delete {snapshot} and re-run to accept the new output."
 
 
 def test_no_flexbox_or_grid():
     for stem in ["approval_01_personal", "denial_01_serviceability", "marketing_01_three_options"]:
         body = _load_fixture(stem)
         html = render_html(body, email_type=_type_for_fixture(stem))
-        for forbidden in ["display:flex", "display: flex", "display:grid",
-                          "display: grid", "display:inline-flex"]:
+        for forbidden in ["display:flex", "display: flex", "display:grid", "display: grid", "display:inline-flex"]:
             assert forbidden not in html, f"{stem}: forbidden `{forbidden}` in output"
 
 

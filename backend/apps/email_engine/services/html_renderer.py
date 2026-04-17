@@ -6,6 +6,7 @@ A CI snapshot parity test fails if the two drift.
 
 See: docs/superpowers/specs/2026-04-17-email-redesign-design.md
 """
+
 import re
 from typing import Literal
 
@@ -66,8 +67,7 @@ def _render_legacy_body(body: str) -> str:
     def _flush_detail_rows():
         if detail_rows:
             html_parts.append(
-                '<table style="width:100%;border-collapse:collapse;margin:8px 0;">'
-                + "".join(detail_rows) + "</table>"
+                '<table style="width:100%;border-collapse:collapse;margin:8px 0;">' + "".join(detail_rows) + "</table>"
             )
             detail_rows.clear()
 
@@ -97,17 +97,13 @@ def _render_legacy_body(body: str) -> str:
         bullet_match = re.match(r"^[\u2022•]\s*(.+)$", stripped)
         if bullet_match:
             _flush_detail_rows()
-            html_parts.append(
-                f'<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;{bullet_match.group(1)}</p>'
-            )
+            html_parts.append(f'<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;{bullet_match.group(1)}</p>')
             continue
 
         num_match = re.match(r"^\s+(\d+)\.\s+(.+)$", line)
         if num_match:
             _flush_detail_rows()
-            html_parts.append(
-                f'<p style="margin:2px 0 2px 16px;">{num_match.group(1)}. {num_match.group(2)}</p>'
-            )
+            html_parts.append(f'<p style="margin:2px 0 2px 16px;">{num_match.group(1)}. {num_match.group(2)}</p>')
             continue
 
         detail_match = LOAN_DETAIL_RE.match(line)
@@ -115,17 +111,13 @@ def _render_legacy_body(body: str) -> str:
             label = detail_match.group(2)
             value = detail_match.group(3)
             if len(label) < 35 and len(value) < 50:
-                detail_rows.append(
-                    f"<tr><td {td_label}>{label}</td><td {td_value}>{value}</td></tr>"
-                )
+                detail_rows.append(f"<tr><td {td_label}>{label}</td><td {td_value}>{value}</td></tr>")
                 continue
 
         _flush_detail_rows()
 
         if re.match(r"^[\u2500\u2501\-]{5,}$", stripped):
-            html_parts.append(
-                '<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">'
-            )
+            html_parts.append('<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">')
             continue
 
         if (
@@ -135,9 +127,7 @@ def _render_legacy_body(body: str) -> str:
             or stripped.startswith("Email:")
             or stripped.startswith("Website:")
         ):
-            html_parts.append(
-                f'<p style="margin:0;font-size:12px;color:#888;">{stripped}</p>'
-            )
+            html_parts.append(f'<p style="margin:0;font-size:12px;color:#888;">{stripped}</p>')
             continue
 
         if stripped == "":
@@ -159,18 +149,18 @@ def _render_header() -> str:
         f'<span style="color:#ffffff; font-size:16px; font-weight:600; '
         f'letter-spacing:0.3px;">AussieLoanAI</span>'
         f'<span style="color:#bfdbfe; font-size:12px; margin-left:8px;">'
-        f'Australian Credit Licence No. 012345</span>'
-        f'</td></tr>'
+        f"Australian Credit Licence No. 012345</span>"
+        f"</td></tr>"
     )
 
 
 def _render_footer_shell() -> str:
     return (
         f'<tr><td style="padding:24px; background-color:{TOKENS["CARD_BG"]}; '
-        f'border-radius:0 0 8px 8px; font-size:{TOKENS["FINE_SIZE"]}; '
+        f"border-radius:0 0 8px 8px; font-size:{TOKENS['FINE_SIZE']}; "
         f'color:{TOKENS["FINE"]};">'
-        f'&nbsp;'
-        f'</td></tr>'
+        f"&nbsp;"
+        f"</td></tr>"
     )
 
 
@@ -192,16 +182,16 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
         f'<tr><td style="padding:32px 16px;">'
         f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
         f'style="width:100%; max-width:{TOKENS["MAX_WIDTH"]}; margin:0 auto; '
-        f'background-color:#ffffff; border-radius:8px; '
+        f"background-color:#ffffff; border-radius:8px; "
         f'box-shadow:0 1px 3px rgba(0,0,0,0.06);">'
-        f'{_render_header()}'
+        f"{_render_header()}"
         f'<tr><td style="padding:24px; font-family:{TOKENS["FONT_STACK"]}; '
-        f'font-size:{TOKENS["BODY_SIZE"]}; line-height:{TOKENS["LINE_HEIGHT"]}; '
+        f"font-size:{TOKENS['BODY_SIZE']}; line-height:{TOKENS['LINE_HEIGHT']}; "
         f'color:{TOKENS["TEXT"]};">'
-        f'{body_html}'
-        f'</td></tr>'
-        f'{_render_footer_shell()}'
-        f'</table>'
-        f'</td></tr>'
-        f'</table>'
+        f"{body_html}"
+        f"</td></tr>"
+        f"{_render_footer_shell()}"
+        f"</table>"
+        f"</td></tr>"
+        f"</table>"
     )
