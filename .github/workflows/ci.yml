@@ -73,7 +73,7 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: pytest tests/ -v --tb=short --cov=apps --cov-report=term-missing --cov-fail-under=60
+        run: pytest -v --tb=short --cov=apps --cov-report=term-missing --cov-fail-under=63
 
   backend-lint:
     name: Backend Lint
