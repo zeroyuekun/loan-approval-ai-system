@@ -1,5 +1,28 @@
 """Unit tests for email html_renderer."""
+from pathlib import Path
+
+import pytest
+
 from apps.email_engine.services.html_renderer import TOKENS, render_html
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "email_bodies"
+SNAPSHOT_DIR = Path(__file__).parent / "fixtures" / "email_snapshots"
+
+
+def _type_for_fixture(name: str) -> str:
+    if name.startswith("approval"):
+        return "approval"
+    if name.startswith("denial"):
+        return "denial"
+    return "marketing"
+
+
+def _load_fixture(stem: str) -> str:
+    return (FIXTURE_DIR / f"{stem}.txt").read_text(encoding="utf-8")
+
+
+def _snapshot_path(stem: str) -> Path:
+    return SNAPSHOT_DIR / f"{stem}.html"
 
 
 def test_tokens_has_required_keys():
@@ -77,4 +100,24 @@ def test_sender_uses_new_renderer():
     assert not hasattr(sender_mod, "_plain_text_to_html"), (
         "sender.py should no longer define _plain_text_to_html — "
         "must import render_html from html_renderer instead."
+    )
+
+
+@pytest.mark.parametrize("stem", [
+    "approval_01_personal",
+    "denial_01_serviceability",
+    "marketing_01_three_options",
+])
+def test_snapshot_matches(stem):
+    body = _load_fixture(stem)
+    actual = render_html(body, email_type=_type_for_fixture(stem))
+    snapshot = _snapshot_path(stem)
+    if not snapshot.exists():
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_text(actual, encoding="utf-8")
+        pytest.skip(f"Wrote new snapshot {snapshot.name} — re-run to assert.")
+    expected = snapshot.read_text(encoding="utf-8")
+    assert actual == expected, (
+        f"Snapshot drift in {stem}. "
+        f"Delete {snapshot} and re-run to accept the new output."
     )
