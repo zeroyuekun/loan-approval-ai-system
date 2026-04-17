@@ -239,6 +239,9 @@ class OrchestrateView(APIView):
         )
 
 
+BATCH_ORCHESTRATE_MAX = 100  # Safety cap for POST /agents/orchestrate-all/
+
+
 class BatchOrchestrateView(APIView):
     """Trigger the AI pipeline for all pending applications in one go."""
 
@@ -247,35 +250,46 @@ class BatchOrchestrateView(APIView):
 
     def post(self, request):
         recheck = request.query_params.get("recheck", "").lower() == "true"
-        max_batch = 100  # Safety cap to prevent accidental mass re-processing
+
         if recheck:
-            # Reset non-terminal, non-processing apps to pending via state machine (capped)
-            recheckable = LoanApplication.objects.filter(
-                status__in=[
-                    LoanApplication.Status.REVIEW,
-                    LoanApplication.Status.PROCESSING,
-                ]
-            ).exclude(status=LoanApplication.Status.PROCESSING)[:max_batch]
-            pending_apps = []
-            for app in recheckable:
+            reviewable_qs = (
+                LoanApplication.objects.filter(
+                    status__in=[
+                        LoanApplication.Status.REVIEW,
+                        LoanApplication.Status.PROCESSING,
+                    ]
+                )
+                .exclude(status=LoanApplication.Status.PROCESSING)
+                .order_by("created_at")
+            )
+            total_eligible = reviewable_qs.count()
+            candidates = reviewable_qs[:BATCH_ORCHESTRATE_MAX]
+            pending_ids = []
+            for app in candidates:
                 try:
-                    app.transition_to("pending", user=request.user, details={"reason": "batch_recheck"})
-                    pending_apps.append(app.id)
+                    app.transition_to(
+                        "pending",
+                        user=request.user,
+                        details={"reason": "batch_recheck"},
+                    )
+                    pending_ids.append(app.id)
                 except LoanApplication.InvalidStateTransition:
                     continue
         else:
-            pending_apps = list(
-                LoanApplication.objects.filter(status=LoanApplication.Status.PENDING).values_list("id", flat=True)
-            )
+            pending_qs = LoanApplication.objects.filter(status=LoanApplication.Status.PENDING).order_by("created_at")
+            total_eligible = pending_qs.count()
+            pending_ids = list(pending_qs.values_list("id", flat=True)[:BATCH_ORCHESTRATE_MAX])
 
-        if not pending_apps:
+        if not pending_ids:
             return Response(
                 {"detail": "No pending applications to process.", "queued": 0},
                 status=status.HTTP_200_OK,
             )
 
+        skipped = max(0, total_eligible - len(pending_ids))
+
         tasks = []
-        for app_id in pending_apps:
+        for app_id in pending_ids:
             task = orchestrate_pipeline_task.delay(str(app_id), force=recheck)
             tasks.append({"application_id": str(app_id), "task_id": task.id})
 
@@ -284,14 +298,20 @@ class BatchOrchestrateView(APIView):
             action="batch_pipeline_triggered",
             resource_type="LoanApplication",
             resource_id="batch",
-            details={"count": len(tasks), "application_ids": [t["application_id"] for t in tasks]},
+            details={
+                "count": len(tasks),
+                "skipped_count": skipped,
+                "application_ids": [t["application_id"] for t in tasks],
+            },
             ip_address=request.META.get("REMOTE_ADDR"),
         )
 
-        return Response(
-            {"queued": len(tasks), "tasks": tasks},
-            status=status.HTTP_202_ACCEPTED,
-        )
+        body = {"queued": len(tasks), "tasks": tasks}
+        if skipped:
+            body["skipped"] = skipped
+            body["detail"] = f"{skipped} more pending; call again to continue"
+
+        return Response(body, status=status.HTTP_202_ACCEPTED)
 
 
 class AgentRunView(APIView):
