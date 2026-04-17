@@ -12,7 +12,6 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.accounts.models import CustomUser
 from apps.loans.models import AuditLog, LoanApplication
 
 BATCH_URL = "/api/v1/agents/orchestrate-all/"
@@ -76,9 +75,7 @@ class TestBatchOrchestrateCap:
             response = client.post(url)
         return response, mock_delay, views.BATCH_ORCHESTRATE_MAX
 
-    def test_default_path_caps_at_max_and_reports_skipped(
-        self, admin_user, customer_user
-    ):
+    def test_default_path_caps_at_max_and_reports_skipped(self, admin_user, customer_user):
         from apps.agents.views import BATCH_ORCHESTRATE_MAX
 
         for _ in range(BATCH_ORCHESTRATE_MAX + 50):
@@ -93,9 +90,7 @@ class TestBatchOrchestrateCap:
         assert "50 more pending" in body["detail"]
         assert mock_delay.call_count == cap
 
-    def test_default_path_no_overflow_keeps_response_shape_unchanged(
-        self, admin_user, customer_user
-    ):
+    def test_default_path_no_overflow_keeps_response_shape_unchanged(self, admin_user, customer_user):
         for _ in range(30):
             _make_application(customer_user)
 
@@ -122,20 +117,15 @@ class TestBatchOrchestrateCap:
         assert body["skipped"] == 50
         assert mock_delay.call_count == cap
 
-    def test_oldest_first_ordering_on_default_path(
-        self, admin_user, customer_user
-    ):
-        from django.utils import timezone
+    def test_oldest_first_ordering_on_default_path(self, admin_user, customer_user):
         from datetime import timedelta
 
+        from django.utils import timezone
+
         first = _make_application(customer_user)
-        LoanApplication.objects.filter(pk=first.pk).update(
-            created_at=timezone.now() - timedelta(days=5)
-        )
+        LoanApplication.objects.filter(pk=first.pk).update(created_at=timezone.now() - timedelta(days=5))
         second = _make_application(customer_user)
-        LoanApplication.objects.filter(pk=second.pk).update(
-            created_at=timezone.now() - timedelta(days=3)
-        )
+        LoanApplication.objects.filter(pk=second.pk).update(created_at=timezone.now() - timedelta(days=3))
         third = _make_application(customer_user)
 
         response, mock_delay, _ = self._post(admin_user)
@@ -145,9 +135,7 @@ class TestBatchOrchestrateCap:
         expected = [str(first.pk), str(second.pk), str(third.pk)]
         assert dispatched_ids == expected
 
-    def test_audit_log_records_skipped_count(
-        self, admin_user, customer_user
-    ):
+    def test_audit_log_records_skipped_count(self, admin_user, customer_user):
         from apps.agents.views import BATCH_ORCHESTRATE_MAX
 
         for _ in range(BATCH_ORCHESTRATE_MAX + 7):
@@ -156,23 +144,17 @@ class TestBatchOrchestrateCap:
         response, _, _ = self._post(admin_user)
 
         assert response.status_code == status.HTTP_202_ACCEPTED
-        audit = AuditLog.objects.filter(
-            action="batch_pipeline_triggered", user=admin_user
-        ).latest("timestamp")
+        audit = AuditLog.objects.filter(action="batch_pipeline_triggered", user=admin_user).latest("timestamp")
         assert audit.details["skipped_count"] == 7
 
-    def test_audit_log_records_zero_skipped_on_happy_path(
-        self, admin_user, customer_user
-    ):
+    def test_audit_log_records_zero_skipped_on_happy_path(self, admin_user, customer_user):
         for _ in range(5):
             _make_application(customer_user)
 
         response, _, _ = self._post(admin_user)
 
         assert response.status_code == status.HTTP_202_ACCEPTED
-        audit = AuditLog.objects.filter(
-            action="batch_pipeline_triggered", user=admin_user
-        ).latest("timestamp")
+        audit = AuditLog.objects.filter(action="batch_pipeline_triggered", user=admin_user).latest("timestamp")
         assert audit.details["skipped_count"] == 0
 
     def test_empty_queue_returns_unchanged_response(self, admin_user):

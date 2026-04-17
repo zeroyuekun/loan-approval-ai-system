@@ -276,13 +276,9 @@ class BatchOrchestrateView(APIView):
                 except LoanApplication.InvalidStateTransition:
                     continue
         else:
-            pending_qs = LoanApplication.objects.filter(
-                status=LoanApplication.Status.PENDING
-            ).order_by("created_at")
+            pending_qs = LoanApplication.objects.filter(status=LoanApplication.Status.PENDING).order_by("created_at")
             total_eligible = pending_qs.count()
-            pending_ids = list(
-                pending_qs.values_list("id", flat=True)[:BATCH_ORCHESTRATE_MAX]
-            )
+            pending_ids = list(pending_qs.values_list("id", flat=True)[:BATCH_ORCHESTRATE_MAX])
 
         if not pending_ids:
             return Response(
