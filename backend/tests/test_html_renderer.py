@@ -24,3 +24,20 @@ def test_render_html_returns_string():
     result = render_html("Dear John,\n\nHello.", email_type="approval")
     assert isinstance(result, str)
     assert result.startswith("<!DOCTYPE") or result.startswith("<table") or result.startswith("<html")
+
+
+def test_legacy_body_parser_detects_section_labels():
+    from apps.email_engine.services.html_renderer import _render_legacy_body
+    body = "Dear John,\n\nLoan Details:\n\n  Loan Amount:   $50,000.00"
+    out = _render_legacy_body(body)
+    assert "<strong>Loan Details:</strong>" in out
+    assert "$50,000.00" in out
+
+
+def test_legacy_body_parser_detects_loan_detail_rows():
+    from apps.email_engine.services.html_renderer import _render_legacy_body
+    body = "  Loan Amount:             $25,000.00\n  Interest Rate:           6.50% p.a."
+    out = _render_legacy_body(body)
+    assert "<table" in out
+    assert "$25,000.00" in out
+    assert "6.50% p.a." in out

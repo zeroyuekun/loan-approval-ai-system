@@ -32,6 +32,127 @@ TOKENS: dict[str, str] = {
 }
 
 
+import re
+
+SECTION_LABELS = [
+    "Loan Details:",
+    "Next Steps:",
+    "Required Documentation:",
+    "Before You Sign:",
+    "We're Here For You:",
+    "What You Can Do:",
+    "We'd Still Like to Help:",
+    "Attachments:",
+    "Conditions of Approval:",
+    "This decision was based on a thorough review of your financial profile, specifically:",
+]
+
+CLOSINGS = ["Kind regards,", "Warm regards,"]
+
+OPTION_PATTERN = re.compile(r"^Option\s+\d+[\s:.\-\u2013\u2014]")
+LOAN_DETAIL_RE = re.compile(r"^(\s{2,})(\S[^:]+:)\s+(.+)$")
+
+
+def _render_legacy_body(body: str) -> str:
+    """Convert plain-text body lines to inline HTML (legacy per-line parser).
+
+    This matches the historical sender._plain_text_to_html output. Per-type
+    block replacements land in PRs 3-5; this function is the fallback for
+    any line that does not match a structured block.
+    """
+    lines = body.split("\n")
+    html_parts: list[str] = []
+    detail_rows: list[str] = []
+
+    def _flush_detail_rows():
+        if detail_rows:
+            html_parts.append(
+                '<table style="width:100%;border-collapse:collapse;margin:8px 0;">'
+                + "".join(detail_rows) + "</table>"
+            )
+            detail_rows.clear()
+
+    td_label = 'style="padding:4px 8px 4px 0;color:#888;border-bottom:1px solid #f0f0f0;"'
+    td_value = 'style="padding:4px 0 4px 8px;text-align:right;border-bottom:1px solid #f0f0f0;"'
+
+    for line in lines:
+        stripped = line.strip()
+        is_section = stripped in SECTION_LABELS
+        is_option = bool(OPTION_PATTERN.match(stripped))
+        is_dear = stripped.startswith("Dear ")
+        is_closing = stripped in CLOSINGS
+
+        if is_section or is_option:
+            _flush_detail_rows()
+            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
+            continue
+        if is_dear:
+            _flush_detail_rows()
+            html_parts.append(f'<p style="margin:0 0 4px 0;"><strong>{stripped}</strong></p>')
+            continue
+        if is_closing:
+            _flush_detail_rows()
+            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
+            continue
+
+        bullet_match = re.match(r"^[\u2022•]\s*(.+)$", stripped)
+        if bullet_match:
+            _flush_detail_rows()
+            html_parts.append(
+                f'<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;{bullet_match.group(1)}</p>'
+            )
+            continue
+
+        num_match = re.match(r"^\s+(\d+)\.\s+(.+)$", line)
+        if num_match:
+            _flush_detail_rows()
+            html_parts.append(
+                f'<p style="margin:2px 0 2px 16px;">{num_match.group(1)}. {num_match.group(2)}</p>'
+            )
+            continue
+
+        detail_match = LOAN_DETAIL_RE.match(line)
+        if detail_match:
+            label = detail_match.group(2)
+            value = detail_match.group(3)
+            if len(label) < 35 and len(value) < 50:
+                detail_rows.append(
+                    f"<tr><td {td_label}>{label}</td><td {td_value}>{value}</td></tr>"
+                )
+                continue
+
+        _flush_detail_rows()
+
+        if re.match(r"^[\u2500\u2501\-]{5,}$", stripped):
+            html_parts.append(
+                '<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">'
+            )
+            continue
+
+        if (
+            stripped.startswith("ABN ")
+            or stripped.startswith("Ph:")
+            or stripped.startswith("Phone:")
+            or stripped.startswith("Email:")
+            or stripped.startswith("Website:")
+        ):
+            html_parts.append(
+                f'<p style="margin:0;font-size:12px;color:#888;">{stripped}</p>'
+            )
+            continue
+
+        if stripped == "":
+            html_parts.append('<div style="height:12px;"></div>')
+            continue
+
+        margin = "16px" if stripped.endswith(".") else "4px"
+        top_margin = "16px" if stripped.startswith("Congratulations") else "0"
+        html_parts.append(f'<p style="margin:{top_margin} 0 {margin} 0;">{stripped}</p>')
+
+    _flush_detail_rows()
+    return "\n".join(html_parts)
+
+
 def render_html(plain_body: str, email_type: EmailType) -> str:
     """Convert plain-text email body into Gmail-safe HTML.
 
