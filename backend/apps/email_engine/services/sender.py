@@ -28,8 +28,24 @@ OPTION_PATTERN = re.compile(r"^Option\s+\d+[\s:.\-\u2013\u2014]")
 LOAN_DETAIL_RE = re.compile(r"^(\s{2,})(\S[^:]+:)\s+(.+)$")
 
 
-def _plain_text_to_html(body: str) -> str:
-    """Convert a plain-text email body to styled HTML matching the dashboard preview."""
+ACCENT_COLORS = {
+    "approval": "#16a34a",
+    "denial": "#374151",
+    "marketing": "#7c3aed",
+}
+
+
+def _get_accent_color(email_type: str) -> str:
+    return ACCENT_COLORS.get(email_type, ACCENT_COLORS["approval"])
+
+
+def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
+    """Convert a plain-text email body to styled HTML matching the dashboard preview.
+
+    email_type selects the accent color and determines whether compliance blocks
+    (AFCA for denial) are appended.
+    """
+    accent = _get_accent_color(email_type)
     lines = body.split("\n")
     html_parts: list[str] = []
     detail_rows: list[str] = []
@@ -123,8 +139,9 @@ def _plain_text_to_html(body: str) -> str:
 
     html_body = "\n".join(html_parts)
     return (
-        '<div style="font-family: Arial, Helvetica, sans-serif; '
-        'font-size: 14px; line-height: 1.6; color: #333;">\n'
+        f'<div style="font-family: Arial, Helvetica, sans-serif; '
+        f'font-size: 16px; line-height: 1.6; color: #1f2937; '
+        f'border-top: 4px solid {accent};">\n'
         f"{html_body}\n"
         "</div>"
     )

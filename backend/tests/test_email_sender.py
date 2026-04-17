@@ -112,3 +112,28 @@ ABN 12 345 678 901
 Phone: 1300 LOAN AI
 Email: alternatives@aussieloanai.com.au
 """
+
+
+class TestAccentColors:
+    def test_approval_html_contains_green_accent(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "#16a34a" in html
+
+    def test_denial_html_contains_slate_accent(self):
+        html = _plain_text_to_html(DENIAL_PLAIN, email_type="denial")
+        assert "#374151" in html
+
+    def test_marketing_html_contains_purple_accent(self):
+        html = _plain_text_to_html(MARKETING_PLAIN, email_type="marketing")
+        assert "#7c3aed" in html
+
+    def test_denial_html_has_no_red_tone(self):
+        """Denial must not use harsh/alarming colors per tone preference."""
+        html = _plain_text_to_html(DENIAL_PLAIN, email_type="denial")
+        assert "#dc2626" not in html
+        assert "#ef4444" not in html
+        assert "#f87171" not in html
+
+    def test_unknown_email_type_defaults_to_approval_accent(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="anything_else")
+        assert "#16a34a" in html
