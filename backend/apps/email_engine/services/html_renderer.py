@@ -6,6 +6,7 @@ A CI snapshot parity test fails if the two drift.
 
 See: docs/superpowers/specs/2026-04-17-email-redesign-design.md
 """
+import re
 from typing import Literal
 
 EmailType = Literal["approval", "denial", "marketing"]
@@ -31,8 +32,6 @@ TOKENS: dict[str, str] = {
     "MAX_WIDTH": "600px",
 }
 
-
-import re
 
 SECTION_LABELS = [
     "Loan Details:",
