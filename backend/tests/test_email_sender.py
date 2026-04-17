@@ -177,3 +177,19 @@ class TestSectionHeaders:
         html = _plain_text_to_html(MARKETING_PLAIN, email_type="marketing")
         assert "Option 1: Secured Personal Loan" in html
         assert "border-bottom:2pxsolid#7c3aed" in html.replace(" ", "")
+
+
+class TestBulletLists:
+    def test_consecutive_bullets_collapse_into_single_ul(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert html.count("<ul") >= 1
+        assert html.count("<li") >= 3
+
+    def test_bullets_use_semantic_li(self):
+        html = _plain_text_to_html(DENIAL_PLAIN, email_type="denial")
+        assert "<li" in html
+        assert "\u2022&nbsp;&nbsp;" not in html
+
+    def test_bullet_items_are_16px(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "font-size:16px" in html.replace(" ", "")

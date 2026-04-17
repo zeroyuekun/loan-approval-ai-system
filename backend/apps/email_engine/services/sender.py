@@ -80,6 +80,7 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
     lines = body.split("\n")
     html_parts: list[str] = []
     detail_rows: list[str] = []
+    list_state: dict = {"items": [], "type": None}
 
     def _flush_detail_rows():
         if detail_rows:
@@ -87,6 +88,18 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
                 '<table style="width:100%;border-collapse:collapse;margin:8px 0;">' + "".join(detail_rows) + "</table>"
             )
             detail_rows.clear()
+
+    def _flush_list():
+        items = list_state["items"]
+        if items:
+            tag = list_state["type"] or "ul"
+            html_parts.append(
+                f'<{tag} style="margin:8px 0; padding-left:24px;">'
+                + "".join(items)
+                + f'</{tag}>'
+            )
+            list_state["items"] = []
+            list_state["type"] = None
 
     td_label = 'style="padding:4px 8px 4px 0;color:#888;border-bottom:1px solid #f0f0f0;"'
     td_value = 'style="padding:4px 0 4px 8px;text-align:right;border-bottom:1px solid #f0f0f0;"'
@@ -101,26 +114,36 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
         is_closing = stripped in CLOSINGS
 
         if is_section or is_option:
+            _flush_list()
             _flush_detail_rows()
             html_parts.append(_render_section_header(stripped, accent))
             continue
 
         if is_dear:
+            _flush_list()
             _flush_detail_rows()
             html_parts.append(f'<p style="margin:0 0 12px 0;">{stripped}</p>')
             continue
 
         if is_closing:
+            _flush_list()
             _flush_detail_rows()
             html_parts.append(f'<p style="margin:24px 0 4px 0;">{stripped}</p>')
             continue
 
-        # Bullet points — render as plain text with bullet character
+        # Bullet points — semantic <ul>/<li> via list accumulator
         bullet_match = re.match(r"^[\u2022•]\s*(.+)$", stripped)
         if bullet_match:
             _flush_detail_rows()
             content = bullet_match.group(1)
-            html_parts.append(f'<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;{content}</p>')
+            if list_state["type"] and list_state["type"] != "ul":
+                _flush_list()
+            list_state["type"] = "ul"
+            list_state["items"].append(
+                '<li style="margin-bottom:6px; font-size:16px; '
+                'color:#1f2937; line-height:1.6;">'
+                f'{content}</li>'
+            )
             continue
 
         # Numbered list items (e.g. "  1. Document.pdf")
@@ -136,9 +159,11 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
             label = detail_match.group(2)
             value = detail_match.group(3)
             if len(label) < 35 and len(value) < 50:
+                _flush_list()
                 detail_rows.append(f"<tr><td {td_label}>{label}</td><td {td_value}>{value}</td></tr>")
                 continue
 
+        _flush_list()
         _flush_detail_rows()
 
         # Horizontal rule
@@ -166,6 +191,7 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
         top_margin = "16px" if stripped.startswith("Congratulations") else "0"
         html_parts.append(f'<p style="margin:{top_margin} 0 {margin} 0;">{stripped}</p>')
 
+    _flush_list()
     _flush_detail_rows()
 
     body_html = "\n".join(html_parts)
