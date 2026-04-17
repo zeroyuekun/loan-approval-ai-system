@@ -2,8 +2,8 @@
 
 **Date:** 2026-04-17
 **Status:** Approved for implementation
-**Scope:** Approval, denial, and marketing email HTML rendering
-**Effort estimate:** 4–6 hours (Approach A — polish `_plain_text_to_html`)
+**Scope:** (1) Approval, denial, and marketing email HTML rendering. (2) Switch email generation to template-only (skip Claude API to save cost).
+**Effort estimate:** 5–7 hours (Approach A — polish `_plain_text_to_html` + template-only flag)
 
 ## Problem
 
@@ -20,6 +20,24 @@ Current outbound emails (approval, denial, marketing) use a functional but dated
 **User goal:** "Use best email formatting practices… line spacing and paragraphing is not the best aesthetic… make the email look professionally formatted."
 
 **Hard constraint:** the frontend dashboard preview (`EmailPreview`, `MarketingEmailCard`) must render exactly what Gmail shows the recipient. No divergence between inbox and preview.
+
+## Template-only generation (cost-saving)
+
+**Problem:** Every approval/denial/marketing email currently calls Claude API ($0.003–$0.015 per email). At scale this becomes meaningful cost and adds latency + failure modes (rate limits, timeouts, credit exhaustion).
+
+**Solution:** Default to the existing template fallback path (`_generate_fallback` in `email_generator.py`, `_marketing_template_fallback` in `marketing_agent.py`). Templates already produce complete, guardrail-compliant plain-text bodies indistinguishable from Claude output in content. Gate Claude with a Django setting:
+
+```python
+# settings/base.py
+EMAIL_USE_CLAUDE_API = env.bool("EMAIL_USE_CLAUDE_API", default=False)
+```
+
+- Default `False` → zero Claude cost for emails.
+- Flip to `True` via env var if Claude output ever proves preferable.
+- Template path is already covered by existing tests — no new test scaffolding needed.
+- `prompt_used` field records `"[TEMPLATE — Claude disabled by config]"` when template is used by choice (vs `"[TEMPLATE FALLBACK — Claude API unavailable]"` when forced by outage). This keeps audit trails distinguishable.
+
+**Impact:** Cost drops from ~$0.005 per email to $0. All formatting improvements below apply to both paths (template and Claude) — the HTML renderer doesn't care which path produced the plain text.
 
 ## Approach
 
@@ -348,20 +366,30 @@ Same function output feeds both destinations → preview always matches inbox.
 
 | File | Change type | Est. lines |
 |------|-------------|-----------|
-| `backend/apps/email_engine/services/sender.py` | Rewrite | +~200, -~100 |
-| `backend/apps/email_engine/services/email_generator.py` | Signature update | +~5 |
-| `backend/apps/agents/services/marketing_agent.py` | Signature update (if it calls `send_decision_email`) | +~3 |
-| `backend/tests/test_email_sender.py` | New tests | +~120 |
+| `backend/apps/email_engine/services/sender.py` | Rewrite `_plain_text_to_html`, add `email_type` kwarg | +~220, -~100 |
+| `backend/apps/email_engine/services/email_generator.py` | Gate Claude with `EMAIL_USE_CLAUDE_API`; always use template if off | +~10 |
+| `backend/apps/agents/services/marketing_agent.py` | Gate Claude the same way | +~10 |
+| `backend/config/settings/base.py` | Add `EMAIL_USE_CLAUDE_API = env.bool(..., default=False)` | +1 |
+| `backend/apps/email_engine/services/lifecycle.py` | Pass `email_type` to `send_decision_email` | +1 |
+| `backend/apps/email_engine/tasks.py` | Pass `email_type` | +1 |
+| `backend/apps/email_engine/views.py` | Pass `email_type` | +1 |
+| `backend/apps/agents/services/email_pipeline.py` | Pass `email_type` | +1 |
+| `backend/apps/agents/services/marketing_pipeline.py` | Pass `email_type="marketing"` | +1 |
+| `backend/apps/agents/services/human_review_handler.py` | Pass `email_type` | +1 |
+| `backend/tests/test_email_sender.py` | New tests | +~150 |
+| `backend/tests/test_email_generator.py` | Add test for `EMAIL_USE_CLAUDE_API=False` path | +~20 |
 | `frontend/src/components/emails/EmailPreview.tsx` | No change (verify only) | 0 |
 | `frontend/src/components/agents/MarketingEmailCard.tsx` | No change (verify only) | 0 |
 
-**Total: ~1 backend file rewritten, ~2 call sites updated, ~120 lines of tests.**
+**Total: ~1 backend file rewritten, 6 call sites touched, ~170 lines of tests, 1 settings flag.**
 
 ## Success criteria
 
 1. `pytest backend/tests/test_email_sender.py` passes with new tests
 2. Full `pytest` suite passes (existing tests may need HTML snapshot updates)
-3. Frontend dev preview (`/dashboard` → sample email) shows new layout
-4. Actual Gmail web inbox renders the same layout (visual parity with preview)
-5. No new exceptions in backend logs
-6. Existing email send still works (SMTP unchanged)
+3. With `EMAIL_USE_CLAUDE_API=False` (default), `EmailGenerator.generate()` never calls `self.client.messages.create` — verified by a test that asserts `client.messages.create` is not called
+4. Frontend dev preview (`/dashboard` → sample email) shows new layout
+5. Actual Gmail web inbox renders the same layout (visual parity with preview)
+6. No new exceptions in backend logs
+7. Existing email send still works (SMTP unchanged)
+8. Flipping `EMAIL_USE_CLAUDE_API=True` still works — Claude path is not removed, just gated
