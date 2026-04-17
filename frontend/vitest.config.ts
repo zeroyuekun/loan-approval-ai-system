@@ -18,7 +18,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/components/**', 'src/hooks/**', 'src/lib/**'],
-      thresholds: { lines: 40 },
+      thresholds: {
+        lines: 65,
+        statements: 65,
+        functions: 75,
+        branches: 75,
+      },
     },
   },
 })
