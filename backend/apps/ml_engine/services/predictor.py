@@ -9,6 +9,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import shap
+from cachetools import TTLCache
 from django.conf import settings
 from prometheus_client import Counter, Histogram
 
@@ -38,9 +39,11 @@ logger = logging.getLogger(__name__)
 
 
 # Module-level cache for loaded model bundles, keyed by model version ID.
-# Bounded to _MAX_CACHE_ENTRIES to prevent unbounded memory growth.
+# TTLCache auto-evicts entries older than _CACHE_TTL_SECONDS and enforces
+# maxsize (LRU), preventing unbounded memory growth and serving stale models.
 _MAX_CACHE_ENTRIES = 3
-_model_cache = {}
+_CACHE_TTL_SECONDS = 3600  # 1 hour
+_model_cache = TTLCache(maxsize=_MAX_CACHE_ENTRIES, ttl=_CACHE_TTL_SECONDS)
 _cache_lock = threading.Lock()
 
 
@@ -156,12 +159,9 @@ def _load_bundle(model_version):
         # Re-check after expensive load — another worker may have cached it first
         if version_id in _model_cache:
             return _model_cache[version_id]
-        # Evict oldest entries if cache is at capacity
-        while len(_model_cache) >= _MAX_CACHE_ENTRIES:
-            oldest_key = next(iter(_model_cache))
-            del _model_cache[oldest_key]
-            logger.info("Evicted model version %s from cache (max %d entries)", oldest_key, _MAX_CACHE_ENTRIES)
+        # TTLCache auto-evicts expired + LRU entries on set
         _model_cache[version_id] = bundle
+        logger.info("Cached model version %s (cache size now %d)", version_id, len(_model_cache))
     return bundle
 
 
