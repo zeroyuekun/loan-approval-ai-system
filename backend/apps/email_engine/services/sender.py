@@ -34,9 +34,28 @@ ACCENT_COLORS = {
     "marketing": "#7c3aed",
 }
 
+CTA_LABELS = {
+    "approval": "Review &amp; Sign",
+    "denial": "Explore Options",
+    "marketing": "See Alternatives",
+}
+
 
 def _get_accent_color(email_type: str) -> str:
     return ACCENT_COLORS.get(email_type, ACCENT_COLORS["approval"])
+
+
+def _render_cta(email_type: str, accent: str) -> str:
+    label = CTA_LABELS.get(email_type, CTA_LABELS["approval"])
+    return (
+        '<table cellspacing="0" cellpadding="0" '
+        'style="margin:24px auto; border-collapse:collapse;">'
+        '<tr><td style="background:' + accent + '; border-radius:6px;">'
+        '<a href="#" style="display:inline-block; padding:12px 28px; '
+        'color:#ffffff; font-size:15px; font-weight:bold; '
+        'text-decoration:none; font-family:Arial,Helvetica,sans-serif;">'
+        + label + '</a></td></tr></table>'
+    )
 
 
 def _render_section_header(label: str, accent: str) -> str:
@@ -211,6 +230,15 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
 
     _flush_list()
     _flush_detail_rows()
+
+    # Inject CTA button before the closing signature block, if any.
+    cta_html = _render_cta(email_type, accent)
+    insert_index = len(html_parts)
+    for i, part in enumerate(html_parts):
+        if any(closing in part for closing in CLOSINGS):
+            insert_index = i
+            break
+    html_parts.insert(insert_index, cta_html)
 
     body_html = "\n".join(html_parts)
     return (

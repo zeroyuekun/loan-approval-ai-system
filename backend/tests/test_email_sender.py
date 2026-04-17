@@ -223,3 +223,23 @@ class TestDetailsCard:
     def test_marketing_each_option_gets_its_own_card(self):
         html = _plain_text_to_html(MARKETING_PLAIN, email_type="marketing")
         assert html.count("#f9fafb") >= 2
+
+
+class TestCTAButton:
+    def test_approval_has_review_and_sign_cta(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "Review &amp; Sign" in html or "Review & Sign" in html
+        assert "background:#16a34a" in html.replace(" ", "")
+
+    def test_denial_has_explore_options_cta(self):
+        html = _plain_text_to_html(DENIAL_PLAIN, email_type="denial")
+        assert "Explore Options" in html
+
+    def test_marketing_has_see_alternatives_cta(self):
+        html = _plain_text_to_html(MARKETING_PLAIN, email_type="marketing")
+        assert "See Alternatives" in html
+
+    def test_cta_is_a_link(self):
+        html = _plain_text_to_html(APPROVAL_PLAIN, email_type="approval")
+        assert "<a " in html
+        assert "text-decoration:none" in html.replace(" ", "")
