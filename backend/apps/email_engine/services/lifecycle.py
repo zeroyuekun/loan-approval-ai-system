@@ -80,9 +80,9 @@ Australian Financial Complaints Authority (AFCA) | www.afca.org.au | 1800 931 67
         passed_guardrails=True,
     )
 
-    # Send if applicant has email
+    # Send if applicant has email (application-received is neutral — use approval accent)
     if applicant.email:
-        send_decision_email(applicant.email, subject, body)
+        send_decision_email(applicant.email, subject, body, email_type="approval")
 
     logger.info("Sent application received email for %s", application.id)
     return email

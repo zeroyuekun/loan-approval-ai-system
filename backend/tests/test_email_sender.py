@@ -268,3 +268,24 @@ class TestComplianceFooter:
         afca_idx = html.find("AFCA")
         assert email_idx != -1 and afca_idx != -1
         assert afca_idx > email_idx
+
+
+class TestSendDecisionEmailSignature:
+    @patch("apps.email_engine.services.sender.send_mail")
+    def test_passes_email_type_to_html_renderer(self, mock_send_mail, settings):
+        settings.EMAIL_HOST_USER = "test@example.com"
+        settings.EMAIL_HOST_PASSWORD = "pw"
+        settings.EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+
+        send_decision_email(
+            "user@example.com",
+            "Test subject",
+            DENIAL_PLAIN,
+            email_type="denial",
+        )
+
+        assert mock_send_mail.called
+        _, kwargs = mock_send_mail.call_args
+        html = kwargs["html_message"]
+        assert "#374151" in html
+        assert "AFCA" in html

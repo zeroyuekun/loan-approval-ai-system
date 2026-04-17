@@ -67,6 +67,7 @@ def generate_email_task(self, application_id, decision):
             recipient_email=application.applicant.email,
             subject=result["subject"],
             body=result["body"],
+            email_type=("approval" if str(decision).lower() == "approved" else "denial"),
         )
         email_sent = send_result.get("sent", False)
 

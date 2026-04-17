@@ -268,11 +268,11 @@ def _plain_text_to_html(body: str, *, email_type: str = "approval") -> str:
     )
 
 
-def send_decision_email(recipient_email, subject, body):
+def send_decision_email(recipient_email, subject, body, email_type: str = "approval"):
     """Send a loan decision email to the customer via Gmail SMTP.
 
-    Sends both plain-text and HTML versions. Section headers (lines ending
-    with ':') are rendered in bold in the HTML version.
+    Sends both plain-text and HTML versions. The HTML uses accent colors and
+    layout appropriate to the email_type ("approval", "denial", "marketing").
 
     Returns a dict with 'sent' (bool) and, on failure, 'error' (str).
     """
@@ -282,7 +282,7 @@ def send_decision_email(recipient_email, subject, body):
         logger.warning("%s to %s", msg, recipient_email)
         return {"sent": False, "error": msg}
 
-    html_body = _plain_text_to_html(body)
+    html_body = _plain_text_to_html(body, email_type=email_type)
 
     try:
         send_mail(
