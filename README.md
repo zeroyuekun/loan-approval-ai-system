@@ -226,9 +226,12 @@ The same script runs as a manually-triggered GitHub Actions job under `smoke-e2e
 Local development accumulates build artifacts, test caches, and trained model files. To reclaim disk:
 
 ```bash
-make clean       # ephemerals (containers, .next, coverage, __pycache__, tsbuildinfo)
-make clean-deep  # also removes node_modules and backend/.venv (forces reinstall)
+make clean-soft  # caches + build output ONLY — docker volumes (DB, redis) preserved
+make clean       # FULL wipe: containers + volumes + caches (DB is wiped — use sparingly)
+make clean-deep  # clean + removes node_modules and backend/.venv (forces reinstall)
 ```
+
+Day-to-day, `make clean-soft` is the right default — it reclaims several hundred MB of Python/Next.js caches without touching the Postgres volume. Reserve `make clean` for "I want a fresh-from-seed DB".
 
 To prune stale trained-model `.joblib` artifacts from `backend/ml_models/` (after many training iterations):
 
