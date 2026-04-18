@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "Regression-gate baseline for the unified champion model. CI fails if a new training run drops below these floors by more than the documented tolerance. Refresh this file only when promoting a new champion — see docs/superpowers/specs/2026-04-18-xgboost-au-lender-parity-design.md §5.",
+  "last_refreshed": "2026-04-18",
+  "champion_version": "v1.9.9",
+  "segment": "unified",
+  "metrics": {
+    "auc_roc": 0.87,
+    "ks_statistic": 0.45,
+    "brier_score": 0.10,
+    "ece": 0.03,
+    "gini_coefficient": 0.74
+  },
+  "tolerances": {
+    "auc_roc_drop_pp": 0.02,
+    "ks_statistic_drop_pp": 0.015,
+    "brier_score_rise_pp": 0.02,
+    "ece_rise_pp": 0.015
+  },
+  "notes": [
+    "AUC 0.87 reflects the Optuna-tuned XGBoost champion on the synthetic-DataGenerator training distribution. The GMSC real-data benchmark (v1.9.7) sits at AUC 0.8663 — below this floor on a different distribution, which is expected.",
+    "Tolerances are absolute-percentage-point drops (or rises, for lower-is-better metrics). 'pp' means percentage points on the metric value itself, not on the metric's 'gain' vs 0.5.",
+    "Refresh cadence: every promoted champion. The champion-challenger gate in model_selector.py already blocks promotion of regressions beyond tolerance; this file is a secondary static check for CI + downstream audit."
+  ]
+}

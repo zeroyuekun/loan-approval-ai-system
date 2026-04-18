@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.10.0 — XGBoost AU Lender Parity (2026-04-18)
+
+Bundle of 8 deliverables bringing the unified champion XGBoost model to APRA / AU-big-4 production parity, plus a regression-gate JSON file so CI can catch silent metric decay after promotion. Target audit surfaces: APRA CPS 220 model validation, SR 11-7 MRM dossier, APS 112 credit policy overlay, APS 220 referral trail, AFCA 2023 hardship guidance, ASIC RG 209 responsible-lending capture, NCCP Act s.128 unsuitability screen.
+
+### ML / Risk
+
+- **D1 — XGBoost monotone constraints.** `ModelTrainer.build_model()` now sets a `monotone_constraints` tuple aligned to feature index order: `credit_score`, `annual_income`, `employment_length`, `years_in_residence` constrained `+1` (higher input → lower predicted default probability); `debt_to_income`, `num_late_payments`, `num_delinquencies`, `credit_utilization`, `num_hardship_flags`, `loan_amount`, `loan_to_income` constrained `-1` (higher input → higher PD). Remaining features left at `0` (free). Justification table lives in the MRM dossier §4.
+- **D2 — Segmented training.** `ModelTrainer` learned to fit per-segment bundles (`home_owner_occupier`, `home_investor`, `personal`, `unified`) against the generator's `purpose`-based product split, with a shared validation split and `SegmentedBundle` accessor so the predictor can route by application intent at inference. Unified remains the live champion while segment-specific challengers accumulate hold-out evidence; promotion gates run per-segment.
+- **D3 — Hard credit policy overlay (shadow-mode default).** New `backend/apps/ml_engine/services/credit_policy.py` codifies 12 underwriter rules: P01 `has_bankruptcy`, P02 `has_default_last_2y`, P03 `credit_score<550`, P04 `loan_amount<2000`, P05 `loan_amount>500000`, P06 `age<18`, P07 `debt_to_income>0.8` (hard-fails); P08 `loan_to_income>9x`, P09 `postcode_default_rate>0.10`, P10 `self_employed AND employment_length<1y`, P11 `num_hardship_flags>=1`, P12 TMD-mismatch (refers). Overlay mode is controlled by `CREDIT_POLICY_MODE` env (`off`/`shadow`/`enforce`, default **shadow**) so the first deploy only logs decisions to audit; flip to `enforce` after a shadow-period review.
+- **D4 — Risk-based pricing tiers.** New `pricing_engine.py` maps (PD, segment) → `PricingTier` (tier A–D, rate_min/rate_max, rationale) using NAB-aligned bands: personal 7.0–24.0%, home 6.0–9.0%. Segment normalisation handles `home_owner_occupier` / `home_investor` / `owner_occupier` / `investor` / `investment` → `home`; `personal` / `auto` / `education` / `unified` → `personal`. Rejection returns tier `D` with midpoint-safe rationale instead of raising.
+- **D5 — KS / PSI / Brier + champion-challenger promotion gate.** `ModelEvaluator.compute_metrics()` now returns KS-statistic, Brier score + Murphy (1973) decomposition (reliability, resolution, uncertainty), PSI against the prior champion's validation bins, and ECE. `model_selector.promote_if_better()` enforces the four-gate contract: AUC regression tolerance 0.02pp, KS tolerance 0.015pp, PSI ≤ 0.25, ECE ≤ 0.05. All metrics persisted on `ModelVersion` for audit.
+- **D6 — Referral audit records (bias-queue-safe).** New `LoanApplication.ReferralStatus` choices (`none` / `referred` / `cleared` / `escalated`) + `referral_codes` (JSONList) + `referral_rationale` (JSONDict) fields, populated by `predictor.py` when a policy run returns `refers`. New admin-only `GET /api/loans/referrals/` endpoint supports `?code=P09,P11`, `?status=referred`, `?limit=100` filters. **The bias human-review queue stays bias-only** — referral evidence is a separate admin surface with no customer-facing UI.
+- **D7 — MRM dossier auto-generation.** New `mrm_dossier.py` produces the 11-section APRA/SR 11-7 model-risk-management dossier as pure Markdown (`generate_dossier_markdown(mv) -> str`, `write_dossier(mv, dir) -> str`) with graceful-degradation text when PSI / fairness / calibration data is missing. A `post_save` signal on `ModelVersion` enqueues `generate_mrm_dossier_task.delay(id)` (Celery, 300s time limit, 1 retry), gated by `MRM_DOSSIER_AUTO_GENERATE` env (default `true`). Broker outage is non-fatal. `python manage.py generate_mrm_dossier <id>` offers an offline regen path. Dossier writes to `<ML_MODELS_DIR>/<id>/mrm.md`.
+- **D8 — `predictor.py` cleanup.** Refactored `predict_loan_outcome()` into composed steps (policy overlay resolution → PD inference → segment-aware pricing → referral-audit capture → rationale assembly) and pushed Claude / SHAP / policy-code rendering into a single structured-logging surface. Reduces cyclomatic complexity on the critical inference path and tightens the contract around `PolicyResult.rationale_by_code`.
+
+### CI / Audit
+
+- **Regression-gate baseline (`backend/ml_models/golden_metrics.json`).** Captures the champion v1.9.9 floor: AUC 0.87, KS 0.45, Brier 0.10, ECE 0.03, Gini 0.74. Tolerances: AUC drop ≤ 0.02pp, KS drop ≤ 0.015pp, Brier rise ≤ 0.02pp, ECE rise ≤ 0.015pp. Refresh only on new-champion promotion.
+- **Regression-gate service (`backend/apps/ml_engine/services/regression_gate.py`).** Pure-functional `check_regression(metrics, golden) -> List[str]` (empty list = pass) + `load_golden()` + `active_model_metrics()` (returns `None` when no active model, so a fresh clone CI stays green). Complements the runtime champion-challenger gate in `model_selector.py` — the runtime gate blocks promotion; this static file catches drift on the *currently-active* model from a nightly CI cron.
+- **Regression-gate tests (`backend/apps/ml_engine/tests/test_regression_gate.py`).** 16 tests covering golden-file shape, required baselines + tolerances, higher-is-better drops, lower-is-better rises, compound breaches, missing-metric / non-numeric graceful skipping, and a `@pytest.mark.django_db` integration test that skips-if-no-active-model.
+
+### Migration note
+
+No data migration beyond additive fields on `LoanApplication` (0023). Existing trained models continue to score. To pick up the monotone / segmented / calibrated champion, retrain via Admin → *Train New Model* or `python manage.py train_ml_model`; the promotion gate will block a silently-regressed bundle from becoming active.
+
+### Target
+
+`v1.10.0` lands the XGBoost-parity arm of the Arm A / Arm B / Arm C portfolio-polish push. Arm B (stress-test / soak / fairness uplift) and Arm C (ml_engine code-review sweep) follow as separate specs.
+
 ## v1.9.9 — Expose HEM + LMI policy variables as model features (2026-04-18)
 
 ### ML
