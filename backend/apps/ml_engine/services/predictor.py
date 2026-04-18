@@ -6,18 +6,13 @@ decorates the response with SHAP explanations, drift snapshots, stress-test delt
 conformal intervals, and counterfactual suggestions, and records the outcome.
 """
 
-import hashlib
 import logging
 import math
-import threading
 import time
-from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
 import shap
-from cachetools import TTLCache
 from django.conf import settings
 from prometheus_client import Counter, Histogram
 
@@ -28,6 +23,23 @@ from apps.ml_engine.services.feature_prep import (
 )
 from apps.ml_engine.services.policy_recompute import (
     recompute_lvr_driven_policy_vars as _recompute_lvr_driven_policy_vars,
+)
+# Re-export cache helpers so external callers and tests that patch
+# `predictor._validate_model_path`, `predictor._verify_model_hash`,
+# `predictor._load_bundle`, `predictor._model_cache`, etc. keep working after
+# the Arm C Phase 1 split. These names are mutable-object bindings; patches
+# applied to the `predictor` module propagate because internal callers of the
+# loader look up these names on `prediction_cache`, and the re-exports share
+# identity with that module's bindings at import time.
+from apps.ml_engine.services.prediction_cache import (  # noqa: F401 — re-export
+    _MAX_CACHE_ENTRIES,
+    _CACHE_TTL_SECONDS,
+    _cache_lock,
+    _load_bundle,
+    _model_cache,
+    _validate_model_path,
+    _verify_model_hash,
+    clear_model_cache,
 )
 
 ml_predictions_total = Counter(
@@ -51,15 +63,6 @@ ml_drift_warnings_total = Counter(
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Module-level cache for loaded model bundles, keyed by model version ID.
-# TTLCache auto-evicts entries older than _CACHE_TTL_SECONDS and enforces
-# maxsize (LRU), preventing unbounded memory growth and serving stale models.
-_MAX_CACHE_ENTRIES = 3
-_CACHE_TTL_SECONDS = 3600  # 1 hour
-_model_cache = TTLCache(maxsize=_MAX_CACHE_ENTRIES, ttl=_CACHE_TTL_SECONDS)
-_cache_lock = threading.Lock()
 
 
 # Bounds for input validation: (min, max) inclusive.
@@ -133,65 +136,6 @@ FEATURE_BOUNDS = {
     "lmi_premium": (0, 200_000),
     "effective_loan_amount": (0, 5_200_000),
 }
-
-
-def _validate_model_path(file_path):
-    """Validate that the model file path is safe to load."""
-    models_dir = Path(settings.ML_MODELS_DIR).resolve()
-    resolved = Path(file_path).resolve()
-
-    if not resolved.is_relative_to(models_dir):
-        raise ValueError(f"Model file path '{file_path}' is outside the allowed directory")
-    if resolved.suffix != ".joblib":
-        raise ValueError(f"Model file must have .joblib extension, got '{resolved.suffix}'")
-    if not resolved.exists():
-        raise FileNotFoundError(f"Model file not found: {resolved}")
-
-    return resolved
-
-
-def _verify_model_hash(file_path, expected_hash):
-    """Verify SHA-256 hash of model file to detect tampering."""
-    if not expected_hash:
-        logger.warning("No file_hash stored for model — skipping integrity check")
-        return
-    sha256 = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    actual_hash = sha256.hexdigest()
-    if actual_hash != expected_hash:
-        raise ValueError(
-            f"Model file integrity check failed: expected hash {expected_hash[:16]}..., got {actual_hash[:16]}..."
-        )
-
-
-def _load_bundle(model_version):
-    """Load and cache a model bundle, returning it from cache if available."""
-    version_id = model_version.id
-    with _cache_lock:
-        if version_id in _model_cache:
-            return _model_cache[version_id]
-
-    resolved_path = _validate_model_path(model_version.file_path)
-    _verify_model_hash(resolved_path, getattr(model_version, "file_hash", None))
-
-    bundle = joblib.load(resolved_path)
-
-    with _cache_lock:
-        # Re-check after expensive load — another worker may have cached it first
-        if version_id in _model_cache:
-            return _model_cache[version_id]
-        # TTLCache auto-evicts expired + LRU entries on set
-        _model_cache[version_id] = bundle
-        logger.info("Cached model version %s (cache size now %d)", version_id, len(_model_cache))
-    return bundle
-
-
-def clear_model_cache():
-    """Clear the model cache (e.g. after retraining)."""
-    with _cache_lock:
-        _model_cache.clear()
 
 
 def compute_risk_grade(probability):
