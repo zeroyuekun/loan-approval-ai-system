@@ -32,10 +32,7 @@ def test_seed_profiles_on_time_payment_pct_is_on_0_to_100_scale():
 
     for profile in profiles:
         pct = float(profile.on_time_payment_pct)
-        assert 0.0 <= pct <= 100.0, (
-            f"on_time_payment_pct={pct} outside the [0, 100] range "
-            f"for {profile.user.username}"
-        )
+        assert 0.0 <= pct <= 100.0, f"on_time_payment_pct={pct} outside the [0, 100] range for {profile.user.username}"
         # Seeded range is uniform(75, 100); anything below 1.0 indicates
         # the legacy 0-1 scale bug has regressed.
         assert pct >= 1.0, (
