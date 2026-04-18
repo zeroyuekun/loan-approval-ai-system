@@ -98,7 +98,9 @@ class TestBuildPredictionFeatures:
     def test_safe_get_state_callback_used(self):
         app = _mk_app(state=None)
         feats = build_prediction_features(
-            app, safe_get_state_fn=lambda _a: "VIC", imputation_values={},
+            app,
+            safe_get_state_fn=lambda _a: "VIC",
+            imputation_values={},
         )
         assert feats["state"] == "VIC"
 

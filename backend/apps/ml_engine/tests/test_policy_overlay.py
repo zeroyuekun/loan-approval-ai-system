@@ -161,11 +161,14 @@ class TestApplyPolicyOverlay:
         def _overlay(label, _r, mode):
             return "denied" if mode == "enforce" else label
 
-        with _patch_policy(
-            evaluate_result=result,
-            current_mode="shadow",
-            apply_overlay_to_decision=_overlay,
-        ), patch("apps.ml_engine.services.policy_overlay.logger") as log:
+        with (
+            _patch_policy(
+                evaluate_result=result,
+                current_mode="shadow",
+                apply_overlay_to_decision=_overlay,
+            ),
+            patch("apps.ml_engine.services.policy_overlay.logger") as log,
+        ):
             label, _review, _payload = apply_policy_overlay(
                 application=app,
                 model_version=mv,
@@ -175,10 +178,7 @@ class TestApplyPolicyOverlay:
 
         # Shadow mode: label stays "approved"; disagreement logged.
         assert label == "approved"
-        assert any(
-            "credit_policy_shadow_disagreement" in str(call)
-            for call in log.warning.call_args_list
-        )
+        assert any("credit_policy_shadow_disagreement" in str(call) for call in log.warning.call_args_list)
 
     def test_refer_persists_audit_fields_on_application(self):
         app = _mk_application()
@@ -284,11 +284,14 @@ class TestApplyPolicyOverlay:
         def _overlay(label, _r, _mode):
             return label
 
-        with _patch_policy(
-            evaluate_result=result,
-            current_mode="shadow",
-            apply_overlay_to_decision=_overlay,
-        ), patch("apps.ml_engine.services.policy_overlay.logger") as log:
+        with (
+            _patch_policy(
+                evaluate_result=result,
+                current_mode="shadow",
+                apply_overlay_to_decision=_overlay,
+            ),
+            patch("apps.ml_engine.services.policy_overlay.logger") as log,
+        ):
             apply_policy_overlay(
                 application=app,
                 model_version=mv,
@@ -296,7 +299,4 @@ class TestApplyPolicyOverlay:
                 requires_human_review=False,
             )
 
-        assert not any(
-            "credit_policy_shadow_disagreement" in str(call)
-            for call in log.warning.call_args_list
-        )
+        assert not any("credit_policy_shadow_disagreement" in str(call) for call in log.warning.call_args_list)

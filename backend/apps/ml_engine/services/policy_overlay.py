@@ -53,9 +53,7 @@ def apply_policy_overlay(
     try:
         policy_result = _policy.evaluate(application)
         policy_mode = _policy.current_mode()
-        final_prediction = _policy.apply_overlay_to_decision(
-            prediction_label, policy_result, policy_mode
-        )
+        final_prediction = _policy.apply_overlay_to_decision(prediction_label, policy_result, policy_mode)
 
         if policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
             hypothetical = _policy.apply_overlay_to_decision(
@@ -87,8 +85,7 @@ def apply_policy_overlay(
                 application.referral_status = application.ReferralStatus.REFERRED
                 application.referral_codes = list(policy_result.refers)
                 application.referral_rationale = {
-                    code: policy_result.rationale_by_code.get(code, "")
-                    for code in policy_result.refers
+                    code: policy_result.rationale_by_code.get(code, "") for code in policy_result.refers
                 }
                 application.save(
                     update_fields=["referral_status", "referral_codes", "referral_rationale"],
@@ -107,8 +104,12 @@ def apply_policy_overlay(
 
     except Exception as exc:
         logger.warning("credit_policy_evaluate_failed", exc_info=True)
-        return prediction_label, requires_human_review, {
-            "passed": None,
-            "mode": "off",
-            "error": str(exc),
-        }
+        return (
+            prediction_label,
+            requires_human_review,
+            {
+                "passed": None,
+                "mode": "off",
+                "error": str(exc),
+            },
+        )

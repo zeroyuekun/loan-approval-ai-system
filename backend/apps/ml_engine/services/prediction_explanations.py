@@ -46,12 +46,14 @@ _COUNTERFACTUAL_FEATURE_BOUNDS = {
 # Features where DECREASING the value is the direction that improves the
 # decision (e.g. lowering DTI, loan amount, expenses). All other features in
 # `_COUNTERFACTUAL_FEATURE_BOUNDS` are "increase improves".
-_DECREASE_IS_BETTER = frozenset({
-    "debt_to_income",
-    "monthly_expenses",
-    "loan_amount",
-    "existing_credit_card_limit",
-})
+_DECREASE_IS_BETTER = frozenset(
+    {
+        "debt_to_income",
+        "monthly_expenses",
+        "loan_amount",
+        "existing_credit_card_limit",
+    }
+)
 
 
 def compute_conformal_interval(
@@ -216,8 +218,7 @@ def search_counterfactuals(
                 "current_value": float(current_value),
                 "target_value": round(float(flip_value), 2),
                 "statement": (
-                    f"{direction} {readable_name.lower()} from {current_fmt} "
-                    f"to {target_fmt} would change the outcome"
+                    f"{direction} {readable_name.lower()} from {current_fmt} to {target_fmt} would change the outcome"
                 ),
             }
         )

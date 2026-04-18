@@ -91,8 +91,11 @@ class TestSearchCounterfactuals:
         df = pd.DataFrame([{"annual_income": 80_000, "credit_score": 600}])
         bundle = self._make_bundle([[1, 0]])
         result = search_counterfactuals(
-            df, feature_importances={}, model_bundle=bundle,
-            transform_fn=_identity_transform, feature_cols=["annual_income", "credit_score"],
+            df,
+            feature_importances={},
+            model_bundle=bundle,
+            transform_fn=_identity_transform,
+            feature_cols=["annual_income", "credit_score"],
         )
         assert result == []
 
@@ -101,8 +104,11 @@ class TestSearchCounterfactuals:
         bundle = self._make_bundle([[1, 0]] * 30)
         # "exotic_feature" has no bounds entry → skipped
         result = search_counterfactuals(
-            df, feature_importances={"exotic_feature": 0.9}, model_bundle=bundle,
-            transform_fn=_identity_transform, feature_cols=["annual_income"],
+            df,
+            feature_importances={"exotic_feature": 0.9},
+            model_bundle=bundle,
+            transform_fn=_identity_transform,
+            feature_cols=["annual_income"],
         )
         assert result == []
 
@@ -111,8 +117,11 @@ class TestSearchCounterfactuals:
         # predict_proba returns a 2-D array; wrap each row accordingly.
         bundle = self._make_bundle([[[0.1, 0.9]]] * 30)
         result = search_counterfactuals(
-            df, feature_importances={"annual_income": 0.8}, model_bundle=bundle,
-            transform_fn=_identity_transform, feature_cols=["annual_income", "credit_score"],
+            df,
+            feature_importances={"annual_income": 0.8},
+            model_bundle=bundle,
+            transform_fn=_identity_transform,
+            feature_cols=["annual_income", "credit_score"],
         )
         assert len(result) == 1
         assert result[0]["feature"] == "annual_income"
@@ -122,8 +131,11 @@ class TestSearchCounterfactuals:
         df = pd.DataFrame([{"loan_amount": 500_000, "credit_score": 700}])
         bundle = self._make_bundle([[[0.1, 0.9]]] * 30)
         result = search_counterfactuals(
-            df, feature_importances={"loan_amount": 0.7}, model_bundle=bundle,
-            transform_fn=_identity_transform, feature_cols=["loan_amount", "credit_score"],
+            df,
+            feature_importances={"loan_amount": 0.7},
+            model_bundle=bundle,
+            transform_fn=_identity_transform,
+            feature_cols=["loan_amount", "credit_score"],
         )
         assert len(result) == 1
         assert result[0]["feature"] == "loan_amount"
@@ -134,8 +146,11 @@ class TestSearchCounterfactuals:
         # Every probe returns deny → no flip value found
         bundle = self._make_bundle([[[0.9, 0.1]]] * 30)
         result = search_counterfactuals(
-            df, feature_importances={"annual_income": 0.9}, model_bundle=bundle,
-            transform_fn=_identity_transform, feature_cols=["annual_income"],
+            df,
+            feature_importances={"annual_income": 0.9},
+            model_bundle=bundle,
+            transform_fn=_identity_transform,
+            feature_cols=["annual_income"],
         )
         assert result == []
 
@@ -144,19 +159,26 @@ class TestSearchCounterfactuals:
         bundle = self._make_bundle([RuntimeError("boom")] * 30)
         # Function should swallow and return empty for that feature
         result = search_counterfactuals(
-            df, feature_importances={"annual_income": 0.9}, model_bundle=bundle,
-            transform_fn=_identity_transform, feature_cols=["annual_income"],
+            df,
+            feature_importances={"annual_income": 0.9},
+            model_bundle=bundle,
+            transform_fn=_identity_transform,
+            feature_cols=["annual_income"],
         )
         assert result == []
 
     def test_takes_top_three_by_importance(self):
-        df = pd.DataFrame([{
-            "annual_income": 50_000,
-            "credit_score": 600,
-            "debt_to_income": 5.0,
-            "loan_amount": 500_000,
-            "monthly_expenses": 3000,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "annual_income": 50_000,
+                    "credit_score": 600,
+                    "debt_to_income": 5.0,
+                    "loan_amount": 500_000,
+                    "monthly_expenses": 3000,
+                }
+            ]
+        )
         bundle = self._make_bundle([[0.1, 0.9]] * 200)
         importances = {
             "annual_income": 0.9,
@@ -166,7 +188,9 @@ class TestSearchCounterfactuals:
             "monthly_expenses": 0.3,
         }
         result = search_counterfactuals(
-            df, feature_importances=importances, model_bundle=bundle,
+            df,
+            feature_importances=importances,
+            model_bundle=bundle,
             transform_fn=_identity_transform,
             feature_cols=list(df.columns),
         )

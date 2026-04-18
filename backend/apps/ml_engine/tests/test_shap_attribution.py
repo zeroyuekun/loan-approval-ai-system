@@ -51,7 +51,10 @@ class TestComputeShapAttribution:
             TE.return_value.shap_values.return_value = np.array([[0.01, 0.02, 0.03]])
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
-                model=model, df=df, feature_cols=feature_cols, positive_probability=0.5,
+                model=model,
+                df=df,
+                feature_cols=feature_cols,
+                positive_probability=0.5,
             )
 
         assert result["feature_importances"] == {"a": 0.1, "b": 0.7, "c": 0.2}
@@ -67,7 +70,10 @@ class TestComputeShapAttribution:
             TE.return_value.shap_values.return_value = np.array([[0.01, 0.02]])
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
-                model=model, df=df, feature_cols=feature_cols, positive_probability=0.5,
+                model=model,
+                df=df,
+                feature_cols=feature_cols,
+                positive_probability=0.5,
             )
 
         assert result["feature_importances"] == {}
@@ -86,7 +92,10 @@ class TestComputeShapAttribution:
             ]
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
-                model=model, df=df, feature_cols=feature_cols, positive_probability=0.5,
+                model=model,
+                df=df,
+                feature_cols=feature_cols,
+                positive_probability=0.5,
             )
 
         assert result["shap_values"] == {"a": 0.1, "b": 0.2}
@@ -104,7 +113,10 @@ class TestComputeShapAttribution:
             TE.return_value.shap_values.return_value = sv
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
-                model=model, df=df, feature_cols=feature_cols, positive_probability=0.5,
+                model=model,
+                df=df,
+                feature_cols=feature_cols,
+                positive_probability=0.5,
             )
 
         assert result["shap_values"] == {"a": 0.1, "b": 0.2}
@@ -121,7 +133,10 @@ class TestComputeShapAttribution:
             TE.return_value.shap_values.return_value = sv
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
-                model=model, df=df, feature_cols=feature_cols, positive_probability=0.5,
+                model=model,
+                df=df,
+                feature_cols=feature_cols,
+                positive_probability=0.5,
             )
 
         assert result["shap_values"] == {"a": 0.3, "b": 0.4}
@@ -140,7 +155,10 @@ class TestComputeShapAttribution:
             TE.return_value.shap_values.return_value = np.array([[0.01, 0.02]])
             TE.return_value.expected_value = 0.5
             compute_shap_attribution(
-                model=calibrated, df=df, feature_cols=feature_cols, positive_probability=0.5,
+                model=calibrated,
+                df=df,
+                feature_cols=feature_cols,
+                positive_probability=0.5,
             )
 
         TE.assert_called_once_with(base)
@@ -156,7 +174,10 @@ class TestComputeShapAttribution:
             side_effect=RuntimeError("not a tree model"),
         ):
             result = compute_shap_attribution(
-                model=model, df=df, feature_cols=feature_cols, positive_probability=0.5,
+                model=model,
+                df=df,
+                feature_cols=feature_cols,
+                positive_probability=0.5,
             )
 
         assert result["shap_available"] is False
@@ -175,7 +196,10 @@ class TestComputeShapAttribution:
             side_effect=RuntimeError("nope"),
         ):
             result = compute_shap_attribution(
-                model=model, df=df, feature_cols=feature_cols, positive_probability=0.5,
+                model=model,
+                df=df,
+                feature_cols=feature_cols,
+                positive_probability=0.5,
             )
 
         assert set(result.keys()) == {

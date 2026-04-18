@@ -114,8 +114,11 @@ class TestRunStressScenarios:
         model = _make_mock_model([0.92, 0.80, 0.70, 0.60, 0.40])  # base + 4
 
         result = run_stress_scenarios(
-            features, threshold=0.5, model=model,
-            transform_fn=_identity_transform, feature_cols=list(features.keys()),
+            features,
+            threshold=0.5,
+            model=model,
+            transform_fn=_identity_transform,
+            feature_cols=list(features.keys()),
         )
 
         assert result["base_probability"] == 0.92
@@ -131,8 +134,11 @@ class TestRunStressScenarios:
         model = _make_mock_model([0.92, 0.80, 0.70, 0.60, 0.40])
 
         result = run_stress_scenarios(
-            features, threshold=0.5, model=model,
-            transform_fn=_identity_transform, feature_cols=list(features.keys()),
+            features,
+            threshold=0.5,
+            model=model,
+            transform_fn=_identity_transform,
+            feature_cols=list(features.keys()),
         )
 
         scen = result["scenarios"]["income_minus_15pct"]
@@ -146,8 +152,11 @@ class TestRunStressScenarios:
         model = _make_mock_model([0.92, 0.80, 0.70, 0.60, 0.40])
 
         result = run_stress_scenarios(
-            features, threshold=0.5, model=model,
-            transform_fn=_identity_transform, feature_cols=list(features.keys()),
+            features,
+            threshold=0.5,
+            model=model,
+            transform_fn=_identity_transform,
+            feature_cols=list(features.keys()),
         )
 
         assert result["scenarios"]["combined_stress"]["decision"] == "denied"
@@ -164,8 +173,11 @@ class TestRunStressScenarios:
             return df
 
         run_stress_scenarios(
-            features, threshold=0.5, model=model,
-            transform_fn=_capture_transform, feature_cols=list(features.keys()),
+            features,
+            threshold=0.5,
+            model=model,
+            transform_fn=_capture_transform,
+            feature_cols=list(features.keys()),
         )
 
         # property_minus_20pct is the 3rd transform call (after base + income)
@@ -185,8 +197,11 @@ class TestRunStressScenarios:
             return df
 
         run_stress_scenarios(
-            features, threshold=0.5, model=model,
-            transform_fn=_capture_transform, feature_cols=list(features.keys()),
+            features,
+            threshold=0.5,
+            model=model,
+            transform_fn=_capture_transform,
+            feature_cols=list(features.keys()),
         )
 
         # income_minus_15pct with 0 * 0.85 = 0 → DTI sentinel 999
@@ -199,8 +214,11 @@ class TestRunStressScenarios:
         model.predict_proba.side_effect = RuntimeError("boom")
 
         result = run_stress_scenarios(
-            features, threshold=0.5, model=model,
-            transform_fn=_identity_transform, feature_cols=list(features.keys()),
+            features,
+            threshold=0.5,
+            model=model,
+            transform_fn=_identity_transform,
+            feature_cols=list(features.keys()),
         )
 
         # Fail-open: return an empty-ish result; never propagate.

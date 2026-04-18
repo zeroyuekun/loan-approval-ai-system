@@ -29,9 +29,7 @@ __all__ = ["compute_shap_attribution"]
 logger = logging.getLogger(__name__)
 
 
-_SHAP_MODEL_NOTE = (
-    "Feature attributions computed on base model before probability calibration"
-)
+_SHAP_MODEL_NOTE = "Feature attributions computed on base model before probability calibration"
 
 
 def compute_shap_attribution(
@@ -53,11 +51,7 @@ def compute_shap_attribution(
     shap_values_dict: dict[str, float] = {}
     shap_available = False
     try:
-        underlying = (
-            model.get_underlying_estimator()
-            if hasattr(model, "get_underlying_estimator")
-            else model
-        )
+        underlying = model.get_underlying_estimator() if hasattr(model, "get_underlying_estimator") else model
         explainer = shap.TreeExplainer(underlying)
         sv = explainer.shap_values(df[feature_cols])
 

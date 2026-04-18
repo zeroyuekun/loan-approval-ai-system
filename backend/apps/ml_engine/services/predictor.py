@@ -29,6 +29,9 @@ from apps.ml_engine.services.feature_prep import (
 from apps.ml_engine.services.policy_overlay import (
     apply_policy_overlay as _apply_policy_overlay_helper,
 )
+from apps.ml_engine.services.policy_recompute import (
+    recompute_lvr_driven_policy_vars as _recompute_lvr_driven_policy_vars,  # noqa: F401 — re-export for test
+)
 from apps.ml_engine.services.prediction_cache import (  # noqa: F401 — re-export for external patches
     _CACHE_TTL_SECONDS,
     _MAX_CACHE_ENTRIES,

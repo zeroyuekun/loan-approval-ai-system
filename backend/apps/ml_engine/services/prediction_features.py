@@ -163,9 +163,7 @@ def derive_underwriter_features(features: dict) -> None:
     except Exception:
         features["hem_benchmark"] = 2950.0
 
-    features["hem_gap"] = round(
-        float(features["monthly_expenses"]) - features["hem_benchmark"], 2
-    )
+    features["hem_gap"] = round(float(features["monthly_expenses"]) - features["hem_benchmark"], 2)
 
     is_home = features["purpose"] in ("home", "investment")
     property_value = float(features.get("property_value", 0.0) or 0.0)
@@ -180,9 +178,5 @@ def derive_underwriter_features(features: dict) -> None:
     else:
         lmi_rate = 0.0
 
-    features["lmi_premium"] = round(
-        float(features["loan_amount"]) * lmi_rate * (1 if is_home else 0), 2
-    )
-    features["effective_loan_amount"] = round(
-        float(features["loan_amount"]) + features["lmi_premium"], 2
-    )
+    features["lmi_premium"] = round(float(features["loan_amount"]) * lmi_rate * (1 if is_home else 0), 2)
+    features["effective_loan_amount"] = round(float(features["loan_amount"]) + features["lmi_premium"], 2)

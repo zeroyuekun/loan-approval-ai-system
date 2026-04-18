@@ -51,9 +51,10 @@ class TestScoreChallengersShadow:
         champion = _mk_version(pk=10, version="v1.0.0-champ")
         scorer = MagicMock()
 
-        with _patch_challengers([]), patch(
-            "apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"
-        ) as create:
+        with (
+            _patch_challengers([]),
+            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create") as create,
+        ):
             score_challengers_shadow(
                 application=app,
                 champion_version=champion,
@@ -73,9 +74,10 @@ class TestScoreChallengersShadow:
 
         scorer = MagicMock(return_value=(0.72, "approved"))
 
-        with _patch_challengers([challenger]), patch(
-            "apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"
-        ) as create:
+        with (
+            _patch_challengers([challenger]),
+            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create") as create,
+        ):
             score_challengers_shadow(
                 application=app,
                 champion_version=champion,
@@ -100,9 +102,10 @@ class TestScoreChallengersShadow:
 
         scorer = MagicMock(return_value=(0.5, "approved"))
 
-        with _patch_challengers(challengers), patch(
-            "apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"
-        ) as create:
+        with (
+            _patch_challengers(challengers),
+            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create") as create,
+        ):
             score_challengers_shadow(
                 application=app,
                 champion_version=champion,
@@ -155,9 +158,10 @@ class TestScoreChallengersShadow:
 
         scorer = MagicMock(side_effect=[RuntimeError("boom"), (0.6, "approved")])
 
-        with _patch_challengers(challengers), patch(
-            "apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"
-        ) as create:
+        with (
+            _patch_challengers(challengers),
+            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create") as create,
+        ):
             score_challengers_shadow(
                 application=app,
                 champion_version=champion,
@@ -178,10 +182,13 @@ class TestScoreChallengersShadow:
         scorer = MagicMock(return_value=(0.5, "approved"))
 
         # First .create raises, second succeeds.
-        with _patch_challengers(challengers), patch(
-            "apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create",
-            side_effect=[RuntimeError("db write failed"), MagicMock()],
-        ) as create:
+        with (
+            _patch_challengers(challengers),
+            patch(
+                "apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create",
+                side_effect=[RuntimeError("db write failed"), MagicMock()],
+            ) as create,
+        ):
             score_challengers_shadow(
                 application=app,
                 champion_version=champion,
@@ -226,8 +233,9 @@ class TestScoreChallengersShadow:
             received.append(df)
             return (0.5, "approved")
 
-        with _patch_challengers([challenger]), patch(
-            "apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"
+        with (
+            _patch_challengers([challenger]),
+            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"),
         ):
             score_challengers_shadow(
                 application=app,
