@@ -51,6 +51,12 @@ lint:                    ## Lint backend and frontend
 format:                  ## Auto-format backend code
 	cd backend && ruff format .
 
+deadcode:                ## Report unused code (ruff F401/F811/F841 + vulture)
+	cd backend && ruff check --select F401,F811,F841 apps config tests || true
+	cd backend && vulture apps --min-confidence 80 \
+		--ignore-names "_*,test_*,setUp,tearDown,Meta,sender,view,frame,expression,connection,signum,instance,kwargs" \
+		--exclude "*/migrations/*,*/tests/*"
+
 # Health
 health:                  ## Check service health
 	@curl -s http://localhost:8000/api/v1/health/ | python -m json.tool
