@@ -109,6 +109,11 @@ FEATURE_BOUNDS = {
     "prepayment_buffer_months": (0, 60),
     "optimism_bias_flag": (0, 1),
     "negative_equity_flag": (0, 1),
+    # Underwriter-internal variables exposed as features
+    "hem_benchmark": (0, 20_000),
+    "hem_gap": (-20_000, 20_000),
+    "lmi_premium": (0, 200_000),
+    "effective_loan_amount": (0, 4_000_000),
 }
 
 
@@ -457,6 +462,45 @@ class ModelPredictor:
             "gambling_spend_ratio": _num("gambling_spend_ratio", 0.0),
             "help_repayment_monthly": _num("help_repayment_monthly", 0.0),
         }
+
+        # =============================================================
+        # Derive underwriter-internal features from the application.
+        #
+        # These mirror what the synthetic DataGenerator and the
+        # UnderwritingEngine already compute for labels — exposing them
+        # lets the trained model learn the same policies, matching how
+        # real AU lenders feed HEM floors and LMI capitalisation into
+        # their credit scorecards.
+        # =============================================================
+        try:
+            from apps.ml_engine.services.underwriting_engine import UnderwritingEngine
+            _uw = UnderwritingEngine()
+            features["hem_benchmark"] = float(
+                _uw.get_hem(
+                    features["applicant_type"],
+                    int(features["number_of_dependants"]),
+                    float(features["annual_income"]),
+                    features["state"],
+                )
+            )
+        except Exception:
+            # Fall back to the feature_engineering default on any error —
+            # inference must not fail because of HEM lookup.
+            features["hem_benchmark"] = 2950.0
+        features["hem_gap"] = round(float(features["monthly_expenses"]) - features["hem_benchmark"], 2)
+        _is_home = features["purpose"] in ("home", "investment")
+        _pv = float(features.get("property_value", 0.0) or 0.0)
+        _lvr_ratio = (float(features["loan_amount"]) / _pv) if _pv > 0 else 0.0
+        if _lvr_ratio > 0.90:
+            _lmi_rate = 0.03
+        elif _lvr_ratio > 0.85:
+            _lmi_rate = 0.02
+        elif _lvr_ratio > 0.80:
+            _lmi_rate = 0.01
+        else:
+            _lmi_rate = 0.0
+        features["lmi_premium"] = round(float(features["loan_amount"]) * _lmi_rate * (1 if _is_home else 0), 2)
+        features["effective_loan_amount"] = round(float(features["loan_amount"]) + features["lmi_premium"], 2)
 
         # Validate inputs
         self._validate_input(features)

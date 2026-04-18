@@ -107,6 +107,12 @@ DEFAULT_IMPUTATION_VALUES = {
     "prepayment_buffer_months": 6.0,
     "negative_equity_flag": 0,
     "loan_trigger_event": "other",
+    # Underwriter-internal variables exposed as features
+    # (computed from application at inference time in predictor.py)
+    "hem_benchmark": 2950.0,  # national median HEM for single no-dependants ~$55k
+    "hem_gap": 0.0,  # declared - hem; 0 = at floor
+    "lmi_premium": 0.0,  # 0 when LVR <= 80% or not a home loan
+    "effective_loan_amount": 0.0,  # = loan_amount + lmi_premium
 }
 
 

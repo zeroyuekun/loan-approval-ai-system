@@ -184,6 +184,12 @@ class ModelTrainer:
         "stressed_dsr",
         "hem_surplus",
         "uncommitted_monthly_income",
+        # Underwriter-internal policy variables (exposed as features so the
+        # model can learn HEM floor + LMI capitalisation policy directly)
+        "hem_benchmark",
+        "hem_gap",
+        "lmi_premium",
+        "effective_loan_amount",
         # Additional derived ratios
         "savings_to_loan_ratio",
         "debt_service_coverage",

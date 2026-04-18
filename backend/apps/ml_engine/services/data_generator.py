@@ -1126,6 +1126,15 @@ class DataGenerator:
 
         product_rate = self._compute_product_rates(rba_cash_rate, purpose, sub_pop, n)
 
+        # Placeholder zeros for underwriter-internal features — recomputed
+        # AFTER the measurement-noise block below so the training features
+        # match what the predictor derives at inference time from declared
+        # values. See docs/experiments/synthetic_data_realism_audit.md.
+        hem_benchmark = np.zeros(n, dtype=float)
+        hem_gap = np.zeros(n, dtype=float)
+        lmi_premium = np.zeros(n, dtype=float)
+        effective_loan_amount = loan_amount.astype(float).copy()
+
         data = {
             "annual_income": annual_income,
             "credit_score": credit_score,
@@ -1212,6 +1221,11 @@ class DataGenerator:
             "optimism_bias_flag": optimism_bias_flag,
             "financial_literacy_score": financial_literacy_score,
             "loan_trigger_event": loan_trigger_event,
+            # Underwriter-internal variables exposed as model features
+            "hem_benchmark": hem_benchmark,
+            "hem_gap": hem_gap,
+            "lmi_premium": lmi_premium,
+            "effective_loan_amount": effective_loan_amount,
         }
 
         df = pd.DataFrame(data)
@@ -1325,6 +1339,42 @@ class DataGenerator:
         df["debt_to_income"] = (
             df["loan_amount"] / df["annual_income"] + existing_dti * (annual_income / df["annual_income"])
         ).round(2)
+
+        # =========================================================
+        # UNDERWRITER POLICY FEATURES (computed post-noise)
+        #
+        # These mirror what the predictor derives at inference from declared
+        # values on the application, so training features match serving
+        # features (no train/serve skew). See
+        # docs/experiments/synthetic_data_realism_audit.md items 2 & 3.
+        # =========================================================
+        _hem_declared = np.array(
+            [
+                self._underwriting.get_hem(at, dep, inc, st)
+                for at, dep, inc, st in zip(
+                    df["applicant_type"].values,
+                    df["number_of_dependants"].values,
+                    df["annual_income"].values,
+                    df["state"].values,
+                    strict=False,
+                )
+            ]
+        ).round(2)
+        df["hem_benchmark"] = _hem_declared
+        df["hem_gap"] = (df["monthly_expenses"] - df["hem_benchmark"]).round(2)
+        _is_home_lmi = df["purpose"].isin(["home", "investment"]).to_numpy()
+        _pv = df["property_value"].to_numpy()
+        _la = df["loan_amount"].to_numpy(dtype=float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            _lvr = np.divide(
+                _la, _pv, out=np.zeros_like(_la, dtype=float), where=_pv > 0
+            )
+        _lvr = np.where(_pv > 0, _lvr, 0.0)
+        _lmi_rate = np.where(
+            _lvr > 0.90, 0.03, np.where(_lvr > 0.85, 0.02, np.where(_lvr > 0.80, 0.01, 0.0))
+        )
+        df["lmi_premium"] = (_la * _lmi_rate * _is_home_lmi.astype(int)).round(2)
+        df["effective_loan_amount"] = (_la + df["lmi_premium"].to_numpy()).round(2)
 
         # =========================================================
         # MISSING DATA

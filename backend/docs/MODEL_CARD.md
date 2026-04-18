@@ -72,7 +72,7 @@ The data generator uses a 6-component mixture model to produce realistic applica
 
 ### Feature Count
 
-48 numeric features plus one-hot encoded categoricals (purpose, home_ownership, employment_type, applicant_type, state).
+52 numeric features plus one-hot encoded categoricals (purpose, home_ownership, employment_type, applicant_type, state).
 
 ### Feature Categories
 
@@ -93,6 +93,8 @@ The data generator uses a 6-component mixture model to produce realistic applica
 **Additional derived (5):** deposit_ratio, monthly_repayment_ratio, net_monthly_surplus, income_per_dependant, credit_score_x_tenure.
 
 **Bureau-derived (3):** enquiry_intensity, bureau_risk_score, rate_stress_buffer.
+
+**Underwriter policy variables (4):** hem_benchmark (HEM lookup for the applicant's family tier), hem_gap (`monthly_expenses − hem_benchmark`), lmi_premium (capitalised Lenders Mortgage Insurance at 1/2/3% for LVR 80/85/90% thresholds — zero for non-home loans), effective_loan_amount (`loan_amount + lmi_premium`). These mirror the `UnderwritingEngine` computations used when grading serviceability, so the ML model learns the same HEM-floor and LMI-capitalisation policies instead of having to infer them.
 
 ## Model Architecture
 

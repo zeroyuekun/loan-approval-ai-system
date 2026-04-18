@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.9.9 — Expose HEM + LMI policy variables as model features (2026-04-18)
+
+### ML
+
+- Promoted four underwriter-internal variables to first-class model features so the scorecard can learn the same HEM-floor and LMI-capitalisation policies the underwriter enforces at decision time, instead of implicitly re-deriving them from raw inputs:
+  - `hem_benchmark` — Household Expenditure Measure lookup for the applicant's family structure / income tier (matches the underwriter's `get_hem()` call used when computing `effective_expenses`).
+  - `hem_gap` — declared `monthly_expenses` minus `hem_benchmark`. Positive values = applicant's declared spend already clears the HEM floor; negative values = HEM floor bites in serviceability.
+  - `lmi_premium` — capitalised Lenders Mortgage Insurance premium (0 for non-home loans, tiered 1%/2%/3% at LVR 80/85/90% thresholds, matching AU market rate cards).
+  - `effective_loan_amount` — `loan_amount + lmi_premium` (mirrors `UnderwritingEngine._compute_effective_loan_amount`).
+- `ModelTrainer.NUMERIC_COLS` extended in `backend/apps/ml_engine/services/trainer.py`. `feature_engineering.DEFAULT_IMPUTATION_VALUES` gains safe defaults so historical rows fit cleanly. `ModelPredictor` now derives these at inference by calling `UnderwritingEngine.get_hem()` (with a 2950.0 fallback) and applying the LVR-tier LMI schedule — same logic as the generator.
+- New `TestUnderwriterPolicyFeatures` test class in `backend/tests/test_data_generator.py` locks the realism contract: HEM increases with dependants, HEM gap = expenses − benchmark, LMI is zero for personal/car/business loans and for LVR ≤ 80%, LMI is charged on >85% LVR home loans, `effective_loan_amount = loan_amount + lmi_premium`.
+- `test_feature_consistency.TestFeatureAlignment.test_trainer_features_in_generated_data` now covers the four new columns against the generated dataframe automatically.
+
+### Migration note
+
+Existing trained models are unaffected (feature set stored inside the bundle). To pick up the new signal, run **Train New Model** in Admin so a fresh bundle is fit with the expanded `NUMERIC_COLS`.
+
 ## v1.9.6 — Workstream B (partial): Throttle & Version Fixes (2026-04-18)
 
 ### Security
