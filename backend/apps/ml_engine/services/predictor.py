@@ -673,6 +673,27 @@ class ModelPredictor:
         # Conformal prediction interval (95% coverage)
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
+        # === Risk-based pricing tier (D4) ==========================
+        # PD = 1 − approval probability. Tier is computed even when the
+        # model denies — the tier itself may independently decline
+        # regardless of the model's verdict (PD > top cutoff).
+        try:
+            from apps.ml_engine.services.pricing_engine import get_tier
+
+            pricing_tier = get_tier(pd_score=1.0 - probability, segment=features.get("purpose", "personal"))
+            pricing_payload = pricing_tier.to_dict()
+            # Pricing-tier decline overrides an otherwise-approved model result.
+            if not pricing_tier.approved and prediction_label == "approved":
+                logger.info(
+                    "Pricing tier decline overrides model approve: PD=%.4f segment=%s",
+                    pricing_tier.pd_score,
+                    pricing_tier.segment,
+                )
+                prediction_label = "denied"
+        except Exception:
+            logger.warning("Pricing tier computation failed", exc_info=True)
+            pricing_payload = {"tier": "unavailable", "approved": True}
+
         # === Credit policy overlay (D3) ============================
         # Evaluate always so shadow-mode logs capture what WOULD have
         # happened under enforce; mode decides whether the verdict is
@@ -741,6 +762,7 @@ class ModelPredictor:
             "stress_test": stress_results,
             "confidence_interval": confidence_interval,
             "policy_decision": policy_payload,
+            "pricing_tier": pricing_payload,
             # Raw (pre-transform) features for downstream counterfactual generation
             "_features_df": features_df,
         }
