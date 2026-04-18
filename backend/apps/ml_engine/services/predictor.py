@@ -6,22 +6,66 @@ decorates the response with SHAP explanations, drift snapshots, stress-test delt
 conformal intervals, and counterfactual suggestions, and records the outcome.
 """
 
-import hashlib
 import logging
-import math
-import threading
 import time
-from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
-import shap
-from cachetools import TTLCache
-from django.conf import settings
 from prometheus_client import Counter, Histogram
 
 from apps.ml_engine.services.consistency import DataConsistencyChecker
+from apps.ml_engine.services.decision_assembly import (
+    assemble_decision as _assemble_decision_helper,
+)
+from apps.ml_engine.services.feature_prep import (
+    FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
+)
+from apps.ml_engine.services.feature_prep import (
+    safe_get_state as _safe_get_state_helper,
+)
+from apps.ml_engine.services.feature_prep import (
+    validate_input as _validate_input_helper,
+)
+from apps.ml_engine.services.policy_overlay import (
+    apply_policy_overlay as _apply_policy_overlay_helper,
+)
+from apps.ml_engine.services.policy_recompute import (
+    recompute_lvr_driven_policy_vars as _recompute_lvr_driven_policy_vars,  # noqa: F401 — re-export for test
+)
+from apps.ml_engine.services.prediction_cache import (  # noqa: F401 — re-export for external patches
+    _CACHE_TTL_SECONDS,
+    _MAX_CACHE_ENTRIES,
+    _cache_lock,
+    _load_bundle,
+    _model_cache,
+    _validate_model_path,
+    _verify_model_hash,
+    clear_model_cache,
+)
+from apps.ml_engine.services.prediction_diagnostics import (
+    check_feature_drift as _check_feature_drift_helper,
+)
+from apps.ml_engine.services.prediction_diagnostics import (
+    run_stress_scenarios as _run_stress_scenarios_helper,
+)
+from apps.ml_engine.services.prediction_explanations import (
+    compute_conformal_interval as _compute_conformal_interval_helper,
+)
+from apps.ml_engine.services.prediction_explanations import (
+    search_counterfactuals as _search_counterfactuals_helper,
+)
+from apps.ml_engine.services.prediction_features import (
+    build_prediction_features as _build_prediction_features_helper,
+)
+from apps.ml_engine.services.prediction_features import (
+    derive_underwriter_features as _derive_underwriter_features_helper,
+)
+from apps.ml_engine.services.shadow_scoring import (
+    score_challengers_shadow as _score_challengers_shadow_helper,
+)
+from apps.ml_engine.services.shap_attribution import (
+    compute_shap_attribution as _compute_shap_attribution_helper,
+)
 
 ml_predictions_total = Counter(
     "ml_predictions_total",
@@ -44,185 +88,6 @@ ml_drift_warnings_total = Counter(
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Module-level cache for loaded model bundles, keyed by model version ID.
-# TTLCache auto-evicts entries older than _CACHE_TTL_SECONDS and enforces
-# maxsize (LRU), preventing unbounded memory growth and serving stale models.
-_MAX_CACHE_ENTRIES = 3
-_CACHE_TTL_SECONDS = 3600  # 1 hour
-_model_cache = TTLCache(maxsize=_MAX_CACHE_ENTRIES, ttl=_CACHE_TTL_SECONDS)
-_cache_lock = threading.Lock()
-
-
-# Bounds for input validation: (min, max) inclusive.
-FEATURE_BOUNDS = {
-    "annual_income": (0, 10_000_000),
-    "credit_score": (0, 1200),  # Equifax Australia scale
-    "loan_amount": (0, 5_000_000),  # Aligned with LoanApplication.loan_amount MaxValueValidator
-    "loan_term_months": (1, 600),
-    "debt_to_income": (0.0, 100.0),
-    "employment_length": (0, 60),
-    "has_cosigner": (0, 1),
-    "property_value": (0, 100_000_000),
-    "deposit_amount": (0, 5_000_000),  # Cannot exceed loan amount
-    "monthly_expenses": (0, 1_000_000),
-    "existing_credit_card_limit": (0, 10_000_000),
-    "number_of_dependants": (0, 10),  # Aligned with LoanApplication.number_of_dependants MaxValueValidator
-    "has_hecs": (0, 1),
-    "has_bankruptcy": (0, 1),
-    "num_credit_enquiries_6m": (0, 50),
-    "worst_arrears_months": (0, 36),
-    "num_defaults_5yr": (0, 20),
-    "credit_history_months": (0, 600),
-    "total_open_accounts": (0, 50),
-    "num_bnpl_accounts": (0, 20),
-    "savings_balance": (0, 10_000_000),
-    "salary_credit_regularity": (0, 1),
-    "num_dishonours_12m": (0, 100),
-    "avg_monthly_savings_rate": (-1, 1),
-    "days_in_overdraft_12m": (0, 365),
-    "rba_cash_rate": (0, 20),
-    "unemployment_rate": (0, 30),
-    "property_growth_12m": (-50, 100),
-    "consumer_confidence": (0, 200),
-    "income_verification_gap": (0, 10),
-    "document_consistency_score": (0, 1),
-    # CCR features
-    "num_late_payments_24m": (0, 50),
-    "worst_late_payment_days": (0, 90),
-    "total_credit_limit": (0, 5_000_000),
-    "credit_utilization_pct": (0, 1),
-    "num_hardship_flags": (0, 10),
-    "months_since_last_default": (0, 999),
-    "num_credit_providers": (0, 30),
-    # BNPL-specific
-    "bnpl_total_limit": (0, 100_000),
-    "bnpl_utilization_pct": (0, 1),
-    "bnpl_late_payments_12m": (0, 50),
-    "bnpl_monthly_commitment": (0, 10_000),
-    # CDR/Open Banking transaction features
-    "income_source_count": (0, 20),
-    "rent_payment_regularity": (0, 1),
-    "utility_payment_regularity": (0, 1),
-    "essential_to_total_spend": (0, 1),
-    "subscription_burden": (0, 1),
-    "balance_before_payday": (-10_000, 1_000_000),
-    "min_balance_30d": (-10_000, 1_000_000),
-    "days_negative_balance_90d": (0, 90),
-    # Geographic risk
-    "postcode_default_rate": (0, 1),
-    # Behavioral features
-    "financial_literacy_score": (0.0, 1.0),
-    "prepayment_buffer_months": (0, 60),
-    "optimism_bias_flag": (0, 1),
-    "negative_equity_flag": (0, 1),
-    # Underwriter-internal variables exposed as features.
-    # effective_loan_amount ceiling must cover max loan_amount (5M) + max
-    # LMI premium (3% * 5M = 150k) with headroom, otherwise large high-LVR
-    # home loans fail validation before reaching the model.
-    "hem_benchmark": (0, 20_000),
-    "hem_gap": (-20_000, 20_000),
-    "lmi_premium": (0, 200_000),
-    "effective_loan_amount": (0, 5_200_000),
-}
-
-
-def _recompute_lvr_driven_policy_vars(row):
-    """Re-derive LVR-driven LMI features after mutating property_value or loan_amount.
-
-    Policy variables (lmi_premium, effective_loan_amount) are a function of
-    LVR, so whenever property_value or loan_amount is perturbed (e.g. by a
-    stress scenario or counterfactual) the downstream fields must be
-    recomputed. Otherwise the model sees stale policy vars that no longer
-    correspond to the stressed LVR.
-
-    Schedule (mirrors the generator/underwriter tables):
-      - LVR ≤ 0.80         : no LMI
-      - 0.80 < LVR ≤ 0.85  : 1%
-      - 0.85 < LVR ≤ 0.90  : 2%
-      - LVR > 0.90         : 3%
-
-    LMI applies only to purpose in {home, investment}; personal loans are
-    always charged 0%.
-
-    Mutates `row` in place. Returns None.
-    """
-    property_value = float(row.get("property_value", 0.0) or 0.0)
-    loan_amount = float(row.get("loan_amount", 0.0) or 0.0)
-    lvr = (loan_amount / property_value) if property_value > 0 else 0.0
-
-    if lvr > 0.90:
-        rate = 0.03
-    elif lvr > 0.85:
-        rate = 0.02
-    elif lvr > 0.80:
-        rate = 0.01
-    else:
-        rate = 0.0
-
-    is_home = row.get("purpose") in ("home", "investment")
-    row["lmi_premium"] = round(loan_amount * rate * (1 if is_home else 0), 2)
-    row["effective_loan_amount"] = round(loan_amount + row["lmi_premium"], 2)
-
-
-def _validate_model_path(file_path):
-    """Validate that the model file path is safe to load."""
-    models_dir = Path(settings.ML_MODELS_DIR).resolve()
-    resolved = Path(file_path).resolve()
-
-    if not resolved.is_relative_to(models_dir):
-        raise ValueError(f"Model file path '{file_path}' is outside the allowed directory")
-    if resolved.suffix != ".joblib":
-        raise ValueError(f"Model file must have .joblib extension, got '{resolved.suffix}'")
-    if not resolved.exists():
-        raise FileNotFoundError(f"Model file not found: {resolved}")
-
-    return resolved
-
-
-def _verify_model_hash(file_path, expected_hash):
-    """Verify SHA-256 hash of model file to detect tampering."""
-    if not expected_hash:
-        logger.warning("No file_hash stored for model — skipping integrity check")
-        return
-    sha256 = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    actual_hash = sha256.hexdigest()
-    if actual_hash != expected_hash:
-        raise ValueError(
-            f"Model file integrity check failed: expected hash {expected_hash[:16]}..., got {actual_hash[:16]}..."
-        )
-
-
-def _load_bundle(model_version):
-    """Load and cache a model bundle, returning it from cache if available."""
-    version_id = model_version.id
-    with _cache_lock:
-        if version_id in _model_cache:
-            return _model_cache[version_id]
-
-    resolved_path = _validate_model_path(model_version.file_path)
-    _verify_model_hash(resolved_path, getattr(model_version, "file_hash", None))
-
-    bundle = joblib.load(resolved_path)
-
-    with _cache_lock:
-        # Re-check after expensive load — another worker may have cached it first
-        if version_id in _model_cache:
-            return _model_cache[version_id]
-        # TTLCache auto-evicts expired + LRU entries on set
-        _model_cache[version_id] = bundle
-        logger.info("Cached model version %s (cache size now %d)", version_id, len(_model_cache))
-    return bundle
-
-
-def clear_model_cache():
-    """Clear the model cache (e.g. after retraining)."""
-    with _cache_lock:
-        _model_cache.clear()
 
 
 def compute_risk_grade(probability):
@@ -324,48 +189,11 @@ class ModelPredictor:
     @staticmethod
     def _safe_get_state(application):
         """Safely get state from application, handling unmigrated databases."""
-        try:
-            state = getattr(application, "state", None)
-            if state:
-                return state
-        except Exception as e:
-            logger.debug("Could not read state from application, defaulting to NSW: %s", e)
-        return "NSW"
+        return _safe_get_state_helper(application)
 
     def _validate_input(self, features: dict):
-        """Validate feature values are within reasonable bounds.
-
-        Raises ValueError with details on any out-of-bounds values.
-        """
-        bounds = {**FEATURE_BOUNDS}
-        # Data-driven bounds can only widen the hardcoded range, never narrow it.
-        # This prevents the training set's min/max from rejecting legitimate
-        # edge-case applicants (e.g. credit_score 620, 3 months arrears).
-        for col, (data_lo, data_hi) in self.feature_bounds.items():
-            if col in bounds:
-                hard_lo, hard_hi = bounds[col]
-                bounds[col] = (min(hard_lo, data_lo), max(hard_hi, data_hi))
-            else:
-                bounds[col] = (data_lo, data_hi)
-
-        errors = []
-        for col, (lo, hi) in bounds.items():
-            val = features.get(col)
-            if val is None:
-                continue
-            try:
-                val = float(val)
-            except (TypeError, ValueError):
-                errors.append(f"{col}: cannot convert {val!r} to number")
-                continue
-            if math.isnan(val) or math.isinf(val):
-                errors.append(f"{col}: invalid value (nan/inf not allowed)")
-                continue
-            if val < lo or val > hi:
-                errors.append(f"{col}: {val} is outside valid range [{lo}, {hi}]")
-
-        if errors:
-            raise ValueError("Input validation failed: " + "; ".join(errors))
+        """Validate feature values against hard + user bounds. See `feature_prep`."""
+        _validate_input_helper(features, FEATURE_BOUNDS, user_bounds=self.feature_bounds)
 
     def _transform(self, df):
         """Transform a DataFrame using the saved preprocessing artifacts.
@@ -426,147 +254,12 @@ class ModelPredictor:
         """
         start_time = time.time()
 
-        def _num(field, default, cast=float):
-            """Extract a numeric feature from the application, falling back to imputation values."""
-            val = getattr(application, field, None)
-            if val is None:
-                return cast(self.imputation_values.get(field, default))
-            return cast(val)
-
-        def _flag(field, default=False):
-            """Extract a boolean/flag feature as int."""
-            return int(getattr(application, field, default))
-
-        def _cat(field, default):
-            """Extract a categorical feature with a fallback."""
-            return getattr(application, field, None) or default
-
-        # Build feature dict from application
-        features = {
-            # Core application fields (always present)
-            "annual_income": float(application.annual_income),
-            "credit_score": application.credit_score,
-            "loan_amount": float(application.loan_amount),
-            "loan_term_months": application.loan_term_months,
-            "debt_to_income": float(application.debt_to_income),
-            "employment_length": application.employment_length,
-            "has_cosigner": int(application.has_cosigner),
-            "purpose": application.purpose,
-            "home_ownership": application.home_ownership,
-            "number_of_dependants": application.number_of_dependants,
-            "employment_type": application.employment_type,
-            "applicant_type": application.applicant_type,
-            "has_hecs": _flag("has_hecs"),
-            "has_bankruptcy": _flag("has_bankruptcy"),
-            "state": self._safe_get_state(application),
-            "is_existing_customer": _flag("is_existing_customer"),
-            "gambling_transaction_flag": _flag("gambling_transaction_flag"),
-            # Nullable core fields
-            "property_value": _num("property_value", 0),
-            "deposit_amount": _num("deposit_amount", 0),
-            "monthly_expenses": _num("monthly_expenses", 2500),
-            "existing_credit_card_limit": _num("existing_credit_card_limit", 0),
-            # Bureau features
-            "num_credit_enquiries_6m": _num("num_credit_enquiries_6m", 1, int),
-            "worst_arrears_months": _num("worst_arrears_months", 0, int),
-            "num_defaults_5yr": _num("num_defaults_5yr", 0, int),
-            "credit_history_months": _num("credit_history_months", 120, int),
-            "total_open_accounts": _num("total_open_accounts", 3, int),
-            "num_bnpl_accounts": _num("num_bnpl_accounts", 0, int),
-            # Behavioural features
-            "savings_balance": _num("savings_balance", 10000),
-            "salary_credit_regularity": _num("salary_credit_regularity", 0.8),
-            "num_dishonours_12m": _num("num_dishonours_12m", 0, int),
-            "avg_monthly_savings_rate": _num("avg_monthly_savings_rate", 0.10),
-            "days_in_overdraft_12m": _num("days_in_overdraft_12m", 0, int),
-            # Macroeconomic context
-            "rba_cash_rate": _num("rba_cash_rate", 4.10),
-            "unemployment_rate": _num("unemployment_rate", 3.8),
-            "property_growth_12m": _num("property_growth_12m", 5.0),
-            "consumer_confidence": _num("consumer_confidence", 95.0),
-            # Application integrity
-            "income_verification_gap": _num("income_verification_gap", 1.0),
-            "document_consistency_score": _num("document_consistency_score", 0.9),
-            # Open Banking features
-            "savings_trend_3m": _cat("savings_trend_3m", "flat"),
-            "discretionary_spend_ratio": _num("discretionary_spend_ratio", 0.35),
-            "bnpl_active_count": _num("bnpl_active_count", 0, int),
-            "overdraft_frequency_90d": _num("overdraft_frequency_90d", 0, int),
-            "income_verification_score": _num("income_verification_score", 0.85),
-            # CCR features
-            "num_late_payments_24m": _num("num_late_payments_24m", 0, int),
-            "worst_late_payment_days": _num("worst_late_payment_days", 0, int),
-            "total_credit_limit": _num("total_credit_limit", 20000.0),
-            "credit_utilization_pct": _num("credit_utilization_pct", 0.30),
-            "num_hardship_flags": _num("num_hardship_flags", 0, int),
-            "months_since_last_default": _num("months_since_last_default", 999),
-            "num_credit_providers": _num("num_credit_providers", 2, int),
-            # BNPL-specific
-            "bnpl_total_limit": _num("bnpl_total_limit", 0.0),
-            "bnpl_utilization_pct": _num("bnpl_utilization_pct", 0.0),
-            "bnpl_late_payments_12m": _num("bnpl_late_payments_12m", 0, int),
-            "bnpl_monthly_commitment": _num("bnpl_monthly_commitment", 0.0),
-            # CDR/Open Banking transaction features
-            "income_source_count": _num("income_source_count", 1, int),
-            "rent_payment_regularity": _num("rent_payment_regularity", 0.85),
-            "utility_payment_regularity": _num("utility_payment_regularity", 0.90),
-            "essential_to_total_spend": _num("essential_to_total_spend", 0.50),
-            "subscription_burden": _num("subscription_burden", 0.05),
-            "balance_before_payday": _num("balance_before_payday", 2000.0),
-            "min_balance_30d": _num("min_balance_30d", 500.0),
-            "days_negative_balance_90d": _num("days_negative_balance_90d", 0, int),
-            # Geographic risk
-            "postcode_default_rate": _num("postcode_default_rate", 0.015),
-            "industry_risk_tier": _cat("industry_risk_tier", "medium"),
-            # Training features not on LoanApplication — imputed at inference
-            "industry_anzsic": _cat("industry_anzsic", "N"),  # ANZSIC division (default: Administrative)
-            "hecs_debt_balance": _num("hecs_debt_balance", 0.0),
-            "existing_property_count": _num("existing_property_count", 0, int),
-            "cash_advance_count_12m": _num("cash_advance_count_12m", 0, int),
-            "monthly_rent": _num("monthly_rent", 0.0),
-            "gambling_spend_ratio": _num("gambling_spend_ratio", 0.0),
-            "help_repayment_monthly": _num("help_repayment_monthly", 0.0),
-        }
-
-        # =============================================================
-        # Derive underwriter-internal features from the application.
-        #
-        # These mirror what the synthetic DataGenerator and the
-        # UnderwritingEngine already compute for labels — exposing them
-        # lets the trained model learn the same policies, matching how
-        # real AU lenders feed HEM floors and LMI capitalisation into
-        # their credit scorecards.
-        # =============================================================
-        try:
-            from apps.ml_engine.services.underwriting_engine import UnderwritingEngine
-
-            _uw = UnderwritingEngine()
-            features["hem_benchmark"] = float(
-                _uw.get_hem(
-                    features["applicant_type"],
-                    int(features["number_of_dependants"]),
-                    float(features["annual_income"]),
-                    features["state"],
-                )
-            )
-        except Exception:
-            # Fall back to the feature_engineering default on any error —
-            # inference must not fail because of HEM lookup.
-            features["hem_benchmark"] = 2950.0
-        features["hem_gap"] = round(float(features["monthly_expenses"]) - features["hem_benchmark"], 2)
-        _is_home = features["purpose"] in ("home", "investment")
-        _pv = float(features.get("property_value", 0.0) or 0.0)
-        _lvr_ratio = (float(features["loan_amount"]) / _pv) if _pv > 0 else 0.0
-        if _lvr_ratio > 0.90:
-            _lmi_rate = 0.03
-        elif _lvr_ratio > 0.85:
-            _lmi_rate = 0.02
-        elif _lvr_ratio > 0.80:
-            _lmi_rate = 0.01
-        else:
-            _lmi_rate = 0.0
-        features["lmi_premium"] = round(float(features["loan_amount"]) * _lmi_rate * (1 if _is_home else 0), 2)
-        features["effective_loan_amount"] = round(float(features["loan_amount"]) + features["lmi_premium"], 2)
+        features = _build_prediction_features_helper(
+            application,
+            safe_get_state_fn=self._safe_get_state,
+            imputation_values=self.imputation_values,
+        )
+        _derive_underwriter_features_helper(features)
 
         # Validate inputs
         self._validate_input(features)
@@ -586,48 +279,15 @@ class ModelPredictor:
         # Predict (probability-based — label derived from threshold comparison)
         probabilities = self.model.predict_proba(df[self.feature_cols])[0]
 
-        # Global feature importances
-        importances = {}
-        if hasattr(self.model, "feature_importances_"):
-            for name, imp in zip(self.feature_cols, self.model.feature_importances_, strict=False):
-                importances[name] = round(float(imp), 4)
-
-        # Per-prediction SHAP values
-        shap_values_dict = {}
-        shap_available = False
-        try:
-            # For calibrated models, extract the underlying estimator for TreeExplainer.
-            # _CalibratedModel wraps the fitted tree model with isotonic calibration;
-            # SHAP needs the raw tree model, not the wrapper.
-            underlying = (
-                self.model.get_underlying_estimator() if hasattr(self.model, "get_underlying_estimator") else self.model
-            )
-            explainer = shap.TreeExplainer(underlying)
-            sv = explainer.shap_values(df[self.feature_cols])
-            # For binary classification shap_values may return:
-            # - list of two arrays (sklearn models, SHAP <0.45)
-            # - 3D numpy array shape (n_samples, n_features, 2) (SHAP >=0.45 multi-output)
-            # - 2D numpy array shape (n_samples, n_features) (XGBoost log-odds, single output)
-            if isinstance(sv, list):
-                sv = sv[1]  # positive class
-            elif hasattr(sv, "ndim") and sv.ndim == 3:
-                sv = sv[:, :, 1]  # positive class from 3D array
-            for name, val in zip(self.feature_cols, sv[0], strict=False):
-                shap_values_dict[name] = round(float(val), 4)
-            shap_available = True
-
-            calibrated_prob = float(probabilities[1])
-            if abs(float(np.array(explainer.expected_value).flat[0]) - calibrated_prob) > 0.05:
-                # Expected — SHAP runs against the uncalibrated base model so its
-                # baseline naturally differs from the calibrated probability.
-                # Logged at DEBUG only; not actionable in production.
-                logger.debug(
-                    "SHAP expected value (%.3f) diverges from calibrated probability (%.3f) — values are from uncalibrated base model",
-                    float(np.array(explainer.expected_value).flat[0]),
-                    calibrated_prob,
-                )
-        except Exception:
-            logger.warning("SHAP computation failed, returning empty shap_values", exc_info=True)
+        attribution = _compute_shap_attribution_helper(
+            model=self.model,
+            df=df,
+            feature_cols=self.feature_cols,
+            positive_probability=float(probabilities[1]),
+        )
+        importances = attribution["feature_importances"]
+        shap_values_dict = attribution["shap_values"]
+        shap_available = attribution["shap_available"]
 
         processing_time = int((time.time() - start_time) * 1000)
 
@@ -635,35 +295,20 @@ class ModelPredictor:
         # the training distribution (APRA CPG 235 ongoing monitoring)
         drift_warnings = self._check_feature_drift(features)
 
-        # Use optimal threshold from model version. Falling back to a
-        # hardcoded 0.5 can cause disparate-impact issues because the model
-        # was calibrated against its learned threshold. Warn loudly instead.
-        threshold = self.model_version.optimal_threshold
-        if threshold is None:
-            threshold = 0.5
-            logger.warning(
-                "ModelVersion %s has no optimal_threshold set — falling back to 0.5. "
-                "This may cause calibration drift and disparate-impact risk. "
-                "Re-run validate_model to populate optimal_threshold.",
-                self.model_version.id,
-            )
-        probability = round(float(probabilities[1]), 4)
-
-        # Per-group fairness threshold (EEOC 80% rule compliance)
-        effective_threshold = threshold
-        employment_type = features.get("employment_type", "")
-        if self.group_thresholds and employment_type in self.group_thresholds:
-            effective_threshold = self.group_thresholds[employment_type]
-
-        prediction_label = "approved" if probability >= effective_threshold else "denied"
-
-        # Flag borderline cases for human review (use effective_threshold
-        # so group-adjusted decisions are consistent with the borderline flag)
-        requires_human_review = abs(probability - effective_threshold) <= 0.10
-
-        # Also flag for review if significant feature drift detected
-        if any(w.get("severity") == "drift" for w in drift_warnings):
-            requires_human_review = True
+        decision = _assemble_decision_helper(
+            probability_positive=float(probabilities[1]),
+            model_version=self.model_version,
+            group_thresholds=self.group_thresholds,
+            employment_type=features.get("employment_type", ""),
+            drift_warnings=drift_warnings,
+            segment=features.get("purpose", "personal"),
+        )
+        probability = decision["probability"]
+        threshold = decision["threshold"]
+        effective_threshold = decision["effective_threshold"]
+        prediction_label = decision["prediction_label"]
+        requires_human_review = decision["requires_human_review"]
+        pricing_payload = decision["pricing_payload"]
 
         # Expected Loss (EL = PD x LGD x EAD) — Basel III / APRA APS 113
         property_val = float(features.get("property_value") or 0)
@@ -676,102 +321,16 @@ class ModelPredictor:
             credit_score=features.get("credit_score", 864),
         )
 
-        # Stress testing — 4 adverse scenarios
         stress_results = self._stress_test(features, threshold)
-
-        # Conformal prediction interval (95% coverage)
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
-        # === Risk-based pricing tier (D4) ==========================
-        # PD = 1 − approval probability. Tier is computed even when the
-        # model denies — the tier itself may independently decline
-        # regardless of the model's verdict (PD > top cutoff).
-        try:
-            from apps.ml_engine.services.pricing_engine import get_tier
-
-            pricing_tier = get_tier(pd_score=1.0 - probability, segment=features.get("purpose", "personal"))
-            pricing_payload = pricing_tier.to_dict()
-            # Pricing-tier decline overrides an otherwise-approved model result.
-            if not pricing_tier.approved and prediction_label == "approved":
-                logger.info(
-                    "Pricing tier decline overrides model approve: PD=%.4f segment=%s",
-                    pricing_tier.pd_score,
-                    pricing_tier.segment,
-                )
-                prediction_label = "denied"
-        except Exception:
-            logger.warning("Pricing tier computation failed", exc_info=True)
-            pricing_payload = {"tier": "unavailable", "approved": True}
-
-        # === Credit policy overlay (D3) ============================
-        # Evaluate always so shadow-mode logs capture what WOULD have
-        # happened under enforce; mode decides whether the verdict is
-        # actually applied. Rule evaluation is cheap (<1ms) and pure.
-        try:
-            from apps.ml_engine.services import credit_policy as _policy
-
-            policy_result = _policy.evaluate(application)
-            policy_mode = _policy.current_mode()
-            final_prediction = _policy.apply_overlay_to_decision(prediction_label, policy_result, policy_mode)
-
-            if policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
-                # Shadow mode: log what enforce would have done.
-                hypothetical = _policy.apply_overlay_to_decision(
-                    prediction_label, policy_result, _policy.OVERLAY_MODE_ENFORCE
-                )
-                if hypothetical != prediction_label:
-                    logger.warning(
-                        "credit_policy_shadow_disagreement",
-                        extra={
-                            "model_version": str(self.model_version.id),
-                            "model_decision": prediction_label,
-                            "policy_hypothetical": hypothetical,
-                            "hard_fails": policy_result.hard_fails,
-                            "refers": policy_result.refers,
-                        },
-                    )
-
-            policy_payload = {
-                **policy_result.to_dict(),
-                "mode": policy_mode,
-                "changed_model_decision": final_prediction != prediction_label,
-            }
-
-            # Enforce-mode refer takes precedence over model borderline flag —
-            # send to human review rather than approve/deny auto-pathway.
-            if policy_mode == _policy.OVERLAY_MODE_ENFORCE and policy_result.has_refer:
-                requires_human_review = True
-
-            # D6 — referral audit trail (orthogonal to bias review queue).
-            # Persist on the LoanApplication itself so admins can query
-            # referrals via /api/loans/referrals/. Save is wrapped in a
-            # try/except so a persistence failure never breaks prediction.
-            if policy_result.has_refer and application is not None:
-                try:
-                    application.referral_status = application.ReferralStatus.REFERRED
-                    application.referral_codes = list(policy_result.refers)
-                    application.referral_rationale = {
-                        code: policy_result.rationale_by_code.get(code, "") for code in policy_result.refers
-                    }
-                    application.save(update_fields=["referral_status", "referral_codes", "referral_rationale"])
-                except Exception:
-                    logger.warning(
-                        "referral_audit_save_failed",
-                        exc_info=True,
-                        extra={
-                            "application_id": str(getattr(application, "id", None)),
-                            "refers": list(policy_result.refers),
-                        },
-                    )
-
-            prediction_label = final_prediction
-        except Exception as _policy_exc:
-            logger.warning("credit_policy_evaluate_failed", exc_info=True)
-            policy_payload = {
-                "passed": None,
-                "mode": "off",
-                "error": str(_policy_exc),
-            }
+        # === Credit policy overlay (D3) + referral audit (D6) ======
+        prediction_label, requires_human_review, policy_payload = _apply_policy_overlay_helper(
+            application=application,
+            model_version=self.model_version,
+            prediction_label=prediction_label,
+            requires_human_review=requires_human_review,
+        )
 
         result = {
             "prediction": prediction_label,
@@ -826,392 +385,50 @@ class ModelPredictor:
             logger.debug("Prometheus metrics emission failed (non-blocking): %s", e)
 
         # === Champion/Challenger Shadow Scoring ===
-        # If challenger models exist, score with them too (shadow mode)
-        try:
-            from apps.ml_engine.models import ModelVersion as MV
-            from apps.ml_engine.models import PredictionLog
+        def _score_with_challenger(challenger_mv, raw_df):
+            challenger_predictor = ModelPredictor(model_version=challenger_mv)
+            transformed = challenger_predictor._transform(raw_df)
+            prob = float(
+                challenger_predictor.model.predict_proba(transformed[challenger_predictor.feature_cols])[:, 1][0]
+            )
+            label = "approved" if prob >= (challenger_mv.optimal_threshold or 0.5) else "denied"
+            return prob, label
 
-            challengers = MV.objects.filter(
-                is_active=False,
-                traffic_percentage__gt=0,
-                traffic_percentage__lt=100,
-            ).exclude(pk=self.model_version.pk)
-
-            for challenger in challengers[:2]:  # Max 2 challengers
-                try:
-                    challenger_predictor = ModelPredictor(model_version=challenger)
-                    features_transformed_c = challenger_predictor._transform(
-                        features_df.copy()
-                    )  # Use raw features, not already-transformed df
-                    challenger_prob = float(
-                        challenger_predictor.model.predict_proba(
-                            features_transformed_c[challenger_predictor.feature_cols]
-                        )[:, 1][0]
-                    )
-                    challenger_pred = (
-                        "approved" if challenger_prob >= (challenger.optimal_threshold or 0.5) else "denied"
-                    )
-
-                    # Log shadow prediction (not used for decision)
-                    PredictionLog.objects.create(
-                        model_version=challenger,
-                        application=application,
-                        prediction=challenger_pred,
-                        probability=challenger_prob,
-                        feature_importances={},
-                        processing_time_ms=0,
-                    )
-                    logger.info(
-                        "Shadow score: challenger %s predicted %s (%.3f) vs champion %s (%.3f)",
-                        challenger.version,
-                        challenger_pred,
-                        challenger_prob,
-                        prediction_label,
-                        probability,
-                    )
-                except Exception as e:
-                    logger.warning("Shadow scoring failed for challenger %s: %s", challenger.version, e)
-        except Exception as e:
-            logger.debug("Shadow scoring check skipped: %s", e)
+        _score_challengers_shadow_helper(
+            application=application,
+            champion_version=self.model_version,
+            champion_probability=probability,
+            champion_prediction_label=prediction_label,
+            features_df=features_df,
+            score_fn=_score_with_challenger,
+        )
 
         return result
 
     def _check_feature_drift(self, features):
-        """Check if individual feature values fall far outside training distribution.
-
-        This is a per-application check, not a batch PSI. It flags when a single
-        applicant's values are extreme outliers relative to what the model was
-        trained on, which may indicate the model is being applied outside its
-        valid range.
-
-        For batch PSI monitoring, use MetricsService.compute_feature_psi().
-        """
-        warnings = []
-        if not self.reference_distribution:
-            return warnings
-
-        for col, ref in self.reference_distribution.items():
-            val = features.get(col)
-            if val is None:
-                continue
-            try:
-                val = float(val)
-            except (TypeError, ValueError):
-                continue
-
-            mean = ref.get("mean", 0)
-            std = ref.get("std", 1)
-            ref.get("percentiles", [])
-
-            if std < 0.001:
-                continue
-
-            # Flag values beyond 3 standard deviations from training mean
-            z_score = abs(val - mean) / std
-            if z_score > 4.0:
-                warnings.append(
-                    {
-                        "feature": col,
-                        "value": val,
-                        "z_score": round(z_score, 2),
-                        "training_mean": round(mean, 2),
-                        "training_std": round(std, 2),
-                        "severity": "drift",
-                        "message": (
-                            f"{col} value ({val:,.2f}) is {z_score:.1f} standard deviations "
-                            f"from the training mean ({mean:,.2f}). The model may not "
-                            f"be reliable for this input range."
-                        ),
-                    }
-                )
-            elif z_score > 3.0:
-                warnings.append(
-                    {
-                        "feature": col,
-                        "value": val,
-                        "z_score": round(z_score, 2),
-                        "training_mean": round(mean, 2),
-                        "training_std": round(std, 2),
-                        "severity": "warning",
-                        "message": (
-                            f"{col} value ({val:,.2f}) is {z_score:.1f} standard deviations "
-                            f"from the training mean ({mean:,.2f}). This is unusual but "
-                            f"within tolerance."
-                        ),
-                    }
-                )
-
-        return warnings
+        """Per-application drift check. See `prediction_diagnostics.check_feature_drift`."""
+        return _check_feature_drift_helper(features, self.reference_distribution)
 
     def _stress_test(self, features, threshold):
-        """Run 4 adverse scenarios to show model behavior under stress.
-
-        Required under APRA APS 110 for stress testing. Shows that worse
-        inputs produce lower approval probabilities (model degrades sensibly).
-        """
-        scenarios = {}
-        base_prob = None
-
-        try:
-            df_base = pd.DataFrame([features])
-            df_base = self._transform(df_base)
-            base_prob = float(self.model.predict_proba(df_base[self.feature_cols])[0][1])
-
-            # Scenario 1: Income -15%
-            stressed = features.copy()
-            stressed["annual_income"] = float(stressed["annual_income"]) * 0.85
-            if stressed["annual_income"] > 0:
-                stressed["debt_to_income"] = float(stressed.get("loan_amount", 0)) / stressed["annual_income"]
-            else:
-                stressed["debt_to_income"] = 999.0  # Maximum DTI when income is zero
-            df_s = pd.DataFrame([stressed])
-            df_s = self._transform(df_s)
-            prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
-            scenarios["income_minus_15pct"] = {
-                "probability": round(prob, 4),
-                "decision": "approved" if prob >= threshold else "denied",
-                "change": round(prob - base_prob, 4),
-            }
-
-            # Scenario 2: Property value -20%
-            stressed = features.copy()
-            if float(stressed.get("property_value", 0)) > 0:
-                stressed["property_value"] = float(stressed["property_value"]) * 0.80
-                # Re-derive LVR-driven LMI features so stressed-LVR drives
-                # stressed LMI — otherwise the model sees stale policy vars
-                # and Scenario 2 looks optimistically low-risk at LVR ~0.80.
-                _recompute_lvr_driven_policy_vars(stressed)
-            df_s = pd.DataFrame([stressed])
-            df_s = self._transform(df_s)
-            prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
-            scenarios["property_minus_20pct"] = {
-                "probability": round(prob, 4),
-                "decision": "approved" if prob >= threshold else "denied",
-                "change": round(prob - base_prob, 4),
-            }
-
-            # Scenario 3: Credit score -50
-            stressed = features.copy()
-            stressed["credit_score"] = max(300, int(stressed["credit_score"]) - 50)
-            df_s = pd.DataFrame([stressed])
-            df_s = self._transform(df_s)
-            prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
-            scenarios["credit_minus_50"] = {
-                "probability": round(prob, 4),
-                "decision": "approved" if prob >= threshold else "denied",
-                "change": round(prob - base_prob, 4),
-            }
-
-            # Scenario 4: Combined stress (all three)
-            stressed = features.copy()
-            stressed["annual_income"] = float(stressed["annual_income"]) * 0.85
-            if stressed["annual_income"] > 0:
-                stressed["debt_to_income"] = float(stressed.get("loan_amount", 0)) / stressed["annual_income"]
-            else:
-                stressed["debt_to_income"] = 999.0  # Maximum DTI when income is zero
-            if float(stressed.get("property_value", 0)) > 0:
-                stressed["property_value"] = float(stressed["property_value"]) * 0.80
-                _recompute_lvr_driven_policy_vars(stressed)
-            stressed["credit_score"] = max(300, int(stressed["credit_score"]) - 50)
-            df_s = pd.DataFrame([stressed])
-            df_s = self._transform(df_s)
-            prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
-            scenarios["combined_stress"] = {
-                "probability": round(prob, 4),
-                "decision": "approved" if prob >= threshold else "denied",
-                "change": round(prob - base_prob, 4),
-            }
-        except Exception:
-            logger.warning("Stress test computation failed", exc_info=True)
-
-        return {
-            "base_probability": round(base_prob, 4) if base_prob is not None else None,
-            "scenarios": scenarios,
-        }
+        """APS-110 stress scenarios. See `prediction_diagnostics.run_stress_scenarios`."""
+        return _run_stress_scenarios_helper(
+            features,
+            threshold,
+            model=self.model,
+            transform_fn=self._transform,
+            feature_cols=self.feature_cols,
+        )
 
     def _conformal_interval(self, probability, alpha=0.05):
-        """Compute conformal prediction interval with guaranteed coverage.
-
-        Uses split conformal prediction: nonconformity scores computed on
-        the validation set during training define how much the prediction
-        can vary. At confidence level (1-alpha), the true probability is
-        within [prob - q, prob + q] where q is the (1-alpha) quantile of
-        the nonconformity scores.
-
-        This gives honest uncertainty estimates — unlike a raw probability
-        which has no coverage guarantee.
-
-        Args:
-            probability: model predicted probability of approval
-            alpha: significance level (0.05 = 95% confidence)
-
-        Returns:
-            dict with lower, upper bounds and confidence level.
-        """
-        if len(self.conformal_scores) == 0:
-            return {
-                "lower": round(probability, 4),
-                "upper": round(probability, 4),
-                "confidence_level": 1 - alpha,
-                "available": False,
-            }
-
-        # Quantile of nonconformity scores at (1 - alpha) level
-        n = len(self.conformal_scores)
-        sorted_scores = np.sort(self.conformal_scores)
-
-        # Small Sample Beta Correction (SSBC) for calibration sets < 500
-        # Reference: arxiv.org/abs/2509.15349
-        ssbc_applied = False
-        if n < 500:
-            try:
-                from scipy.stats import beta as beta_dist
-
-                # Adjust alpha for finite-sample coverage guarantee
-                # Target: P(coverage >= 1-alpha) >= 0.9
-                adjusted_alpha = alpha
-                for candidate_alpha in np.arange(alpha * 0.5, alpha, 0.001):
-                    k = int(np.ceil((1 - candidate_alpha) * (n + 1))) - 1
-                    k = min(k, n - 1)
-                    # Beta distribution for order statistic coverage
-                    coverage_prob = 1 - beta_dist.cdf(1 - alpha, n - k, k + 1)
-                    if coverage_prob >= 0.9:
-                        adjusted_alpha = candidate_alpha
-                        break
-
-                if adjusted_alpha != alpha:
-                    logger.info(
-                        "SSBC: adjusted alpha from %.3f to %.3f (n=%d, target coverage=0.9)",
-                        alpha,
-                        adjusted_alpha,
-                        n,
-                    )
-                    alpha = adjusted_alpha
-                    ssbc_applied = True
-            except ImportError:
-                logger.debug("scipy not available for SSBC correction")
-
-        q_idx = int(np.ceil((1 - alpha) * (n + 1))) - 1
-        q_idx = min(max(q_idx, 0), n - 1)
-        q = float(sorted_scores[q_idx])
-
-        lower = max(0.0, probability - q)
-        upper = min(1.0, probability + q)
-
-        return {
-            "lower": round(lower, 4),
-            "upper": round(upper, 4),
-            "width": round(upper - lower, 4),
-            "confidence_level": 1 - alpha,
-            "ssbc_applied": ssbc_applied,
-            "available": True,
-        }
+        """Split-conformal interval. See `prediction_explanations.compute_conformal_interval`."""
+        return _compute_conformal_interval_helper(probability, self.conformal_scores, alpha=alpha)
 
     def _generate_counterfactuals(self, features_df, feature_importances, model_bundle):
-        """Generate counterfactual explanations for denied applications.
-
-        For top 3 negative factors, binary-search for the value that flips
-        the prediction. Returns actionable statements.
-        """
-        counterfactuals = []
-
-        if not feature_importances:
-            return counterfactuals
-
-        # Get top 3 features that most contributed to denial
-        sorted_features = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]
-
-        model = model_bundle["model"]
-
-        for feature_name, _importance in sorted_features:
-            if feature_name not in features_df.columns:
-                continue
-
-            current_value = features_df[feature_name].iloc[0]
-
-            # Define search bounds based on feature type
-            feature_bounds = {
-                "credit_score": (300, 1200),
-                "annual_income": (20000, 2000000),
-                "debt_to_income": (0, 10),
-                "employment_length": (0, 50),
-                "loan_amount": (5000, 5000000),
-                "monthly_expenses": (500, 50000),
-                "existing_credit_card_limit": (0, 200000),
-            }
-
-            bounds = feature_bounds.get(feature_name)
-            if bounds is None:
-                continue
-
-            # Determine search direction (increase or decrease)
-            # For DTI, expenses, loan_amount: decrease is better
-            # For credit_score, income, employment: increase is better
-            decrease_is_better = feature_name in (
-                "debt_to_income",
-                "monthly_expenses",
-                "loan_amount",
-                "existing_credit_card_limit",
-            )
-
-            if decrease_is_better:
-                low, high = bounds[0], float(current_value)
-            else:
-                low, high = float(current_value), bounds[1]
-
-            # Binary search for the flip point
-            flip_value = None
-            for _ in range(30):  # max iterations
-                mid = (low + high) / 2
-                test_df = features_df.copy()
-                test_df[feature_name] = mid
-
-                try:
-                    # Use the same preprocessing pipeline as predict()
-                    transformed_df = self._transform(test_df)
-                    prob = model.predict_proba(transformed_df[self.feature_cols])[0][1]
-                    threshold = model_bundle.get("threshold", 0.5)
-
-                    if prob >= threshold:
-                        flip_value = mid
-                        if decrease_is_better:
-                            low = mid
-                        else:
-                            high = mid
-                    else:
-                        if decrease_is_better:
-                            high = mid
-                        else:
-                            low = mid
-                except Exception as e:
-                    logger.debug("Counterfactual binary search step failed: %s", e)
-                    break
-
-            if flip_value is not None:
-                # Format the counterfactual statement
-                readable_name = feature_name.replace("_", " ").title()
-
-                if feature_name in ("annual_income", "loan_amount", "monthly_expenses", "existing_credit_card_limit"):
-                    current_fmt = f"${current_value:,.0f}"
-                    target_fmt = f"${flip_value:,.0f}"
-                elif feature_name == "credit_score":
-                    current_fmt = f"{int(current_value)}"
-                    target_fmt = f"{int(flip_value)}"
-                elif feature_name == "debt_to_income":
-                    current_fmt = f"{current_value:.1f}x"
-                    target_fmt = f"{flip_value:.1f}x"
-                else:
-                    current_fmt = f"{current_value:.1f}"
-                    target_fmt = f"{flip_value:.1f}"
-
-                direction = "Reducing" if decrease_is_better else "Increasing"
-                counterfactuals.append(
-                    {
-                        "feature": feature_name,
-                        "current_value": float(current_value),
-                        "target_value": round(float(flip_value), 2),
-                        "statement": f"{direction} {readable_name.lower()} from {current_fmt} to {target_fmt} would change the outcome",
-                    }
-                )
-
-        return counterfactuals
+        """Binary-search counterfactuals. See `prediction_explanations.search_counterfactuals`."""
+        return _search_counterfactuals_helper(
+            features_df,
+            feature_importances,
+            model_bundle,
+            transform_fn=self._transform,
+            feature_cols=self.feature_cols,
+        )

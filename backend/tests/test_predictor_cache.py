@@ -18,9 +18,9 @@ class TestModelCacheTTL:
 
         predictor.clear_model_cache()
 
-    @patch("apps.ml_engine.services.predictor._verify_model_hash")
-    @patch("apps.ml_engine.services.predictor._validate_model_path")
-    @patch("apps.ml_engine.services.predictor.joblib.load")
+    @patch("apps.ml_engine.services.prediction_cache._verify_model_hash")
+    @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
+    @patch("apps.ml_engine.services.prediction_cache.joblib.load")
     def test_cache_reloads_after_ttl(self, mock_load, mock_validate, mock_verify):
         from apps.ml_engine.services import predictor
 
@@ -44,9 +44,9 @@ class TestModelCacheTTL:
         assert predictor._load_bundle(version) == {"model": "B"}
         assert mock_load.call_count == 2
 
-    @patch("apps.ml_engine.services.predictor._verify_model_hash")
-    @patch("apps.ml_engine.services.predictor._validate_model_path")
-    @patch("apps.ml_engine.services.predictor.joblib.load")
+    @patch("apps.ml_engine.services.prediction_cache._verify_model_hash")
+    @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
+    @patch("apps.ml_engine.services.prediction_cache.joblib.load")
     def test_cache_bounded_to_maxsize(self, mock_load, mock_validate, mock_verify):
         from apps.ml_engine.services import predictor
 
