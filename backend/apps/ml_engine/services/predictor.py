@@ -267,21 +267,6 @@ class ModelPredictor:
 
             self.model_version = select_model_version(segment=segment or SEGMENT_UNIFIED)
 
-    @classmethod
-    def for_application(cls, application):
-        """Create a predictor routed to the application's product segment.
-
-        Derives the segment from application.purpose / home_ownership, then
-        calls `select_model_version` which falls back to the unified model
-        if no active segment-specific model is available. This is the
-        preferred entry point for scoring tasks — constructor access
-        without a segment defaults to unified.
-        """
-        from apps.ml_engine.services.segmentation import derive_segment
-
-        segment = derive_segment(application)
-        return cls(segment=segment)
-
         bundle = _load_bundle(self.model_version)
         self.model = bundle["model"]
         self.scaler = bundle["scaler"]
@@ -301,6 +286,21 @@ class ModelPredictor:
         from .metrics import MetricsService
 
         self._metrics_service = MetricsService()
+
+    @classmethod
+    def for_application(cls, application):
+        """Create a predictor routed to the application's product segment.
+
+        Derives the segment from application.purpose / home_ownership, then
+        calls `select_model_version` which falls back to the unified model
+        if no active segment-specific model is available. This is the
+        preferred entry point for scoring tasks — constructor access
+        without a segment defaults to unified.
+        """
+        from apps.ml_engine.services.segmentation import derive_segment
+
+        segment = derive_segment(application)
+        return cls(segment=segment)
 
     @staticmethod
     def _add_derived_features(df):
@@ -673,6 +673,56 @@ class ModelPredictor:
         # Conformal prediction interval (95% coverage)
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
+        # === Credit policy overlay (D3) ============================
+        # Evaluate always so shadow-mode logs capture what WOULD have
+        # happened under enforce; mode decides whether the verdict is
+        # actually applied. Rule evaluation is cheap (<1ms) and pure.
+        try:
+            from apps.ml_engine.services import credit_policy as _policy
+
+            policy_result = _policy.evaluate(application)
+            policy_mode = _policy.current_mode()
+            final_prediction = _policy.apply_overlay_to_decision(
+                prediction_label, policy_result, policy_mode
+            )
+
+            if policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
+                # Shadow mode: log what enforce would have done.
+                hypothetical = _policy.apply_overlay_to_decision(
+                    prediction_label, policy_result, _policy.OVERLAY_MODE_ENFORCE
+                )
+                if hypothetical != prediction_label:
+                    logger.warning(
+                        "credit_policy_shadow_disagreement",
+                        extra={
+                            "model_version": str(self.model_version.id),
+                            "model_decision": prediction_label,
+                            "policy_hypothetical": hypothetical,
+                            "hard_fails": policy_result.hard_fails,
+                            "refers": policy_result.refers,
+                        },
+                    )
+
+            policy_payload = {
+                **policy_result.to_dict(),
+                "mode": policy_mode,
+                "changed_model_decision": final_prediction != prediction_label,
+            }
+
+            # Enforce-mode refer takes precedence over model borderline flag —
+            # send to human review rather than approve/deny auto-pathway.
+            if policy_mode == _policy.OVERLAY_MODE_ENFORCE and policy_result.has_refer:
+                requires_human_review = True
+
+            prediction_label = final_prediction
+        except Exception as _policy_exc:
+            logger.warning("credit_policy_evaluate_failed", exc_info=True)
+            policy_payload = {
+                "passed": None,
+                "mode": "off",
+                "error": str(_policy_exc),
+            }
+
         result = {
             "prediction": prediction_label,
             "probability": probability,
@@ -690,6 +740,7 @@ class ModelPredictor:
             "expected_loss": expected_loss,
             "stress_test": stress_results,
             "confidence_interval": confidence_interval,
+            "policy_decision": policy_payload,
             # Raw (pre-transform) features for downstream counterfactual generation
             "_features_df": features_df,
         }

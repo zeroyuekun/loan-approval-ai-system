@@ -231,6 +231,15 @@ ML_OPTUNA_TRIALS = 30
 # Threads per XGBoost training. Matches the celery_worker_ml CPU quota.
 ML_XGB_N_JOBS = 2
 
+# Hard credit policy overlay (D3). Modes: "off" (not applied), "shadow"
+# (evaluated + logged, model verdict stands), "enforce" (hard-fails override
+# the model, refers route to human review). Default is "shadow" so the rule
+# set can be calibrated against production traffic before being promoted
+# to enforce. Unknown values collapse to "shadow" at read time so a
+# misconfigured deployment never silently downgrades responsible-lending
+# safeguards.
+CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shadow")
+
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
