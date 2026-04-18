@@ -268,9 +268,9 @@ def test_evaluate_accepts_attribute_style_application():
 
 def test_evaluate_collects_multiple_simultaneous_hits():
     app = {
-        "has_bankruptcy": True,       # P03 hard-fail
-        "credit_score": 300,          # P05 hard-fail
-        "num_hardship_flags": 2,      # P11 refer
+        "has_bankruptcy": True,  # P03 hard-fail
+        "credit_score": 300,  # P05 hard-fail
+        "num_hardship_flags": 2,  # P11 refer
     }
     result = cp.evaluate(app)
     assert set(result.hard_fails) >= {"P03", "P05"}
@@ -344,12 +344,14 @@ def test_current_mode_defaults_to_shadow_on_unknown_value(monkeypatch):
     # Clear any Django setting first so env var is what's read
     monkeypatch.setenv(cp.OVERLAY_MODE_ENV, "banana")
     from django.conf import settings as _settings
+
     monkeypatch.setattr(_settings, "CREDIT_POLICY_OVERLAY_MODE", "banana", raising=False)
     assert cp.current_mode() == cp.OVERLAY_MODE_SHADOW
 
 
 def test_current_mode_reads_settings_first(monkeypatch):
     from django.conf import settings as _settings
+
     monkeypatch.setattr(_settings, "CREDIT_POLICY_OVERLAY_MODE", "off", raising=False)
     # Env says enforce, settings says off — settings wins
     monkeypatch.setenv(cp.OVERLAY_MODE_ENV, "enforce")
@@ -358,6 +360,7 @@ def test_current_mode_reads_settings_first(monkeypatch):
 
 def test_current_mode_falls_back_to_env_when_settings_absent(monkeypatch):
     from django.conf import settings as _settings
+
     monkeypatch.setattr(_settings, "CREDIT_POLICY_OVERLAY_MODE", None, raising=False)
     monkeypatch.setenv(cp.OVERLAY_MODE_ENV, "enforce")
     assert cp.current_mode() == cp.OVERLAY_MODE_ENFORCE
@@ -365,6 +368,7 @@ def test_current_mode_falls_back_to_env_when_settings_absent(monkeypatch):
 
 def test_current_mode_defaults_to_shadow_when_nothing_is_set(monkeypatch):
     from django.conf import settings as _settings
+
     monkeypatch.setattr(_settings, "CREDIT_POLICY_OVERLAY_MODE", None, raising=False)
     monkeypatch.delenv(cp.OVERLAY_MODE_ENV, raising=False)
     assert cp.current_mode() == cp.OVERLAY_MODE_SHADOW

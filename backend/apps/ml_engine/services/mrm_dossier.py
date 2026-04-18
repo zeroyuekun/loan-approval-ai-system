@@ -62,9 +62,7 @@ _SEGMENT_PURPOSE = {
 def _header_section(mv) -> str:
     """§1 — Header."""
     trained_at = getattr(mv, "created_at", None)
-    algorithm_display = (
-        mv.get_algorithm_display() if hasattr(mv, "get_algorithm_display") else mv.algorithm
-    )
+    algorithm_display = mv.get_algorithm_display() if hasattr(mv, "get_algorithm_display") else mv.algorithm
     training_meta = mv.training_metadata or {}
     return "\n".join(
         [
@@ -86,9 +84,7 @@ def _header_section(mv) -> str:
 
 def _purpose_section(mv) -> str:
     """§2 — Purpose & limitations."""
-    purpose = _SEGMENT_PURPOSE.get(
-        mv.segment, "Segment-specific purpose statement not yet registered."
-    )
+    purpose = _SEGMENT_PURPOSE.get(mv.segment, "Segment-specific purpose statement not yet registered.")
     return "\n".join(
         [
             "## 2. Purpose & limitations",
@@ -136,10 +132,7 @@ def _monotone_section(mv) -> str:
             RATIONALE,
         )
     except Exception:
-        return (
-            "## 4. Monotonicity constraint table\n\n"
-            "Unavailable — could not import monotone_constraints."
-        )
+        return "## 4. Monotonicity constraint table\n\nUnavailable — could not import monotone_constraints."
 
     rows = ["| Feature | Sign | Rationale |", "|---|---|---|"]
     positives, negatives = [], []
@@ -260,9 +253,7 @@ def _fairness_section(mv) -> str:
         di_s = f"{di:.4f}" if isinstance(di, (int, float)) else "—"
         rows.append(f"| `{attr}` | {di_s} | {passes} |")
     return (
-        "## 8. Fairness audit\n\n"
-        + "\n".join(rows)
-        + "\n\nCross-reference `intersectional_fairness.py` output in "
+        "## 8. Fairness audit\n\n" + "\n".join(rows) + "\n\nCross-reference `intersectional_fairness.py` output in "
         "`training_metadata.intersectional_fairness` for two-way slices."
     )
 
@@ -272,10 +263,7 @@ def _policy_section(mv) -> str:
     try:
         from apps.ml_engine.services.credit_policy import POLICY_RULES
     except Exception:
-        return (
-            "## 9. Policy overlay reference\n\n"
-            "Unavailable — could not import credit_policy."
-        )
+        return "## 9. Policy overlay reference\n\nUnavailable — could not import credit_policy."
 
     rows = ["| Code | Severity | Description |", "|---|---|---|"]
     for rule in POLICY_RULES:
@@ -322,20 +310,12 @@ def _changelog_section(mv) -> str:
         return "## 11. Change log\n\nUnavailable — ORM not ready."
 
     try:
-        previous = (
-            ModelVersion.objects.filter(segment=mv.segment)
-            .exclude(pk=mv.pk)
-            .order_by("-created_at")
-            .first()
-        )
+        previous = ModelVersion.objects.filter(segment=mv.segment).exclude(pk=mv.pk).order_by("-created_at").first()
     except Exception:
         previous = None
 
     if previous is None:
-        return (
-            "## 11. Change log\n\nNo prior version on segment "
-            f"`{mv.segment}` — this is the first dossier."
-        )
+        return f"## 11. Change log\n\nNo prior version on segment `{mv.segment}` — this is the first dossier."
 
     def _delta(name, cur, prev):
         if cur is None or prev is None:
@@ -350,8 +330,7 @@ def _changelog_section(mv) -> str:
     lines = [
         "## 11. Change log",
         "",
-        f"Comparison vs previous ModelVersion on segment `{mv.segment}`: "
-        f"`{previous.id}` (v{previous.version}).",
+        f"Comparison vs previous ModelVersion on segment `{mv.segment}`: `{previous.id}` (v{previous.version}).",
         "",
         _delta("AUC-ROC", mv.auc_roc, previous.auc_roc),
         _delta("KS", mv.ks_statistic, previous.ks_statistic),

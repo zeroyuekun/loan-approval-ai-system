@@ -185,8 +185,8 @@ def test_promote_accepts_strong_challenger(patched_model_version):
     candidate = _make_mv(
         id_="cand-1",
         auc=0.90,  # better than champion's 0.88
-        ks=0.47,   # better than 0.45
-        ece=0.015, # below 0.03 ceiling
+        ks=0.47,  # better than 0.45
+        ece=0.015,  # below 0.03 ceiling
         psi_by_feature_map={"f1": 0.05, "f2": 0.10},  # below 0.25
     )
     result = ms.promote_if_eligible(candidate)

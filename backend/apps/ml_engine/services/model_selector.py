@@ -14,10 +14,10 @@ logger = logging.getLogger("ml_engine.model_selector")
 # exact values. All four must be satisfied for a challenger to replace the
 # current champion. Values align with APRA APS 220 credit-risk model-validation
 # commentary and Basel WG-CR scorecard guides.
-KS_REGRESSION_TOLERANCE = 0.015   # Candidate KS must not drop more than 1.5pp
-MAX_PSI_THRESHOLD = 0.25          # Significant-shift PSI boundary
-MAX_ECE_THRESHOLD = 0.03          # Expected calibration error ceiling
-AUC_REGRESSION_TOLERANCE = 0.02   # Candidate AUC must not drop more than 2pp
+KS_REGRESSION_TOLERANCE = 0.015  # Candidate KS must not drop more than 1.5pp
+MAX_PSI_THRESHOLD = 0.25  # Significant-shift PSI boundary
+MAX_ECE_THRESHOLD = 0.03  # Expected calibration error ceiling
+AUC_REGRESSION_TOLERANCE = 0.02  # Candidate AUC must not drop more than 2pp
 
 
 def select_model_version(segment: str = SEGMENT_UNIFIED):
@@ -34,9 +34,7 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
     No active models in segment and no unified fallback: raises ValueError.
     """
     active_models = list(
-        ModelVersion.objects.filter(
-            is_active=True, traffic_percentage__gt=0, segment=segment
-        ).order_by("-created_at")
+        ModelVersion.objects.filter(is_active=True, traffic_percentage__gt=0, segment=segment).order_by("-created_at")
     )
 
     if not active_models and segment != SEGMENT_UNIFIED:
@@ -45,9 +43,9 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
             segment,
         )
         active_models = list(
-            ModelVersion.objects.filter(
-                is_active=True, traffic_percentage__gt=0, segment=SEGMENT_UNIFIED
-            ).order_by("-created_at")
+            ModelVersion.objects.filter(is_active=True, traffic_percentage__gt=0, segment=SEGMENT_UNIFIED).order_by(
+                "-created_at"
+            )
         )
 
     if not active_models:
@@ -147,9 +145,7 @@ def promote_if_eligible(
     pure and unit-testable without a live database.
     """
     champion = (
-        ModelVersion.objects.filter(
-            is_active=True, segment=candidate_version.segment
-        )
+        ModelVersion.objects.filter(is_active=True, segment=candidate_version.segment)
         .exclude(pk=candidate_version.pk)
         .order_by("-created_at")
         .first()
@@ -166,9 +162,7 @@ def promote_if_eligible(
         "passed": cand_psi <= max_psi,
     }
     if cand_psi > max_psi:
-        reasons.append(
-            f"PSI gate failed: max feature PSI {cand_psi:.4f} exceeds {max_psi:.2f} ceiling"
-        )
+        reasons.append(f"PSI gate failed: max feature PSI {cand_psi:.4f} exceeds {max_psi:.2f} ceiling")
 
     # --- Gate 3: Calibration (ECE) ---------------------------------------
     cand_ece = _metric(candidate_version, "ece", default=1.0)
@@ -182,9 +176,7 @@ def promote_if_eligible(
         "passed": cand_ece <= max_ece,
     }
     if cand_ece > max_ece:
-        reasons.append(
-            f"Calibration gate failed: ECE {cand_ece:.4f} exceeds {max_ece:.2f} ceiling"
-        )
+        reasons.append(f"Calibration gate failed: ECE {cand_ece:.4f} exceeds {max_ece:.2f} ceiling")
 
     # --- Gates 1 and 4 need an incumbent champion to compare against ---
     if champion is None:

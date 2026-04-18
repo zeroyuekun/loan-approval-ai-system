@@ -37,7 +37,7 @@ from dataclasses import dataclass
 # "home"/"personal" strings so this module doesn't force callers to import
 # segmentation to quote a tier. The helper below resolves both forms.
 SEGMENT_PERSONAL = "personal"
-SEGMENT_HOME = "home"           # covers owner-occupier + investor + any secured home product
+SEGMENT_HOME = "home"  # covers owner-occupier + investor + any secured home product
 SEGMENT_INVESTMENT = "investment"
 
 # PD cutoffs + rate bands are indicative only. Bands are (min_rate, max_rate)
@@ -159,8 +159,7 @@ def get_tier(pd_score: float, segment: str) -> PricingTier:
                 rate_min=lo,
                 rate_max=hi,
                 rationale=(
-                    f"PD {pd_score:.4f} ≤ {cutoff} → {resolved} tier {tier_label}, "
-                    f"indicative {lo:.1f}–{hi:.1f}% APR"
+                    f"PD {pd_score:.4f} ≤ {cutoff} → {resolved} tier {tier_label}, indicative {lo:.1f}–{hi:.1f}% APR"
                 ),
             )
 
@@ -172,8 +171,5 @@ def get_tier(pd_score: float, segment: str) -> PricingTier:
         pd_score=pd_score,
         rate_min=None,
         rate_max=None,
-        rationale=(
-            f"PD {pd_score:.4f} exceeds maximum priced tier cutoff "
-            f"({top_cutoff}) — risk outside appetite"
-        ),
+        rationale=(f"PD {pd_score:.4f} exceeds maximum priced tier cutoff ({top_cutoff}) — risk outside appetite"),
     )

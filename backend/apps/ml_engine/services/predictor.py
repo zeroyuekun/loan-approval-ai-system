@@ -531,6 +531,7 @@ class ModelPredictor:
         # =============================================================
         try:
             from apps.ml_engine.services.underwriting_engine import UnderwritingEngine
+
             _uw = UnderwritingEngine()
             features["hem_benchmark"] = float(
                 _uw.get_hem(
@@ -703,9 +704,7 @@ class ModelPredictor:
 
             policy_result = _policy.evaluate(application)
             policy_mode = _policy.current_mode()
-            final_prediction = _policy.apply_overlay_to_decision(
-                prediction_label, policy_result, policy_mode
-            )
+            final_prediction = _policy.apply_overlay_to_decision(prediction_label, policy_result, policy_mode)
 
             if policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
                 # Shadow mode: log what enforce would have done.
@@ -744,12 +743,9 @@ class ModelPredictor:
                     application.referral_status = application.ReferralStatus.REFERRED
                     application.referral_codes = list(policy_result.refers)
                     application.referral_rationale = {
-                        code: policy_result.rationale_by_code.get(code, "")
-                        for code in policy_result.refers
+                        code: policy_result.rationale_by_code.get(code, "") for code in policy_result.refers
                     }
-                    application.save(
-                        update_fields=["referral_status", "referral_codes", "referral_rationale"]
-                    )
+                    application.save(update_fields=["referral_status", "referral_codes", "referral_rationale"])
                 except Exception:
                     logger.warning(
                         "referral_audit_save_failed",

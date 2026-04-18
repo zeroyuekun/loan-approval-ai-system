@@ -40,14 +40,8 @@ SEGMENT_MIN_SAMPLES = 500
 # the segment. Kept here — rather than scattered across trainer.py — so a
 # change to segment definitions lands in one place.
 SEGMENT_FILTERS = {
-    SEGMENT_HOME_OWNER_OCCUPIER: lambda row: (
-        row.get("purpose") == "home"
-        and row.get("home_ownership") != "investor"
-    ),
-    SEGMENT_HOME_INVESTOR: lambda row: (
-        row.get("purpose") == "investment"
-        or row.get("home_ownership") == "investor"
-    ),
+    SEGMENT_HOME_OWNER_OCCUPIER: lambda row: row.get("purpose") == "home" and row.get("home_ownership") != "investor",
+    SEGMENT_HOME_INVESTOR: lambda row: row.get("purpose") == "investment" or row.get("home_ownership") == "investor",
     SEGMENT_PERSONAL: lambda row: row.get("purpose") == "personal",
 }
 
@@ -104,6 +98,7 @@ def select_active_model_for_segment(
     """
     if ModelVersion is None:
         from apps.ml_engine.models import ModelVersion as _MV
+
         ModelVersion = _MV
 
     base = ModelVersion.objects.filter(is_active=True, algorithm=algorithm)

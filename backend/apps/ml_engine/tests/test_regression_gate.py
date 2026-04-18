@@ -60,8 +60,7 @@ def test_golden_metrics_has_all_required_tolerances():
 # ---------------------------------------------------------------------------
 
 
-def _baseline(auc=0.87, ks=0.45, brier=0.10, ece=0.03,
-              auc_tol=0.02, ks_tol=0.015, brier_tol=0.02, ece_tol=0.015):
+def _baseline(auc=0.87, ks=0.45, brier=0.10, ece=0.03, auc_tol=0.02, ks_tol=0.015, brier_tol=0.02, ece_tol=0.015):
     return {
         "metrics": {"auc_roc": auc, "ks_statistic": ks, "brier_score": brier, "ece": ece},
         "tolerances": {

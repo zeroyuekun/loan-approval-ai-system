@@ -33,7 +33,7 @@ extends rate-risk exposure).
 from collections.abc import Iterable
 
 # Sentinel values for monotone_constraints semantics.
-POSITIVE = 1   # Higher value → more likely approved
+POSITIVE = 1  # Higher value → more likely approved
 NEGATIVE = -1  # Higher value → less likely approved
 UNCONSTRAINED = 0
 
@@ -72,7 +72,6 @@ MONOTONE_CONSTRAINTS = {
     "is_existing_customer": POSITIVE,
     "income_per_dependant": POSITIVE,
     "serviceability_ratio": POSITIVE,
-
     # --- NEGATIVE: higher value decreases approval probability ---
     "debt_to_income": NEGATIVE,
     "loan_amount": NEGATIVE,
@@ -238,11 +237,7 @@ def assert_rationale_coverage() -> None:
     """
     missing = set(MONOTONE_CONSTRAINTS) - set(RATIONALE)
     if missing:
-        raise AssertionError(
-            f"Monotone constraints missing RATIONALE entries: {sorted(missing)}"
-        )
+        raise AssertionError(f"Monotone constraints missing RATIONALE entries: {sorted(missing)}")
     orphaned = set(RATIONALE) - set(MONOTONE_CONSTRAINTS)
     if orphaned:
-        raise AssertionError(
-            f"RATIONALE entries with no corresponding constraint: {sorted(orphaned)}"
-        )
+        raise AssertionError(f"RATIONALE entries with no corresponding constraint: {sorted(orphaned)}")

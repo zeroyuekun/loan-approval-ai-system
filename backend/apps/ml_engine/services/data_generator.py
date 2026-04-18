@@ -1366,13 +1366,9 @@ class DataGenerator:
         _pv = df["property_value"].to_numpy()
         _la = df["loan_amount"].to_numpy(dtype=float)
         with np.errstate(divide="ignore", invalid="ignore"):
-            _lvr = np.divide(
-                _la, _pv, out=np.zeros_like(_la, dtype=float), where=_pv > 0
-            )
+            _lvr = np.divide(_la, _pv, out=np.zeros_like(_la, dtype=float), where=_pv > 0)
         _lvr = np.where(_pv > 0, _lvr, 0.0)
-        _lmi_rate = np.where(
-            _lvr > 0.90, 0.03, np.where(_lvr > 0.85, 0.02, np.where(_lvr > 0.80, 0.01, 0.0))
-        )
+        _lmi_rate = np.where(_lvr > 0.90, 0.03, np.where(_lvr > 0.85, 0.02, np.where(_lvr > 0.80, 0.01, 0.0)))
         df["lmi_premium"] = (_la * _lmi_rate * _is_home_lmi.astype(int)).round(2)
         df["effective_loan_amount"] = (_la + df["lmi_premium"].to_numpy()).round(2)
 

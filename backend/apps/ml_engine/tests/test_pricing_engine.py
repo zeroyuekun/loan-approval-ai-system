@@ -26,13 +26,13 @@ from apps.ml_engine.services.pricing_engine import (
     [
         (0.0, "A", (7.0, 9.5)),
         (0.02, "A", (7.0, 9.5)),
-        (0.03, "A", (7.0, 9.5)),           # exact boundary → tier A
+        (0.03, "A", (7.0, 9.5)),  # exact boundary → tier A
         (0.031, "B", (9.5, 14.0)),
-        (0.07, "B", (9.5, 14.0)),          # exact boundary → tier B
+        (0.07, "B", (9.5, 14.0)),  # exact boundary → tier B
         (0.10, "C", (14.0, 19.0)),
-        (0.15, "C", (14.0, 19.0)),         # exact boundary → tier C
+        (0.15, "C", (14.0, 19.0)),  # exact boundary → tier C
         (0.20, "D", (19.0, 24.0)),
-        (0.25, "D", (19.0, 24.0)),         # exact boundary → tier D
+        (0.25, "D", (19.0, 24.0)),  # exact boundary → tier D
         (0.26, "Decline", None),
         (0.50, "Decline", None),
     ],
@@ -60,13 +60,13 @@ def test_personal_tier_assignment(pd_score, expected_tier, expected_band):
     [
         (0.0, "A", (6.0, 6.5)),
         (0.005, "A", (6.0, 6.5)),
-        (0.01, "A", (6.0, 6.5)),           # exact → A
+        (0.01, "A", (6.0, 6.5)),  # exact → A
         (0.02, "B", (6.5, 7.2)),
-        (0.03, "B", (6.5, 7.2)),           # exact → B
+        (0.03, "B", (6.5, 7.2)),  # exact → B
         (0.05, "C", (7.2, 8.0)),
-        (0.06, "C", (7.2, 8.0)),           # exact → C
+        (0.06, "C", (7.2, 8.0)),  # exact → C
         (0.08, "D", (8.0, 9.0)),
-        (0.10, "D", (8.0, 9.0)),           # exact → D (top of home band)
+        (0.10, "D", (8.0, 9.0)),  # exact → D (top of home band)
         (0.11, "Decline", None),
         (0.30, "Decline", None),
     ],
@@ -100,7 +100,7 @@ def test_home_tier_assignment(pd_score, expected_tier, expected_band):
         ("auto", "personal"),
         ("education", "personal"),
         ("unified", "personal"),
-        ("HOME", "home"),            # case-insensitive
+        ("HOME", "home"),  # case-insensitive
         ("Personal", "personal"),
     ],
 )

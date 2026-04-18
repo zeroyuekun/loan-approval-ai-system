@@ -79,9 +79,7 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
     with transaction.atomic():
         # Scope deactivation to the same segment so training a new
         # personal-loan model doesn't knock out the active home-loan model.
-        ModelVersion.objects.filter(is_active=True, segment=segment).update(
-            is_active=False, traffic_percentage=0
-        )
+        ModelVersion.objects.filter(is_active=True, segment=segment).update(is_active=False, traffic_percentage=0)
         mv = ModelVersion.objects.create(
             algorithm=algorithm,
             version=version_str,

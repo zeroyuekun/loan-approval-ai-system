@@ -33,9 +33,7 @@ class TestMonotoneConstraintRegistry:
 
     def test_signs_are_valid(self):
         for feat, sign in MONOTONE_CONSTRAINTS.items():
-            assert sign in (POSITIVE, NEGATIVE, UNCONSTRAINED), (
-                f"{feat} has invalid sign {sign}"
-            )
+            assert sign in (POSITIVE, NEGATIVE, UNCONSTRAINED), f"{feat} has invalid sign {sign}"
 
     def test_positive_and_negative_are_disjoint(self):
         pos = {f for f, s in MONOTONE_CONSTRAINTS.items() if s == POSITIVE}

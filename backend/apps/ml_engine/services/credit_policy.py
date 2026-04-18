@@ -53,17 +53,18 @@ OVERLAY_MODES = (OVERLAY_MODE_OFF, OVERLAY_MODE_SHADOW, OVERLAY_MODE_ENFORCE)
 
 # Thresholds centralised here so that the MRM dossier and audit views can
 # cite the exact values used at decision time.
-MAX_DTI = 8.0                 # APRA intervention threshold (2021 letter)
-REFER_LTI = 9.0               # NAB LTI ceiling
-MAX_LVR_HOME = 0.95           # LMI cap for owner-occupier
-MAX_LVR_ANY = 1.00            # Hard no-negative-equity boundary
-MIN_CREDIT_SCORE = 450        # Bureau floor for any automated approval
-MIN_EMP_TENURE_MONTHS_SE = 24 # Self-employed minimum trading history
+MAX_DTI = 8.0  # APRA intervention threshold (2021 letter)
+REFER_LTI = 9.0  # NAB LTI ceiling
+MAX_LVR_HOME = 0.95  # LMI cap for owner-occupier
+MAX_LVR_ANY = 1.00  # Hard no-negative-equity boundary
+MIN_CREDIT_SCORE = 450  # Bureau floor for any automated approval
+MIN_EMP_TENURE_MONTHS_SE = 24  # Self-employed minimum trading history
 
 
 @dataclass
 class PolicyResult:
     """Outcome of running the overlay against one application."""
+
     hard_fails: list[str] = field(default_factory=list)
     refers: list[str] = field(default_factory=list)
     rationale: list[str] = field(default_factory=list)
@@ -115,6 +116,7 @@ def _f(value, default: float = 0.0) -> float:
 # easy for reviewers to map to the AU lending policy source they codify.
 # ---------------------------------------------------------------------------
 
+
 def _p01_visa_ineligible(application) -> tuple | None:
     """P01: Non-resident / bridging visa → hard-fail.
 
@@ -143,6 +145,7 @@ def _p02_age_ineligible(application) -> tuple | None:
         return None
     try:
         from datetime import date
+
         today = date.today()
         years_old = (today - dob).days / 365.25 if hasattr(dob, "year") else None
         if years_old is None:
@@ -181,7 +184,9 @@ def _p04_active_ato_debt(application) -> tuple | None:
 
 
 def _p05_credit_score_floor(application) -> tuple | None:
-    score = _f(_get(application, "credit_score"), default=None) if _get(application, "credit_score") is not None else None
+    score = (
+        _f(_get(application, "credit_score"), default=None) if _get(application, "credit_score") is not None else None
+    )
     if score is None:
         return None
     if score < MIN_CREDIT_SCORE:
@@ -318,6 +323,7 @@ _REFER_RULES = [
 # the runtime evaluation to docstring parsing.
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class PolicyRuleSpec:
     code: str
@@ -396,9 +402,7 @@ def current_mode() -> str:
         mode = os.environ.get(OVERLAY_MODE_ENV, OVERLAY_MODE_SHADOW)
     mode = (mode or OVERLAY_MODE_SHADOW).lower()
     if mode not in OVERLAY_MODES:
-        logger.warning(
-            "Unknown CREDIT_POLICY_OVERLAY_MODE=%r — defaulting to '%s'", mode, OVERLAY_MODE_SHADOW
-        )
+        logger.warning("Unknown CREDIT_POLICY_OVERLAY_MODE=%r — defaulting to '%s'", mode, OVERLAY_MODE_SHADOW)
         return OVERLAY_MODE_SHADOW
     return mode
 
