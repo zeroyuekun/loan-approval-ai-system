@@ -31,8 +31,7 @@ does not read from the model object.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import List, Tuple
+from dataclasses import dataclass
 
 # Segment identifiers. Accept both the D2 SEGMENT_* constants and the raw
 # "home"/"personal" strings so this module doesn't force callers to import
@@ -43,13 +42,13 @@ SEGMENT_INVESTMENT = "investment"
 
 # PD cutoffs + rate bands are indicative only. Bands are (min_rate, max_rate)
 # APR. The Decline tier carries no rate — pricing is not offered.
-_PERSONAL_TIERS: List[Tuple[str, float, Tuple[float, float]]] = [
+_PERSONAL_TIERS: list[tuple[str, float, tuple[float, float]]] = [
     ("A", 0.03, (7.0, 9.5)),
     ("B", 0.07, (9.5, 14.0)),
     ("C", 0.15, (14.0, 19.0)),
     ("D", 0.25, (19.0, 24.0)),
 ]
-_HOME_TIERS: List[Tuple[str, float, Tuple[float, float]]] = [
+_HOME_TIERS: list[tuple[str, float, tuple[float, float]]] = [
     ("A", 0.01, (6.0, 6.5)),
     ("B", 0.03, (6.5, 7.2)),
     ("C", 0.06, (7.2, 8.0)),

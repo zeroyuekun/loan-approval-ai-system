@@ -20,10 +20,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
-
-import pytest
-
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helpers

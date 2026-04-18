@@ -13,10 +13,8 @@ from __future__ import annotations
 import pytest
 
 from apps.ml_engine.services.pricing_engine import (
-    PricingTier,
     get_tier,
 )
-
 
 # ---------------------------------------------------------------------------
 # Personal-loan tier boundaries

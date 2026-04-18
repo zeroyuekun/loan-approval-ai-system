@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +64,10 @@ MIN_EMP_TENURE_MONTHS_SE = 24 # Self-employed minimum trading history
 @dataclass
 class PolicyResult:
     """Outcome of running the overlay against one application."""
-    hard_fails: List[str] = field(default_factory=list)
-    refers: List[str] = field(default_factory=list)
-    rationale: List[str] = field(default_factory=list)
-    evaluated_rules: List[str] = field(default_factory=list)
+    hard_fails: list[str] = field(default_factory=list)
+    refers: list[str] = field(default_factory=list)
+    rationale: list[str] = field(default_factory=list)
+    evaluated_rules: list[str] = field(default_factory=list)
     # code → raw reason text (without the "Pxx (hard-fail/refer): " prefix).
     # Used by D6 audit trail to populate LoanApplication.referral_rationale.
     rationale_by_code: dict = field(default_factory=dict)
@@ -115,7 +115,7 @@ def _f(value, default: float = 0.0) -> float:
 # easy for reviewers to map to the AU lending policy source they codify.
 # ---------------------------------------------------------------------------
 
-def _p01_visa_ineligible(application) -> Optional[tuple]:
+def _p01_visa_ineligible(application) -> tuple | None:
     """P01: Non-resident / bridging visa → hard-fail.
 
     Falls back to "not evaluable" if the application has no visa field;
@@ -131,7 +131,7 @@ def _p01_visa_ineligible(application) -> Optional[tuple]:
     return None
 
 
-def _p02_age_ineligible(application) -> Optional[tuple]:
+def _p02_age_ineligible(application) -> tuple | None:
     """P02: Age < 18 or > 75 at loan maturity → hard-fail.
 
     Not evaluable without a DOB; returns None when DOB is missing. When
@@ -158,13 +158,13 @@ def _p02_age_ineligible(application) -> Optional[tuple]:
         return None
 
 
-def _p03_bankruptcy(application) -> Optional[tuple]:
+def _p03_bankruptcy(application) -> tuple | None:
     if bool(_get(application, "has_bankruptcy", False)):
         return ("P03", "Undischarged bankrupt or within 7-year bankruptcy window")
     return None
 
 
-def _p04_active_ato_debt(application) -> Optional[tuple]:
+def _p04_active_ato_debt(application) -> tuple | None:
     """P04: Active ATO tax debt flag → hard-fail.
 
     Requires an `has_ato_debt_default` or similar flag; not currently in
@@ -180,7 +180,7 @@ def _p04_active_ato_debt(application) -> Optional[tuple]:
     return None
 
 
-def _p05_credit_score_floor(application) -> Optional[tuple]:
+def _p05_credit_score_floor(application) -> tuple | None:
     score = _f(_get(application, "credit_score"), default=None) if _get(application, "credit_score") is not None else None
     if score is None:
         return None
@@ -193,7 +193,7 @@ def _p05_credit_score_floor(application) -> Optional[tuple]:
     return None
 
 
-def _p06_lvr_ceiling(application) -> Optional[tuple]:
+def _p06_lvr_ceiling(application) -> tuple | None:
     property_value = _f(_get(application, "property_value", 0))
     loan_amount = _f(_get(application, "loan_amount", 0))
     purpose = _get(application, "purpose")
@@ -215,7 +215,7 @@ def _p06_lvr_ceiling(application) -> Optional[tuple]:
     return None
 
 
-def _p07_dti_ceiling(application) -> Optional[tuple]:
+def _p07_dti_ceiling(application) -> tuple | None:
     dti = _f(_get(application, "debt_to_income"))
     if dti > MAX_DTI:
         return (
@@ -225,7 +225,7 @@ def _p07_dti_ceiling(application) -> Optional[tuple]:
     return None
 
 
-def _p08_lti_refer(application) -> Optional[tuple]:
+def _p08_lti_refer(application) -> tuple | None:
     annual_income = _f(_get(application, "annual_income"))
     loan_amount = _f(_get(application, "loan_amount"))
     if annual_income <= 0:
@@ -239,7 +239,7 @@ def _p08_lti_refer(application) -> Optional[tuple]:
     return None
 
 
-def _p09_high_risk_postcode_refer(application) -> Optional[tuple]:
+def _p09_high_risk_postcode_refer(application) -> tuple | None:
     rate = _f(_get(application, "postcode_default_rate"))
     if rate > 0.08:  # 8% historical default rate → refer
         return (
@@ -249,7 +249,7 @@ def _p09_high_risk_postcode_refer(application) -> Optional[tuple]:
     return None
 
 
-def _p10_self_employed_short_history_refer(application) -> Optional[tuple]:
+def _p10_self_employed_short_history_refer(application) -> tuple | None:
     employment_type = _get(application, "employment_type")
     if employment_type != "self_employed":
         return None
@@ -265,7 +265,7 @@ def _p10_self_employed_short_history_refer(application) -> Optional[tuple]:
     return None
 
 
-def _p11_hardship_history_refer(application) -> Optional[tuple]:
+def _p11_hardship_history_refer(application) -> tuple | None:
     flags = _f(_get(application, "num_hardship_flags"))
     if flags > 0:
         return (
@@ -275,7 +275,7 @@ def _p11_hardship_history_refer(application) -> Optional[tuple]:
     return None
 
 
-def _p12_tmd_mismatch_refer(application) -> Optional[tuple]:
+def _p12_tmd_mismatch_refer(application) -> tuple | None:
     """P12: TMD / Target Market Determination mismatch refer.
 
     Personal-loan TMD typically caps at $50k; unsecured over $50k is refer
@@ -325,9 +325,9 @@ class PolicyRuleSpec:
     description: str
 
 
-POLICY_RULES: List[PolicyRuleSpec] = [
+POLICY_RULES: list[PolicyRuleSpec] = [
     PolicyRuleSpec("P01", "hard_fail", "Non-resident / ineligible visa (bridging/student/tourist) — decline"),
-    PolicyRuleSpec("P02", "hard_fail", f"Applicant age < 18 or age at maturity > 75"),
+    PolicyRuleSpec("P02", "hard_fail", "Applicant age < 18 or age at maturity > 75"),
     PolicyRuleSpec("P03", "hard_fail", "Undischarged bankruptcy or within 7yr window — decline"),
     PolicyRuleSpec("P04", "hard_fail", "Active ATO tax-debt default flag — decline"),
     PolicyRuleSpec("P05", "hard_fail", f"Credit score below floor {MIN_CREDIT_SCORE} — decline"),

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ DEFAULT_GOLDEN_PATH_CANDIDATES = [
 ]
 
 
-def load_golden(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+def load_golden(path: Path | None = None) -> dict[str, Any] | None:
     """Load the golden-metrics JSON. Returns None if the file is absent.
 
     Absence is a legal state — first-run environments haven't produced a
@@ -54,9 +54,9 @@ def load_golden(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
 
 
 def check_regression(
-    metrics: Dict[str, Any],
-    golden: Dict[str, Any],
-) -> List[str]:
+    metrics: dict[str, Any],
+    golden: dict[str, Any],
+) -> list[str]:
     """Compare a metrics dict against the golden file's baselines + tolerances.
 
     Returns a list of human-readable breach messages. Empty list means no
@@ -65,7 +65,7 @@ def check_regression(
     """
     baselines = golden.get("metrics", {}) or {}
     tolerances = golden.get("tolerances", {}) or {}
-    breaches: List[str] = []
+    breaches: list[str] = []
 
     # Higher-is-better metrics — fail on a drop beyond tolerance.
     for name, tol_key in [
@@ -116,7 +116,7 @@ def check_regression(
     return breaches
 
 
-def active_model_metrics() -> Optional[Dict[str, Any]]:
+def active_model_metrics() -> dict[str, Any] | None:
     """Pull the current active ModelVersion's metrics as a dict.
 
     Returns None when there is no active model (e.g. a fresh clone with

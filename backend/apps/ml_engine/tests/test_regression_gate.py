@@ -18,15 +18,12 @@ semantics separately from this file.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from apps.ml_engine.services.regression_gate import (
     check_regression,
     load_golden,
 )
-
 
 # ---------------------------------------------------------------------------
 # Golden file — shape + load integrity

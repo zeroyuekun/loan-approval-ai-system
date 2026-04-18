@@ -30,7 +30,7 @@ ambiguous (e.g. `loan_term_months` — longer lowers the monthly repayment but
 extends rate-risk exposure).
 """
 
-from typing import Iterable
+from collections.abc import Iterable
 
 # Sentinel values for monotone_constraints semantics.
 POSITIVE = 1   # Higher value → more likely approved

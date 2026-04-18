@@ -24,9 +24,6 @@ ModelVersion row (`select_active_model_for_segment`).
 
 from __future__ import annotations
 
-from typing import Optional
-
-
 SEGMENT_UNIFIED = "unified"
 SEGMENT_HOME_OWNER_OCCUPIER = "home_owner_occupier"
 SEGMENT_HOME_INVESTOR = "home_investor"
@@ -96,7 +93,7 @@ def select_active_model_for_segment(
     *,
     ModelVersion=None,
     algorithm: str = "xgb",
-) -> Optional["ModelVersion"]:
+) -> ModelVersion | None:  # noqa: F821 — class symbol shadowed by injected kwarg; resolved at runtime via the late import below
     """Pick the most recent active ModelVersion for the given segment.
 
     Falls back to the unified model when no active segment-specific model

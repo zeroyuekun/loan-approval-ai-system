@@ -3,7 +3,6 @@
 import logging
 import random
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 from apps.ml_engine.models import ModelVersion
 from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
@@ -78,9 +77,9 @@ class PromotionDecision:
     """Outcome of a champion-challenger promotion gate evaluation."""
 
     promoted: bool
-    candidate_id: Optional[str] = None
-    champion_id: Optional[str] = None
-    reasons: List[str] = field(default_factory=list)
+    candidate_id: str | None = None
+    champion_id: str | None = None
+    reasons: list[str] = field(default_factory=list)
     gates: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -157,7 +156,7 @@ def promote_if_eligible(
     )
 
     gates: dict = {}
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     # --- Gate 2: PSI stability -------------------------------------------
     cand_psi = _max_psi(candidate_version)

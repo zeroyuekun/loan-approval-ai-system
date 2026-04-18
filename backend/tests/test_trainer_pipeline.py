@@ -93,7 +93,10 @@ class TestTrainerPipeline:
         assert not result["credit_card_burden"].isna().any()
 
     def test_numeric_cols_count(self, trainer):
-        assert len(trainer.NUMERIC_COLS) == 94, f"Expected 94 numeric columns, got {len(trainer.NUMERIC_COLS)}"
+        # v1.9.9 promoted 4 underwriter-internal variables (hem_benchmark,
+        # hem_gap, lmi_premium, effective_loan_amount) to first-class
+        # features, taking NUMERIC_COLS from 94 → 98.
+        assert len(trainer.NUMERIC_COLS) == 98, f"Expected 98 numeric columns, got {len(trainer.NUMERIC_COLS)}"
 
     def test_categorical_cols_count(self, trainer):
         assert len(trainer.CATEGORICAL_COLS) == 8, (

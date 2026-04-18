@@ -12,13 +12,11 @@ provable rather than inferred from reading the code.
 
 from __future__ import annotations
 
-import os
 from datetime import date, timedelta
 
 import pytest
 
 from apps.ml_engine.services import credit_policy as cp
-
 
 # ---------------------------------------------------------------------------
 # Hard-fail rule coverage (P01-P07)

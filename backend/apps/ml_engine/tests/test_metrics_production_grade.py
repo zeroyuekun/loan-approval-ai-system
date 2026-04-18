@@ -13,7 +13,6 @@ Covers:
 
 from __future__ import annotations
 
-import types
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -26,7 +25,6 @@ from apps.ml_engine.services.metrics import (
     psi,
     psi_by_feature,
 )
-
 
 # ===========================================================================
 # KS statistic
@@ -152,9 +150,11 @@ def _make_mv(
     mv.auc_roc = auc
     mv.ks_statistic = ks
     mv.ece = ece
-    mv.training_metadata = {
-        "psi_by_feature": psi_by_feature_map or {"f1": 0.05, "f2": 0.08},
-    }
+    # Distinguish "caller didn't pass an override" (None → use default) from
+    # "caller explicitly passed an empty dict" (should surface as pre-D5
+    # missing-PSI data, which the gate treats as inf and rejects).
+    psi_feat = {"f1": 0.05, "f2": 0.08} if psi_by_feature_map is None else psi_by_feature_map
+    mv.training_metadata = {"psi_by_feature": psi_feat}
     return mv
 
 
