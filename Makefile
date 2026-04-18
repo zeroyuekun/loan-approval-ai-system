@@ -1,4 +1,4 @@
-.PHONY: dev down build test lint seed train logs health clean
+.PHONY: dev down build test lint seed train logs health clean clean-deep typecheck security verify deadcode
 
 # Development
 dev:                     ## Start all services
@@ -58,9 +58,20 @@ health:                  ## Check service health
 	@curl -s http://localhost:8000/api/v1/health/deep/ | python -m json.tool
 
 # Cleanup
-clean:                   ## Remove containers, volumes, and cached files
+clean:                   ## Nuke ephemerals (containers, caches, build output)
 	docker compose down -v
 	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find backend -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -name "*.pyc" -not -path "*/node_modules/*" -delete 2>/dev/null || true
+	rm -rf frontend/.next frontend/coverage frontend/playwright-report frontend/test-results
+	rm -rf backend/htmlcov backend/.coverage backend/.pytest_cache
+	rm -f frontend/tsconfig.tsbuildinfo
+	@echo "Clean complete. Re-run 'make build' then 'make dev' to restart."
+
+clean-deep:              ## clean + remove node_modules + .venv (forces reinstall)
+	$(MAKE) clean
+	rm -rf frontend/node_modules backend/.venv
+	@echo "Deep-clean complete. Expect re-install before next run."
 
 help:                    ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
