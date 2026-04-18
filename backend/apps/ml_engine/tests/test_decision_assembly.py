@@ -21,8 +21,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from apps.ml_engine.services.decision_assembly import assemble_decision
 
 

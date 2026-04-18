@@ -7,63 +7,61 @@ conformal intervals, and counterfactual suggestions, and records the outcome.
 """
 
 import logging
-import math
 import time
 
 import numpy as np
 import pandas as pd
-from django.conf import settings
 from prometheus_client import Counter, Histogram
 
 from apps.ml_engine.services.consistency import DataConsistencyChecker
-from apps.ml_engine.services.feature_prep import (
-    FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
-    safe_get_state as _safe_get_state_helper,
-    validate_input as _validate_input_helper,
-)
-from apps.ml_engine.services.policy_recompute import (
-    recompute_lvr_driven_policy_vars as _recompute_lvr_driven_policy_vars,
-)
-from apps.ml_engine.services.prediction_diagnostics import (
-    check_feature_drift as _check_feature_drift_helper,
-    run_stress_scenarios as _run_stress_scenarios_helper,
-)
-from apps.ml_engine.services.prediction_explanations import (
-    compute_conformal_interval as _compute_conformal_interval_helper,
-    search_counterfactuals as _search_counterfactuals_helper,
-)
-from apps.ml_engine.services.prediction_features import (
-    build_prediction_features as _build_prediction_features_helper,
-    derive_underwriter_features as _derive_underwriter_features_helper,
-)
-from apps.ml_engine.services.shadow_scoring import (
-    score_challengers_shadow as _score_challengers_shadow_helper,
-)
 from apps.ml_engine.services.decision_assembly import (
     assemble_decision as _assemble_decision_helper,
+)
+from apps.ml_engine.services.feature_prep import (
+    FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
+)
+from apps.ml_engine.services.feature_prep import (
+    safe_get_state as _safe_get_state_helper,
+)
+from apps.ml_engine.services.feature_prep import (
+    validate_input as _validate_input_helper,
 )
 from apps.ml_engine.services.policy_overlay import (
     apply_policy_overlay as _apply_policy_overlay_helper,
 )
-from apps.ml_engine.services.shap_attribution import (
-    compute_shap_attribution as _compute_shap_attribution_helper,
-)
-# Re-export cache helpers so external callers and tests that patch
-# `predictor._validate_model_path`, `predictor._verify_model_hash`,
-# `predictor._load_bundle`, `predictor._model_cache`, etc. keep working after
-# the Arm C Phase 1 split. These names are mutable-object bindings; patches
-# applied to the `predictor` module propagate because internal callers of the
-# loader look up these names on `prediction_cache`, and the re-exports share
-# identity with that module's bindings at import time.
-from apps.ml_engine.services.prediction_cache import (  # noqa: F401 — re-export
-    _MAX_CACHE_ENTRIES,
+from apps.ml_engine.services.prediction_cache import (  # noqa: F401 — re-export for external patches
     _CACHE_TTL_SECONDS,
+    _MAX_CACHE_ENTRIES,
     _cache_lock,
     _load_bundle,
     _model_cache,
     _validate_model_path,
     _verify_model_hash,
     clear_model_cache,
+)
+from apps.ml_engine.services.prediction_diagnostics import (
+    check_feature_drift as _check_feature_drift_helper,
+)
+from apps.ml_engine.services.prediction_diagnostics import (
+    run_stress_scenarios as _run_stress_scenarios_helper,
+)
+from apps.ml_engine.services.prediction_explanations import (
+    compute_conformal_interval as _compute_conformal_interval_helper,
+)
+from apps.ml_engine.services.prediction_explanations import (
+    search_counterfactuals as _search_counterfactuals_helper,
+)
+from apps.ml_engine.services.prediction_features import (
+    build_prediction_features as _build_prediction_features_helper,
+)
+from apps.ml_engine.services.prediction_features import (
+    derive_underwriter_features as _derive_underwriter_features_helper,
+)
+from apps.ml_engine.services.shadow_scoring import (
+    score_challengers_shadow as _score_challengers_shadow_helper,
+)
+from apps.ml_engine.services.shap_attribution import (
+    compute_shap_attribution as _compute_shap_attribution_helper,
 )
 
 ml_predictions_total = Counter(
@@ -388,9 +386,7 @@ class ModelPredictor:
             challenger_predictor = ModelPredictor(model_version=challenger_mv)
             transformed = challenger_predictor._transform(raw_df)
             prob = float(
-                challenger_predictor.model.predict_proba(
-                    transformed[challenger_predictor.feature_cols]
-                )[:, 1][0]
+                challenger_predictor.model.predict_proba(transformed[challenger_predictor.feature_cols])[:, 1][0]
             )
             label = "approved" if prob >= (challenger_mv.optimal_threshold or 0.5) else "denied"
             return prob, label
@@ -433,4 +429,3 @@ class ModelPredictor:
             transform_fn=self._transform,
             feature_cols=self.feature_cols,
         )
-

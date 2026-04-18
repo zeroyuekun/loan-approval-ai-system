@@ -28,7 +28,7 @@ def _clear_cache():
     prediction_cache.clear_model_cache()
 
 
-def _make_mock_version(pk=1, path="/tmp/fake.joblib", file_hash=None):
+def _make_mock_version(pk=1, path="/tmp/fake.joblib", file_hash=None):  # noqa: S108 — mock return, no file IO
     v = MagicMock()
     v.id = pk
     v.file_path = path
@@ -109,7 +109,7 @@ class TestLoadBundle:
     @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
     @patch("apps.ml_engine.services.prediction_cache.joblib.load")
     def test_cache_hit_avoids_repeat_load(self, mock_load, mock_validate, mock_verify):
-        mock_validate.return_value = "/tmp/fake.joblib"
+        mock_validate.return_value = "/tmp/fake.joblib"  # noqa: S108 — mock return, no file IO
         mock_load.side_effect = [{"model": "A"}, {"model": "B"}]
         version = _make_mock_version(pk=1)
 
@@ -121,7 +121,7 @@ class TestLoadBundle:
     @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
     @patch("apps.ml_engine.services.prediction_cache.joblib.load")
     def test_cache_reloads_after_ttl(self, mock_load, mock_validate, mock_verify):
-        mock_validate.return_value = "/tmp/fake.joblib"
+        mock_validate.return_value = "/tmp/fake.joblib"  # noqa: S108 — mock return, no file IO
         mock_load.side_effect = [{"model": "A"}, {"model": "B"}]
         version = _make_mock_version(pk=1)
 
@@ -136,7 +136,7 @@ class TestLoadBundle:
     @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
     @patch("apps.ml_engine.services.prediction_cache.joblib.load")
     def test_cache_bounded_to_maxsize(self, mock_load, mock_validate, mock_verify):
-        mock_validate.return_value = "/tmp/fake.joblib"
+        mock_validate.return_value = "/tmp/fake.joblib"  # noqa: S108 — mock return, no file IO
         mock_load.side_effect = [{"m": i} for i in range(10)]
 
         for i in range(5):
@@ -148,7 +148,7 @@ class TestLoadBundle:
     @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
     @patch("apps.ml_engine.services.prediction_cache.joblib.load")
     def test_clear_model_cache_empties(self, mock_load, mock_validate, mock_verify):
-        mock_validate.return_value = "/tmp/fake.joblib"
+        mock_validate.return_value = "/tmp/fake.joblib"  # noqa: S108 — mock return, no file IO
         mock_load.return_value = {"model": "A"}
 
         prediction_cache._load_bundle(_make_mock_version(pk=1))

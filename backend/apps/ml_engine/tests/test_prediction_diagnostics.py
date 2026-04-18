@@ -27,7 +27,6 @@ from apps.ml_engine.services.prediction_diagnostics import (
     run_stress_scenarios,
 )
 
-
 # ---------------------------------------------------------------------------
 # check_feature_drift
 # ---------------------------------------------------------------------------

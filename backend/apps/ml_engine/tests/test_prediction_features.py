@@ -14,8 +14,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
 from apps.ml_engine.services.prediction_features import (
     build_prediction_features,
     derive_underwriter_features,
