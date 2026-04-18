@@ -1,4 +1,4 @@
-.PHONY: dev down build test lint seed train logs health clean clean-deep typecheck security verify deadcode
+.PHONY: dev down build test lint seed train logs health clean clean-soft clean-deep typecheck security verify deadcode
 
 # Development
 dev:                     ## Start all services
@@ -90,15 +90,19 @@ health:                  ## Check service health
 	@curl -s http://localhost:8000/api/v1/health/deep/ | python -m json.tool
 
 # Cleanup
-clean:                   ## Nuke ephemerals (containers, caches, build output)
-	docker compose down -v
+clean-soft:              ## Clear caches + build output; KEEPS docker volumes (DB, redis, etc.)
 	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find backend -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -not -path "*/node_modules/*" -delete 2>/dev/null || true
 	rm -rf frontend/.next frontend/coverage frontend/playwright-report frontend/test-results
 	rm -rf backend/htmlcov backend/.coverage backend/.pytest_cache
 	rm -f frontend/tsconfig.tsbuildinfo
-	@echo "Clean complete. Re-run 'make build' then 'make dev' to restart."
+	@echo "Soft-clean complete. Docker volumes preserved (postgres/redis data intact)."
+
+clean:                   ## FULL wipe: containers + volumes + caches. Use clean-soft day-to-day.
+	docker compose down -v
+	$(MAKE) clean-soft
+	@echo "Full clean complete. Re-run 'make build' then 'make dev' to restart. DB was wiped."
 
 clean-deep:              ## clean + remove node_modules + .venv (forces reinstall)
 	$(MAKE) clean
