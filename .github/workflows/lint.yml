@@ -94,7 +94,7 @@ jobs:
 
       - name: Install mypy + stubs
         run: |
-          pip install "mypy>=1.13" types-requests cachetools numpy pandas-stubs
+          pip install "mypy>=1.13" types-requests types-cachetools numpy pandas-stubs
 
       - name: mypy (Arm C Phase 1 extraction modules)
         working-directory: backend
