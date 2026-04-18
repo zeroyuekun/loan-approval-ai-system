@@ -192,6 +192,22 @@ A separate `watchdog` service runs in the core stack at all times. It polls ever
 
 ~1000 tests across 66 files. 60% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
 
+## Housekeeping
+
+Local development accumulates build artifacts, test caches, and trained model files. To reclaim disk:
+
+```bash
+make clean       # ephemerals (containers, .next, coverage, __pycache__, tsbuildinfo)
+make clean-deep  # also removes node_modules and backend/.venv (forces reinstall)
+```
+
+To prune stale trained-model `.joblib` artifacts from `backend/ml_models/` (after many training iterations):
+
+```bash
+docker compose exec backend python manage.py prune_model_artifacts --dry-run  # preview
+docker compose exec backend python manage.py prune_model_artifacts            # delete
+```
+
 ## Limitations and honest caveats
 
 - **Trained on synthetic data.** The data generator is calibrated against ATO, ABS, APRA, and Equifax published statistics and runs the labels through a 1000-line rules-based underwriting engine plus a separate loan-performance simulator, so the learning task is non-trivial. It does not capture real-world feedback loops, fraud patterns, broker channel effects, or lender-specific heuristics. A production rollout would retrain on real historical data before trusting the outputs.
