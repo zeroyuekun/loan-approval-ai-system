@@ -240,6 +240,10 @@ ML_XGB_N_JOBS = 2
 # safeguards.
 CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shadow")
 
+# D7 — MRM dossier auto-generation on ModelVersion post_save.
+# Enabled by default; disable in unit tests that create throwaway models.
+MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").lower() == "true"
+
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True

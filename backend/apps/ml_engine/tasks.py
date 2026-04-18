@@ -366,3 +366,45 @@ def compute_weekly_drift_report(self):
         "alert_level": alert_level,
         "num_predictions": num_predictions,
     }
+
+
+@shared_task(
+    bind=True,
+    name="apps.ml_engine.tasks.generate_mrm_dossier_task",
+    time_limit=300,
+    soft_time_limit=280,
+    autoretry_for=(OSError,),
+    retry_backoff=True,
+    max_retries=1,
+)
+def generate_mrm_dossier_task(self, model_version_id: str):
+    """Generate an MRM dossier for a ModelVersion on the `ml` queue.
+
+    Invoked from the post_save signal on ModelVersion. Non-blocking:
+    failures log a warning but do not surface back to the caller that
+    created the model. Idempotent — overwriting an existing dossier is
+    the correct behaviour when the metrics payload changes (e.g. a
+    post-training fairness update calls save() again).
+    """
+    try:
+        mv = ModelVersion.objects.get(pk=model_version_id)
+    except ModelVersion.DoesNotExist:
+        logger.warning("generate_mrm_dossier_task: ModelVersion %s not found", model_version_id)
+        return {"status": "skipped", "reason": "model_not_found"}
+
+    from apps.ml_engine.services.mrm_dossier import write_dossier
+
+    output_dir = str(settings.ML_MODELS_DIR)
+    try:
+        path = write_dossier(mv, output_dir)
+    except Exception as exc:
+        logger.warning(
+            "generate_mrm_dossier_task: failed for %s: %s",
+            model_version_id,
+            exc,
+            exc_info=True,
+        )
+        return {"status": "failed", "error": str(exc)}
+
+    logger.info("MRM dossier written for model %s → %s", model_version_id, path)
+    return {"status": "ok", "path": path}

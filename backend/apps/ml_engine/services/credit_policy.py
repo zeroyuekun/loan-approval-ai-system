@@ -307,6 +307,44 @@ _REFER_RULES = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Declarative catalogue (used by the MRM dossier and admin UI).
+# Keeping this declarative block beside the rule functions keeps the
+# code / severity / one-line description in one place without coupling
+# the runtime evaluation to docstring parsing.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PolicyRuleSpec:
+    code: str
+    severity: str  # "hard_fail" or "refer"
+    description: str
+
+
+POLICY_RULES: List[PolicyRuleSpec] = [
+    PolicyRuleSpec("P01", "hard_fail", "Non-resident / ineligible visa (bridging/student/tourist) — decline"),
+    PolicyRuleSpec("P02", "hard_fail", f"Applicant age < 18 or age at maturity > 75"),
+    PolicyRuleSpec("P03", "hard_fail", "Undischarged bankruptcy or within 7yr window — decline"),
+    PolicyRuleSpec("P04", "hard_fail", "Active ATO tax-debt default flag — decline"),
+    PolicyRuleSpec("P05", "hard_fail", f"Credit score below floor {MIN_CREDIT_SCORE} — decline"),
+    PolicyRuleSpec(
+        "P06",
+        "hard_fail",
+        f"LVR > {MAX_LVR_HOME:.0%} owner-occupier or ≥ {MAX_LVR_ANY:.0%} any — decline",
+    ),
+    PolicyRuleSpec("P07", "hard_fail", f"DTI exceeds APRA intervention ceiling {MAX_DTI:.1f}× — decline"),
+    PolicyRuleSpec("P08", "refer", f"LTI > {REFER_LTI:.0f}× — refer to manual underwriting"),
+    PolicyRuleSpec("P09", "refer", "Postcode default rate > 8% — geographic concentration review"),
+    PolicyRuleSpec(
+        "P10",
+        "refer",
+        f"Self-employed with < {MIN_EMP_TENURE_MONTHS_SE}mo trading history — refer",
+    ),
+    PolicyRuleSpec("P11", "refer", "Hardship flag(s) on file — AFCA 2023 mandates human review"),
+    PolicyRuleSpec("P12", "refer", "Personal loan > $50k TMD band — refer to TMD-aware underwriting"),
+]
+
+
 def evaluate(application) -> PolicyResult:
     """Run the full overlay against one application and return a PolicyResult.
 
