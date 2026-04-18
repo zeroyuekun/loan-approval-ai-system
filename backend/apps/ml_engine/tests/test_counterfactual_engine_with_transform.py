@@ -101,7 +101,7 @@ def test_engine_runs_against_transforming_model():
 
     # Must not raise. Previously would raise
     # ``KeyError: '[purpose_home, ..., state_QLD] not in index'``.
-    results = engine.generate(raw_query, original_loan_amount=300000.0, timeout_seconds=2)
+    results = engine.generate(raw_query, original_loan_amount=300000.0)
 
     # Binary-search fallback should produce at least one suggestion
     assert isinstance(results, list)
@@ -149,6 +149,6 @@ def test_engine_without_transform_still_works():
         threshold=0.5,
         # No transform_fn — identity path
     )
-    results = engine.generate(query, original_loan_amount=250000.0, timeout_seconds=2)
+    results = engine.generate(query, original_loan_amount=250000.0)
     assert isinstance(results, list)
     assert len(results) >= 1
