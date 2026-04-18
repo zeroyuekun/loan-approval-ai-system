@@ -31,8 +31,10 @@ repos:
       - id: mypy
         files: ^backend/apps/ml_engine/services/(feature_prep|prediction_cache|policy_overlay|policy_recompute|prediction_diagnostics|prediction_explanations|prediction_features|shadow_scoring|shap_attribution|decision_assembly)\.py$
         additional_dependencies:
-          - django-stubs[compatible-mypy]
           - types-requests
+          - cachetools
+          - numpy
+          - pandas-stubs
         args: ["--config-file=backend/mypy.ini"]
 
   - repo: https://github.com/gitleaks/gitleaks

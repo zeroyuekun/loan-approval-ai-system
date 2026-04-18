@@ -12,4 +12,3 @@ ruff>=0.8.6
 pip-audit>=2.7
 vulture>=2.13
 mypy>=1.13
-django-stubs[compatible-mypy]>=5.1
