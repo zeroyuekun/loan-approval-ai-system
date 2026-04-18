@@ -44,7 +44,7 @@ class CalibrationValidator:
         if apra_benchmarks is not None:
             self._apra = apra_benchmarks
         else:
-            from backend.apps.ml_engine.services.macro_data_service import (
+            from apps.ml_engine.services.macro_data_service import (
                 MacroDataService,
             )
 
