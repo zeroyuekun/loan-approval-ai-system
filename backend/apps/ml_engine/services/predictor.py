@@ -17,6 +17,7 @@ from prometheus_client import Counter, Histogram
 
 from apps.ml_engine.services.consistency import DataConsistencyChecker
 from apps.ml_engine.services.feature_prep import (
+    FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
     safe_get_state as _safe_get_state_helper,
     validate_input as _validate_input_helper,
 )
@@ -86,79 +87,6 @@ ml_drift_warnings_total = Counter(
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Bounds for input validation: (min, max) inclusive.
-FEATURE_BOUNDS = {
-    "annual_income": (0, 10_000_000),
-    "credit_score": (0, 1200),  # Equifax Australia scale
-    "loan_amount": (0, 5_000_000),  # Aligned with LoanApplication.loan_amount MaxValueValidator
-    "loan_term_months": (1, 600),
-    "debt_to_income": (0.0, 100.0),
-    "employment_length": (0, 60),
-    "has_cosigner": (0, 1),
-    "property_value": (0, 100_000_000),
-    "deposit_amount": (0, 5_000_000),  # Cannot exceed loan amount
-    "monthly_expenses": (0, 1_000_000),
-    "existing_credit_card_limit": (0, 10_000_000),
-    "number_of_dependants": (0, 10),  # Aligned with LoanApplication.number_of_dependants MaxValueValidator
-    "has_hecs": (0, 1),
-    "has_bankruptcy": (0, 1),
-    "num_credit_enquiries_6m": (0, 50),
-    "worst_arrears_months": (0, 36),
-    "num_defaults_5yr": (0, 20),
-    "credit_history_months": (0, 600),
-    "total_open_accounts": (0, 50),
-    "num_bnpl_accounts": (0, 20),
-    "savings_balance": (0, 10_000_000),
-    "salary_credit_regularity": (0, 1),
-    "num_dishonours_12m": (0, 100),
-    "avg_monthly_savings_rate": (-1, 1),
-    "days_in_overdraft_12m": (0, 365),
-    "rba_cash_rate": (0, 20),
-    "unemployment_rate": (0, 30),
-    "property_growth_12m": (-50, 100),
-    "consumer_confidence": (0, 200),
-    "income_verification_gap": (0, 10),
-    "document_consistency_score": (0, 1),
-    # CCR features
-    "num_late_payments_24m": (0, 50),
-    "worst_late_payment_days": (0, 90),
-    "total_credit_limit": (0, 5_000_000),
-    "credit_utilization_pct": (0, 1),
-    "num_hardship_flags": (0, 10),
-    "months_since_last_default": (0, 999),
-    "num_credit_providers": (0, 30),
-    # BNPL-specific
-    "bnpl_total_limit": (0, 100_000),
-    "bnpl_utilization_pct": (0, 1),
-    "bnpl_late_payments_12m": (0, 50),
-    "bnpl_monthly_commitment": (0, 10_000),
-    # CDR/Open Banking transaction features
-    "income_source_count": (0, 20),
-    "rent_payment_regularity": (0, 1),
-    "utility_payment_regularity": (0, 1),
-    "essential_to_total_spend": (0, 1),
-    "subscription_burden": (0, 1),
-    "balance_before_payday": (-10_000, 1_000_000),
-    "min_balance_30d": (-10_000, 1_000_000),
-    "days_negative_balance_90d": (0, 90),
-    # Geographic risk
-    "postcode_default_rate": (0, 1),
-    # Behavioral features
-    "financial_literacy_score": (0.0, 1.0),
-    "prepayment_buffer_months": (0, 60),
-    "optimism_bias_flag": (0, 1),
-    "negative_equity_flag": (0, 1),
-    # Underwriter-internal variables exposed as features.
-    # effective_loan_amount ceiling must cover max loan_amount (5M) + max
-    # LMI premium (3% * 5M = 150k) with headroom, otherwise large high-LVR
-    # home loans fail validation before reaching the model.
-    "hem_benchmark": (0, 20_000),
-    "hem_gap": (-20_000, 20_000),
-    "lmi_premium": (0, 200_000),
-    "effective_loan_amount": (0, 5_200_000),
-}
 
 
 def compute_risk_grade(probability):
