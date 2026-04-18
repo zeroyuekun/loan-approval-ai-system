@@ -34,7 +34,7 @@ class Command(BaseCommand):
             profile.has_credit_card = random.random() > 0.3
             profile.has_mortgage = random.random() > 0.6
             profile.has_auto_loan = random.random() > 0.7
-            profile.on_time_payment_pct = round(random.uniform(0.75, 1.0), 4)
+            profile.on_time_payment_pct = round(random.uniform(75.0, 100.0), 2)
             profile.previous_loans_repaid = random.randint(0, 5)
 
             # Loyalty tier based on tenure & products
