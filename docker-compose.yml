@@ -296,27 +296,9 @@ services:
     networks:
       - internal
 
-  grafana:
-    image: grafana/grafana:latest
-    container_name: loan-approval-grafana
-    profiles: ["monitoring"]
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-      - grafana_data:/var/lib/grafana
-    ports:
-      - "127.0.0.1:3001:3000"
-    depends_on:
-      prometheus:
-        condition: service_started
-      loki:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - internal
+  # grafana moved to docker-compose.monitoring.yml so the main stack parses
+  # without forcing GRAFANA_ADMIN_PASSWORD on developers who don't use the
+  # monitoring profile. See docker-compose.monitoring.yml for the service.
 
   loki:
     image: grafana/loki:3.4.2
@@ -416,6 +398,6 @@ volumes:
   redis_data:
   loki_data:
   prometheus_data:
-  grafana_data:
+  # grafana_data is declared in docker-compose.monitoring.yml
   frontend_next:
   frontend_node_modules:

@@ -172,13 +172,15 @@ JWT with HttpOnly cookies, 60-min access / 7-day refresh with rotation and black
 
 ## Monitoring and observability
 
-A full monitoring stack ships in the same compose file behind the `monitoring` profile — Prometheus, Grafana, Loki, Promtail, Alertmanager, a Celery exporter, and a Postgres exporter. Django exposes `/metrics` via `django-prometheus` with request latencies, ORM query counts, Celery task counters, and a custom training-duration histogram. Nothing runs by default, so the core stack stays small; you opt in when you want dashboards.
+A full monitoring stack ships behind the `monitoring` profile — Prometheus, Grafana, Loki, Promtail, Alertmanager, a Celery exporter, and a Postgres exporter. Django exposes `/metrics` via `django-prometheus` with request latencies, ORM query counts, Celery task counters, and a custom training-duration histogram. Nothing runs by default, so the core stack stays small; you opt in when you want dashboards.
 
-Launch it alongside the regular stack:
+Grafana lives in `docker-compose.monitoring.yml` so the main stack parses without a Grafana admin password. Before launching, set `GRAFANA_ADMIN_PASSWORD` in `.env` (compose refuses to start the monitoring profile without it — no silent fallback), then launch alongside the regular stack:
 
 ```bash
-docker compose --profile monitoring up -d
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml --profile monitoring up -d
 ```
+
+Or set `COMPOSE_FILE=docker-compose.yml:docker-compose.monitoring.yml` in `.env` to make both files the default, after which `docker compose --profile monitoring up -d` works as before.
 
 Then:
 
