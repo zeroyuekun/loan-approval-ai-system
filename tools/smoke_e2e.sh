@@ -78,33 +78,53 @@ for i in {1..60}; do
 done
 
 random=$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8 || echo "smoke$(date +%s)")
+username=$(jq -r ".user.username" "${FIXTURE}" | sed "s/{{RANDOM}}/${random}/")
 email=$(jq -r ".user.email" "${FIXTURE}" | sed "s/{{RANDOM}}/${random}/")
 password=$(jq -r ".user.password" "${FIXTURE}")
 first_name=$(jq -r ".user.first_name" "${FIXTURE}")
 last_name=$(jq -r ".user.last_name" "${FIXTURE}")
 
-echo "[smoke] Registering customer ${email}..."
+COOKIE_JAR="${REPO_ROOT}/.tmp/smoke_cookies_${random}.txt"
+trap 'rm -f "${COOKIE_JAR}"; cleanup' EXIT
+
+csrf_header() {
+  local token
+  token=$(awk '/csrftoken/ {print $NF}' "${COOKIE_JAR}" | tail -n 1)
+  echo "X-CSRFToken: ${token}"
+}
+
+echo "[smoke] Registering customer ${email} (username=${username})..."
 curl -fsS -X POST "${API_BASE}/auth/register/" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"${email}\",\"password\":\"${password}\",\"first_name\":\"${first_name}\",\"last_name\":\"${last_name}\",\"role\":\"customer\"}" \
+  -d "{\"username\":\"${username}\",\"email\":\"${email}\",\"password\":\"${password}\",\"password2\":\"${password}\",\"first_name\":\"${first_name}\",\"last_name\":\"${last_name}\"}" \
   > /dev/null || { write_result "failure" "register-failed"; exit 1; }
 
-echo "[smoke] Logging in..."
-login_response=$(curl -fsS -X POST "${API_BASE}/auth/login/" \
+echo "[smoke] Logging in (cookie auth)..."
+curl -fsS -c "${COOKIE_JAR}" -X POST "${API_BASE}/auth/login/" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"${email}\",\"password\":\"${password}\"}" \
-  || { write_result "failure" "login-failed"; exit 1; })
-access_token=$(echo "${login_response}" | jq -r ".access // .access_token // .token // empty")
-if [[ -z "${access_token}" ]]; then
-  write_result "failure" "no-access-token-returned"
+  -d "{\"username\":\"${username}\",\"password\":\"${password}\"}" \
+  > /dev/null || { write_result "failure" "login-failed"; exit 1; }
+
+if ! grep -q "csrftoken" "${COOKIE_JAR}"; then
+  write_result "failure" "no-csrf-cookie"
   exit 1
 fi
 
+echo "[smoke] Populating customer profile..."
+profile_payload=$(jq -c ".profile" "${FIXTURE}")
+curl -fsS -b "${COOKIE_JAR}" -X PATCH "${API_BASE}/auth/me/profile/" \
+  -H "Content-Type: application/json" \
+  -H "$(csrf_header)" \
+  -H "Referer: http://localhost:8000/" \
+  -d "${profile_payload}" \
+  > /dev/null || { write_result "failure" "profile-patch-failed"; exit 1; }
+
 echo "[smoke] Submitting loan application..."
 application_payload=$(jq -c ".application" "${FIXTURE}")
-application_response=$(curl -fsS -X POST "${API_BASE}/loans/" \
+application_response=$(curl -fsS -b "${COOKIE_JAR}" -X POST "${API_BASE}/loans/" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${access_token}" \
+  -H "$(csrf_header)" \
+  -H "Referer: http://localhost:8000/" \
   -d "${application_payload}" \
   || { write_result "failure" "application-submit-failed"; exit 1; })
 application_id=$(echo "${application_response}" | jq -r ".id // .uuid // empty")
@@ -115,16 +135,17 @@ fi
 echo "[smoke] Application ${application_id} submitted."
 
 echo "[smoke] Triggering orchestrator..."
-curl -fsS -X POST "${API_BASE}/agents/orchestrate/${application_id}/" \
-  -H "Authorization: Bearer ${access_token}" > /dev/null \
+curl -fsS -b "${COOKIE_JAR}" -X POST "${API_BASE}/agents/orchestrate/${application_id}/" \
+  -H "$(csrf_header)" \
+  -H "Referer: http://localhost:8000/" \
+  > /dev/null \
   || { write_result "failure" "orchestrate-trigger-failed"; exit 1; }
 
 echo "[smoke] Polling for terminal decision (120s ceiling)..."
 decision=""
 app_detail=""
 for i in {1..120}; do
-  app_detail=$(curl -fsS "${API_BASE}/loans/${application_id}/" \
-    -H "Authorization: Bearer ${access_token}")
+  app_detail=$(curl -fsS -b "${COOKIE_JAR}" "${API_BASE}/loans/${application_id}/")
   decision=$(echo "${app_detail}" | jq -r ".status // empty")
   if [[ "${decision}" == "approved" || "${decision}" == "declined" || "${decision}" == "referred" ]]; then
     echo "[smoke] Terminal decision reached after ${i}s: ${decision}"
@@ -143,8 +164,7 @@ model_version=$(echo "${app_detail}" | jq -r ".model_version_id // .ml_predictio
 echo "[smoke] Polling for generated email (30s ceiling)..."
 email_subject=""
 for i in {1..30}; do
-  email_detail=$(curl -fsS "${API_BASE}/emails/${application_id}/" \
-    -H "Authorization: Bearer ${access_token}" 2>/dev/null || echo "{}")
+  email_detail=$(curl -fsS -b "${COOKIE_JAR}" "${API_BASE}/emails/${application_id}/" 2>/dev/null || echo "{}")
   email_subject=$(echo "${email_detail}" | jq -r ".subject // empty")
   if [[ -n "${email_subject}" ]]; then
     break

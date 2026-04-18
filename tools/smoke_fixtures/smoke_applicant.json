@@ -1,9 +1,24 @@
 {
   "user": {
+    "username": "smoke{{RANDOM}}",
     "email": "smoke-{{RANDOM}}@example.test",
     "password": "SmokePass!2026",
     "first_name": "Smoke",
     "last_name": "Tester"
+  },
+  "profile": {
+    "date_of_birth": "1990-06-15",
+    "phone": "+61 400 123 456",
+    "address_line_1": "12 George St",
+    "suburb": "Sydney",
+    "state": "NSW",
+    "postcode": "2000",
+    "residency_status": "citizen",
+    "primary_id_type": "drivers_licence",
+    "primary_id_number": "DL1234567",
+    "employment_status": "payg_permanent",
+    "gross_annual_income": 140000,
+    "housing_situation": "mortgage"
   },
   "application": {
     "annual_income": 140000,
@@ -23,8 +38,8 @@
     "monthly_expenses": 3200,
     "existing_credit_card_limit": 10000,
     "number_of_dependants": 0,
-    "employment_type": "full_time",
-    "applicant_type": "owner_occupier",
+    "employment_type": "payg_permanent",
+    "applicant_type": "single",
     "consumer_objectives": "Purchase principal place of residence for long-term owner-occupation.",
     "consumer_requirements": "30-year principal and interest loan with ability to make extra repayments without penalty.",
     "financial_situation_notes": "Stable full-time employment, no dependants, modest monthly expenses, substantial deposit."
