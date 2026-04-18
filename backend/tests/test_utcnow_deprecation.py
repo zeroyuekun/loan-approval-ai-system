@@ -4,6 +4,7 @@ Python 3.13 deprecates `datetime.utcnow()`; Python 3.14+ is scheduled to
 remove it. This test scans the services directory for the call and fails
 if any remain.
 """
+
 from pathlib import Path
 
 
