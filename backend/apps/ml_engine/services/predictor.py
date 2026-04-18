@@ -22,6 +22,10 @@ from django.conf import settings
 from prometheus_client import Counter, Histogram
 
 from apps.ml_engine.services.consistency import DataConsistencyChecker
+from apps.ml_engine.services.feature_prep import (
+    safe_get_state as _safe_get_state_helper,
+    validate_input as _validate_input_helper,
+)
 from apps.ml_engine.services.policy_recompute import (
     recompute_lvr_driven_policy_vars as _recompute_lvr_driven_policy_vars,
 )
@@ -289,48 +293,11 @@ class ModelPredictor:
     @staticmethod
     def _safe_get_state(application):
         """Safely get state from application, handling unmigrated databases."""
-        try:
-            state = getattr(application, "state", None)
-            if state:
-                return state
-        except Exception as e:
-            logger.debug("Could not read state from application, defaulting to NSW: %s", e)
-        return "NSW"
+        return _safe_get_state_helper(application)
 
     def _validate_input(self, features: dict):
-        """Validate feature values are within reasonable bounds.
-
-        Raises ValueError with details on any out-of-bounds values.
-        """
-        bounds = {**FEATURE_BOUNDS}
-        # Data-driven bounds can only widen the hardcoded range, never narrow it.
-        # This prevents the training set's min/max from rejecting legitimate
-        # edge-case applicants (e.g. credit_score 620, 3 months arrears).
-        for col, (data_lo, data_hi) in self.feature_bounds.items():
-            if col in bounds:
-                hard_lo, hard_hi = bounds[col]
-                bounds[col] = (min(hard_lo, data_lo), max(hard_hi, data_hi))
-            else:
-                bounds[col] = (data_lo, data_hi)
-
-        errors = []
-        for col, (lo, hi) in bounds.items():
-            val = features.get(col)
-            if val is None:
-                continue
-            try:
-                val = float(val)
-            except (TypeError, ValueError):
-                errors.append(f"{col}: cannot convert {val!r} to number")
-                continue
-            if math.isnan(val) or math.isinf(val):
-                errors.append(f"{col}: invalid value (nan/inf not allowed)")
-                continue
-            if val < lo or val > hi:
-                errors.append(f"{col}: {val} is outside valid range [{lo}, {hi}]")
-
-        if errors:
-            raise ValueError("Input validation failed: " + "; ".join(errors))
+        """Validate feature values against hard + user bounds. See `feature_prep`."""
+        _validate_input_helper(features, FEATURE_BOUNDS, user_bounds=self.feature_bounds)
 
     def _transform(self, df):
         """Transform a DataFrame using the saved preprocessing artifacts.
