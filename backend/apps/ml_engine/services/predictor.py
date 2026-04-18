@@ -38,6 +38,9 @@ from apps.ml_engine.services.prediction_features import (
 from apps.ml_engine.services.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
 )
+from apps.ml_engine.services.policy_overlay import (
+    apply_policy_overlay as _apply_policy_overlay_helper,
+)
 from apps.ml_engine.services.shap_attribution import (
     compute_shap_attribution as _compute_shap_attribution_helper,
 )
@@ -428,75 +431,13 @@ class ModelPredictor:
             logger.warning("Pricing tier computation failed", exc_info=True)
             pricing_payload = {"tier": "unavailable", "approved": True}
 
-        # === Credit policy overlay (D3) ============================
-        # Evaluate always so shadow-mode logs capture what WOULD have
-        # happened under enforce; mode decides whether the verdict is
-        # actually applied. Rule evaluation is cheap (<1ms) and pure.
-        try:
-            from apps.ml_engine.services import credit_policy as _policy
-
-            policy_result = _policy.evaluate(application)
-            policy_mode = _policy.current_mode()
-            final_prediction = _policy.apply_overlay_to_decision(prediction_label, policy_result, policy_mode)
-
-            if policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
-                # Shadow mode: log what enforce would have done.
-                hypothetical = _policy.apply_overlay_to_decision(
-                    prediction_label, policy_result, _policy.OVERLAY_MODE_ENFORCE
-                )
-                if hypothetical != prediction_label:
-                    logger.warning(
-                        "credit_policy_shadow_disagreement",
-                        extra={
-                            "model_version": str(self.model_version.id),
-                            "model_decision": prediction_label,
-                            "policy_hypothetical": hypothetical,
-                            "hard_fails": policy_result.hard_fails,
-                            "refers": policy_result.refers,
-                        },
-                    )
-
-            policy_payload = {
-                **policy_result.to_dict(),
-                "mode": policy_mode,
-                "changed_model_decision": final_prediction != prediction_label,
-            }
-
-            # Enforce-mode refer takes precedence over model borderline flag —
-            # send to human review rather than approve/deny auto-pathway.
-            if policy_mode == _policy.OVERLAY_MODE_ENFORCE and policy_result.has_refer:
-                requires_human_review = True
-
-            # D6 — referral audit trail (orthogonal to bias review queue).
-            # Persist on the LoanApplication itself so admins can query
-            # referrals via /api/loans/referrals/. Save is wrapped in a
-            # try/except so a persistence failure never breaks prediction.
-            if policy_result.has_refer and application is not None:
-                try:
-                    application.referral_status = application.ReferralStatus.REFERRED
-                    application.referral_codes = list(policy_result.refers)
-                    application.referral_rationale = {
-                        code: policy_result.rationale_by_code.get(code, "") for code in policy_result.refers
-                    }
-                    application.save(update_fields=["referral_status", "referral_codes", "referral_rationale"])
-                except Exception:
-                    logger.warning(
-                        "referral_audit_save_failed",
-                        exc_info=True,
-                        extra={
-                            "application_id": str(getattr(application, "id", None)),
-                            "refers": list(policy_result.refers),
-                        },
-                    )
-
-            prediction_label = final_prediction
-        except Exception as _policy_exc:
-            logger.warning("credit_policy_evaluate_failed", exc_info=True)
-            policy_payload = {
-                "passed": None,
-                "mode": "off",
-                "error": str(_policy_exc),
-            }
+        # === Credit policy overlay (D3) + referral audit (D6) ======
+        prediction_label, requires_human_review, policy_payload = _apply_policy_overlay_helper(
+            application=application,
+            model_version=self.model_version,
+            prediction_label=prediction_label,
+            requires_human_review=requires_human_review,
+        )
 
         result = {
             "prediction": prediction_label,
