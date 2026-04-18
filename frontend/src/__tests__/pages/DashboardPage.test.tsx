@@ -13,7 +13,15 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
-vi.stubGlobal('ResizeObserver', vi.fn(() => ({ observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() })))
+// Recharts uses ResizeObserver which is not available in jsdom. Vitest 4's
+// vi.fn() returns a spy that is not callable as a constructor, so use a
+// class-based mock matching the ModelMetricsPage test pattern.
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal('ResizeObserver', ResizeObserverMock)
 
 import DashboardPage from '@/app/dashboard/page'
 
