@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -214,8 +214,8 @@ class PlaidPatternsService:
 
     def _get_transactions(self, access_token: str, days: int = 90) -> list | None:
         """Fetch transactions from sandbox account."""
-        end_date = datetime.utcnow().strftime("%Y-%m-%d")
-        start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end_date = datetime.now(UTC).strftime("%Y-%m-%d")
+        start_date = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
 
         try:
             with httpx.Client(timeout=self.timeout) as client:

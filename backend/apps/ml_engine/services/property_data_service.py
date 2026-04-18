@@ -18,7 +18,7 @@ multiplier adjusts within that state.
 import copy
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import numpy as np
@@ -532,7 +532,7 @@ class PropertyDataService:
 
     def _get_cached(self, cache_key: str) -> dict | None:
         """Return cached value if still within TTL, else None."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         ts = self._cache_timestamps.get(cache_key)
         if ts and cache_key in self._cache:
             if (now - ts) < timedelta(hours=_CACHE_TTL_HOURS):
@@ -542,7 +542,7 @@ class PropertyDataService:
     def _set_cached(self, cache_key: str, value: dict) -> None:
         """Store value in cache with current timestamp."""
         self._cache[cache_key] = value
-        self._cache_timestamps[cache_key] = datetime.utcnow()
+        self._cache_timestamps[cache_key] = datetime.now(UTC)
 
     # ------------------------------------------------------------------
     # Public methods

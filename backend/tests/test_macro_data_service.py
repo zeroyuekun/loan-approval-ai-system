@@ -4,7 +4,7 @@ All tests mock httpx so no real API calls are made.
 """
 
 import unittest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from apps.ml_engine.services.macro_data_service import (
@@ -267,7 +267,7 @@ class TestCaching(unittest.TestCase):
         svc.get_gdp_growth()
 
         # Manually expire cache
-        svc._cache_timestamps["gdp_growth"] = datetime.utcnow() - timedelta(hours=_CACHE_TTL_HOURS + 1)
+        svc._cache_timestamps["gdp_growth"] = datetime.now(UTC) - timedelta(hours=_CACHE_TTL_HOURS + 1)
         svc.get_gdp_growth()
 
         # Should have fetched twice
@@ -285,7 +285,7 @@ class TestCaching(unittest.TestCase):
         svc.get_gdp_growth()
 
         # Expire cache, then make API fail
-        svc._cache_timestamps["gdp_growth"] = datetime.utcnow() - timedelta(hours=_CACHE_TTL_HOURS + 1)
+        svc._cache_timestamps["gdp_growth"] = datetime.now(UTC) - timedelta(hours=_CACHE_TTL_HOURS + 1)
         mock_client_cls.side_effect = Exception("API down")
 
         result2 = svc.get_gdp_growth()

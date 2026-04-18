@@ -20,7 +20,7 @@ constants, so generation never breaks if APIs are unreachable.
 import csv
 import io
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -313,7 +313,7 @@ class RealWorldBenchmarks:
 
     def _fetch_with_cache(self, cache_key: str, fetch_fn, fallback, ttl_hours: int = _CACHE_TTL_HOURS):
         """Generic cache-or-fetch pattern with TTL and fallback."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         ts = self._cache_timestamps.get(cache_key)
         if ts and cache_key in self._cache:
             if (now - ts) < timedelta(hours=ttl_hours):
@@ -492,7 +492,7 @@ class RealWorldBenchmarks:
             "f6_rates": self.get_rba_f6_rates(),
             "help_debt_stats": self.get_help_debt_statistics(),
             "rba_household_debt": self.get_rba_household_debt(),
-            "fetched_at": datetime.utcnow().isoformat(),
+            "fetched_at": datetime.now(UTC).isoformat(),
         }
         logger.info(
             "Calibration snapshot assembled — sources: %s",
