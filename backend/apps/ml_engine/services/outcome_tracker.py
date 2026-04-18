@@ -110,7 +110,7 @@ def compute_outcome_analysis(days=90):
     }
 
 
-def compute_vintage_analysis(months_back=12):
+def compute_vintage_analysis():
     """Track outcome rates by origination month (vintage curves).
 
     Returns list of dicts:
