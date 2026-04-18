@@ -16,7 +16,7 @@ References:
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ class CalibrationValidator:
             "recommendations": recommendations,
             "apra_quarter": apra_quarter,
             "apra_published_date": apra_published,
-            "validated_at": datetime.utcnow().isoformat() + "Z",
+            "validated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
         logger.info(
@@ -396,7 +396,7 @@ class CalibrationValidator:
         """
         report = {
             "report_type": "calibration_validation",
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "apra_quarter": self._apra.get("quarter", "unknown"),
             "apra_published_date": self._apra.get("published_date", "unknown"),
             "total_applications": total_applications,

@@ -25,7 +25,7 @@ the gap.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 
 # ---------------------------------------------------------------------------
 # Purpose statements per segment. Kept adjacent so a change to the training
@@ -348,7 +348,7 @@ def generate_dossier_markdown(mv) -> str:
     section headers (audit-visible evidence of gaps, rather than silent
     omission).
     """
-    generated_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     sections: Iterable[str] = [
         f"# Model Risk Management Dossier — `{mv.id}`",
         f"_Generated {generated_at} — APRA CPS 220 / SR 11-7 alignment_",

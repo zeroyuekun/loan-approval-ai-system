@@ -10,7 +10,7 @@ These replace hardcoded lookup tables in the data generator with real government
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -156,7 +156,7 @@ class MacroDataService:
 
     def _fetch_with_cache(self, cache_key: str, fetch_fn, ttl_hours: int = _CACHE_TTL_HOURS):
         """Generic cache-or-fetch pattern with TTL."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         ts = self._cache_timestamps.get(cache_key)
         if ts and cache_key in self._cache:
             if (now - ts) < timedelta(hours=ttl_hours):
