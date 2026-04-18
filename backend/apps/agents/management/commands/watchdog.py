@@ -18,8 +18,8 @@ import signal
 import sys
 import time
 
+import httpx
 import redis
-import requests
 from celery import Celery
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -110,7 +110,7 @@ class Command(BaseCommand):
         token = getattr(django_settings, "HEALTH_CHECK_TOKEN", "")
         headers = {"X-Health-Token": token} if token else {}
         try:
-            resp = requests.get(backend_url, timeout=10, headers=headers)
+            resp = httpx.get(backend_url, timeout=10, headers=headers)
             data = resp.json()
 
             db_ok = data.get("database") == "ok"
@@ -145,7 +145,7 @@ class Command(BaseCommand):
                     self.consecutive_failures,
                 )
 
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             self.consecutive_failures += 1
             logger.error(
                 "Health check unreachable (failure %d/%d): %s",
