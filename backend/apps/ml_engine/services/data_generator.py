@@ -1080,7 +1080,12 @@ class DataGenerator:
                     local_unemp = sa4_unemp.get(sa4_code, national_avg_unemp)
                     unemp_factor = 1.0 + 0.5 * (local_unemp - national_avg_unemp) / national_avg_unemp
                     base_default_rate[i] *= max(unemp_factor, 0.5)
-        geo_postcode_default_rate = base_default_rate + rng.normal(0, 0.003, size=n)
+        # Noise std 0.008 (was 0.003) to match real AU bureau correlation with SA4
+        # unemployment (~0.4, per Equifax/illion AU aggregates). Tighter noise was
+        # creating near-deterministic signal from unemployment → postcode_default_rate,
+        # artificially inflating AUC because the underwriter also uses
+        # postcode_default_rate as a feature. See docs/experiments/synthetic_data_realism_audit.md.
+        geo_postcode_default_rate = base_default_rate + rng.normal(0, 0.008, size=n)
         geo_postcode_default_rate = np.clip(geo_postcode_default_rate, 0.002, 0.05).round(4)
 
         _high_risk_industries = {"A", "B", "E", "H"}

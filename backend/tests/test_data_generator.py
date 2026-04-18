@@ -228,6 +228,30 @@ class TestRealWorldDistributions:
         mean_score = generated_data["credit_score"].mean()
         assert 750 <= mean_score <= 950, f"Mean credit score {mean_score:.0f} outside realistic range (750-950)"
 
+    def test_postcode_default_rate_correlation_realistic(self, generated_data):
+        """postcode_default_rate must have realistic (loose) correlation with the
+        approval label, not near-deterministic.
+
+        Real Equifax/illion Australia aggregates show postcode-level default
+        rate correlates with SA4 unemployment at r ~= 0.3-0.45. Because our
+        label is driven partly by unemployment-linked features, the synthetic
+        postcode_default_rate's absolute Pearson correlation with the binary
+        default label should fall in the same loose range. A correlation above
+        ~0.6 indicates the noise process is too tight — the feature becomes a
+        near-direct label copy and artificially inflates AUC.
+
+        See docs/experiments/synthetic_data_realism_audit.md (issue #1).
+        """
+        # Use the default-flag (inverse of approval for simplicity of interpretation)
+        rate = generated_data["postcode_default_rate"].astype(float)
+        label = (~generated_data["approved"].astype(bool)).astype(int)  # "defaulted" ~= "rejected"
+        corr = rate.corr(label)
+        assert abs(corr) < 0.25, (
+            f"postcode_default_rate correlation with label is {corr:.3f}, "
+            "which is tighter than real bureau data supports (expected |r| < 0.25). "
+            "This indicates signal concentration — reduce coupling or increase noise."
+        )
+
     def test_employment_type_proportions(self, generated_data):
         """Employment type proportions should roughly match ABS."""
         proportions = generated_data["employment_type"].value_counts(normalize=True)

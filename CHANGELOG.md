@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.9.8 — Synthetic Data Realism Audit + Postcode Leakage Fix (2026-04-18)
+
+### ML / Data Quality
+
+- **Fixed postcode signal concentration in `DataGenerator`.** `geo_postcode_default_rate` was computed as `base_default_rate * SA4_unemployment_factor + N(0, 0.003)` — the tight noise made the feature near-deterministic on the same unemployment signal that drives the label. The underwriting simulator also uses `postcode_default_rate` directly as a penalty input, which meant the model saw the same signal twice and learned a shortcut that wouldn't generalise. Noise std increased from **0.003 → 0.008** to match the real Equifax/illion AU bureau correlation with SA4 unemployment (r ≈ 0.3–0.45). No schema change, no retraining required for existing deployments.
+- **New test `test_postcode_default_rate_correlation_realistic`** enforces that the synthetic correlation stays below |r| < 0.25 with the approval label. Would have caught the original tight-noise bug.
+- **New audit document** `docs/experiments/synthetic_data_realism_audit.md` — feature-by-feature mapping of what in the synthetic data is (a) anchored to real AU statistics (HEM, APRA 3% buffer, NCCP serviceability, HECS FY25/26, ABS AWE, RBA cash rate, SA4 unemployment, CoreLogic property indexes, Melbourne Institute consumer confidence), (b) approximated, and (c) missing. Five follow-up issues catalogued with severity: HEM declared-vs-floor gap, LMI capitalisation, employment-rule alignment, income volatility features, and gambling-spend ratio validation. Linked from `backend/docs/MODEL_CARD.md`.
+
+### Housekeeping
+
+- Bumped `APP_VERSION` from `1.9.7` → `1.9.8`.
+
 ## v1.9.6 — Workstream B (partial): Throttle & Version Fixes (2026-04-18)
 
 ### Security
