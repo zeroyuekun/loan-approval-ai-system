@@ -225,7 +225,11 @@ class CustomerProfile(SoftDeleteModel):
     loyalty_tier = models.CharField(max_length=20, choices=Tier.choices, default=Tier.STANDARD)
 
     # ── Payment history ──
-    on_time_payment_pct = models.FloatField(default=100.0, help_text="Percentage of on-time payments")
+    on_time_payment_pct = models.FloatField(
+        default=100.0,
+        help_text="Percentage of on-time payments (0-100)",
+        validators=[MinValueValidator(0.0), MaxValueValidator(100.0)],
+    )
 
     # ── Privacy Act / consent tracking ──
     privacy_consent_given = models.BooleanField(
