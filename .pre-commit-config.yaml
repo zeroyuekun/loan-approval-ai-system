@@ -30,6 +30,16 @@ repos:
     hooks:
       - id: gitleaks
 
+  - repo: local
+    hooks:
+      - id: ml-engine-quality-bar
+        name: ml_engine/services quality bar
+        entry: python tools/check_file_sizes.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
 exclude: |
   (?x)^(
     frontend/node_modules/.* |
