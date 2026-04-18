@@ -1,3 +1,11 @@
+"""Synthetic Australian loan-application data generator.
+
+Orchestrates the benchmark resolver, behavioural-feature generator, loan-performance
+simulator, and underwriting engine to produce realistic AU-lending training sets with
+calibrated default rates, HEM-based serviceability, and post-approval Markov-chain
+performance trajectories. The primary entry point is `DataGenerator.generate(n)`.
+"""
+
 import os
 from datetime import date, timedelta
 

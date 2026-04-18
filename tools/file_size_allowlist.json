@@ -1,0 +1,20 @@
+{
+  "$comment": "Cap per file in LOC (blank-line + comment-inclusive). Files not listed default to the global cap of 500. Each Arm C phase-PR deletes its target from this map. See docs/superpowers/specs/2026-04-18-arm-c-ml-engine-quality-bar-design.md.",
+  "global_cap": 500,
+  "packages": {
+    "backend/apps/ml_engine/services": {
+      "files": {
+        "data_generator.py": 1559,
+        "real_world_benchmarks.py": 1378,
+        "trainer.py": 1324,
+        "predictor.py": 1217,
+        "metrics.py": 1018,
+        "underwriting_engine.py": 1009,
+        "property_data_service.py": 765,
+        "macro_data_service.py": 579,
+        "calibration_validator.py": 536,
+        "credit_bureau_service.py": 506
+      }
+    }
+  }
+}

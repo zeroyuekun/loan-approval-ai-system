@@ -1,3 +1,10 @@
+"""Post-approval loan-performance simulator using Markov-chain transitions.
+
+Steps each approved loan through `current → 30d → 60d → 90d → default` states using
+age- and risk-conditional transition probabilities. Extracted from `DataGenerator` so
+performance simulation can evolve independently of upstream feature generation.
+"""
+
 import numpy as np
 import pandas as pd
 

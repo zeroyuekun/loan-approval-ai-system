@@ -1,3 +1,11 @@
+"""Runtime loan-prediction orchestrator.
+
+`ModelPredictor` loads the active `ModelVersion` artefacts for the resolved segment,
+runs policy-overlay pre-checks in shadow mode, scores with the XGBoost pipeline,
+decorates the response with SHAP explanations, drift snapshots, stress-test deltas,
+conformal intervals, and counterfactual suggestions, and records the outcome.
+"""
+
 import hashlib
 import logging
 import math

@@ -1,3 +1,9 @@
+"""Benchmark resolver — pulls live calibration parameters or falls back to hard-coded defaults.
+
+Extracted from `DataGenerator` so benchmark resolution can be swapped out (e.g. for
+production-data-only calibration) without touching synthetic-data generation logic.
+"""
+
 import numpy as np
 
 
