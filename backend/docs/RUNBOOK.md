@@ -388,6 +388,12 @@ from apps.ml_engine.models import ModelVersion
 for mv in ModelVersion.objects.order_by('-created_at')[:10]:
     print(f'{mv.version} | {mv.algorithm} | AUC: {mv.auc_roc:.4f} | Gini: {mv.gini_coefficient} | Active: {mv.is_active} | {mv.created_at}')
 "
+
+# Prune stale .joblib artifacts in backend/ml_models/
+# Keeps active ModelVersion + N recent inactive per segment + contract_test_model.joblib.
+# Use --dry-run first to preview.
+docker compose exec backend python manage.py prune_model_artifacts --dry-run
+docker compose exec backend python manage.py prune_model_artifacts --keep 2
 ```
 
 ### Service Management
