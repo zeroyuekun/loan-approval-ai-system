@@ -38,6 +38,9 @@ from apps.ml_engine.services.prediction_features import (
 from apps.ml_engine.services.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
 )
+from apps.ml_engine.services.decision_assembly import (
+    assemble_decision as _assemble_decision_helper,
+)
 from apps.ml_engine.services.policy_overlay import (
     apply_policy_overlay as _apply_policy_overlay_helper,
 )
@@ -363,35 +366,20 @@ class ModelPredictor:
         # the training distribution (APRA CPG 235 ongoing monitoring)
         drift_warnings = self._check_feature_drift(features)
 
-        # Use optimal threshold from model version. Falling back to a
-        # hardcoded 0.5 can cause disparate-impact issues because the model
-        # was calibrated against its learned threshold. Warn loudly instead.
-        threshold = self.model_version.optimal_threshold
-        if threshold is None:
-            threshold = 0.5
-            logger.warning(
-                "ModelVersion %s has no optimal_threshold set — falling back to 0.5. "
-                "This may cause calibration drift and disparate-impact risk. "
-                "Re-run validate_model to populate optimal_threshold.",
-                self.model_version.id,
-            )
-        probability = round(float(probabilities[1]), 4)
-
-        # Per-group fairness threshold (EEOC 80% rule compliance)
-        effective_threshold = threshold
-        employment_type = features.get("employment_type", "")
-        if self.group_thresholds and employment_type in self.group_thresholds:
-            effective_threshold = self.group_thresholds[employment_type]
-
-        prediction_label = "approved" if probability >= effective_threshold else "denied"
-
-        # Flag borderline cases for human review (use effective_threshold
-        # so group-adjusted decisions are consistent with the borderline flag)
-        requires_human_review = abs(probability - effective_threshold) <= 0.10
-
-        # Also flag for review if significant feature drift detected
-        if any(w.get("severity") == "drift" for w in drift_warnings):
-            requires_human_review = True
+        decision = _assemble_decision_helper(
+            probability_positive=float(probabilities[1]),
+            model_version=self.model_version,
+            group_thresholds=self.group_thresholds,
+            employment_type=features.get("employment_type", ""),
+            drift_warnings=drift_warnings,
+            segment=features.get("purpose", "personal"),
+        )
+        probability = decision["probability"]
+        threshold = decision["threshold"]
+        effective_threshold = decision["effective_threshold"]
+        prediction_label = decision["prediction_label"]
+        requires_human_review = decision["requires_human_review"]
+        pricing_payload = decision["pricing_payload"]
 
         # Expected Loss (EL = PD x LGD x EAD) — Basel III / APRA APS 113
         property_val = float(features.get("property_value") or 0)
@@ -404,32 +392,8 @@ class ModelPredictor:
             credit_score=features.get("credit_score", 864),
         )
 
-        # Stress testing — 4 adverse scenarios
         stress_results = self._stress_test(features, threshold)
-
-        # Conformal prediction interval (95% coverage)
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
-
-        # === Risk-based pricing tier (D4) ==========================
-        # PD = 1 − approval probability. Tier is computed even when the
-        # model denies — the tier itself may independently decline
-        # regardless of the model's verdict (PD > top cutoff).
-        try:
-            from apps.ml_engine.services.pricing_engine import get_tier
-
-            pricing_tier = get_tier(pd_score=1.0 - probability, segment=features.get("purpose", "personal"))
-            pricing_payload = pricing_tier.to_dict()
-            # Pricing-tier decline overrides an otherwise-approved model result.
-            if not pricing_tier.approved and prediction_label == "approved":
-                logger.info(
-                    "Pricing tier decline overrides model approve: PD=%.4f segment=%s",
-                    pricing_tier.pd_score,
-                    pricing_tier.segment,
-                )
-                prediction_label = "denied"
-        except Exception:
-            logger.warning("Pricing tier computation failed", exc_info=True)
-            pricing_payload = {"tier": "unavailable", "approved": True}
 
         # === Credit policy overlay (D3) + referral audit (D6) ======
         prediction_label, requires_human_review, policy_payload = _apply_policy_overlay_helper(
