@@ -1,0 +1,47 @@
+# Grafana monitoring override.
+#
+# Grafana lives here rather than in the main docker-compose.yml so that
+# `docker compose up` (without monitoring) continues to parse even when
+# GRAFANA_ADMIN_PASSWORD is unset. When this file is included, compose
+# enforces the password via `:?` — no default, no surprises.
+#
+# Usage:
+#   export GRAFANA_ADMIN_PASSWORD='a strong secret'  # or set in .env
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml \
+#                  --profile monitoring up -d
+#
+# Or more conveniently, add to .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.monitoring.yml
+#   GRAFANA_ADMIN_PASSWORD=<your-secret>
+# and then `docker compose --profile monitoring up -d` picks up both files.
+
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: loan-approval-grafana
+    profiles: ["monitoring"]
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env before starting the monitoring profile}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+volumes:
+  grafana_data:
+
+networks:
+  internal:
+    external: true
+    name: loan-approval-ai-system_internal
