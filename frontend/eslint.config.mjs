@@ -2,7 +2,7 @@ import nextCoreWebVitals from 'eslint-config-next/core-web-vitals'
 
 // Next.js 16 removed `next lint`; ESLint 9 flat config replaces .eslintrc.json.
 // eslint-config-next/core-web-vitals is already a flat-config array.
-export default [
+const config = [
   {
     ignores: [
       '.next/**',
@@ -27,3 +27,5 @@ export default [
     },
   },
 ]
+
+export default config

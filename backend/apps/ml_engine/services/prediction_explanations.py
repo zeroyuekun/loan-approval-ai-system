@@ -32,14 +32,14 @@ logger = logging.getLogger(__name__)
 
 # Feature bounds for the binary-search counterfactual scan. Kept at module
 # scope so the search surface is visible alongside the search itself.
-_COUNTERFACTUAL_FEATURE_BOUNDS = {
-    "credit_score": (300, 1200),
-    "annual_income": (20000, 2000000),
-    "debt_to_income": (0, 10),
-    "employment_length": (0, 50),
-    "loan_amount": (5000, 5000000),
-    "monthly_expenses": (500, 50000),
-    "existing_credit_card_limit": (0, 200000),
+_COUNTERFACTUAL_FEATURE_BOUNDS: dict[str, tuple[float, float]] = {
+    "credit_score": (300.0, 1200.0),
+    "annual_income": (20000.0, 2000000.0),
+    "debt_to_income": (0.0, 10.0),
+    "employment_length": (0.0, 50.0),
+    "loan_amount": (5000.0, 5000000.0),
+    "monthly_expenses": (500.0, 50000.0),
+    "existing_credit_card_limit": (0.0, 200000.0),
 }
 
 

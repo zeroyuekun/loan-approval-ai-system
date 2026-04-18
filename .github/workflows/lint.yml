@@ -79,3 +79,34 @@ jobs:
 
       - name: Run file-size + docstring check
         run: python tools/check_file_sizes.py
+
+  mypy:
+    name: Backend mypy (Arm C extraction modules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install mypy + stubs
+        run: |
+          pip install "mypy>=1.13" types-requests types-cachetools numpy pandas-stubs
+
+      - name: mypy (Arm C Phase 1 extraction modules)
+        working-directory: backend
+        run: |
+          mypy --config-file mypy.ini \
+            apps/ml_engine/services/feature_prep.py \
+            apps/ml_engine/services/prediction_cache.py \
+            apps/ml_engine/services/policy_overlay.py \
+            apps/ml_engine/services/policy_recompute.py \
+            apps/ml_engine/services/prediction_diagnostics.py \
+            apps/ml_engine/services/prediction_explanations.py \
+            apps/ml_engine/services/prediction_features.py \
+            apps/ml_engine/services/shadow_scoring.py \
+            apps/ml_engine/services/shap_attribution.py \
+            apps/ml_engine/services/decision_assembly.py

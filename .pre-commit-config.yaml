@@ -25,6 +25,18 @@ repos:
       - id: ruff-format
         files: ^backend/
 
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        files: ^backend/apps/ml_engine/services/(feature_prep|prediction_cache|policy_overlay|policy_recompute|prediction_diagnostics|prediction_explanations|prediction_features|shadow_scoring|shap_attribution|decision_assembly)\.py$
+        additional_dependencies:
+          - types-requests
+          - types-cachetools
+          - numpy
+          - pandas-stubs
+        args: ["--config-file=backend/mypy.ini"]
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
     hooks:

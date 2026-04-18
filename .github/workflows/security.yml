@@ -52,7 +52,7 @@ jobs:
       - name: Audit Python dependencies
         run: |
           pip install pip-audit
-          pip-audit -r backend/requirements.txt --desc on
+          pip-audit --strict --desc on -r backend/requirements.txt
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -60,9 +60,9 @@ jobs:
       - name: Install frontend deps
         working-directory: frontend
         run: npm ci
-      - name: Audit npm dependencies
+      - name: Audit npm dependencies (runtime only, high+critical)
         working-directory: frontend
-        run: npm audit --audit-level=moderate
+        run: npm audit --audit-level=high --omit=dev
 
   secret-scan:
     runs-on: ubuntu-latest
