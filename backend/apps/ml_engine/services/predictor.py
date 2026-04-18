@@ -28,6 +28,10 @@ from apps.ml_engine.services.prediction_diagnostics import (
     check_feature_drift as _check_feature_drift_helper,
     run_stress_scenarios as _run_stress_scenarios_helper,
 )
+from apps.ml_engine.services.prediction_explanations import (
+    compute_conformal_interval as _compute_conformal_interval_helper,
+    search_counterfactuals as _search_counterfactuals_helper,
+)
 # Re-export cache helpers so external callers and tests that patch
 # `predictor._validate_model_path`, `predictor._verify_model_hash`,
 # `predictor._load_bundle`, `predictor._model_cache`, etc. keep working after
@@ -771,188 +775,16 @@ class ModelPredictor:
         )
 
     def _conformal_interval(self, probability, alpha=0.05):
-        """Compute conformal prediction interval with guaranteed coverage.
-
-        Uses split conformal prediction: nonconformity scores computed on
-        the validation set during training define how much the prediction
-        can vary. At confidence level (1-alpha), the true probability is
-        within [prob - q, prob + q] where q is the (1-alpha) quantile of
-        the nonconformity scores.
-
-        This gives honest uncertainty estimates — unlike a raw probability
-        which has no coverage guarantee.
-
-        Args:
-            probability: model predicted probability of approval
-            alpha: significance level (0.05 = 95% confidence)
-
-        Returns:
-            dict with lower, upper bounds and confidence level.
-        """
-        if len(self.conformal_scores) == 0:
-            return {
-                "lower": round(probability, 4),
-                "upper": round(probability, 4),
-                "confidence_level": 1 - alpha,
-                "available": False,
-            }
-
-        # Quantile of nonconformity scores at (1 - alpha) level
-        n = len(self.conformal_scores)
-        sorted_scores = np.sort(self.conformal_scores)
-
-        # Small Sample Beta Correction (SSBC) for calibration sets < 500
-        # Reference: arxiv.org/abs/2509.15349
-        ssbc_applied = False
-        if n < 500:
-            try:
-                from scipy.stats import beta as beta_dist
-
-                # Adjust alpha for finite-sample coverage guarantee
-                # Target: P(coverage >= 1-alpha) >= 0.9
-                adjusted_alpha = alpha
-                for candidate_alpha in np.arange(alpha * 0.5, alpha, 0.001):
-                    k = int(np.ceil((1 - candidate_alpha) * (n + 1))) - 1
-                    k = min(k, n - 1)
-                    # Beta distribution for order statistic coverage
-                    coverage_prob = 1 - beta_dist.cdf(1 - alpha, n - k, k + 1)
-                    if coverage_prob >= 0.9:
-                        adjusted_alpha = candidate_alpha
-                        break
-
-                if adjusted_alpha != alpha:
-                    logger.info(
-                        "SSBC: adjusted alpha from %.3f to %.3f (n=%d, target coverage=0.9)",
-                        alpha,
-                        adjusted_alpha,
-                        n,
-                    )
-                    alpha = adjusted_alpha
-                    ssbc_applied = True
-            except ImportError:
-                logger.debug("scipy not available for SSBC correction")
-
-        q_idx = int(np.ceil((1 - alpha) * (n + 1))) - 1
-        q_idx = min(max(q_idx, 0), n - 1)
-        q = float(sorted_scores[q_idx])
-
-        lower = max(0.0, probability - q)
-        upper = min(1.0, probability + q)
-
-        return {
-            "lower": round(lower, 4),
-            "upper": round(upper, 4),
-            "width": round(upper - lower, 4),
-            "confidence_level": 1 - alpha,
-            "ssbc_applied": ssbc_applied,
-            "available": True,
-        }
+        """Split-conformal interval. See `prediction_explanations.compute_conformal_interval`."""
+        return _compute_conformal_interval_helper(probability, self.conformal_scores, alpha=alpha)
 
     def _generate_counterfactuals(self, features_df, feature_importances, model_bundle):
-        """Generate counterfactual explanations for denied applications.
+        """Binary-search counterfactuals. See `prediction_explanations.search_counterfactuals`."""
+        return _search_counterfactuals_helper(
+            features_df,
+            feature_importances,
+            model_bundle,
+            transform_fn=self._transform,
+            feature_cols=self.feature_cols,
+        )
 
-        For top 3 negative factors, binary-search for the value that flips
-        the prediction. Returns actionable statements.
-        """
-        counterfactuals = []
-
-        if not feature_importances:
-            return counterfactuals
-
-        # Get top 3 features that most contributed to denial
-        sorted_features = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]
-
-        model = model_bundle["model"]
-
-        for feature_name, _importance in sorted_features:
-            if feature_name not in features_df.columns:
-                continue
-
-            current_value = features_df[feature_name].iloc[0]
-
-            # Define search bounds based on feature type
-            feature_bounds = {
-                "credit_score": (300, 1200),
-                "annual_income": (20000, 2000000),
-                "debt_to_income": (0, 10),
-                "employment_length": (0, 50),
-                "loan_amount": (5000, 5000000),
-                "monthly_expenses": (500, 50000),
-                "existing_credit_card_limit": (0, 200000),
-            }
-
-            bounds = feature_bounds.get(feature_name)
-            if bounds is None:
-                continue
-
-            # Determine search direction (increase or decrease)
-            # For DTI, expenses, loan_amount: decrease is better
-            # For credit_score, income, employment: increase is better
-            decrease_is_better = feature_name in (
-                "debt_to_income",
-                "monthly_expenses",
-                "loan_amount",
-                "existing_credit_card_limit",
-            )
-
-            if decrease_is_better:
-                low, high = bounds[0], float(current_value)
-            else:
-                low, high = float(current_value), bounds[1]
-
-            # Binary search for the flip point
-            flip_value = None
-            for _ in range(30):  # max iterations
-                mid = (low + high) / 2
-                test_df = features_df.copy()
-                test_df[feature_name] = mid
-
-                try:
-                    # Use the same preprocessing pipeline as predict()
-                    transformed_df = self._transform(test_df)
-                    prob = model.predict_proba(transformed_df[self.feature_cols])[0][1]
-                    threshold = model_bundle.get("threshold", 0.5)
-
-                    if prob >= threshold:
-                        flip_value = mid
-                        if decrease_is_better:
-                            low = mid
-                        else:
-                            high = mid
-                    else:
-                        if decrease_is_better:
-                            high = mid
-                        else:
-                            low = mid
-                except Exception as e:
-                    logger.debug("Counterfactual binary search step failed: %s", e)
-                    break
-
-            if flip_value is not None:
-                # Format the counterfactual statement
-                readable_name = feature_name.replace("_", " ").title()
-
-                if feature_name in ("annual_income", "loan_amount", "monthly_expenses", "existing_credit_card_limit"):
-                    current_fmt = f"${current_value:,.0f}"
-                    target_fmt = f"${flip_value:,.0f}"
-                elif feature_name == "credit_score":
-                    current_fmt = f"{int(current_value)}"
-                    target_fmt = f"{int(flip_value)}"
-                elif feature_name == "debt_to_income":
-                    current_fmt = f"{current_value:.1f}x"
-                    target_fmt = f"{flip_value:.1f}x"
-                else:
-                    current_fmt = f"{current_value:.1f}"
-                    target_fmt = f"{flip_value:.1f}"
-
-                direction = "Reducing" if decrease_is_better else "Increasing"
-                counterfactuals.append(
-                    {
-                        "feature": feature_name,
-                        "current_value": float(current_value),
-                        "target_value": round(float(flip_value), 2),
-                        "statement": f"{direction} {readable_name.lower()} from {current_fmt} to {target_fmt} would change the outcome",
-                    }
-                )
-
-        return counterfactuals
