@@ -79,7 +79,7 @@ class TestComplaintFilingThrottle:
 
         for i in range(10):
             resp = client.post(COMPLAINTS_URL, payload, format="json")
-            assert resp.status_code == 201, f"call {i+1} unexpectedly failed: {resp.status_code} {resp.content!r}"
+            assert resp.status_code == 201, f"call {i + 1} unexpectedly failed: {resp.status_code} {resp.content!r}"
 
         throttled = client.post(COMPLAINTS_URL, payload, format="json")
         assert throttled.status_code == 429
@@ -93,12 +93,16 @@ class TestComplaintFilingThrottle:
         client.force_authenticate(user=user)
 
         for _ in range(10):
-            client.post(COMPLAINTS_URL, {
-                "loan_application": str(loan.id),
-                "category": "decision",
-                "subject": "x",
-                "description": "y",
-            }, format="json")
+            client.post(
+                COMPLAINTS_URL,
+                {
+                    "loan_application": str(loan.id),
+                    "category": "decision",
+                    "subject": "x",
+                    "description": "y",
+                },
+                format="json",
+            )
 
         resp = client.get(COMPLAINTS_URL)
         assert resp.status_code == 200, "list should remain accessible after filing cap is hit"
@@ -113,7 +117,7 @@ class TestDataExportThrottle:
 
         for i in range(10):
             resp = client.get(DATA_EXPORT_URL)
-            assert resp.status_code == 200, f"call {i+1} unexpectedly failed: {resp.status_code} {resp.content!r}"
+            assert resp.status_code == 200, f"call {i + 1} unexpectedly failed: {resp.status_code} {resp.content!r}"
 
         throttled = client.get(DATA_EXPORT_URL)
         assert throttled.status_code == 429
