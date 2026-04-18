@@ -57,6 +57,32 @@ deadcode:                ## Report unused code (ruff F401/F811/F841 + vulture)
 		--ignore-names "_*,test_*,setUp,tearDown,Meta,sender,view,frame,expression,connection,signum,instance,kwargs" \
 		--exclude "*/migrations/*,*/tests/*"
 
+typecheck:               ## Type-check backend (mypy) + frontend (tsc --noEmit)
+	docker compose exec backend mypy --config-file mypy.ini \
+		apps/ml_engine/services/feature_prep.py \
+		apps/ml_engine/services/prediction_cache.py \
+		apps/ml_engine/services/policy_overlay.py \
+		apps/ml_engine/services/policy_recompute.py \
+		apps/ml_engine/services/prediction_diagnostics.py \
+		apps/ml_engine/services/prediction_explanations.py \
+		apps/ml_engine/services/prediction_features.py \
+		apps/ml_engine/services/shadow_scoring.py \
+		apps/ml_engine/services/shap_attribution.py \
+		apps/ml_engine/services/decision_assembly.py
+	cd frontend && npm run typecheck
+
+security:                ## Security scans (bandit + pip-audit + npm audit)
+	docker compose exec backend bandit -r apps/ config/ -lll
+	docker compose exec backend pip-audit --strict --requirement /app/requirements.txt
+	cd frontend && npm audit --audit-level=high --omit=dev
+
+verify:                  ## Full verification gate: lint + typecheck + security + tests
+	$(MAKE) lint
+	$(MAKE) typecheck
+	$(MAKE) security
+	docker compose exec backend pytest -x --tb=short
+	cd frontend && npm test -- --run
+
 # Health
 health:                  ## Check service health
 	@curl -s http://localhost:8000/api/v1/health/ | python -m json.tool
