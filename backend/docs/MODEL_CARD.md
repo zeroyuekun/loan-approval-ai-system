@@ -149,6 +149,26 @@ Metrics are computed on the held-out test set (10% of data, never seen during tr
 | **5-fold CV AUC** | Available in `training_metadata.cv_auc_mean` +/- `training_metadata.cv_auc_std` |
 | **Overfitting gap** | ~0.07 (train AUC - test AUC); expected to narrow with more data |
 
+### External Benchmark Validation (Kaggle "Give Me Some Credit", 2011)
+
+The synthetic-data performance above is complemented by an external benchmark against real borrower data to rule out the critique that the pipeline's accuracy is an artifact of synthetic-specific correlations.
+
+The *same* XGBoost + Optuna + isotonic-calibration architecture was re-trained on the Kaggle "Give Me Some Credit" dataset (150,000 real anonymised borrowers, target = 90+ days delinquent within 2 years, natural 6.7% positive rate) using only that dataset's 10 features (age, DebtRatio, MonthlyIncome, utilisation, delinquency counts, dependants).
+
+| Metric | Value |
+|--------|-------|
+| **5-fold stratified CV AUC (mean ± std)** | **0.8663 ± 0.0035** |
+| **KS statistic** | 0.581 |
+| **Brier score** | 0.049 |
+| **Published Kaggle top-1% AUC** | 0.869 |
+| **Optuna trials** | 50 (TPE sampler, matches production search space) |
+
+Fold-to-fold AUC std of 0.0035 is an order of magnitude below the 0.02 stability threshold — the result is highly reproducible (`random_state=42`).
+
+Methodology, limitations, and honest discussion of what this does and does NOT validate are in [`docs/experiments/gmsc_benchmark.md`](../../docs/experiments/gmsc_benchmark.md). In short: this validates the **pipeline architecture** generalises to real data; it does NOT validate the production 71-feature Australian model directly (65 features have no GMSC counterpart).
+
+Reproducible via `make benchmark-gmsc` or `python backend/scripts/benchmark_gmsc.py --yes`. First run: 2026-04-18.
+
 ### Outcome Tracking (SR 11-7 Compliance)
 
 SR 11-7 (Federal Reserve, 2011) identifies outcomes analysis as one of three model

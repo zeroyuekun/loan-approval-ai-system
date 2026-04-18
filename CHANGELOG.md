@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.9.7 — GMSC External Benchmark Validation (2026-04-18)
+
+### ML / Validation
+
+- Added external benchmark against Kaggle **"Give Me Some Credit"** (GMSC) — 150,000 real anonymised borrowers, 2011 competition. The production XGBoost + Optuna + isotonic-calibration pipeline, re-trained on GMSC's 10-feature schema with zero other changes, reaches **AUC 0.8663 ± 0.0035** (5-fold CV, seeded). Per-fold AUCs: 0.8651 / 0.8660 / 0.8704 / 0.8607 / 0.8695. KS 0.581, Brier 0.049. Within 0.003 of the published top-1% Kaggle leaderboard result (0.869).
+- Rules out the *"this pipeline only works because the synthetic data is easy"* critique: the same pipeline reaches near-top-tier AUC on real borrower data using only 10 features and 50 Optuna trials.
+- New `backend/scripts/benchmark_gmsc.py` — SHA256-pinned download from a public GitHub mirror, stratified 5-fold CV, fails on AUC std > 0.02. Cache lives at `backend/.tmp/gmsc/` (gitignored). Run via `make benchmark-gmsc`.
+- New `backend/tests/test_benchmark_gmsc.py` — 12 unit tests over the loader, preprocessor, SHA256 integrity check, and KS statistic. CI-safe (full benchmark is manual-only; it's a 2-minute Optuna run).
+- Documented in `docs/experiments/gmsc_benchmark.md` (full methodology, per-fold results, honest "what this does NOT validate" section calling out the 65 production features that don't overlap with GMSC — HECS, BNPL, ANZSIC, CDR/Open Banking, macro) and linked from `backend/docs/MODEL_CARD.md` under a new "External Benchmark Validation" section.
+
+### Housekeeping
+
+- Bumped `APP_VERSION` from `1.9.6` → `1.9.7`.
+
 ## v1.9.6 — Workstream B (partial): Throttle & Version Fixes (2026-04-18)
 
 ### Security

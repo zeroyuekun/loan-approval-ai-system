@@ -1,4 +1,4 @@
-.PHONY: dev down build test lint seed train logs health clean
+.PHONY: dev down build test lint seed train logs health clean benchmark-gmsc
 
 # Development
 dev:                     ## Start all services
@@ -50,6 +50,10 @@ lint:                    ## Lint backend and frontend
 
 format:                  ## Auto-format backend code
 	cd backend && ruff format .
+
+# ML benchmarks
+benchmark-gmsc:          ## Run external GMSC benchmark (Kaggle Give Me Some Credit, 150k real borrowers)
+	docker compose exec backend python scripts/benchmark_gmsc.py --yes
 
 # Health
 health:                  ## Check service health
