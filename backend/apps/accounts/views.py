@@ -9,7 +9,7 @@ from django.utils.html import escape
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -454,10 +454,18 @@ class StaffCustomerActivityView(generics.GenericAPIView):
         )
 
 
+class DataExportThrottle(UserRateThrottle):
+    """Low cap on data exports — heavy endpoint + Privacy Act APP-12 is low-frequency."""
+
+    scope = "data_export"
+    rate = "10/hour"
+
+
 class CustomerDataExportView(generics.GenericAPIView):
     """Export all customer data (APP 12 — Australian Privacy Act 1988)."""
 
     permission_classes = (IsAuthenticated,)
+    throttle_classes = (DataExportThrottle,)
 
     def get(self, request):
         user = request.user
