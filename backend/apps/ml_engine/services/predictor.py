@@ -109,12 +109,53 @@ FEATURE_BOUNDS = {
     "prepayment_buffer_months": (0, 60),
     "optimism_bias_flag": (0, 1),
     "negative_equity_flag": (0, 1),
-    # Underwriter-internal variables exposed as features
+    # Underwriter-internal variables exposed as features.
+    # effective_loan_amount ceiling must cover max loan_amount (5M) + max
+    # LMI premium (3% * 5M = 150k) with headroom, otherwise large high-LVR
+    # home loans fail validation before reaching the model.
     "hem_benchmark": (0, 20_000),
     "hem_gap": (-20_000, 20_000),
     "lmi_premium": (0, 200_000),
-    "effective_loan_amount": (0, 4_000_000),
+    "effective_loan_amount": (0, 5_200_000),
 }
+
+
+def _recompute_lvr_driven_policy_vars(row):
+    """Re-derive LVR-driven LMI features after mutating property_value or loan_amount.
+
+    Policy variables (lmi_premium, effective_loan_amount) are a function of
+    LVR, so whenever property_value or loan_amount is perturbed (e.g. by a
+    stress scenario or counterfactual) the downstream fields must be
+    recomputed. Otherwise the model sees stale policy vars that no longer
+    correspond to the stressed LVR.
+
+    Schedule (mirrors the generator/underwriter tables):
+      - LVR ≤ 0.80         : no LMI
+      - 0.80 < LVR ≤ 0.85  : 1%
+      - 0.85 < LVR ≤ 0.90  : 2%
+      - LVR > 0.90         : 3%
+
+    LMI applies only to purpose in {home, investment}; personal loans are
+    always charged 0%.
+
+    Mutates `row` in place. Returns None.
+    """
+    property_value = float(row.get("property_value", 0.0) or 0.0)
+    loan_amount = float(row.get("loan_amount", 0.0) or 0.0)
+    lvr = (loan_amount / property_value) if property_value > 0 else 0.0
+
+    if lvr > 0.90:
+        rate = 0.03
+    elif lvr > 0.85:
+        rate = 0.02
+    elif lvr > 0.80:
+        rate = 0.01
+    else:
+        rate = 0.0
+
+    is_home = row.get("purpose") in ("home", "investment")
+    row["lmi_premium"] = round(loan_amount * rate * (1 if is_home else 0), 2)
+    row["effective_loan_amount"] = round(loan_amount + row["lmi_premium"], 2)
 
 
 def _validate_model_path(file_path):
@@ -818,6 +859,10 @@ class ModelPredictor:
             stressed = features.copy()
             if float(stressed.get("property_value", 0)) > 0:
                 stressed["property_value"] = float(stressed["property_value"]) * 0.80
+                # Re-derive LVR-driven LMI features so stressed-LVR drives
+                # stressed LMI — otherwise the model sees stale policy vars
+                # and Scenario 2 looks optimistically low-risk at LVR ~0.80.
+                _recompute_lvr_driven_policy_vars(stressed)
             df_s = pd.DataFrame([stressed])
             df_s = self._transform(df_s)
             prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
@@ -848,6 +893,7 @@ class ModelPredictor:
                 stressed["debt_to_income"] = 999.0  # Maximum DTI when income is zero
             if float(stressed.get("property_value", 0)) > 0:
                 stressed["property_value"] = float(stressed["property_value"]) * 0.80
+                _recompute_lvr_driven_policy_vars(stressed)
             stressed["credit_score"] = max(300, int(stressed["credit_score"]) - 50)
             df_s = pd.DataFrame([stressed])
             df_s = self._transform(df_s)
