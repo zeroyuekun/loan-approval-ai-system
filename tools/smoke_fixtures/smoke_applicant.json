@@ -1,0 +1,32 @@
+{
+  "user": {
+    "email": "smoke-{{RANDOM}}@example.test",
+    "password": "SmokePass!2026",
+    "first_name": "Smoke",
+    "last_name": "Tester"
+  },
+  "application": {
+    "annual_income": 140000,
+    "credit_score": 780,
+    "loan_amount": 350000,
+    "loan_term_months": 360,
+    "debt_to_income": 0.25,
+    "employment_length": 60,
+    "purpose": "home",
+    "home_ownership": "mortgage",
+    "has_cosigner": false,
+    "has_hecs": false,
+    "has_bankruptcy": false,
+    "state": "NSW",
+    "property_value": 500000,
+    "deposit_amount": 150000,
+    "monthly_expenses": 3200,
+    "existing_credit_card_limit": 10000,
+    "number_of_dependants": 0,
+    "employment_type": "full_time",
+    "applicant_type": "owner_occupier",
+    "consumer_objectives": "Purchase principal place of residence for long-term owner-occupation.",
+    "consumer_requirements": "30-year principal and interest loan with ability to make extra repayments without penalty.",
+    "financial_situation_notes": "Stable full-time employment, no dependants, modest monthly expenses, substantial deposit."
+  }
+}

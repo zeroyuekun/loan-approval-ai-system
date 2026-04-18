@@ -192,6 +192,33 @@ A separate `watchdog` service runs in the core stack at all times. It polls ever
 
 ~1000 tests across 66 files. 60% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
 
+## Verifying the build
+
+An end-to-end smoke script exercises the full pipeline (register → apply → orchestrate → decision → email) against a locally-running stack:
+
+```bash
+docker compose up -d
+make seed                     # generate data + train model
+tools/smoke_e2e.sh            # full cycle + teardown
+tools/smoke_e2e.sh --keep-up  # leave stack up for manual inspection
+```
+
+Result is written to `.tmp/smoke_result.json`:
+
+```json
+{
+  "started_at": "2026-04-19T12:34:56Z",
+  "finished_at": "2026-04-19T12:35:42Z",
+  "duration_ms": 46123,
+  "status": "success",
+  "reason": "ok",
+  "model_version_id": "<uuid>",
+  "email_subject_hash": "<sha256-prefix>"
+}
+```
+
+The same script runs as a manually-triggered GitHub Actions job under `smoke-e2e` (see `.github/workflows/smoke-e2e.yml`). The workflow is `workflow_dispatch`-only by design — cost-conscious default; add a cron once the signal is known stable.
+
 ## Housekeeping
 
 Local development accumulates build artifacts, test caches, and trained model files. To reclaim disk:

@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.10.1 — Production Hardening (2026-04-19)
+
+Six atomic deliverables that tighten the production surface without touching model behaviour:
+
+- **D1 — Hosted-demo scaffolding removed.** Stripped placeholder wizard / profile / about pages and associated fixtures; nothing rendered from them in the current build, and deleting them shrinks the bundle.
+- **D2 — Extended `make clean`.** `make clean` reclaims containers / build caches / test artifacts / tsbuildinfo; new `make clean-deep` also drops `node_modules` and `backend/.venv`. Documented under a new README "Housekeeping" section.
+- **D3 — Stale model artifact pruning.** New `manage.py prune_model_artifacts [--dry-run] [--keep N]` command cleans stale `.joblib` files under `backend/ml_models/` while keeping the active `ModelVersion` and the N most-recent inactive ones (default 3). Covered by 11 pytest cases.
+- **D4 — Dead-code sweep.** New `make deadcode` target combines `ruff --select F401,F811,F841` + `vulture --min-confidence 80`; removed one unused-parameter case surfaced by the sweep.
+- **D5 — Robustness audit.** New `backend/mypy.ini` + lightweight CI `mypy` job gate the 10 Arm C Phase 1 extraction modules; `make typecheck` / `make security` / `make verify` targets; `pip-audit --strict`, `npm audit --audit-level=high --omit=dev`, and bandit `-lll`. Frontend `lint:strict` + `typecheck` available as developer tools (not CI gate; 8 intentionally-demoted react-hooks warnings from the Next 16 upgrade block it).
+- **D6 — End-to-end smoke test.** New `tools/smoke_e2e.sh` (register → apply → orchestrate → decision → email) + deterministic applicant fixture + `workflow_dispatch`-only GitHub Actions job. Result written to `.tmp/smoke_result.json`.
+
+### Version bump
+
+`APP_VERSION` advances `1.10.0` → `1.10.1`. No data migrations. No trained-model invalidation.
+
 ## v1.10.0 — XGBoost AU Lender Parity (2026-04-18)
 
 Bundle of 8 deliverables bringing the unified champion XGBoost model to APRA / AU-big-4 production parity, plus a regression-gate JSON file so CI can catch silent metric decay after promotion. Target audit surfaces: APRA CPS 220 model validation, SR 11-7 MRM dossier, APS 112 credit policy overlay, APS 220 referral trail, AFCA 2023 hardship guidance, ASIC RG 209 responsible-lending capture, NCCP Act s.128 unsuitability screen.
