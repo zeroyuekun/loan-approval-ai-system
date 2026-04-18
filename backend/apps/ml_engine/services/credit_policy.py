@@ -68,6 +68,9 @@ class PolicyResult:
     refers: List[str] = field(default_factory=list)
     rationale: List[str] = field(default_factory=list)
     evaluated_rules: List[str] = field(default_factory=list)
+    # code → raw reason text (without the "Pxx (hard-fail/refer): " prefix).
+    # Used by D6 audit trail to populate LoanApplication.referral_rationale.
+    rationale_by_code: dict = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -87,6 +90,7 @@ class PolicyResult:
             "hard_fails": list(self.hard_fails),
             "refers": list(self.refers),
             "rationale": list(self.rationale),
+            "rationale_by_code": dict(self.rationale_by_code),
             "evaluated_rules": list(self.evaluated_rules),
         }
 
@@ -361,6 +365,7 @@ def evaluate(application) -> PolicyResult:
             code, rationale = hit
             result.hard_fails.append(code)
             result.rationale.append(f"{code} (hard-fail): {rationale}")
+            result.rationale_by_code[code] = rationale
 
     for rule in _REFER_RULES:
         hit = rule(application)
@@ -369,6 +374,7 @@ def evaluate(application) -> PolicyResult:
             code, rationale = hit
             result.refers.append(code)
             result.rationale.append(f"{code} (refer): {rationale}")
+            result.rationale_by_code[code] = rationale
 
     return result
 

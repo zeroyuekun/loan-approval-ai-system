@@ -735,6 +735,31 @@ class ModelPredictor:
             if policy_mode == _policy.OVERLAY_MODE_ENFORCE and policy_result.has_refer:
                 requires_human_review = True
 
+            # D6 — referral audit trail (orthogonal to bias review queue).
+            # Persist on the LoanApplication itself so admins can query
+            # referrals via /api/loans/referrals/. Save is wrapped in a
+            # try/except so a persistence failure never breaks prediction.
+            if policy_result.has_refer and application is not None:
+                try:
+                    application.referral_status = application.ReferralStatus.REFERRED
+                    application.referral_codes = list(policy_result.refers)
+                    application.referral_rationale = {
+                        code: policy_result.rationale_by_code.get(code, "")
+                        for code in policy_result.refers
+                    }
+                    application.save(
+                        update_fields=["referral_status", "referral_codes", "referral_rationale"]
+                    )
+                except Exception:
+                    logger.warning(
+                        "referral_audit_save_failed",
+                        exc_info=True,
+                        extra={
+                            "application_id": str(getattr(application, "id", None)),
+                            "refers": list(policy_result.refers),
+                        },
+                    )
+
             prediction_label = final_prediction
         except Exception as _policy_exc:
             logger.warning("credit_policy_evaluate_failed", exc_info=True)

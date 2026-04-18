@@ -10,5 +10,6 @@ router.register(r"", views.LoanApplicationViewSet, basename="loan-application")
 
 urlpatterns = [
     path("dashboard-stats/", views.DashboardStatsView.as_view(), name="dashboard-stats"),
+    path("referrals/", views.ReferralListView.as_view(), name="referrals-list"),
     path("", include(router.urls)),
 ]
