@@ -36,6 +36,9 @@ from apps.ml_engine.services.prediction_features import (
     build_prediction_features as _build_prediction_features_helper,
     derive_underwriter_features as _derive_underwriter_features_helper,
 )
+from apps.ml_engine.services.shadow_scoring import (
+    score_challengers_shadow as _score_challengers_shadow_helper,
+)
 # Re-export cache helpers so external callers and tests that patch
 # `predictor._validate_model_path`, `predictor._verify_model_hash`,
 # `predictor._load_bundle`, `predictor._model_cache`, etc. keep working after
@@ -579,53 +582,25 @@ class ModelPredictor:
             logger.debug("Prometheus metrics emission failed (non-blocking): %s", e)
 
         # === Champion/Challenger Shadow Scoring ===
-        # If challenger models exist, score with them too (shadow mode)
-        try:
-            from apps.ml_engine.models import ModelVersion as MV
-            from apps.ml_engine.models import PredictionLog
+        def _score_with_challenger(challenger_mv, raw_df):
+            challenger_predictor = ModelPredictor(model_version=challenger_mv)
+            transformed = challenger_predictor._transform(raw_df)
+            prob = float(
+                challenger_predictor.model.predict_proba(
+                    transformed[challenger_predictor.feature_cols]
+                )[:, 1][0]
+            )
+            label = "approved" if prob >= (challenger_mv.optimal_threshold or 0.5) else "denied"
+            return prob, label
 
-            challengers = MV.objects.filter(
-                is_active=False,
-                traffic_percentage__gt=0,
-                traffic_percentage__lt=100,
-            ).exclude(pk=self.model_version.pk)
-
-            for challenger in challengers[:2]:  # Max 2 challengers
-                try:
-                    challenger_predictor = ModelPredictor(model_version=challenger)
-                    features_transformed_c = challenger_predictor._transform(
-                        features_df.copy()
-                    )  # Use raw features, not already-transformed df
-                    challenger_prob = float(
-                        challenger_predictor.model.predict_proba(
-                            features_transformed_c[challenger_predictor.feature_cols]
-                        )[:, 1][0]
-                    )
-                    challenger_pred = (
-                        "approved" if challenger_prob >= (challenger.optimal_threshold or 0.5) else "denied"
-                    )
-
-                    # Log shadow prediction (not used for decision)
-                    PredictionLog.objects.create(
-                        model_version=challenger,
-                        application=application,
-                        prediction=challenger_pred,
-                        probability=challenger_prob,
-                        feature_importances={},
-                        processing_time_ms=0,
-                    )
-                    logger.info(
-                        "Shadow score: challenger %s predicted %s (%.3f) vs champion %s (%.3f)",
-                        challenger.version,
-                        challenger_pred,
-                        challenger_prob,
-                        prediction_label,
-                        probability,
-                    )
-                except Exception as e:
-                    logger.warning("Shadow scoring failed for challenger %s: %s", challenger.version, e)
-        except Exception as e:
-            logger.debug("Shadow scoring check skipped: %s", e)
+        _score_challengers_shadow_helper(
+            application=application,
+            champion_version=self.model_version,
+            champion_probability=probability,
+            champion_prediction_label=prediction_label,
+            features_df=features_df,
+            score_fn=_score_with_challenger,
+        )
 
         return result
 
