@@ -70,9 +70,7 @@ def test_prune_keeps_active_and_recent_versions(models_dir: Path):
     assert keep_1.exists(), "most recent inactive kept for rollback"
     assert not stale_1.exists(), "older inactive pruned"
     assert not stale_2.exists(), "older inactive pruned"
-    assert (models_dir / "contract_test_model.joblib").exists(), (
-        "contract_test_model.joblib is always whitelisted"
-    )
+    assert (models_dir / "contract_test_model.joblib").exists(), "contract_test_model.joblib is always whitelisted"
 
 
 def test_prune_dry_run_deletes_nothing(models_dir: Path):

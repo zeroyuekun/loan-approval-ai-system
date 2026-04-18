@@ -75,11 +75,7 @@ class Command(BaseCommand):
                 joblib.unlink()
 
         mode = "(dry-run)" if dry_run else ""
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"Done {mode}: {deleted} file(s); {reclaimed} bytes reclaimed."
-            )
-        )
+        self.stdout.write(self.style.SUCCESS(f"Done {mode}: {deleted} file(s); {reclaimed} bytes reclaimed."))
 
     def _compute_whitelist(self, keep_n: int) -> set[str]:
         keep: set[str] = set(ALWAYS_KEEP)
@@ -90,9 +86,7 @@ class Command(BaseCommand):
 
         per_segment: dict[str, list[ModelVersion]] = defaultdict(list)
         inactives: Iterable[ModelVersion] = (
-            ModelVersion.objects.filter(is_active=False)
-            .exclude(file_path="")
-            .order_by("-created_at")
+            ModelVersion.objects.filter(is_active=False).exclude(file_path="").order_by("-created_at")
         )
         for mv in inactives:
             per_segment[getattr(mv, "segment", "unified")].append(mv)
