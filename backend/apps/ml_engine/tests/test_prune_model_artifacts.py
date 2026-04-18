@@ -53,15 +53,17 @@ def _make_version(
 def test_prune_keeps_active_and_recent_versions(models_dir: Path):
     """Active ModelVersion file + N most-recent inactive per segment are kept."""
     active = _make_file(models_dir / "xgb_active.joblib", 2048)
-    keep_1 = _make_file(models_dir / "xgb_keep.joblib", 2048)
     stale_1 = _make_file(models_dir / "xgb_stale_1.joblib", 2048)
     stale_2 = _make_file(models_dir / "xgb_stale_2.joblib", 2048)
+    keep_1 = _make_file(models_dir / "xgb_keep.joblib", 2048)
     _make_file(models_dir / "contract_test_model.joblib", 5)
 
+    # Creation order drives `order_by("-created_at")` — the version created
+    # last is the most-recent inactive and should be retained when --keep 1.
     _make_version(file_path=active, version="1.0.0-active", is_active=True)
-    _make_version(file_path=keep_1, version="1.0.0-keep")
     _make_version(file_path=stale_1, version="1.0.0-stale1")
     _make_version(file_path=stale_2, version="1.0.0-stale2")
+    _make_version(file_path=keep_1, version="1.0.0-keep")
 
     out = StringIO()
     call_command("prune_model_artifacts", "--keep", "1", stdout=out)
@@ -75,8 +77,9 @@ def test_prune_keeps_active_and_recent_versions(models_dir: Path):
 
 def test_prune_dry_run_deletes_nothing(models_dir: Path):
     """--dry-run reports what would be deleted but touches no files."""
+    # Orphan file (no ModelVersion row) — would normally be pruned, so the
+    # dry-run output must include the "would delete" notice.
     stale = _make_file(models_dir / "xgb_stale.joblib", 2048)
-    _make_version(file_path=stale, version="1.0.0-stale")
 
     out = StringIO()
     call_command("prune_model_artifacts", "--dry-run", stdout=out)
