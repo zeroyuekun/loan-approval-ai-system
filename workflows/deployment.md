@@ -117,38 +117,10 @@ docker-compose down
 docker-compose down -v
 ```
 
-## Cloud Deployment Options
+## Scope: local-only portfolio project
 
-The project runs locally via Docker Compose as described above. A hosted demo URL is the single highest-impact portfolio polish item — without one, a reviewer can't try the product in a browser.
+This project is designed to run locally via Docker Compose. No cloud-hosting configuration is committed. That is a deliberate scoping choice — portfolio reviewers are expected to clone, `make dev`, and walk through the dashboards on `localhost`.
 
-Picking a host is a tradeoff across cost, data residency, cold-start latency, and complexity. Three realistic paths:
+Operational procedures for a running local instance (rotating secrets, recovering from a stuck Celery queue, database backup, upgrading the model) live in `backend/docs/RUNBOOK.md`. Security and compliance baselines live in `backend/docs/SECURITY.md`.
 
-| Host | Monthly cost (demo scale) | AU region | Cold-start | Complexity | Notes |
-|---|---|---|---|---|---|
-| **Fly.io** | $0 (free tier + ~$3 if exceeded) | Yes (`syd`) | ~10-20s on shared-cpu-1x | Medium | Best AU data residency. Needs `fly.toml` + `flyctl`. Backend + DB + Redis + Celery worker as separate processes. |
-| **Render** | $0 (free web service + $7 paid DB) | No (closest: Singapore) | ~30-50s on free tier | Low | Friendliest setup via `render.yaml` + GitHub connect. Free tier sleeps after 15 min idle. |
-| **Hetzner VPS** | ~€4.5/mo ($5) CX11 instance | EU only | None (always on) | High | Cheapest always-on. Requires self-managed Docker host + reverse proxy + TLS (Caddy or Traefik). |
-
-The **frontend** (Next.js) deploys separately via Vercel free tier in all three scenarios — build Vercel on top of whichever backend host you pick, point `NEXT_PUBLIC_API_URL` at the backend URL.
-
-### Required secrets (any host)
-
-- `DJANGO_SECRET_KEY` — generate with `python -c "import secrets; print(secrets.token_urlsafe(50))"`
-- `FIELD_ENCRYPTION_KEY` — generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-- `ANTHROPIC_API_KEY` — from console.anthropic.com
-- `DATABASE_URL` + `REDIS_URL` — provided by the host's managed services
-- `ALLOWED_HOSTS` — set to your deployed backend hostname
-- `CORS_ALLOWED_ORIGINS` — set to your Vercel frontend URL
-
-### Before deploying (any host)
-
-- [ ] `.env.example` has no real secrets committed
-- [ ] Backend image rebuilds cleanly: `docker compose build backend`
-- [ ] Frontend builds cleanly: `cd frontend && npm run build`
-- [ ] Migrations run cleanly against a fresh Postgres: `docker compose exec backend python manage.py migrate`
-- [ ] Generate synthetic applicants: `docker compose exec backend python manage.py generate_data --count 100`
-- [ ] Smoke test: `curl -fsS http://localhost:8000/api/v1/health/`
-
-### Non-demo considerations (out of scope for portfolio)
-
-Real production would need: Sentry DSN, a proper domain + TLS, CDN for frontend assets, background task monitoring (Flower or equivalent), database backups, rate limiting at the edge, and SR 11-7 / APRA CPS 234 compliance controls. The portfolio demo intentionally skips these — `backend/docs/SECURITY.md` covers the security baseline; regulatory/compliance control mapping is a future doc.
+If you need a cloud deployment of your own, the Docker Compose topology is portable to any container host (Kubernetes, bare-metal, or any PaaS that accepts Docker images) — but no specific host config is supported here.
