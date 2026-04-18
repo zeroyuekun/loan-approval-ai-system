@@ -20,6 +20,16 @@ import { NextBestOfferCard } from '@/components/agents/NextBestOfferCard'
 import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
 import { formatCurrency, formatDate, getStatusColor, getDisplayStatus } from '@/lib/utils'
 import {
+  tierColors,
+  residencyLabels,
+  idTypeLabels,
+  maritalLabels,
+  employmentStatusLabels,
+  housingSituationLabels,
+  industryLabels,
+  contactMethodLabels,
+} from '@/lib/customerLabels'
+import {
   ArrowLeft,
   UserCircle,
   CreditCard,
@@ -37,81 +47,6 @@ import {
   Save,
   X,
 } from 'lucide-react'
-
-const tierColors: Record<string, string> = {
-  standard: 'bg-gray-100 text-gray-800',
-  silver: 'bg-slate-200 text-slate-800',
-  gold: 'bg-yellow-100 text-yellow-800',
-  platinum: 'bg-purple-100 text-purple-800',
-}
-
-const residencyLabels: Record<string, string> = {
-  citizen: 'Australian Citizen',
-  permanent_resident: 'Permanent Resident',
-  temporary_visa: 'Temporary Visa Holder',
-  nz_citizen: 'New Zealand Citizen',
-}
-
-const idTypeLabels: Record<string, string> = {
-  drivers_licence: "Driver's Licence",
-  passport: 'Australian Passport',
-  medicare: 'Medicare Card',
-  immicard: 'ImmiCard',
-}
-
-const maritalLabels: Record<string, string> = {
-  single: 'Single',
-  married: 'Married',
-  de_facto: 'De Facto',
-  divorced: 'Divorced',
-  widowed: 'Widowed',
-}
-
-const employmentStatusLabels: Record<string, string> = {
-  payg_permanent: 'PAYG Permanent',
-  payg_casual: 'PAYG Casual',
-  self_employed: 'Self Employed',
-  contract: 'Contract',
-  retired: 'Retired',
-  unemployed: 'Unemployed',
-  home_duties: 'Home Duties',
-}
-
-const housingSituationLabels: Record<string, string> = {
-  own_outright: 'Own Outright',
-  mortgage: 'Mortgage',
-  renting: 'Renting',
-  boarding: 'Boarding',
-  living_with_parents: 'Living with Parents',
-}
-
-const industryLabels: Record<string, string> = {
-  agriculture: 'Agriculture',
-  mining: 'Mining',
-  manufacturing: 'Manufacturing',
-  utilities: 'Utilities',
-  construction: 'Construction',
-  wholesale_trade: 'Wholesale Trade',
-  retail_trade: 'Retail Trade',
-  accommodation_food: 'Accommodation & Food',
-  transport_postal: 'Transport & Postal',
-  information_media: 'Information & Media',
-  financial_insurance: 'Financial & Insurance',
-  property_services: 'Property Services',
-  professional_scientific: 'Professional & Scientific',
-  administrative: 'Administrative',
-  public_admin: 'Public Administration',
-  education_training: 'Education & Training',
-  healthcare_social: 'Healthcare & Social',
-  arts_recreation: 'Arts & Recreation',
-  other_services: 'Other Services',
-}
-
-const contactMethodLabels: Record<string, string> = {
-  email: 'Email',
-  phone: 'Phone',
-  sms: 'SMS',
-}
 
 function BoolIndicator({ value, label }: { value: boolean; label: string }) {
   return (

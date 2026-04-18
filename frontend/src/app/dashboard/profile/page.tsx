@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Save, Shield, UserCircle, Building2, CreditCard, Briefcase, Landmark, Home } from 'lucide-react'
 import { toast } from 'sonner'
+import { tierColors } from '@/lib/customerLabels'
 
 export default function ProfilePage() {
   const { user } = useAuth()
@@ -114,13 +115,6 @@ export default function ProfilePage() {
         <Skeleton className="h-64 w-full" />
       </div>
     )
-  }
-
-  const tierColors: Record<string, string> = {
-    standard: 'bg-gray-100 text-gray-800',
-    silver: 'bg-slate-200 text-slate-800',
-    gold: 'bg-yellow-100 text-yellow-800',
-    platinum: 'bg-purple-100 text-purple-800',
   }
 
   return (
