@@ -1,0 +1,55 @@
+name: smoke-e2e
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Create .env from example
+        run: |
+          cp .env.example .env
+          {
+            echo "DJANGO_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')"
+            echo "FIELD_ENCRYPTION_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          } >> .env
+
+      - name: Build + up
+        run: docker compose up -d
+
+      - name: Migrate + seed minimal dataset
+        run: |
+          docker compose exec -T backend python manage.py migrate
+          docker compose exec -T backend python manage.py generate_data --count 500
+          docker compose exec -T backend python manage.py train_model --algorithm xgb
+
+      - name: Run smoke script
+        run: tools/smoke_e2e.sh --keep-up
+
+      - name: Print backend + celery logs on failure
+        if: failure()
+        run: |
+          docker compose logs backend | tail -200
+          docker compose logs celery_worker_ml | tail -100
+
+      - name: Upload smoke result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-result
+          path: .tmp/smoke_result.json
+          if-no-files-found: warn
+
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
