@@ -1,3 +1,10 @@
+"""Behavioural-realism feature generator for synthetic loan data.
+
+Stateless helper that layers behavioural signals (payment-regularity, overdraft
+frequency, spending volatility, etc.) onto a base application frame. Extracted from
+`DataGenerator` so these signals can be regenerated independently when tuning realism.
+"""
+
 import numpy as np
 import pandas as pd
 

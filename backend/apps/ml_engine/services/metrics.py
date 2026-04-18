@@ -1,3 +1,11 @@
+"""Production-grade ML metrics for champion-challenger evaluation.
+
+Provides KS statistic, PSI (per-feature and population), Brier decomposition
+(reliability + resolution + uncertainty per Murphy 1973), ECE, and a 4-gate
+promotion decision. Aligns with APRA APS 220 model-validation guidance and
+Basel WG-CR scorecard expectations.
+"""
+
 import numpy as np
 import pandas as pd
 from django.conf import settings as django_settings

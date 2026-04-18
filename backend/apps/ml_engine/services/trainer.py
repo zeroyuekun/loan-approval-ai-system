@@ -1,3 +1,11 @@
+"""XGBoost + Random-Forest model trainer with calibration and segmented training.
+
+Entry point `ModelTrainer.train(segment=...)` builds the preprocessing pipeline,
+runs Optuna-tuned XGBoost training with monotone constraints, calibrates via isotonic
+regression, computes holdout metrics (AUC/KS/Brier/PSI/ECE), and persists a
+`ModelVersion` row keyed by segment. Aligns with APRA CPS 220 MRM evidence logging.
+"""
+
 import logging
 import os
 import time

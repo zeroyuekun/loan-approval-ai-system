@@ -1,3 +1,11 @@
+"""Underwriting engine — approval decisions and default-probability calibration.
+
+Hosts the HEM expense table, serviceability-assessment thresholds, and
+`compute_approval` / `calibrate_default_probability` methods. Extracted from
+`DataGenerator` so the underwriting rules have a single home and can be evolved
+alongside APRA APG 223 serviceability guidance without touching data generation.
+"""
+
 import numpy as np
 import pandas as pd
 

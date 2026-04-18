@@ -65,3 +65,17 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+  quality-bar:
+    name: ml_engine quality bar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run file-size + docstring check
+        run: python tools/check_file_sizes.py
