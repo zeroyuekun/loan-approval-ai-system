@@ -13,6 +13,10 @@ from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_sco
 from sklearn.preprocessing import StandardScaler
 
 from .metrics import MetricsService
+from .monotone_constraints import (
+    assert_rationale_coverage,
+    build_xgboost_monotone_spec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -484,6 +488,9 @@ class ModelTrainer:
                 eval_metric="logloss",
                 n_jobs=n_jobs,
                 scale_pos_weight=scale_pos,
+                # Mirror the final-model constraints so temporal-CV AUC is
+                # comparable to the production point estimate.
+                monotone_constraints=build_xgboost_monotone_spec(list(X_train_fold.columns)),
             )
             model.fit(X_train_fold, y_train_fold)
             probs = model.predict_proba(X_val_fold)[:, 1]
@@ -750,6 +757,9 @@ class ModelTrainer:
             eval_metric="logloss",
             n_jobs=1,
             scale_pos_weight=neg_count_cv / pos_count_cv if pos_count_cv > 0 else 1.0,
+            # Mirror the final-model constraints so stability-CV AUC is
+            # comparable to the production point estimate.
+            monotone_constraints=build_xgboost_monotone_spec(list(X_train.columns)),
         )
         cv_scores = cross_val_score(cv_model, X_train, y_train, cv=cv, scoring="roc_auc")
         cv_mean = float(cv_scores.mean())
@@ -1072,37 +1082,15 @@ class ModelTrainer:
         return grid.best_estimator_, grid.best_params_
 
     def _build_monotonic_constraints(self, feature_cols):
-        """Return (1, -1, 0) tuple per feature for XGBoost monotonic constraints."""
-        # Up to 21 constraints. Using max_bin=512 to compensate for the larger
-        # constraint set and preserve sufficient split candidates.
-        constraints = {
-            # Positive: higher value → more likely approved
-            "credit_score": 1,
-            "annual_income": 1,
-            "employment_length": 1,
-            "savings_balance": 1,
-            "credit_history_months": 1,
-            "salary_credit_regularity": 1,
-            "income_verification_score": 1,
-            # Additional positive: higher value → more likely approved
-            "property_value": 1,
-            "deposit_amount": 1,
-            "has_cosigner": 1,
-            "on_time_payment_pct": 1,
-            "savings_to_loan_ratio": 1,
-            "debt_service_coverage": 1,
-            # Negative: higher value → less likely approved
-            "debt_to_income": -1,
-            "num_defaults_5yr": -1,
-            "worst_arrears_months": -1,
-            # Additional negative: higher value → less likely approved
-            "existing_credit_card_limit": -1,
-            "monthly_expenses": -1,
-            "num_credit_enquiries_6m": -1,
-            "bureau_risk_score": -1,
-            "stressed_dsr": -1,
-        }
-        return tuple(constraints.get(col, 0) for col in feature_cols)
+        """Delegate to the module-level schedule in monotone_constraints.py.
+
+        The schedule was extracted out of trainer.py so it can be referenced
+        from the MRM dossier generator and audited in isolation. Calling
+        assert_rationale_coverage() here causes a sign-flip or undocumented
+        new constraint to fail training rather than ship silently.
+        """
+        assert_rationale_coverage()
+        return build_xgboost_monotone_spec(feature_cols)
 
     def _train_xgb(self, X_train, y_train, X_val, y_val, sample_weights=None):
         """Train XGBoost with Optuna hyperparameter search and early stopping."""
