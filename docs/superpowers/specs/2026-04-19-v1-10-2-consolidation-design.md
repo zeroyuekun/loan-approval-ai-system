@@ -138,8 +138,10 @@ trailing `Z`, substitute:
 datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 ```
 
-**Gate:** `pytest -W error::DeprecationWarning` passes; full suite 1454 passed
-/ 27 skipped reported rate with zero new warnings.
+**Gate:** Full pytest suite (1454 passed / 27 skipped baseline) runs with zero
+new `utcnow`-related `DeprecationWarning` entries under the captured warnings
+for the touched `apps.ml_engine.services.*` modules. Other unrelated third-party
+deprecation warnings are acceptable.
 
 ---
 
@@ -178,8 +180,10 @@ and DRF serializer-level (explicit `MinValueValidator` / `MaxValueValidator`).
 - `backend/apps/accounts/serializers.py` — apply in `CustomerProfileSerializer`
 - `backend/tests/test_profile_validators.py` — **new** — 3 tests (valid, too high,
   negative) for both model `.full_clean()` and serializer
-- Optional: management command `backend/apps/accounts/management/commands/audit_payment_pct.py`
-  to report out-of-range rows (read-only, no mutation — PO decision before auto-fix)
+
+Auditing existing out-of-range rows is deferred. The validator only applies
+on save / full_clean; old rows stay as-is. No data migration needed. If the
+PO later wants remediation, that's a separate spec.
 
 **Change:**
 ```python
@@ -310,8 +314,19 @@ clean-soft:              ## Reclaim cache space (DB + Redis volumes preserved)
 
 clean:                   ## Nuke ephemerals INCLUDING volumes (destructive!)
 	docker compose down -v
-	# ... existing body unchanged ...
+	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find backend -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -name "*.pyc" -not -path "*/node_modules/*" -delete 2>/dev/null || true
+	rm -rf frontend/.next frontend/coverage frontend/playwright-report frontend/test-results
+	rm -rf backend/htmlcov backend/.coverage backend/.pytest_cache
+	rm -f frontend/tsconfig.tsbuildinfo
+	@echo "Full clean complete. Volumes destroyed."
 ```
+
+The `clean` body is effectively `clean-soft` steps plus `-v` on the compose
+down. DRY is not introduced here (a single shared helper) because `make`
+targets are executed independently and the body is short enough to keep
+literal. If either list grows, refactor to a shared variable later.
 
 README "Housekeeping" section gains a 2-line note on the distinction.
 
@@ -328,15 +343,20 @@ them.
 **Files:**
 - `backend/config/settings/base.py` — `APP_VERSION = "1.10.2"`
 - `CHANGELOG.md` — new `## [1.10.2] - 2026-04-19` section listing D1-D6
-- Release PR body mentions `Closes #55 #57 #54 #56 #61` (the last two as stale)
+
+**Issue closure attribution:**
+- D3's PR body: `Closes #55` (validator) — closes on merge
+- D4's PR body: `Closes #57` (Grafana password) — closes on merge
+- D5's PR body: `Closes #54` (DiCE pin) — closes on merge via deadcode removal
+- D7's release PR body: `Closes #56 #61` (stale issues) — with a one-line
+  comment on each before close linking the verifying commit
 
 **Gate:**
 - `tools/smoke_e2e.sh` passes against `v1.10.2` tag (local run + `workflow_dispatch`
   CI from Actions tab)
 - `git tag v1.10.2 <commit>` + `git push origin v1.10.2`
-- Stale issues #56, #61 closed with a link to the commit where they were
-  verified stale
-- Fixed issues #55, #57 closed by the merge of D3/D4 PRs (via `Closes #N` in body)
+- All four attributions above actually closed post-merge
+  (`gh issue view <N> --json state`)
 
 ---
 
