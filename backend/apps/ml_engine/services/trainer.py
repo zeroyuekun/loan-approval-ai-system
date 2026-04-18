@@ -12,7 +12,12 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score, train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from .metrics import MetricsService
+from .metrics import (
+    MetricsService,
+    brier_decomposition,
+    ks_statistic,
+    psi_by_feature,
+)
 from .monotone_constraints import (
     assert_rationale_coverage,
     build_xgboost_monotone_spec,
@@ -909,6 +914,25 @@ class ModelTrainer:
         metrics["calibration_data"] = self.metrics_service.compute_calibration_data(y_test, y_prob)
         metrics["threshold_analysis"] = self.metrics_service.compute_threshold_analysis(y_test, y_prob)
         metrics["decile_analysis"] = self.metrics_service.compute_decile_analysis(y_test, y_prob)
+
+        # D5 — production-grade metrics for champion-challenger promotion.
+        # `ks` is the bare float, distinct from `ks_statistic` (rounded) so
+        # gate comparisons carry full precision. Brier decomposition lets the
+        # MRM dossier and promotion gate separate calibration error
+        # (reliability) from discriminative power (resolution).
+        metrics["ks"] = round(ks_statistic(y_test, y_prob), 6)
+        metrics["brier_decomp"] = brier_decomposition(y_test, y_prob)
+        # Per-feature PSI of test distribution vs train distribution — feeds
+        # the promotion gate's max-PSI check and the MRM dossier.
+        try:
+            metrics["psi_by_feature"] = psi_by_feature(
+                X_train if isinstance(X_train, pd.DataFrame) else pd.DataFrame(X_train, columns=feature_cols),
+                X_test if isinstance(X_test, pd.DataFrame) else pd.DataFrame(X_test, columns=feature_cols),
+                feature_cols,
+            )
+        except Exception as _psi_exc:
+            logger.warning("psi_by_feature computation failed: %s", _psi_exc)
+            metrics["psi_by_feature"] = {}
 
         # Overfitting detection — derive predictions from probabilities
         # to avoid a redundant full inference pass on the training set

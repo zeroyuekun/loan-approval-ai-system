@@ -846,3 +846,165 @@ class VintageAnalyser:
             result[quarter] = entry
 
         return result
+
+
+# ===========================================================================
+# Production-grade metrics (D5) — simple-return wrappers.
+#
+# The MetricsService methods above are the historical API and return dicts
+# with analytics payloads for the dashboard. These module-level helpers return
+# the raw scalars / dicts that champion-challenger promotion gates and MRM
+# dossier generation need to reason over. Keeping both shapes avoids breaking
+# the existing API while giving new code an unambiguous float to compare.
+# ===========================================================================
+
+
+def ks_statistic(y_true, y_proba) -> float:
+    """Kolmogorov-Smirnov statistic = max separation between the CDFs of the
+    predicted probabilities for positives vs negatives.
+
+    Returns a float in [0, 1]. ~0.35+ is considered good for retail credit
+    scorecards (APRA APS 220 commentary, Basel WG-CR validation guides).
+    """
+    import numpy as _np
+
+    y_true = _np.asarray(y_true).astype(int)
+    y_proba = _np.asarray(y_proba, dtype=float)
+
+    pos = y_proba[y_true == 1]
+    neg = y_proba[y_true == 0]
+    if len(pos) == 0 or len(neg) == 0:
+        return 0.0
+
+    thresholds = _np.unique(_np.concatenate([pos, neg]))
+    # F₁(s) - F₀(s) across all unique scores
+    cdf_pos = _np.searchsorted(_np.sort(pos), thresholds, side="right") / len(pos)
+    cdf_neg = _np.searchsorted(_np.sort(neg), thresholds, side="right") / len(neg)
+    return float(_np.max(_np.abs(cdf_pos - cdf_neg)))
+
+
+def psi(expected_dist, actual_dist, bins: int = 10) -> float:
+    """Population Stability Index between two 1-D distributions.
+
+    PSI < 0.10: stable, 0.10-0.25: moderate shift, > 0.25: significant.
+    Matches the compute_psi implementation above but returns a bare float
+    so gate logic can `psi(...) <= 0.25` without indexing a dict.
+    """
+    import numpy as _np
+
+    expected = _np.asarray(expected_dist, dtype=float)
+    actual = _np.asarray(actual_dist, dtype=float)
+    expected = expected[_np.isfinite(expected)]
+    actual = actual[_np.isfinite(actual)]
+    if len(expected) < bins or len(actual) < bins:
+        return 0.0
+
+    edges = _np.unique(_np.percentile(expected, _np.linspace(0, 100, bins + 1)))
+    if len(edges) < 3:
+        return 0.0
+
+    eps = 1e-4
+    exp_counts = _np.histogram(expected, bins=edges)[0]
+    act_counts = _np.histogram(actual, bins=edges)[0]
+    exp_pct = (exp_counts + eps) / (len(expected) + eps * len(exp_counts))
+    act_pct = (act_counts + eps) / (len(actual) + eps * len(act_counts))
+    exp_pct = exp_pct / exp_pct.sum()
+    act_pct = act_pct / act_pct.sum()
+
+    return float(_np.sum((act_pct - exp_pct) * _np.log(act_pct / exp_pct)))
+
+
+def psi_by_feature(X_ref, X_cur, feature_cols, bins: int = 10) -> dict:
+    """Per-feature PSI against a reference frame. Returns {feature: float}.
+
+    Features missing from either frame are skipped silently — partial
+    coverage is better than a hard failure during gate evaluation.
+    """
+    out: dict = {}
+    for col in feature_cols:
+        if col in getattr(X_ref, "columns", []) and col in getattr(X_cur, "columns", []):
+            try:
+                out[col] = round(psi(X_ref[col].values, X_cur[col].values, bins=bins), 4)
+            except Exception:
+                out[col] = 0.0
+    return out
+
+
+def brier_decomposition(y_true, y_proba, bins: int = 10) -> dict:
+    """Murphy (1973) three-term decomposition of the Brier score.
+
+    The classical Murphy identity — BS = reliability − resolution + uncertainty —
+    holds exactly for the **binned** Brier score: the Brier computed after
+    replacing each forecast f_i with its bin mean f_k. For continuous-score
+    models applied to coarsely binned reliability diagrams, the pointwise
+    Brier additionally carries a within-bin-variance contribution that is
+    reported separately.
+
+    Returns:
+        {
+            "brier": float,              # pointwise BS (sklearn-compatible)
+            "brier_binned": float,       # BS computed with bin means — used
+                                         # in the Murphy identity below
+            "reliability": float,        # calibration error (lower = better)
+            "resolution": float,         # discrimination (higher = better)
+            "uncertainty": float,        # o_bar * (1 − o_bar), irreducible
+            "within_bin_variance": float, # pointwise − binned
+        }
+
+    Identity (within numerical tolerance):
+        brier_binned = reliability − resolution + uncertainty
+        brier        = brier_binned + within_bin_variance
+    """
+    import numpy as _np
+
+    y_true = _np.asarray(y_true, dtype=float)
+    y_proba = _np.asarray(y_proba, dtype=float)
+    n = len(y_true)
+    if n == 0:
+        return {
+            "brier": 0.0,
+            "brier_binned": 0.0,
+            "reliability": 0.0,
+            "resolution": 0.0,
+            "uncertainty": 0.0,
+            "within_bin_variance": 0.0,
+        }
+
+    overall = float(_np.mean(y_true))
+    uncertainty = overall * (1.0 - overall)
+    brier_pointwise = float(_np.mean((y_proba - y_true) ** 2))
+
+    edges = _np.linspace(0.0, 1.0, bins + 1)
+    # digitize -1 shifts to 0-indexed bins; clamp top bin so predictions of
+    # 1.0 fall into the final bin rather than overflowing to bins+1.
+    bin_idx = _np.clip(_np.digitize(y_proba, edges) - 1, 0, bins - 1)
+
+    reliability = 0.0
+    resolution = 0.0
+    brier_binned = 0.0
+    for k in range(bins):
+        mask = bin_idx == k
+        n_k = int(mask.sum())
+        if n_k == 0:
+            continue
+        f_bin = y_proba[mask]
+        y_bin = y_true[mask]
+        o_k = float(_np.mean(y_bin))
+        f_k = float(_np.mean(f_bin))
+        weight = n_k / n
+        reliability += weight * (f_k - o_k) ** 2
+        resolution += weight * (o_k - overall) ** 2
+        # Binned Brier: avg over bin of (f_k - y_i)^2. This is what the
+        # 3-term Murphy identity exactly decomposes.
+        brier_binned += _np.sum((f_k - y_bin) ** 2) / n
+
+    within_bin_variance = brier_pointwise - float(brier_binned)
+
+    return {
+        "brier": round(brier_pointwise, 6),
+        "brier_binned": round(float(brier_binned), 6),
+        "reliability": round(reliability, 6),
+        "resolution": round(resolution, 6),
+        "uncertainty": round(uncertainty, 6),
+        "within_bin_variance": round(float(within_bin_variance), 6),
+    }
