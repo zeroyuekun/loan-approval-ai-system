@@ -286,6 +286,35 @@ class LoanApplication(SoftDeleteModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
     notes = models.TextField(blank=True)
 
+    # Referral audit trail (D6) — populated when credit-policy overlay's
+    # refer rules (P08–P12) fire. Intentionally orthogonal to the
+    # customer-facing bias review queue (which stays bias-only per the
+    # established product preference); admins read these via the
+    # `/api/loans/referrals/` endpoint.
+    class ReferralStatus(models.TextChoices):
+        NONE = "none", "Not referred"
+        REFERRED = "referred", "Referred to underwriter"
+        CLEARED = "cleared", "Cleared by underwriter"
+        ESCALATED = "escalated", "Escalated (further review)"
+
+    referral_status = models.CharField(
+        max_length=20,
+        choices=ReferralStatus.choices,
+        default=ReferralStatus.NONE,
+        db_index=True,
+        help_text="Referral state from credit-policy overlay (P08–P12); admin-only workflow.",
+    )
+    referral_codes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Policy codes (e.g. ['P09', 'P11']) that triggered referral.",
+    )
+    referral_rationale = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Code → human-readable reason map, captured at decision time for audit.",
+    )
+
     # Legacy fields — kept for migration compatibility
     conditions = models.JSONField(
         default=list,

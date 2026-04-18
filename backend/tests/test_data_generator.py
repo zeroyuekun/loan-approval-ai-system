@@ -79,10 +79,15 @@ class TestDataGenerator:
             "sa3_name",
             "industry_anzsic",
             "help_repayment_monthly",
+            # Underwriter-internal features exposed to the model
+            "hem_benchmark",
+            "hem_gap",
+            "lmi_premium",
+            "effective_loan_amount",
         ]
         for col in expected_columns:
             assert col in df.columns, f"Missing column: {col}"
-        assert len(df.columns) >= 42
+        assert len(df.columns) >= 46
 
     def test_approval_rate_in_realistic_range(self, df):
         approval_rate = df["approved"].mean()
@@ -504,3 +509,68 @@ class TestOutcomeTracking:
             assert valid.min() >= 1, "Months to outcome should be >= 1"
             # Log-normal default timing allows up to 36 months (RBA research)
             assert valid.max() <= 36, "Months to outcome should be <= 36"
+
+
+class TestUnderwriterPolicyFeatures:
+    """Validate underwriter-internal policy variables exposed as model features.
+
+    These features (hem_benchmark, hem_gap, lmi_premium, effective_loan_amount)
+    let the ML model learn the HEM-floor + LMI-capitalisation policy the
+    underwriter enforces, instead of having to infer them from raw inputs.
+    """
+
+    @pytest.fixture(scope="class")
+    def df(self):
+        return DataGenerator().generate(num_records=3000, random_seed=7)
+
+    def test_hem_benchmark_reasonable_range(self, df):
+        # HEM lookups come from the HEM_BENCHMARKS table (couple+dependants
+        # tiers). The lowest single-no-kids row is ~$1,600 and the richest
+        # couple+3-kids row is under ~$6,000.
+        assert df["hem_benchmark"].min() >= 1_000
+        assert df["hem_benchmark"].max() <= 8_000
+
+    def test_hem_benchmark_increases_with_dependants(self, df):
+        no_deps = df[df["number_of_dependants"] == 0]["hem_benchmark"].mean()
+        three_plus = df[df["number_of_dependants"] >= 3]["hem_benchmark"].mean()
+        assert three_plus > no_deps, (
+            f"HEM with 3+ dependants ({three_plus:.0f}) should exceed no-dependants ({no_deps:.0f})"
+        )
+
+    def test_hem_gap_equals_expenses_minus_benchmark(self, df):
+        # hem_gap is computed at generation time from the RAW monthly_expenses,
+        # BEFORE MNAR missingness is injected into monthly_expenses. So we
+        # compare only where monthly_expenses is still observable.
+        observed = df["monthly_expenses"].notna()
+        diff = (df.loc[observed, "monthly_expenses"] - df.loc[observed, "hem_benchmark"]).round(2)
+        assert np.allclose(df.loc[observed, "hem_gap"], diff, atol=0.02)
+
+    def test_lmi_zero_for_non_home_loans(self, df):
+        non_home = df[~df["purpose"].isin(["home", "investment"])]
+        assert (non_home["lmi_premium"] == 0).all(), "Personal/car/business loans must have zero LMI"
+
+    def test_lmi_zero_when_lvr_below_80(self, df):
+        home_low_lvr = df[
+            df["purpose"].isin(["home", "investment"])
+            & (df["property_value"] > 0)
+            & ((df["loan_amount"] / df["property_value"]) <= 0.80)
+        ]
+        if len(home_low_lvr) > 20:
+            assert (home_low_lvr["lmi_premium"] == 0).all(), "LMI should be zero for LVR <= 80%"
+
+    def test_lmi_positive_when_lvr_above_80(self, df):
+        home_high_lvr = df[
+            df["purpose"].isin(["home", "investment"])
+            & (df["property_value"] > 0)
+            & ((df["loan_amount"] / df["property_value"]) > 0.85)
+        ]
+        if len(home_high_lvr) > 20:
+            positive = (home_high_lvr["lmi_premium"] > 0).mean()
+            assert positive > 0.8, f"LMI should be charged for LVR>85%, got {positive:.1%} positive"
+
+    def test_effective_loan_equals_loan_plus_lmi(self, df):
+        diff = df["loan_amount"] + df["lmi_premium"]
+        assert np.allclose(df["effective_loan_amount"], diff.round(2), atol=0.02)
+
+    def test_effective_loan_never_below_loan_amount(self, df):
+        assert (df["effective_loan_amount"] >= df["loan_amount"] - 0.01).all()

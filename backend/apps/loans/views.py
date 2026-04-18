@@ -285,3 +285,62 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return [ComplaintFilingThrottle()]
         return super().get_throttles()
+
+
+class ReferralListView(APIView):
+    """Admin-only list of LoanApplications in a non-NONE referral state.
+
+    Orthogonal to the bias review queue (which remains
+    `bias_reports__flagged=True`). Filterable by policy code via
+    `?code=P09` (ORs across comma-separated values). Designed as a
+    read-only audit surface for future ops tooling — Arm A intentionally
+    ships no customer-facing UI against this endpoint.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsAdmin]
+
+    def get(self, request):
+        qs = (
+            LoanApplication.objects.exclude(
+                referral_status=LoanApplication.ReferralStatus.NONE,
+            )
+            .select_related("applicant")
+            .order_by("-updated_at")
+        )
+
+        code_filter = request.query_params.get("code")
+        if code_filter:
+            codes = [c.strip() for c in code_filter.split(",") if c.strip()]
+            # JSONField contains-any match — postgres supports @> with a list
+            # operand. Fall back to a Python filter if the DB dialect can't
+            # translate (sqlite in tests).
+            try:
+                code_q = models.Q()
+                for code in codes:
+                    code_q |= models.Q(referral_codes__contains=[code])
+                qs = qs.filter(code_q)
+            except Exception:
+                applications = [a for a in qs if any(c in (a.referral_codes or []) for c in codes)]
+                qs = applications  # fallback: Python-level filter
+
+        status_filter = request.query_params.get("status")
+        if status_filter and hasattr(qs, "filter"):
+            qs = qs.filter(referral_status=status_filter)
+
+        limit = min(int(request.query_params.get("limit", 100)), 500)
+        results = []
+        for app in list(qs)[:limit]:
+            results.append(
+                {
+                    "application_id": str(app.id),
+                    "applicant_id": str(app.applicant_id),
+                    "purpose": app.purpose,
+                    "loan_amount": float(app.loan_amount) if app.loan_amount is not None else None,
+                    "referral_status": app.referral_status,
+                    "referral_codes": app.referral_codes or [],
+                    "referral_rationale": app.referral_rationale or {},
+                    "status": app.status,
+                    "updated_at": app.updated_at.isoformat() if app.updated_at else None,
+                }
+            )
+        return Response({"count": len(results), "results": results})

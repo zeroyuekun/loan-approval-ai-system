@@ -12,7 +12,16 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score, train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from .metrics import MetricsService
+from .metrics import (
+    MetricsService,
+    brier_decomposition,
+    ks_statistic,
+    psi_by_feature,
+)
+from .monotone_constraints import (
+    assert_rationale_coverage,
+    build_xgboost_monotone_spec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +193,12 @@ class ModelTrainer:
         "stressed_dsr",
         "hem_surplus",
         "uncommitted_monthly_income",
+        # Underwriter-internal policy variables (exposed as features so the
+        # model can learn HEM floor + LMI capitalisation policy directly)
+        "hem_benchmark",
+        "hem_gap",
+        "lmi_premium",
+        "effective_loan_amount",
         # Additional derived ratios
         "savings_to_loan_ratio",
         "debt_service_coverage",
@@ -478,6 +493,9 @@ class ModelTrainer:
                 eval_metric="logloss",
                 n_jobs=n_jobs,
                 scale_pos_weight=scale_pos,
+                # Mirror the final-model constraints so temporal-CV AUC is
+                # comparable to the production point estimate.
+                monotone_constraints=build_xgboost_monotone_spec(list(X_train_fold.columns)),
             )
             model.fit(X_train_fold, y_train_fold)
             probs = model.predict_proba(X_val_fold)[:, 1]
@@ -487,7 +505,15 @@ class ModelTrainer:
             return None, 0
         return round(float(np.mean(fold_aucs)), 4), len(fold_aucs)
 
-    def train(self, data_path, algorithm="xgb", use_reject_inference=True, reject_inference_labels=None):
+    def train(
+        self,
+        data_path,
+        algorithm="xgb",
+        use_reject_inference=True,
+        reject_inference_labels=None,
+        *,
+        segment=None,
+    ):
         """Train model with Optuna (XGBoost) or GridSearchCV (RF) and return model + metrics.
 
         Parameters
@@ -504,7 +530,18 @@ class ModelTrainer:
             Series of inferred outcomes for denied applications, indexed to
             match the rows in the CSV. Typically from
             DataGenerator.reject_inference_labels.
+        segment : str or None
+            When provided (home_owner_occupier / home_investor / personal),
+            narrows the training DataFrame to rows matching that product
+            segment. Falls back to unified training when the segment slice
+            is below SEGMENT_MIN_SAMPLES to avoid noisy per-segment models.
         """
+        from apps.ml_engine.services.segmentation import (
+            SEGMENT_FILTERS,
+            SEGMENT_MIN_SAMPLES,
+            SEGMENT_UNIFIED,
+        )
+
         start_time = time.time()
 
         # Load data
@@ -512,6 +549,31 @@ class ModelTrainer:
 
         if len(df) < 20:
             raise ValueError(f"Dataset too small for training: {len(df)} rows (minimum 20 required)")
+
+        # Segment slicing: narrow the training frame before any splitting so
+        # the holdout and CV reflect the segment only.
+        if segment and segment != SEGMENT_UNIFIED:
+            seg_filter = SEGMENT_FILTERS.get(segment)
+            if seg_filter is None:
+                raise ValueError(f"Unknown segment '{segment}'")
+            mask = df.apply(lambda row: seg_filter(row.to_dict()), axis=1)
+            df_seg = df[mask].copy()
+            if len(df_seg) < SEGMENT_MIN_SAMPLES:
+                logger.warning(
+                    "Segment '%s' has %d rows (< %d threshold) — falling back to unified training",
+                    segment,
+                    len(df_seg),
+                    SEGMENT_MIN_SAMPLES,
+                )
+                segment = SEGMENT_UNIFIED
+            else:
+                logger.info(
+                    "Training segment-specific model '%s' on %d rows (of %d total)",
+                    segment,
+                    len(df_seg),
+                    len(df),
+                )
+                df = df_seg
 
         y = df["approved"]
         class_counts = y.value_counts()
@@ -744,6 +806,9 @@ class ModelTrainer:
             eval_metric="logloss",
             n_jobs=1,
             scale_pos_weight=neg_count_cv / pos_count_cv if pos_count_cv > 0 else 1.0,
+            # Mirror the final-model constraints so stability-CV AUC is
+            # comparable to the production point estimate.
+            monotone_constraints=build_xgboost_monotone_spec(list(X_train.columns)),
         )
         cv_scores = cross_val_score(cv_model, X_train, y_train, cv=cv, scoring="roc_auc")
         cv_mean = float(cv_scores.mean())
@@ -850,6 +915,25 @@ class ModelTrainer:
         metrics["threshold_analysis"] = self.metrics_service.compute_threshold_analysis(y_test, y_prob)
         metrics["decile_analysis"] = self.metrics_service.compute_decile_analysis(y_test, y_prob)
 
+        # D5 — production-grade metrics for champion-challenger promotion.
+        # `ks` is the bare float, distinct from `ks_statistic` (rounded) so
+        # gate comparisons carry full precision. Brier decomposition lets the
+        # MRM dossier and promotion gate separate calibration error
+        # (reliability) from discriminative power (resolution).
+        metrics["ks"] = round(ks_statistic(y_test, y_prob), 6)
+        metrics["brier_decomp"] = brier_decomposition(y_test, y_prob)
+        # Per-feature PSI of test distribution vs train distribution — feeds
+        # the promotion gate's max-PSI check and the MRM dossier.
+        try:
+            metrics["psi_by_feature"] = psi_by_feature(
+                X_train if isinstance(X_train, pd.DataFrame) else pd.DataFrame(X_train, columns=feature_cols),
+                X_test if isinstance(X_test, pd.DataFrame) else pd.DataFrame(X_test, columns=feature_cols),
+                feature_cols,
+            )
+        except Exception as _psi_exc:
+            logger.warning("psi_by_feature computation failed: %s", _psi_exc)
+            metrics["psi_by_feature"] = {}
+
         # Overfitting detection — derive predictions from probabilities
         # to avoid a redundant full inference pass on the training set
         y_train_pred_prob = model.predict_proba(X_train)[:, 1]
@@ -882,6 +966,7 @@ class ModelTrainer:
         metrics["training_time_seconds"] = training_time
         metrics["optimal_threshold"] = optimal_threshold
         metrics["training_metadata"] = {
+            "segment": segment or "unified",
             "train_size": len(y_train),
             "val_size": len(y_val),
             "test_size": len(y_test),
@@ -1066,37 +1151,15 @@ class ModelTrainer:
         return grid.best_estimator_, grid.best_params_
 
     def _build_monotonic_constraints(self, feature_cols):
-        """Return (1, -1, 0) tuple per feature for XGBoost monotonic constraints."""
-        # Up to 21 constraints. Using max_bin=512 to compensate for the larger
-        # constraint set and preserve sufficient split candidates.
-        constraints = {
-            # Positive: higher value → more likely approved
-            "credit_score": 1,
-            "annual_income": 1,
-            "employment_length": 1,
-            "savings_balance": 1,
-            "credit_history_months": 1,
-            "salary_credit_regularity": 1,
-            "income_verification_score": 1,
-            # Additional positive: higher value → more likely approved
-            "property_value": 1,
-            "deposit_amount": 1,
-            "has_cosigner": 1,
-            "on_time_payment_pct": 1,
-            "savings_to_loan_ratio": 1,
-            "debt_service_coverage": 1,
-            # Negative: higher value → less likely approved
-            "debt_to_income": -1,
-            "num_defaults_5yr": -1,
-            "worst_arrears_months": -1,
-            # Additional negative: higher value → less likely approved
-            "existing_credit_card_limit": -1,
-            "monthly_expenses": -1,
-            "num_credit_enquiries_6m": -1,
-            "bureau_risk_score": -1,
-            "stressed_dsr": -1,
-        }
-        return tuple(constraints.get(col, 0) for col in feature_cols)
+        """Delegate to the module-level schedule in monotone_constraints.py.
+
+        The schedule was extracted out of trainer.py so it can be referenced
+        from the MRM dossier generator and audited in isolation. Calling
+        assert_rationale_coverage() here causes a sign-flip or undocumented
+        new constraint to fail training rather than ship silently.
+        """
+        assert_rationale_coverage()
+        return build_xgboost_monotone_spec(feature_cols)
 
     def _train_xgb(self, X_train, y_train, X_val, y_val, sample_weights=None):
         """Train XGBoost with Optuna hyperparameter search and early stopping."""

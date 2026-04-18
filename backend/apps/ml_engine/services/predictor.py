@@ -109,7 +109,53 @@ FEATURE_BOUNDS = {
     "prepayment_buffer_months": (0, 60),
     "optimism_bias_flag": (0, 1),
     "negative_equity_flag": (0, 1),
+    # Underwriter-internal variables exposed as features.
+    # effective_loan_amount ceiling must cover max loan_amount (5M) + max
+    # LMI premium (3% * 5M = 150k) with headroom, otherwise large high-LVR
+    # home loans fail validation before reaching the model.
+    "hem_benchmark": (0, 20_000),
+    "hem_gap": (-20_000, 20_000),
+    "lmi_premium": (0, 200_000),
+    "effective_loan_amount": (0, 5_200_000),
 }
+
+
+def _recompute_lvr_driven_policy_vars(row):
+    """Re-derive LVR-driven LMI features after mutating property_value or loan_amount.
+
+    Policy variables (lmi_premium, effective_loan_amount) are a function of
+    LVR, so whenever property_value or loan_amount is perturbed (e.g. by a
+    stress scenario or counterfactual) the downstream fields must be
+    recomputed. Otherwise the model sees stale policy vars that no longer
+    correspond to the stressed LVR.
+
+    Schedule (mirrors the generator/underwriter tables):
+      - LVR ≤ 0.80         : no LMI
+      - 0.80 < LVR ≤ 0.85  : 1%
+      - 0.85 < LVR ≤ 0.90  : 2%
+      - LVR > 0.90         : 3%
+
+    LMI applies only to purpose in {home, investment}; personal loans are
+    always charged 0%.
+
+    Mutates `row` in place. Returns None.
+    """
+    property_value = float(row.get("property_value", 0.0) or 0.0)
+    loan_amount = float(row.get("loan_amount", 0.0) or 0.0)
+    lvr = (loan_amount / property_value) if property_value > 0 else 0.0
+
+    if lvr > 0.90:
+        rate = 0.03
+    elif lvr > 0.85:
+        rate = 0.02
+    elif lvr > 0.80:
+        rate = 0.01
+    else:
+        rate = 0.0
+
+    is_home = row.get("purpose") in ("home", "investment")
+    row["lmi_premium"] = round(loan_amount * rate * (1 if is_home else 0), 2)
+    row["effective_loan_amount"] = round(loan_amount + row["lmi_premium"], 2)
 
 
 def _validate_model_path(file_path):
@@ -212,13 +258,14 @@ class ModelPredictor:
         "industry_anzsic",
     ]
 
-    def __init__(self, model_version=None):
+    def __init__(self, model_version=None, *, segment=None):
         if model_version is not None:
             self.model_version = model_version
         else:
             from apps.ml_engine.services.model_selector import select_model_version
+            from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
 
-            self.model_version = select_model_version()
+            self.model_version = select_model_version(segment=segment or SEGMENT_UNIFIED)
 
         bundle = _load_bundle(self.model_version)
         self.model = bundle["model"]
@@ -239,6 +286,21 @@ class ModelPredictor:
         from .metrics import MetricsService
 
         self._metrics_service = MetricsService()
+
+    @classmethod
+    def for_application(cls, application):
+        """Create a predictor routed to the application's product segment.
+
+        Derives the segment from application.purpose / home_ownership, then
+        calls `select_model_version` which falls back to the unified model
+        if no active segment-specific model is available. This is the
+        preferred entry point for scoring tasks — constructor access
+        without a segment defaults to unified.
+        """
+        from apps.ml_engine.services.segmentation import derive_segment
+
+        segment = derive_segment(application)
+        return cls(segment=segment)
 
     @staticmethod
     def _add_derived_features(df):
@@ -458,6 +520,46 @@ class ModelPredictor:
             "help_repayment_monthly": _num("help_repayment_monthly", 0.0),
         }
 
+        # =============================================================
+        # Derive underwriter-internal features from the application.
+        #
+        # These mirror what the synthetic DataGenerator and the
+        # UnderwritingEngine already compute for labels — exposing them
+        # lets the trained model learn the same policies, matching how
+        # real AU lenders feed HEM floors and LMI capitalisation into
+        # their credit scorecards.
+        # =============================================================
+        try:
+            from apps.ml_engine.services.underwriting_engine import UnderwritingEngine
+
+            _uw = UnderwritingEngine()
+            features["hem_benchmark"] = float(
+                _uw.get_hem(
+                    features["applicant_type"],
+                    int(features["number_of_dependants"]),
+                    float(features["annual_income"]),
+                    features["state"],
+                )
+            )
+        except Exception:
+            # Fall back to the feature_engineering default on any error —
+            # inference must not fail because of HEM lookup.
+            features["hem_benchmark"] = 2950.0
+        features["hem_gap"] = round(float(features["monthly_expenses"]) - features["hem_benchmark"], 2)
+        _is_home = features["purpose"] in ("home", "investment")
+        _pv = float(features.get("property_value", 0.0) or 0.0)
+        _lvr_ratio = (float(features["loan_amount"]) / _pv) if _pv > 0 else 0.0
+        if _lvr_ratio > 0.90:
+            _lmi_rate = 0.03
+        elif _lvr_ratio > 0.85:
+            _lmi_rate = 0.02
+        elif _lvr_ratio > 0.80:
+            _lmi_rate = 0.01
+        else:
+            _lmi_rate = 0.0
+        features["lmi_premium"] = round(float(features["loan_amount"]) * _lmi_rate * (1 if _is_home else 0), 2)
+        features["effective_loan_amount"] = round(float(features["loan_amount"]) + features["lmi_premium"], 2)
+
         # Validate inputs
         self._validate_input(features)
 
@@ -572,6 +674,97 @@ class ModelPredictor:
         # Conformal prediction interval (95% coverage)
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
+        # === Risk-based pricing tier (D4) ==========================
+        # PD = 1 − approval probability. Tier is computed even when the
+        # model denies — the tier itself may independently decline
+        # regardless of the model's verdict (PD > top cutoff).
+        try:
+            from apps.ml_engine.services.pricing_engine import get_tier
+
+            pricing_tier = get_tier(pd_score=1.0 - probability, segment=features.get("purpose", "personal"))
+            pricing_payload = pricing_tier.to_dict()
+            # Pricing-tier decline overrides an otherwise-approved model result.
+            if not pricing_tier.approved and prediction_label == "approved":
+                logger.info(
+                    "Pricing tier decline overrides model approve: PD=%.4f segment=%s",
+                    pricing_tier.pd_score,
+                    pricing_tier.segment,
+                )
+                prediction_label = "denied"
+        except Exception:
+            logger.warning("Pricing tier computation failed", exc_info=True)
+            pricing_payload = {"tier": "unavailable", "approved": True}
+
+        # === Credit policy overlay (D3) ============================
+        # Evaluate always so shadow-mode logs capture what WOULD have
+        # happened under enforce; mode decides whether the verdict is
+        # actually applied. Rule evaluation is cheap (<1ms) and pure.
+        try:
+            from apps.ml_engine.services import credit_policy as _policy
+
+            policy_result = _policy.evaluate(application)
+            policy_mode = _policy.current_mode()
+            final_prediction = _policy.apply_overlay_to_decision(prediction_label, policy_result, policy_mode)
+
+            if policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
+                # Shadow mode: log what enforce would have done.
+                hypothetical = _policy.apply_overlay_to_decision(
+                    prediction_label, policy_result, _policy.OVERLAY_MODE_ENFORCE
+                )
+                if hypothetical != prediction_label:
+                    logger.warning(
+                        "credit_policy_shadow_disagreement",
+                        extra={
+                            "model_version": str(self.model_version.id),
+                            "model_decision": prediction_label,
+                            "policy_hypothetical": hypothetical,
+                            "hard_fails": policy_result.hard_fails,
+                            "refers": policy_result.refers,
+                        },
+                    )
+
+            policy_payload = {
+                **policy_result.to_dict(),
+                "mode": policy_mode,
+                "changed_model_decision": final_prediction != prediction_label,
+            }
+
+            # Enforce-mode refer takes precedence over model borderline flag —
+            # send to human review rather than approve/deny auto-pathway.
+            if policy_mode == _policy.OVERLAY_MODE_ENFORCE and policy_result.has_refer:
+                requires_human_review = True
+
+            # D6 — referral audit trail (orthogonal to bias review queue).
+            # Persist on the LoanApplication itself so admins can query
+            # referrals via /api/loans/referrals/. Save is wrapped in a
+            # try/except so a persistence failure never breaks prediction.
+            if policy_result.has_refer and application is not None:
+                try:
+                    application.referral_status = application.ReferralStatus.REFERRED
+                    application.referral_codes = list(policy_result.refers)
+                    application.referral_rationale = {
+                        code: policy_result.rationale_by_code.get(code, "") for code in policy_result.refers
+                    }
+                    application.save(update_fields=["referral_status", "referral_codes", "referral_rationale"])
+                except Exception:
+                    logger.warning(
+                        "referral_audit_save_failed",
+                        exc_info=True,
+                        extra={
+                            "application_id": str(getattr(application, "id", None)),
+                            "refers": list(policy_result.refers),
+                        },
+                    )
+
+            prediction_label = final_prediction
+        except Exception as _policy_exc:
+            logger.warning("credit_policy_evaluate_failed", exc_info=True)
+            policy_payload = {
+                "passed": None,
+                "mode": "off",
+                "error": str(_policy_exc),
+            }
+
         result = {
             "prediction": prediction_label,
             "probability": probability,
@@ -589,6 +782,8 @@ class ModelPredictor:
             "expected_loss": expected_loss,
             "stress_test": stress_results,
             "confidence_interval": confidence_interval,
+            "policy_decision": policy_payload,
+            "pricing_tier": pricing_payload,
             # Raw (pre-transform) features for downstream counterfactual generation
             "_features_df": features_df,
         }
@@ -774,6 +969,10 @@ class ModelPredictor:
             stressed = features.copy()
             if float(stressed.get("property_value", 0)) > 0:
                 stressed["property_value"] = float(stressed["property_value"]) * 0.80
+                # Re-derive LVR-driven LMI features so stressed-LVR drives
+                # stressed LMI — otherwise the model sees stale policy vars
+                # and Scenario 2 looks optimistically low-risk at LVR ~0.80.
+                _recompute_lvr_driven_policy_vars(stressed)
             df_s = pd.DataFrame([stressed])
             df_s = self._transform(df_s)
             prob = float(self.model.predict_proba(df_s[self.feature_cols])[0][1])
@@ -804,6 +1003,7 @@ class ModelPredictor:
                 stressed["debt_to_income"] = 999.0  # Maximum DTI when income is zero
             if float(stressed.get("property_value", 0)) > 0:
                 stressed["property_value"] = float(stressed["property_value"]) * 0.80
+                _recompute_lvr_driven_policy_vars(stressed)
             stressed["credit_score"] = max(300, int(stressed["credit_score"]) - 50)
             df_s = pd.DataFrame([stressed])
             df_s = self._transform(df_s)

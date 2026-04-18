@@ -12,6 +12,7 @@ from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
 from apps.ml_engine.services.predictor import ModelPredictor
+from apps.ml_engine.services.segmentation import derive_segment
 
 from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector, MarketingEmailReviewer  # noqa: F401
 from .context_builder import ApplicationContextBuilder
@@ -225,7 +226,12 @@ class PipelineOrchestrator:
         # Step 1: ML Prediction
         step = self._start_step("ml_prediction")
         try:
-            predictor = ModelPredictor()
+            # Use the constructor directly (not `for_application`) so test
+            # fixtures that patch `ModelPredictor` and configure
+            # `.return_value.predict.return_value` keep working. The segment
+            # route is computed here explicitly — equivalent to what the
+            # `for_application` classmethod does internally.
+            predictor = ModelPredictor(segment=derive_segment(application))
             prediction_result = predictor.predict(application)
 
             PredictionLog.objects.create(

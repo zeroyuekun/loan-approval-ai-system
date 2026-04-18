@@ -8,12 +8,35 @@ from django.db import models, transaction
 
 
 class ModelVersion(models.Model):
+    SEGMENT_UNIFIED = "unified"
+    SEGMENT_HOME_OWNER_OCCUPIER = "home_owner_occupier"
+    SEGMENT_HOME_INVESTOR = "home_investor"
+    SEGMENT_PERSONAL = "personal"
+    SEGMENT_CHOICES = [
+        (SEGMENT_UNIFIED, "Unified (all products)"),
+        (SEGMENT_HOME_OWNER_OCCUPIER, "Home loans — owner-occupier"),
+        (SEGMENT_HOME_INVESTOR, "Home loans — investor"),
+        (SEGMENT_PERSONAL, "Personal loans"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     algorithm = models.CharField(max_length=20, choices=[("rf", "Random Forest"), ("xgb", "XGBoost")])
     version = models.CharField(max_length=50)
     file_path = models.CharField(max_length=500)
     file_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hash for integrity verification")
     is_active = models.BooleanField(default=False)
+    segment = models.CharField(
+        max_length=40,
+        choices=SEGMENT_CHOICES,
+        default=SEGMENT_UNIFIED,
+        help_text=(
+            "Product segment this model was trained for. `unified` is the "
+            "fallback that scores all applications. Per-segment models "
+            "(home owner-occupier / home investor / personal) are selected "
+            "ahead of unified when available and meet the minimum-sample "
+            "threshold — otherwise the predictor falls back to unified."
+        ),
+    )
     traffic_percentage = models.IntegerField(
         default=100,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
@@ -83,6 +106,12 @@ class ModelVersion(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["segment", "is_active"],
+                name="ml_modelver_segment_active_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.get_algorithm_display()} v{self.version} (active={self.is_active})"
@@ -97,9 +126,12 @@ class ModelVersion(models.Model):
             if resolved.suffix != ".joblib":
                 raise ValidationError({"file_path": "Model file must have .joblib extension"})
         if self.is_active:
+            # Traffic-percentage cap is scoped to the same segment so that
+            # per-segment A/B tests (e.g. two challengers for the personal
+            # model) don't conflict with the unified or home-loan models.
             other_traffic = (
                 (
-                    ModelVersion.objects.filter(is_active=True)
+                    ModelVersion.objects.filter(is_active=True, segment=self.segment)
                     .exclude(pk=self.pk)
                     .aggregate(total=models.Sum("traffic_percentage"))["total"]
                 )
@@ -107,8 +139,9 @@ class ModelVersion(models.Model):
             )
             if other_traffic + (self.traffic_percentage or 0) > 100:
                 raise ValidationError(
-                    f"Total traffic would be {other_traffic + (self.traffic_percentage or 0)}% "
-                    f"(max 100%). Reduce other models' traffic first."
+                    f"Total traffic in segment '{self.segment}' would be "
+                    f"{other_traffic + (self.traffic_percentage or 0)}% (max 100%). "
+                    "Reduce other models' traffic in this segment first."
                 )
 
     def save(self, *args, **kwargs):

@@ -11,7 +11,7 @@ import sentry_sdk
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application version (synced with CHANGELOG.md)
-APP_VERSION = "1.9.6"
+APP_VERSION = "1.10.0"
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 
@@ -230,6 +230,19 @@ ML_MAX_BIN = 256
 ML_OPTUNA_TRIALS = 30
 # Threads per XGBoost training. Matches the celery_worker_ml CPU quota.
 ML_XGB_N_JOBS = 2
+
+# Hard credit policy overlay (D3). Modes: "off" (not applied), "shadow"
+# (evaluated + logged, model verdict stands), "enforce" (hard-fails override
+# the model, refers route to human review). Default is "shadow" so the rule
+# set can be calibrated against production traffic before being promoted
+# to enforce. Unknown values collapse to "shadow" at read time so a
+# misconfigured deployment never silently downgrades responsible-lending
+# safeguards.
+CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shadow")
+
+# D7 — MRM dossier auto-generation on ModelVersion post_save.
+# Enabled by default; disable in unit tests that create throwaway models.
+MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").lower() == "true"
 
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"

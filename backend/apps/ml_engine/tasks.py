@@ -23,8 +23,13 @@ logger = logging.getLogger(__name__)
     retry_backoff=True,
     max_retries=2,
 )
-def train_model_task(self, algorithm="xgb", data_path=None):
-    """Train a model asynchronously via Celery."""
+def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
+    """Train a model asynchronously via Celery.
+
+    `segment` (optional) narrows the training data to a single product
+    segment (home_owner_occupier / home_investor / personal). When omitted
+    the trainer produces a unified model that scores all applications.
+    """
     import redis as _redis
 
     # Prevent concurrent training — acquire a Redis lock for 30 minutes
@@ -36,22 +41,24 @@ def train_model_task(self, algorithm="xgb", data_path=None):
         return {"status": "skipped", "reason": "training_already_in_progress"}
 
     try:
-        return _do_train(self, algorithm, data_path, lock)
+        return _do_train(self, algorithm, data_path, lock, segment=segment)
     except Exception:
         lock.release()
         raise
 
 
-def _do_train(task, algorithm, data_path, lock):
+def _do_train(task, algorithm, data_path, lock, *, segment=None):
     """Inner training logic — called with lock held."""
     from apps.ml_engine.services.predictor import clear_model_cache
+    from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.trainer import ModelTrainer
 
     if data_path is None:
         data_path = str(settings.BASE_DIR / ".tmp" / "synthetic_loans.csv")
 
+    segment = segment or SEGMENT_UNIFIED
     trainer = ModelTrainer()
-    model, metrics = trainer.train(data_path, algorithm=algorithm)
+    model, metrics = trainer.train(data_path, algorithm=algorithm, segment=segment)
 
     version_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_filename = f"{algorithm}_{version_str}.joblib"
@@ -70,13 +77,16 @@ def _do_train(task, algorithm, data_path, lock):
     from django.db import transaction
 
     with transaction.atomic():
-        ModelVersion.objects.filter(is_active=True).update(is_active=False, traffic_percentage=0)
+        # Scope deactivation to the same segment so training a new
+        # personal-loan model doesn't knock out the active home-loan model.
+        ModelVersion.objects.filter(is_active=True, segment=segment).update(is_active=False, traffic_percentage=0)
         mv = ModelVersion.objects.create(
             algorithm=algorithm,
             version=version_str,
             file_path=model_path,
             file_hash=file_hash,
             is_active=True,
+            segment=segment,
             accuracy=metrics["accuracy"],
             precision=metrics["precision"],
             recall=metrics["recall"],
@@ -167,7 +177,7 @@ def run_prediction_task(self, application_id):
         return {"application_id": str(application_id), "status": "skipped", "reason": application.status}
 
     try:
-        predictor = ModelPredictor()
+        predictor = ModelPredictor.for_application(application)
         result = predictor.predict(application)
     except Exception:
         # Revert status so the application isn't stuck in 'processing'
@@ -354,3 +364,45 @@ def compute_weekly_drift_report(self):
         "alert_level": alert_level,
         "num_predictions": num_predictions,
     }
+
+
+@shared_task(
+    bind=True,
+    name="apps.ml_engine.tasks.generate_mrm_dossier_task",
+    time_limit=300,
+    soft_time_limit=280,
+    autoretry_for=(OSError,),
+    retry_backoff=True,
+    max_retries=1,
+)
+def generate_mrm_dossier_task(self, model_version_id: str):
+    """Generate an MRM dossier for a ModelVersion on the `ml` queue.
+
+    Invoked from the post_save signal on ModelVersion. Non-blocking:
+    failures log a warning but do not surface back to the caller that
+    created the model. Idempotent — overwriting an existing dossier is
+    the correct behaviour when the metrics payload changes (e.g. a
+    post-training fairness update calls save() again).
+    """
+    try:
+        mv = ModelVersion.objects.get(pk=model_version_id)
+    except ModelVersion.DoesNotExist:
+        logger.warning("generate_mrm_dossier_task: ModelVersion %s not found", model_version_id)
+        return {"status": "skipped", "reason": "model_not_found"}
+
+    from apps.ml_engine.services.mrm_dossier import write_dossier
+
+    output_dir = str(settings.ML_MODELS_DIR)
+    try:
+        path = write_dossier(mv, output_dir)
+    except Exception as exc:
+        logger.warning(
+            "generate_mrm_dossier_task: failed for %s: %s",
+            model_version_id,
+            exc,
+            exc_info=True,
+        )
+        return {"status": "failed", "error": str(exc)}
+
+    logger.info("MRM dossier written for model %s → %s", model_version_id, path)
+    return {"status": "ok", "path": path}
