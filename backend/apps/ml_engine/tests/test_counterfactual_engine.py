@@ -84,14 +84,6 @@ class TestCounterfactualEngine:
             assert isinstance(cf["statement"], str)
             assert len(cf["statement"]) > 0
 
-    def test_fallback_on_timeout(self):
-        engine = self._make_engine()
-        result = engine.generate(self._denied_applicant(), original_loan_amount=200000.0, timeout_seconds=0)
-        assert isinstance(result, list)
-        assert len(result) >= 1
-        for cf in result:
-            assert "statement" in cf
-
     def test_returns_empty_for_approved_applicant(self):
         engine = self._make_engine()
         approved = pd.DataFrame(
@@ -113,18 +105,20 @@ class TestCounterfactualEngine:
         assert result == []
 
 
-def test_generate_default_timeout_is_20_seconds():
-    """B1: caller/callee timeout mismatch fix — generate() defaults to 20s."""
+def test_generate_signature_has_no_timeout_param():
+    """D5 (v1.10.2): DiCE removal also drops the no-op timeout knob."""
     from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
 
     sig = inspect.signature(CounterfactualEngine.generate)
-    param = sig.parameters["timeout_seconds"]
-    assert param.default == 20, f"generate() default timeout should be 20s after B1 fix; got {param.default}"
+    assert "timeout_seconds" not in sig.parameters, (
+        "generate() no longer takes timeout_seconds after DiCE removal — binary search is deterministic and fast."
+    )
 
 
-def test_dice_total_cfs_is_three():
-    """B1: total_CFs reduced 5→3 to cut DiCE wall time."""
-    from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+def test_no_dice_ml_in_module_source():
+    """D5 (v1.10.2): the DiCE callpath was dead code; removal is irreversible."""
+    from apps.ml_engine.services import counterfactual_engine
 
-    src = inspect.getsource(CounterfactualEngine._dice_counterfactuals)
-    assert "total_CFs=3" in src or "total_CFs = 3" in src, "DiCE call should use total_CFs=3 after B1 fix"
+    src = inspect.getsource(counterfactual_engine)
+    assert "dice_ml" not in src, "counterfactual_engine.py must not reference dice_ml after D5"
+    assert "_dice_counterfactuals" not in src, "_dice_counterfactuals must be removed after D5"
