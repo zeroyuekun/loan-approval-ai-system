@@ -12,7 +12,6 @@ import time
 
 import numpy as np
 import pandas as pd
-import shap
 from django.conf import settings
 from prometheus_client import Counter, Histogram
 
@@ -38,6 +37,9 @@ from apps.ml_engine.services.prediction_features import (
 )
 from apps.ml_engine.services.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
+)
+from apps.ml_engine.services.shap_attribution import (
+    compute_shap_attribution as _compute_shap_attribution_helper,
 )
 # Re-export cache helpers so external callers and tests that patch
 # `predictor._validate_model_path`, `predictor._verify_model_hash`,
@@ -342,48 +344,15 @@ class ModelPredictor:
         # Predict (probability-based — label derived from threshold comparison)
         probabilities = self.model.predict_proba(df[self.feature_cols])[0]
 
-        # Global feature importances
-        importances = {}
-        if hasattr(self.model, "feature_importances_"):
-            for name, imp in zip(self.feature_cols, self.model.feature_importances_, strict=False):
-                importances[name] = round(float(imp), 4)
-
-        # Per-prediction SHAP values
-        shap_values_dict = {}
-        shap_available = False
-        try:
-            # For calibrated models, extract the underlying estimator for TreeExplainer.
-            # _CalibratedModel wraps the fitted tree model with isotonic calibration;
-            # SHAP needs the raw tree model, not the wrapper.
-            underlying = (
-                self.model.get_underlying_estimator() if hasattr(self.model, "get_underlying_estimator") else self.model
-            )
-            explainer = shap.TreeExplainer(underlying)
-            sv = explainer.shap_values(df[self.feature_cols])
-            # For binary classification shap_values may return:
-            # - list of two arrays (sklearn models, SHAP <0.45)
-            # - 3D numpy array shape (n_samples, n_features, 2) (SHAP >=0.45 multi-output)
-            # - 2D numpy array shape (n_samples, n_features) (XGBoost log-odds, single output)
-            if isinstance(sv, list):
-                sv = sv[1]  # positive class
-            elif hasattr(sv, "ndim") and sv.ndim == 3:
-                sv = sv[:, :, 1]  # positive class from 3D array
-            for name, val in zip(self.feature_cols, sv[0], strict=False):
-                shap_values_dict[name] = round(float(val), 4)
-            shap_available = True
-
-            calibrated_prob = float(probabilities[1])
-            if abs(float(np.array(explainer.expected_value).flat[0]) - calibrated_prob) > 0.05:
-                # Expected — SHAP runs against the uncalibrated base model so its
-                # baseline naturally differs from the calibrated probability.
-                # Logged at DEBUG only; not actionable in production.
-                logger.debug(
-                    "SHAP expected value (%.3f) diverges from calibrated probability (%.3f) — values are from uncalibrated base model",
-                    float(np.array(explainer.expected_value).flat[0]),
-                    calibrated_prob,
-                )
-        except Exception:
-            logger.warning("SHAP computation failed, returning empty shap_values", exc_info=True)
+        attribution = _compute_shap_attribution_helper(
+            model=self.model,
+            df=df,
+            feature_cols=self.feature_cols,
+            positive_probability=float(probabilities[1]),
+        )
+        importances = attribution["feature_importances"]
+        shap_values_dict = attribution["shap_values"]
+        shap_available = attribution["shap_available"]
 
         processing_time = int((time.time() - start_time) * 1000)
 
