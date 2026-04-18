@@ -11,7 +11,7 @@ import sentry_sdk
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application version (synced with CHANGELOG.md)
-APP_VERSION = "1.10.1"
+APP_VERSION = "1.10.2"
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 

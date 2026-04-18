@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.10.2 — Consolidation Release (2026-04-19)
+
+Seven atomic deliverables that fix latent bugs, close security gaps, and remove dead code without changing model behaviour or API surface. Built on top of in-flight PRs #103 / #104 / #105 which shipped as milestones M1–M3.
+
+### Milestones (merged before D-series)
+
+- **M1 — Smoke E2E stabilisation (#103).** Fixed container-network hostname resolution + login auth payload shape in `tools/smoke_e2e.sh` so the `workflow_dispatch` smoke job exits 0 against a live deploy.
+- **M2 — Watchdog httpx swap (#104).** Replaced the missing `requests` dependency in the `docker-compose` watchdog service with the already-vendored `httpx` client so the watchdog actually starts.
+- **M3 — Calibration lazy-import fix (#105).** `ml_engine/services/calibration.py` had a broken top-of-file import that crashed any calibration-adjacent code in production; moved the sklearn import inside the function.
+
+### Deliverables
+
+- **D1 — Python 3.13 datetime deprecation.** Replaced every `datetime.utcnow()` call in `apps/ml_engine/` with `datetime.now(UTC)` so the module stops emitting `DeprecationWarning: datetime.utcnow() is deprecated` under Python 3.13. Added `tests/test_utcnow_deprecation.py` AST guard against regression.
+- **D2 — `seed_profiles` percentage scale.** `seed_profiles` was setting `on_time_payment_pct` to a fraction in `[0.75, 1.0]` while the field is documented as `[0, 100]`. Downstream credit-policy and scoring code reading the field as a whole-number percentage would silently mis-rank seeded users. Fixed to `random.uniform(75.0, 100.0)` with a regression test that asserts the value is in the documented range AND ≥ 1.0 (catching the fraction form).
+- **D3 — `on_time_payment_pct` validators.** The field previously had no bounds, so any buggy writer could persist `-5.0` or `250.0` and crash downstream scoring. Added `MinValueValidator(0.0)` + `MaxValueValidator(100.0)` with migration `0010_add_on_time_payment_pct_validators` and tests for boundary cases (0.0 / 100.0 / mid), negatives, and > 100. Closes #55.
+- **D4 — Grafana admin password required in monitoring profile.** The default compose had `GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}` which ships a known weak credential. Split the Grafana service into `docker-compose.monitoring.yml` (opt-in profile) with the required-env `${GRAFANA_ADMIN_PASSWORD:?set in .env}` form so the monitoring stack fails fast instead of exposing an `admin/changeme` dashboard. Main compose no longer references the variable, so standard `docker compose up -d` is unaffected. Closes #57.
+- **D5 — Dead DiCE callpath removed.** `CounterfactualEngine` carried a DiCE branch that never executed in production — `dice_ml` was never in `requirements.txt`, and the orchestrator always passes `transform_fn=predictor._transform`, which routes `generate()` straight to the binary-search fallback. Removed `_dice_counterfactuals`, `_build_dice_dataset`, `_parse_dice_result`, `_timeout_ctx`, and the no-op `timeout_seconds` parameter. Net: `counterfactual_engine.py` 458 → 230 lines. Added AST-based guard at `tests/test_no_dice_ml_dependency.py` that detects executable `dice_ml` references while ignoring docstring mentions. Closes #54.
+- **D6 — `make clean-soft`.** `make clean` used to run `docker compose down -v`, silently nuking the Postgres volume along with caches. Split into `clean-soft` (caches + build output only, volumes preserved) and `clean` (full wipe). `clean` now internally calls `clean-soft` for the cache sweep. README documents `clean-soft` as the day-to-day default. Guard test locks in the split.
+- **D7 — Release packaging.** `APP_VERSION` advances `1.10.1` → `1.10.2`. Closes the stale issue #56 (Celery `DJANGO_SETTINGS_MODULE` default — was already fixed in `config/celery.py:8` via `os.environ.setdefault`).
+
+### Version bump
+
+`APP_VERSION` advances `1.10.1` → `1.10.2`. No data migrations beyond `0010_add_on_time_payment_pct_validators`. No trained-model invalidation. No API surface changes.
+
+### Scope notes
+
+- Issue #61 (retention `enforce_retention` regression test) remains open as future work. The command is exercised in production via the `weekly-data-retention` Celery beat job (`celery.py:95`) but still has no unit coverage. Intentionally left out of v1.10.2 to keep D7 scope release-only.
+
 ## v1.10.1 — Production Hardening (2026-04-19)
 
 Six atomic deliverables that tighten the production surface without touching model behaviour:
