@@ -225,7 +225,7 @@ class PipelineOrchestrator:
         # Step 1: ML Prediction
         step = self._start_step("ml_prediction")
         try:
-            predictor = ModelPredictor()
+            predictor = ModelPredictor.for_application(application)
             prediction_result = predictor.predict(application)
 
             PredictionLog.objects.create(

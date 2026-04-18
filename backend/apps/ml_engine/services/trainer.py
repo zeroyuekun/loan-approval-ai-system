@@ -500,7 +500,15 @@ class ModelTrainer:
             return None, 0
         return round(float(np.mean(fold_aucs)), 4), len(fold_aucs)
 
-    def train(self, data_path, algorithm="xgb", use_reject_inference=True, reject_inference_labels=None):
+    def train(
+        self,
+        data_path,
+        algorithm="xgb",
+        use_reject_inference=True,
+        reject_inference_labels=None,
+        *,
+        segment=None,
+    ):
         """Train model with Optuna (XGBoost) or GridSearchCV (RF) and return model + metrics.
 
         Parameters
@@ -517,7 +525,18 @@ class ModelTrainer:
             Series of inferred outcomes for denied applications, indexed to
             match the rows in the CSV. Typically from
             DataGenerator.reject_inference_labels.
+        segment : str or None
+            When provided (home_owner_occupier / home_investor / personal),
+            narrows the training DataFrame to rows matching that product
+            segment. Falls back to unified training when the segment slice
+            is below SEGMENT_MIN_SAMPLES to avoid noisy per-segment models.
         """
+        from apps.ml_engine.services.segmentation import (
+            SEGMENT_FILTERS,
+            SEGMENT_MIN_SAMPLES,
+            SEGMENT_UNIFIED,
+        )
+
         start_time = time.time()
 
         # Load data
@@ -525,6 +544,31 @@ class ModelTrainer:
 
         if len(df) < 20:
             raise ValueError(f"Dataset too small for training: {len(df)} rows (minimum 20 required)")
+
+        # Segment slicing: narrow the training frame before any splitting so
+        # the holdout and CV reflect the segment only.
+        if segment and segment != SEGMENT_UNIFIED:
+            seg_filter = SEGMENT_FILTERS.get(segment)
+            if seg_filter is None:
+                raise ValueError(f"Unknown segment '{segment}'")
+            mask = df.apply(lambda row: seg_filter(row.to_dict()), axis=1)
+            df_seg = df[mask].copy()
+            if len(df_seg) < SEGMENT_MIN_SAMPLES:
+                logger.warning(
+                    "Segment '%s' has %d rows (< %d threshold) — falling back to unified training",
+                    segment,
+                    len(df_seg),
+                    SEGMENT_MIN_SAMPLES,
+                )
+                segment = SEGMENT_UNIFIED
+            else:
+                logger.info(
+                    "Training segment-specific model '%s' on %d rows (of %d total)",
+                    segment,
+                    len(df_seg),
+                    len(df),
+                )
+                df = df_seg
 
         y = df["approved"]
         class_counts = y.value_counts()
@@ -898,6 +942,7 @@ class ModelTrainer:
         metrics["training_time_seconds"] = training_time
         metrics["optimal_threshold"] = optimal_threshold
         metrics["training_metadata"] = {
+            "segment": segment or "unified",
             "train_size": len(y_train),
             "val_size": len(y_val),
             "test_size": len(y_test),

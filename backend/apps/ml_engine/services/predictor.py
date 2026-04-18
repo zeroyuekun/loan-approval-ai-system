@@ -258,13 +258,29 @@ class ModelPredictor:
         "industry_anzsic",
     ]
 
-    def __init__(self, model_version=None):
+    def __init__(self, model_version=None, *, segment=None):
         if model_version is not None:
             self.model_version = model_version
         else:
             from apps.ml_engine.services.model_selector import select_model_version
+            from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
 
-            self.model_version = select_model_version()
+            self.model_version = select_model_version(segment=segment or SEGMENT_UNIFIED)
+
+    @classmethod
+    def for_application(cls, application):
+        """Create a predictor routed to the application's product segment.
+
+        Derives the segment from application.purpose / home_ownership, then
+        calls `select_model_version` which falls back to the unified model
+        if no active segment-specific model is available. This is the
+        preferred entry point for scoring tasks — constructor access
+        without a segment defaults to unified.
+        """
+        from apps.ml_engine.services.segmentation import derive_segment
+
+        segment = derive_segment(application)
+        return cls(segment=segment)
 
         bundle = _load_bundle(self.model_version)
         self.model = bundle["model"]
