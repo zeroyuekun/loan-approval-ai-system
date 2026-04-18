@@ -133,7 +133,7 @@ export function FeatureImportance({ features, title = 'Feature Importance' }: Fe
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        {/* TODO: add proper aria labels */}
+        <div role="img" aria-label={`Bar chart of top ${data.length} features by importance: ${data.slice(0, 3).map((d) => `${d.name} ${(d.importance * 100).toFixed(1)}%`).join(', ')}`}>
         <ResponsiveContainer width="100%" height={Math.max(280, data.length * 36)}>
           <BarChart data={data} layout="vertical" margin={{ top: 5, right: 30, bottom: 5, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} horizontal={false} />
@@ -150,6 +150,7 @@ export function FeatureImportance({ features, title = 'Feature Importance' }: Fe
             <Bar dataKey="importance" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
+        </div>
       </CardContent>
     </Card>
   )
