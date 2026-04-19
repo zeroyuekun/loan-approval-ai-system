@@ -208,7 +208,7 @@ jobs:
     # Relies on branch-protection rules to require green Lint / Test / Security
     # workflow conclusions before a push reaches master. See
     # docs/runbooks/ci-deployment.md for the required-checks list.
-    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && !contains(needs.docker-build.result, 'failure') && !contains(needs.dast-scan.result, 'failure')
+    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.docker-build.result == 'success' && needs.dast-scan.result == 'success'
     steps:
       - uses: actions/checkout@v6
 
