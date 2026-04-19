@@ -54,7 +54,6 @@ jobs:
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       CELERY_BROKER_URL: redis://localhost:6379/0
-      FIELD_ENCRYPTION_KEY: ${{ secrets.CI_FERNET_KEY }}
       ANTHROPIC_API_KEY: sk-ant-test-key
     steps:
       - uses: actions/checkout@v6
@@ -69,6 +68,14 @@ jobs:
       - name: Install dependencies
         working-directory: backend
         run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Generate ephemeral Fernet key for CI
+        # Fernet keys for CI test DBs don't need to be secret — they just
+        # need to be valid. Generating at runtime avoids both a hardcoded
+        # key in source (security hygiene) and a required repo secret.
+        # Uses stdlib so no pip install is required.
+        run: |
+          python -c "import os,base64; print('FIELD_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(os.urandom(32)).decode())" >> "$GITHUB_ENV"
 
       - name: Run migrations
         working-directory: backend
