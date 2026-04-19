@@ -275,6 +275,7 @@ const OFFER_HEADER_RE = /^Option\s+(\d+)[\s:.\-\u2013\u2014]+(.+)$/
 const UNSUBSCRIBE_LINE_RE = /^Unsubscribe:\s*(\S+)/
 const CALL_SARAH_LINE_RE = /^Call Sarah on\s+(\d[\d\s]+)/i
 const MARKETING_BREAK_PREFIXES = ['ABN ', 'Ph:', 'Phone:', 'Email:', 'Website:', 'Unsubscribe:']
+const BUREAU_BULLET_RE = /^[\u2022•]\s*(Equifax|Illion|Experian)\b/i
 
 function extractSectionBullets(body: string, sectionLabel: string): { bullets: string[]; start: number; end: number } {
   const lines = body.split('\n')
@@ -300,6 +301,8 @@ function extractSectionBullets(body: string, sectionLabel: string): { bullets: s
 }
 
 function extractFactorParagraphs(body: string): { factors: Array<[string, string]>; start: number; end: number } {
+  // Accepts both plain "Label: explanation." and bulleted "•  Label: explanation."
+  // shapes — live Claude output uses the bullet form per the prompt template.
   const lines = body.split('\n')
   let triggerIdx = -1
   for (let i = 0; i < lines.length; i++) {
@@ -318,7 +321,9 @@ function extractFactorParagraphs(body: string): { factors: Array<[string, string
       i++
       continue
     }
-    const m = s.match(FACTOR_LINE_RE)
+    const bm = s.match(BULLET_LINE_RE)
+    const inner = bm ? bm[1].trim() : s
+    const m = inner.match(FACTOR_LINE_RE)
     if (m) {
       factors.push([m[1].trim(), m[2].trim()])
       end = i
@@ -330,28 +335,72 @@ function extractFactorParagraphs(body: string): { factors: Array<[string, string
   return { factors, start: triggerIdx, end }
 }
 
-function extractFreeCreditReportBlock(body: string): { start: number; end: number } {
+function extractCreditReportBlock(body: string): { start: number; end: number } {
+  // Recognizes two shapes:
+  //   1. Explicit "Free Credit Report:" section label followed by intro + bureau URLs.
+  //   2. Prose intro mentioning "credit report" immediately followed (optional
+  //      blank line) by 2+ "• Equifax/Illion/Experian – url" bullets — this is
+  //      what the live denial prompt produces.
   const lines = body.split('\n')
-  let start = -1
-  let end = -1
   for (let i = 0; i < lines.length; i++) {
-    const s = lines[i].trim()
-    if (start === -1) {
-      if (s === 'Free Credit Report:') {
-        start = i
-        end = i
+    if (lines[i].trim() === 'Free Credit Report:') {
+      const start = i
+      let end = start
+      for (let j = start + 1; j < lines.length; j++) {
+        const s = lines[j].trim()
+        if (SECTION_LABELS.includes(s) || CLOSINGS.includes(s)) break
+        if (s) end = j
       }
-      continue
+      return { start, end }
     }
-    if (s === '') continue
-    const low = s.toLowerCase()
-    if (low.includes('equifax') || low.includes('experian') || low.includes('illion')) {
-      end = i
-      continue
-    }
-    break
   }
-  return { start, end }
+  const n = lines.length
+  for (let i = 0; i < n; i++) {
+    if (!BUREAU_BULLET_RE.test(lines[i].trim())) continue
+    let lastBureau = i
+    let bureauCount = 1
+    let j = i + 1
+    while (j < n) {
+      const s = lines[j].trim()
+      if (s === '') {
+        j++
+        continue
+      }
+      if (BUREAU_BULLET_RE.test(s)) {
+        lastBureau = j
+        bureauCount++
+        j++
+        continue
+      }
+      break
+    }
+    if (bureauCount < 2) continue
+    let start = i
+    for (let k = i - 1; k >= 0; k--) {
+      const s = lines[k].trim()
+      if (s === '') continue
+      if (SECTION_LABELS.includes(s) || CLOSINGS.includes(s)) break
+      if (BULLET_LINE_RE.test(s)) break
+      if (s.toLowerCase().includes('credit report')) {
+        start = k
+        // Asymmetric with outer walk: outer `continue`s past blanks to locate
+        // the "credit report" intro across paragraph gaps; inner `break`s at
+        // the first blank so the prose intro stays bounded to its own
+        // paragraph and doesn't swallow preceding content.
+        for (let k2 = k - 1; k2 >= 0; k2--) {
+          const s2 = lines[k2].trim()
+          if (s2 === '') break
+          if (SECTION_LABELS.includes(s2) || CLOSINGS.includes(s2)) break
+          if (BULLET_LINE_RE.test(s2)) break
+          start = k2
+        }
+        break
+      }
+      break
+    }
+    return { start, end: lastBureau }
+  }
+  return { start: -1, end: -1 }
 }
 
 function renderFactorCard(factors: Array<[string, string]>): string {
@@ -459,7 +508,7 @@ function renderDualCta(): string {
 function renderDenialBody(plainBody: string): string {
   const { factors, start: fStart, end: fEnd } = extractFactorParagraphs(plainBody)
   const { bullets: wycd, start: wStart, end: wEnd } = extractSectionBullets(plainBody, 'What You Can Do:')
-  const { start: crStart, end: crEnd } = extractFreeCreditReportBlock(plainBody)
+  const { start: crStart, end: crEnd } = extractCreditReportBlock(plainBody)
   const { preSig, sigLines, postSig } = splitAtSignature(plainBody)
   const preSigEndIdx = preSig ? preSig.split('\n').length : 0
 
