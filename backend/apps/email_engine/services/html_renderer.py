@@ -363,7 +363,8 @@ def _extract_free_credit_report_block(body: str) -> tuple[int, int]:
     """Locate the 'Free Credit Report:' section so it can be replaced by the structured card.
 
     Returns (start, end) spanning the label line through the last bureau URL line,
-    or (-1, -1) if not found.
+    or (-1, -1) if not found. Intro sentences between the label and bureau URLs
+    are absorbed into the span so they aren't re-rendered below the card.
     """
     lines = body.split("\n")
     start = -1
@@ -377,10 +378,11 @@ def _extract_free_credit_report_block(body: str) -> tuple[int, int]:
         s = line.strip()
         if s == "":
             continue
-        if "equifax" in s.lower() or "experian" in s.lower() or "illion" in s.lower():
+        if s in SECTION_LABELS or s in CLOSINGS or s.startswith("Dear "):
+            break
+        low = s.lower()
+        if "equifax" in low or "experian" in low or "illion" in low:
             end = i
-            continue
-        break
     return start, end
 
 

@@ -344,12 +344,11 @@ function extractFreeCreditReportBlock(body: string): { start: number; end: numbe
       continue
     }
     if (s === '') continue
+    if (SECTION_LABELS.includes(s) || CLOSINGS.includes(s) || s.startsWith('Dear ')) break
     const low = s.toLowerCase()
     if (low.includes('equifax') || low.includes('experian') || low.includes('illion')) {
       end = i
-      continue
     }
-    break
   }
   return { start, end }
 }
