@@ -15,6 +15,9 @@ class TestPrometheusMetrics:
 
     def test_latency_histogram_registered(self):
         assert "ml_prediction_latency" in ml_prediction_latency_seconds._name
+        # `algorithm` label added so xgboost / rf / logistic segments can be
+        # compared separately on the Grafana latency dashboard (issue #52).
+        assert "algorithm" in ml_prediction_latency_seconds._labelnames
 
     def test_confidence_histogram_registered(self):
         assert "ml_prediction_confidence" in ml_prediction_confidence._name
@@ -30,5 +33,6 @@ class TestPrometheusMetrics:
         assert after == before + 1
 
     def test_histogram_can_observe(self):
-        ml_prediction_latency_seconds.observe(0.5)
+        # Latency histogram requires the algorithm label now.
+        ml_prediction_latency_seconds.labels(algorithm="rf").observe(0.5)
         ml_prediction_confidence.observe(0.75)

@@ -98,6 +98,24 @@ class StepTracker:
         agent_run.error = error or ""
         agent_run.save()
 
+        # Emit Prometheus e2e-latency histogram. Metric emission must never
+        # break the pipeline, so any Prometheus client failure is swallowed.
+        try:
+            from apps.agents.metrics import pipeline_e2e_seconds
+            from apps.loans.models import LoanDecision
+
+            decision_label = "unknown"
+            try:
+                decision_label = agent_run.application.decision.decision or "unknown"
+            except (LoanDecision.DoesNotExist, AttributeError):
+                pass
+            pipeline_e2e_seconds.labels(
+                status=agent_run.status,
+                decision=decision_label,
+            ).observe(total_time / 1000.0)
+        except Exception as exc:  # noqa: BLE001 — metric emission is best-effort
+            logger.debug("pipeline_e2e_seconds emission failed: %s", exc)
+
     @staticmethod
     def waterfall_entry(step: str, result: str, reason_code: str, detail: str) -> dict:
         return {

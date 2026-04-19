@@ -75,6 +75,7 @@ ml_predictions_total = Counter(
 ml_prediction_latency_seconds = Histogram(
     "ml_prediction_latency_seconds",
     "ML prediction computation time",
+    labelnames=["algorithm"],
     buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
 )
 ml_prediction_confidence = Histogram(
@@ -384,7 +385,9 @@ class ModelPredictor:
                 decision=result["prediction"],
                 model_version=str(self.model_version.id)[:8],
             ).inc()
-            ml_prediction_latency_seconds.observe(result["processing_time_ms"] / 1000.0)
+            ml_prediction_latency_seconds.labels(
+                algorithm=getattr(self.model_version, "algorithm", "unknown") or "unknown",
+            ).observe(result["processing_time_ms"] / 1000.0)
             ml_prediction_confidence.observe(result["probability"])
             if result.get("drift_warnings"):
                 ml_drift_warnings_total.inc()

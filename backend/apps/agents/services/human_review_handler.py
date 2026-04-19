@@ -40,6 +40,11 @@ class HumanReviewHandler:
             if agent_run.status != "escalated":
                 raise ValueError(f'Cannot resume agent run with status {agent_run.status!r} (expected "escalated")')
 
+            # Capture the escalation timestamp BEFORE we flip status, since
+            # the save below will bump updated_at. Used for the bias-review
+            # TTR histogram further down.
+            escalated_at = agent_run.updated_at
+
             application = agent_run.application
 
             # Lock application to prevent two simultaneous reviews from resuming
@@ -215,6 +220,19 @@ class HumanReviewHandler:
                 details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
             )
         self.tracker.finalize_run(agent_run, steps, start_time)
+
+        # Emit time-to-resolution for the bias review queue (docs/slo.md).
+        try:
+            from django.utils import timezone as _tz
+
+            from apps.agents.metrics import bias_review_total, bias_review_ttr_seconds
+
+            ttr = (_tz.now() - escalated_at).total_seconds()
+            bias_review_ttr_seconds.labels(decision=decision).observe(ttr)
+            bias_review_total.labels(outcome="human_resolved").inc()
+        except Exception as exc:  # noqa: BLE001 — best-effort metric
+            logger.debug("bias_review_ttr emission failed: %s", exc)
+
         logger.info("Agent run %s: resumed and completed with decision=%s", agent_run_id, decision)
 
         return agent_run
