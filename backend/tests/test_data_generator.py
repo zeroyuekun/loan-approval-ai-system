@@ -202,6 +202,22 @@ class TestDataGenerator:
         thin_file = df[df["credit_history_months"] < 36]
         assert len(thin_file) > 0, "Should have thin-file applicants (credit_history < 36 months)"
 
+    def test_postcode_default_rate_correlation_realistic(self, df):
+        # Real Equifax / illion AU data shows bureau postcode-default-rate
+        # correlates with SA4 unemployment at r ≈ 0.3-0.45 — an informative
+        # signal, not a deterministic shortcut. The classifier trains on the
+        # binary `approved` label (see ModelTrainer._prepare_data). If
+        # postcode_default_rate's correlation with `approved` exceeds 0.25 in
+        # magnitude, the generator has re-introduced a synthetic-only leakage
+        # that will inflate AUC in ways that do not transfer to real data.
+        # Guards against regression of the noise-std fix (0.003 → 0.008).
+        corr = float(np.corrcoef(df["postcode_default_rate"].values, df["approved"].astype(float).values)[0, 1])
+        assert abs(corr) < 0.25, (
+            f"postcode_default_rate ↔ approved correlation {corr:.3f} looks "
+            "like synthetic-only leakage; expected |corr| < 0.25 for a "
+            "realistic bureau-style signal"
+        )
+
     def test_seasonal_quarter_distribution(self, generator):
         """Q4 quarters should have more records than Q2 (seasonal weighting)."""
         df_large = generator.generate(num_records=5000, random_seed=42)
