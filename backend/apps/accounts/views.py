@@ -467,6 +467,13 @@ class CustomerDataExportView(generics.GenericAPIView):
     permission_classes = (IsAuthenticated,)
     throttle_classes = (DataExportThrottle,)
 
+    # Prevent unbounded memory load for high-volume applicants. Real users will
+    # never exceed these caps; attackers who synthesise many records would OOM
+    # the worker without them.
+    MAX_APPLICATIONS = 500
+    MAX_EMAILS_PER_APP = 50
+    MAX_AGENT_RUNS_PER_APP = 20
+
     def get(self, request):
         user = request.user
         data = {
@@ -503,6 +510,7 @@ class CustomerDataExportView(generics.GenericAPIView):
                 "agent_runs__bias_reports",
                 "marketing_emails",
             )
+            .order_by("-created_at")[: self.MAX_APPLICATIONS]
         )
 
         apps_data = []
@@ -531,7 +539,6 @@ class CustomerDataExportView(generics.GenericAPIView):
             except LoanDecision.DoesNotExist:
                 app_dict["decision"] = None
 
-            # Generated emails (approval/denial)
             app_dict["emails"] = [
                 {
                     "subject": e.subject,
@@ -539,10 +546,9 @@ class CustomerDataExportView(generics.GenericAPIView):
                     "decision": e.decision,
                     "created_at": e.created_at.isoformat(),
                 }
-                for e in app.emails.all()
+                for e in list(app.emails.all())[: self.MAX_EMAILS_PER_APP]
             ]
 
-            # Marketing emails
             app_dict["marketing_emails"] = [
                 {
                     "subject": me.subject,
@@ -551,10 +557,9 @@ class CustomerDataExportView(generics.GenericAPIView):
                     "sent_at": me.sent_at.isoformat() if me.sent_at else None,
                     "created_at": me.created_at.isoformat(),
                 }
-                for me in app.marketing_emails.all()
+                for me in list(app.marketing_emails.all())[: self.MAX_EMAILS_PER_APP]
             ]
 
-            # Agent run summaries with bias reports
             app_dict["agent_runs"] = [
                 {
                     "status": run.status,
@@ -571,7 +576,7 @@ class CustomerDataExportView(generics.GenericAPIView):
                         for br in run.bias_reports.all()
                     ],
                 }
-                for run in app.agent_runs.all()
+                for run in list(app.agent_runs.all())[: self.MAX_AGENT_RUNS_PER_APP]
             ]
 
             apps_data.append(app_dict)

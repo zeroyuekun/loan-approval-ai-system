@@ -299,9 +299,10 @@ class MarketingPipelineService:
 
         marketing_bias_score = marketing_bias_result.get("score", 100)
 
-        if marketing_bias_score > bias_threshold_review:
+        # Inclusive bound: a score equal to the review threshold must block.
+        if marketing_bias_score >= bias_threshold_review:
             logger.warning(
-                "Application %s: marketing email blocked — bias score %s > review threshold %s",
+                "Application %s: marketing email blocked — bias score %s >= review threshold %s",
                 application.pk,
                 marketing_bias_score,
                 bias_threshold_review,
@@ -311,7 +312,7 @@ class MarketingPipelineService:
                 step,
                 result_summary={
                     "bias_score": marketing_bias_score,
-                    "reason": f"Marketing email blocked: bias score {marketing_bias_score} exceeds threshold {bias_threshold_review}",
+                    "reason": f"Marketing email blocked: bias score {marketing_bias_score} >= threshold {bias_threshold_review}",
                 },
             )
             steps.append(step)

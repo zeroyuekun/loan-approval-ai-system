@@ -9,7 +9,7 @@ all keys are tried for decryption).
 import functools
 import logging
 
-from cryptography.fernet import Fernet, MultiFernet
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from django.conf import settings
 
 logger = logging.getLogger("accounts.encryption")
@@ -52,19 +52,21 @@ def encrypt_field(value):
 def decrypt_field(value):
     """Decrypt a Fernet-encrypted string back to plaintext.
 
-    Returns *None* / empty string unchanged.  If the token is invalid (e.g.
-    pre-migration plaintext data), returns the original value so the system
-    degrades gracefully.
+    Returns *None* / empty string unchanged. On ``InvalidToken`` (wrong key,
+    corrupted ciphertext, or key rotation gap) returns ``""`` rather than the
+    raw token so callers never surface ciphertext as if it were plaintext PII.
     """
     if value is None or value == "":
         return value
     try:
         f = get_fernet()
         return f.decrypt(value.encode()).decode()
-    except Exception as exc:
-        logger.warning(
-            "decrypt_field failed (length=%d): %s",
+    except InvalidToken:
+        logger.error(
+            "decrypt_field: invalid token (length=%d) — wrong key or corrupted data",
             len(value),
-            type(exc).__name__,
         )
-        return value
+        return ""
+    except Exception:
+        logger.exception("decrypt_field: unexpected error (length=%d)", len(value))
+        return ""

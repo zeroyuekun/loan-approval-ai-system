@@ -83,3 +83,34 @@ If unresolved, contact the Australian Financial Complaints Authority (AFCA) on 1
         failed_names = [r["check_name"] for r in results if not r["passed"]]
         # Should detect discrimination
         self.assertTrue(len(failed_names) > 0, "Expected guardrail failures for discriminatory language")
+
+    def test_apology_language_blocked_in_denial(self):
+        """Denial emails must never contain apology/sorry/regret language.
+
+        This is the project's explicit red line (CLAUDE.md). The LLM prompt
+        forbids it, but the deterministic regex is the authoritative safety
+        net — if Claude ever drifts from the prompt the guardrail must catch
+        it before the email ships.
+        """
+        context = {
+            "applicant_name": "Test",
+            "loan_amount": 100000.0,
+            "purpose": "Personal",
+            "decision": "denied",
+        }
+        offending_phrases = [
+            "We are sorry to inform you",
+            "We apologise for this outcome",
+            "We apologize that your application was not approved",
+            "Our apologies for the decision",
+            "We understand your disappointment",
+            "We regret that we cannot proceed",
+        ]
+        for phrase in offending_phrases:
+            body = f"Dear Customer, {phrase}. Contact us on 1300 000 000."
+            results = self.checker.run_all_checks(body, context)
+            failed = [r for r in results if not r["passed"] and r.get("severity") != "warning"]
+            self.assertTrue(
+                len(failed) > 0,
+                f"Expected guardrail failure for apology phrase: {phrase!r}",
+            )

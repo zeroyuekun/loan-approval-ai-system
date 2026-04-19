@@ -185,14 +185,15 @@ class EmailPipelineService:
         bias_score = bias_result.get("score", 0)
         bias_threshold_review = getattr(settings, "BIAS_THRESHOLD_REVIEW", 60)
 
-        # Bias score above review threshold — escalate to human review
-        if bias_score > bias_threshold_review:
+        # Bias score at/above review threshold — escalate to human review.
+        # Inclusive bound: a score equal to the threshold must escalate.
+        if bias_score >= bias_threshold_review:
             waterfall.append(
                 StepTracker.waterfall_entry(
                     "final_decision",
                     "fail",
                     "ESCALATED_SEVERE_BIAS",
-                    f"Severe bias detected (score {bias_score} > {bias_threshold_review}), escalated to human review",
+                    f"Severe bias detected (score {bias_score} >= {bias_threshold_review}), escalated to human review",
                 )
             )
             StepTracker.save_waterfall(application, waterfall)
@@ -202,7 +203,7 @@ class EmailPipelineService:
                 step,
                 result_summary={
                     "bias_score": bias_score,
-                    "reason": f"Severe bias detected (score > {bias_threshold_review}), escalated directly to human reviewer",
+                    "reason": f"Severe bias detected (score >= {bias_threshold_review}), escalated directly to human reviewer",
                 },
             )
             steps.append(step)
