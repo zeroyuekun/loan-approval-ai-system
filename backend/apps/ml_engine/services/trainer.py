@@ -555,18 +555,14 @@ class ModelTrainer:
         # Load data
         df = pd.read_csv(data_path)
 
-        # Defence in depth: drop any post-outcome leakage columns before they
-        # can reach the feature matrix. A single regression test (previously
-        # the only guard) cannot prevent a monotone-constraint / imputation
-        # entry from sneaking a leakage column through IV selection into the
-        # model. Dropping at the load boundary closes the loop.
+        # Defence-in-depth drop of any post-outcome leakage column at the load
+        # boundary — a single regression test cannot catch every way such a
+        # column could sneak through IV selection or monotone-constraint edits.
         from apps.ml_engine.services.data_generator import POST_OUTCOME_FEATURES
 
         leaked = [c for c in POST_OUTCOME_FEATURES if c in df.columns]
         if leaked:
-            logger.warning(
-                "Dropping post-outcome leakage columns from training data: %s", leaked
-            )
+            logger.warning("Dropping post-outcome leakage columns: %s", leaked)
             df = df.drop(columns=leaked)
 
         if len(df) < 20:
