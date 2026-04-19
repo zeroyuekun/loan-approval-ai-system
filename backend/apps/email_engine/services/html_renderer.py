@@ -952,7 +952,7 @@ def _render_legacy_body(body: str) -> str:
 def _render_header() -> str:
     badge = (
         f'<span style="display:inline-block; width:24px; height:24px; '
-        f'background-color:#ffffff; color:{TOKENS["BRAND_PRIMARY"]}; '
+        f"background-color:#ffffff; color:{TOKENS['BRAND_PRIMARY']}; "
         f"border-radius:12px; font-size:14px; font-weight:700; "
         f"line-height:24px; text-align:center; margin-right:8px; "
         f'vertical-align:middle;">$</span>'
