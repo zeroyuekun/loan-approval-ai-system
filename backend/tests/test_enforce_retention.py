@@ -174,7 +174,7 @@ class TestEnforceRetention:
 
     def test_emits_audit_log_rows_on_purge(self, retention_user, retention_mv):
         """Every purge/archive operation leaves an AuditLog row behind."""
-        expired_app = _mk_application(retention_user, deleted_days_ago=SOFT_DELETE_DAYS + 10)
+        _mk_application(retention_user, deleted_days_ago=SOFT_DELETE_DAYS + 10)
         active_app = _mk_application(retention_user, deleted_days_ago=None)
         _mk_prediction(retention_mv, active_app, days_ago=PREDICTION_DAYS + 10)
         _mk_drift(retention_mv, days_ago=DRIFT_DAYS + 10)
