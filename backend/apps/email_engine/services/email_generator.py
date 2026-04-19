@@ -29,6 +29,7 @@ def _record_email_metric(decision: str, source: str, passed_guardrails: bool) ->
     except Exception as exc:  # noqa: BLE001 — metric emission is best-effort
         _metrics_logger.debug("email_generation_total emission failed: %s", exc)
 
+
 EMAIL_SUBMIT_TOOL = {
     "name": "submit_email",
     "description": "Submit the generated email with subject and body.",
