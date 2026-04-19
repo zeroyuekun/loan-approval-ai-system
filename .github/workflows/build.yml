@@ -95,7 +95,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
           REDIS_PASSWORD: testpass
-          FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
+          FIELD_ENCRYPTION_KEY: ${{ secrets.CI_FERNET_KEY }}
           ANTHROPIC_API_KEY: sk-ant-test-key
 
       - name: OWASP ZAP Baseline Scan
@@ -159,7 +159,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
           REDIS_PASSWORD: testpass
-          FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
+          FIELD_ENCRYPTION_KEY: ${{ secrets.CI_FERNET_KEY }}
           ANTHROPIC_API_KEY: sk-ant-test-key
 
       - name: Seed test data
