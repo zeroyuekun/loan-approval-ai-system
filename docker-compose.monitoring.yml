@@ -17,7 +17,7 @@
 
 services:
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.5.1
     container_name: loan-approval-grafana
     profiles: ["monitoring"]
     environment:

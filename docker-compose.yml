@@ -12,7 +12,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-loan_approval}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # No default password — compose refuses to start unless set in .env.
+      # Prevents shipping a known-weak credential to any environment.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env before starting the stack}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 15s
@@ -60,7 +62,7 @@ services:
       POSTGRES_HOST: db
       POSTGRES_DB: ${POSTGRES_DB:-loan_approval}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env before starting the stack}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-}
@@ -104,7 +106,7 @@ services:
         required: false
     environment:
       POSTGRES_HOST: db
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env before starting the stack}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -153,7 +155,7 @@ services:
         required: false
     environment:
       POSTGRES_HOST: db
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env before starting the stack}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -193,7 +195,7 @@ services:
         required: false
     environment:
       POSTGRES_HOST: db
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env before starting the stack}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -227,7 +229,7 @@ services:
         required: false
     environment:
       POSTGRES_HOST: db
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env before starting the stack}
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -280,7 +282,7 @@ services:
 
   # --- Monitoring stack (opt-in via: docker compose --profile monitoring up) ---
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     container_name: loan-approval-prometheus
     profiles: ["monitoring"]
     volumes:
@@ -346,7 +348,7 @@ services:
       - internal
 
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.28.0
     container_name: loan-approval-alertmanager
     profiles: ["monitoring"]
     restart: unless-stopped
@@ -360,7 +362,7 @@ services:
       - internal
 
   celery-exporter:
-    image: danihodovic/celery-exporter:latest
+    image: danihodovic/celery-exporter:0.10.13
     container_name: loan-approval-celery-exporter
     profiles: ["monitoring"]
     restart: unless-stopped
@@ -375,7 +377,7 @@ services:
       - internal
 
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:latest
+    image: prometheuscommunity/postgres-exporter:v0.17.1
     container_name: loan-approval-postgres-exporter
     profiles: ["monitoring"]
     restart: unless-stopped
@@ -385,7 +387,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-loan_approval}?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env before starting the stack}@db:5432/${POSTGRES_DB:-loan_approval}?sslmode=disable"
     networks:
       - internal
 
