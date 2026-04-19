@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.10.3 — Senior Code Review Response (2026-04-19)
+
+Four atomic PRs addressing findings from a full senior-engineer code review pass. No model retraining, no migrations, no API surface changes. Each PR landed green-CI against master and was merged independently for minimal blast radius + independent rollback.
+
+### Deliverables
+
+- **#113 — Security critical gaps.** Fernet `InvalidToken` is now explicitly caught (previously swallowed by a bare `except Exception` that masked rotation mishaps), export-path quotas hardened, apology regex added to denial guardrails, bias threshold corrected from `>` to `>=` (the prior form mis-classified borderline cases), and the template-mode code path now reaches the fallback guardrail call that the LLM path always did. New `test_apology_language_blocked_in_denial` locks in the apology rejection.
+- **#114 — ML correctness.** Moved the `processing_time_ms` timestamp to the end of `predict()` so Prometheus latency histograms reflect actual wall-clock time (the previous stamp was taken mid-function and hid the counterfactual + shadow-scoring cost). Added defence-in-depth leakage drop: `train()` now drops any `POST_OUTCOME_FEATURES` column at the load boundary with a warning log, rather than relying solely on IV selection / monotone-constraints review to catch leakage. A regression test can't catch every path such a column could sneak through; the explicit drop makes the invariant locally auditable.
+- **#115 — Infra hardening.** `POSTGRES_PASSWORD` is now required (`:?` guard) across every compose service — the prior `:-postgres` default would silently boot Postgres with a known credential if `.env` was missing. Pinned `prom/prometheus:v3.1.0`, `prom/alertmanager:v0.28.0`, `grafana/grafana:11.5.1`, `danihodovic/celery-exporter:0.10.13`, and `prometheuscommunity/postgres-exporter:v0.17.1` (closes supply-chain risk of `:latest` silent major upgrades). Tightened `build.yml` deploy gate from `!contains(... 'failure')` to `== 'success'` — the prior form would permit a deploy on cancelled/skipped upstream stages. `.env.example` now documents `openssl rand -base64 24` as the generation hint and no longer ships a weak default value.
+- **#116 — Frontend polling.** Customer status page replaces a hand-rolled `useEffect` + `setInterval` pair with TanStack Query's `refetchInterval` function form: the hook itself now decides whether to poll based on the current `status` (`pending` / `processing` poll at 5s; everything else stops). Eliminates the manual cleanup edge cases around unmount / re-render / status transitions. `useApplication` accepts an optional `refetchInterval` option so other callers can opt in.
+
+### Deferred to future PR
+
+Two items from the review were scoped out of v1.10.3:
+
+- **HTML-escape LLM-interpolated values** in `emailHtmlRenderer.ts` + Python `html_renderer.py`. Deferred because the 15 byte-for-byte parity snapshots in email-renderer CI must regenerate in lockstep across Python + TypeScript; too wide a blast radius for a "safe" release PR. Planned as a single future PR that coordinates `escapeHtml()` in both renderers with a fresh snapshot regen and a tightened DOMPurify `ALLOWED_URI_REGEXP`.
+- **URL protocol allowlist** for LLM-extracted unsubscribe URLs. Low residual risk on the frontend path (DOMPurify default URI allowlist strips `javascript:` / `data:`); the meaningful gain is only on the SMTP-delivered email path. Bundled with the HTML-escape follow-up.
+
+### Also reviewed but not changed
+
+`user: root` on the frontend compose service stays in place — the named `frontend_node_modules` volume needs write access from `npm ci`, and the safer fix requires a Dockerfile `chown` at build time (out of scope for a compose-only PR).
+
+### Version bump
+
+`APP_VERSION` advances `1.10.2` → `1.10.3`. No data migrations. No trained-model invalidation. No API surface changes.
+
 ## v1.10.2 — Consolidation Release (2026-04-19)
 
 Seven atomic deliverables that fix latent bugs, close security gaps, and remove dead code without changing model behaviour or API surface. Built on top of in-flight PRs #103 / #104 / #105 which shipped as milestones M1–M3.
