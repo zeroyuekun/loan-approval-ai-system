@@ -30,7 +30,7 @@ django-csp==4.0
 django-filter==25.2
 django-otp==1.7.0
 django-prometheus==2.4.1
-djangorestframework==3.16.1
+djangorestframework==3.17.1
 djangorestframework-simplejwt==5.5.1
 docstring-parser==0.18.0
 drf-spectacular==0.29.0
