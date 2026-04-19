@@ -269,14 +269,14 @@ docker compose exec backend python manage.py prune_model_artifacts            # 
 
 </details>
 
-## Limitations and honest caveats
+## Scope & limits
 
-- **Trained on synthetic data.** The data generator is calibrated against ATO, ABS, APRA, and Equifax published statistics and runs the labels through a 1000-line rules-based underwriting engine plus a separate loan-performance simulator, so the learning task is non-trivial. It does not capture real-world feedback loops, fraud patterns, broker channel effects, or lender-specific heuristics. A production rollout would retrain on real historical data before trusting the outputs.
-- **Reported AUC is on the synthetic pipeline.** XGBoost achieves 0.88 AUC on the synthetic holdout of the active `ModelVersion` (see `backend/docs/MODEL_CARD.md`). The TSTR validator estimates a real-world AUC around 0.82 with moderate confidence. The project also reports a walk-forward temporal CV AUC in `training_metadata.temporal_cv_auc_mean` so the drift gap against random CV is visible.
-- **XGBoost lift over a simple scorecard is measured, not assumed.** Every training run fits a logistic-regression baseline on `credit_score, annual_income, loan_amount, debt_to_income` and records `training_metadata.baseline_auc` plus `xgb_lift_over_baseline` so the main model's value-add is a specific number on the model card, not marketing copy.
-- **Email generation is template-first.** Claude is used for creative variations only, and there is a $5/day spend cap on the Anthropic API. The guardrail layer runs 15 deterministic checks on every LLM-generated message before it ships.
-- **Compliance framing is implemented, not audited.** APRA CPG 235, NCCP Act responsible lending, Banking Code disclosure, and the Australian regulatory language around adverse action are baked into the data model, email templates, and fairness gates. None of this has been independently reviewed by a compliance professional — it's a best-effort implementation for a portfolio project.
-- **Reliability is prototype-grade.** All eight core services ship with healthchecks, the watchdog auto-recovers stuck pipelines, and the monitoring stack exposes Prometheus metrics and Grafana dashboards. There is no paging, no multi-region failover, and no SLO enforcement. Good enough for a demo, not a fintech launch.
+- **Synthetic training data.** The data generator is calibrated against ATO, ABS, APRA, and Equifax published statistics, runs labels through a 1000-line rules-based underwriting engine, and adds a separate loan-performance simulator. It does not capture real-world feedback loops, fraud patterns, broker channel effects, or lender-specific heuristics. A production rollout would retrain on real historical data.
+- **Reported AUC is on the synthetic pipeline.** XGBoost achieves 0.88 AUC on the synthetic holdout of the active `ModelVersion` (see `backend/docs/MODEL_CARD.md`). The TSTR validator estimates real-world AUC around 0.82 with moderate confidence. Walk-forward temporal CV AUC is reported in `training_metadata.temporal_cv_auc_mean` so the drift gap against random CV is visible.
+- **XGBoost lift over a simple scorecard is a measured number.** Every training run fits a logistic-regression baseline on `credit_score, annual_income, loan_amount, debt_to_income` and records `training_metadata.baseline_auc` + `xgb_lift_over_baseline` on the model card.
+- **Email generation is template-first.** Claude is used for creative variations only, with a $5/day spend cap on the Anthropic API. The guardrail layer runs 15 deterministic checks on every LLM-generated message before it ships.
+- **Compliance framing is implemented, not audited.** APRA CPG 235, NCCP Act responsible lending, Banking Code disclosure, and adverse-action language are baked into the data model, email templates, and fairness gates. None of this has been independently reviewed by a compliance professional.
+- **Reliability is prototype-grade.** Eight core services ship with healthchecks, the watchdog auto-recovers stuck pipelines, and the monitoring stack exposes Prometheus metrics + Grafana dashboards. No paging, no multi-region failover, no SLO enforcement. Good enough for a demo, not a fintech launch.
 
 ## License
 
