@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.10.4 — Senior Review Follow-Ups + SLO Instrumentation (2026-04-19)
+
+Five atomic PRs finishing the backlog flagged by the senior code-review pass and landing the SLO histograms the Grafana dashboard was silently missing. No model retraining, no data migrations, no API surface changes.
+
+### Deliverables
+
+- **#118 — ML data-realism fix.** `DataGenerator` was emitting `postcode_default_rate = base + rng.normal(0, 0.003)` — noise std too tight, collapsing the feature to a near-deterministic function of SA4 unemployment (which also drives the label). Bumped noise std `0.003 → 0.008` to match real Equifax / illion AU bureau correlation with SA4 unemployment (r ≈ 0.3–0.45). Added regression guard `test_postcode_default_rate_correlation_realistic` that asserts `|corr(postcode_default_rate, approved)| < 0.25` so the leakage shortcut cannot be silently re-introduced. Re-lands the substance of earlier closed PR #93 as a fresh atomic change against current master. Fix takes effect on the next `DataGenerator.generate()` call; no in-flight ModelVersion invalidated.
+- **#119 — CI Fernet key hardening.** `.github/workflows/{test,build}.yml` previously hardcoded a Fernet encryption key in plaintext; senior review flagged this as a credential in source. Replaced with a per-run generated key: each CI job emits a fresh 32-byte urlsafe-base64 key via Python stdlib (`os.urandom(32)` + `base64.urlsafe_b64encode`) and exports it via `$GITHUB_ENV`. No repo secret required, no hardcoded key in source, no new dependency. The CI test DB is ephemeral so the key only needs to be valid, not confidential. Closes #59.
+- **#120 — Bandit SAST gate tightening.** `.github/workflows/security.yml` was scanning at `--severity-level medium` which generated noise without blocking on the real issues. Tightened gate to `--severity-level high --confidence-level high` — the pair that matches the threat model the review identified. 0 HIGH/HIGH findings at the time of tightening, so the gate is load-bearing going forward. Five remaining MEDIUM findings tracked as follow-ups but do not block CI. Closes #60.
+- **#121 — `enforce_retention` regression coverage.** `backend/apps/loans/management/commands/enforce_retention.py` enforces AU-regulatory retention periods (AML/CTF Act s107/s112 7y loan/KYC retention, APRA CPG 235 5y ML audit trail, Privacy Act APP 11.2 90d soft-delete purge) but had 0% test coverage — a silent regression in either direction is a data-loss or compliance incident. Added 8 regression tests locking `--dry-run` no-op, 90d/5y/3y cutoff directions (strict `<` not `<=`), AuditLog emission per purge/archive, and no-op behaviour on fresh data. Uses `QuerySet.update()` to backdate `auto_now_add` timestamps rather than adding `freezegun` as a new dev dep. Closes #61.
+- **#122 — SLO histogram instrumentation.** `docs/slo.md` catalogued four SLOs whose underlying metrics were marked _"follow-up issue tracks this"_ and never emitted — Grafana panels couldn't render them; PagerDuty alerts couldn't fire. This PR instruments all four at their service-layer chokepoints:
+  - `pipeline_e2e_seconds{status,decision}` Histogram (1s – 120s buckets) emitted in `StepTracker.finalize_run` — single chokepoint for every terminal pipeline run (completed / failed / escalated)
+  - `email_generation_total{decision,source,status}` Counter emitted in `EmailGenerator.generate()` at both return paths (claude_api + template_fallback)
+  - `ml_prediction_latency_seconds` gains an `algorithm` label so xgboost / rf / logistic can be compared separately on the Grafana latency panel (the existing `HighPredictionLatency` alert uses `sum by (le)` and aggregates across labels, so no rule rewrite needed)
+  - `bias_review_ttr_seconds{decision}` Histogram (1min – 3d buckets) + `bias_review_total{outcome}` Counter emitted in `HumanReviewHandler.resume_after_review`
+
+  Also added two Prometheus alert rules: `PipelineE2ESLOBurn` (p95 > 60s for 30min — double the 30s SLO) and `EmailGenerationErrorBudgetBurn` (success rate < 95% for 15min — burns monthly 2% budget in <1 day). Every emission is wrapped in `try/except` with a debug log so Prometheus client failures can never propagate into the pipeline. 14 new registration + observe/increment tests in `tests/test_slo_metrics.py`. Closes #50, #51, #52, #53.
+
+### Version bump
+
+`APP_VERSION` advances `1.10.3` → `1.10.4`. No data migrations. No trained-model invalidation. No API surface changes.
+
+### Scope notes
+
+- HTML-escape of LLM-interpolated values in `emailHtmlRenderer.ts` / `html_renderer.py` (deferred from v1.10.3) remains slated for a single coordinated future PR — the 15 byte-for-byte Python/TypeScript parity snapshots in email-renderer CI must regenerate in lockstep, too wide a blast radius for a coverage/observability release.
+
 ## v1.10.3 — Senior Code Review Response (2026-04-19)
 
 Four atomic PRs addressing findings from a full senior-engineer code review pass. No model retraining, no migrations, no API surface changes. Each PR landed green-CI against master and was merged independently for minimal blast radius + independent rollback.
