@@ -33,7 +33,7 @@ flowchart TD
     A[Application submitted] --> B[1. XGBoost scores it]
     B --> B1[probability + SHAP]
     B1 --> C[2. Claude writes the email]
-    C --> D[3. Guardrails — 15 deterministic checks]
+    C --> D[3. Guardrails — 18 deterministic checks]
     D --> E[4. Bias pre-screen regex<br/>score 0–100]
     E -- "score ≤ 60" --> F[Send the email]
     E -- "60–80" --> G[Claude reviews flags]
@@ -64,7 +64,7 @@ Failed steps put the application into "review" with a log of where it broke. Stu
 | Frontend | Next.js 15, React 19, TanStack Query, Tailwind, shadcn/ui |
 | ML | scikit-learn, XGBoost, SHAP, Optuna |
 | AI | Claude API (Sonnet for generation, Opus for compliance review) |
-| Infra | Docker Compose, 7 containers, separate ML and IO Celery workers |
+| Infra | Docker Compose, 8 containers, separate ML and IO Celery workers, watchdog recovery |
 
 ## Run locally in 60 seconds
 
@@ -132,18 +132,26 @@ Other ML features: IV-based feature selection, PSI/CSI drift monitoring, reject 
 
 ## Email guardrails
 
-Every email Claude generates goes through 10 checks before sending:
+Every email Claude generates goes through 18 deterministic checks before sending (decision emails; marketing path runs an additional decline-language check for 19 total). The full list is in `backend/apps/email_engine/services/guardrails/engine.py`. Categories include:
 
 1. Prohibited language (discrimination acts)
 2. Hallucinated dollar amounts (validated against application data)
 3. Aggressive tone
-4. Overly formal/corporate phrasing
-5. Unprofessional financial language
-6. Markdown/HTML rejection (plain text only)
-7. Word count limits
-8. Required regulatory elements (AFCA reference, cooling-off period, etc.)
-9. Double sign-off detection
-10. Sentence rhythm uniformity (flags suspiciously even sentence lengths)
+4. AI-giveaway phrasing (em-dashes, "moreover", uniform clause length)
+5. Overly formal/corporate phrasing
+6. Unprofessional financial language
+7. Markdown/HTML rejection (plain text only)
+8. Required regulatory elements (AFCA reference, cooling-off period, comparison-rate warning, etc.)
+9. Comparison-rate warning on credit offers
+10. Contextual dignity (no apology/sorry/disappointment in denials)
+11. Psychological framing (no "unfortunately"-laden openings)
+12. Patronising language
+13. False urgency / scarcity
+14. Guaranteed-approval language
+15. Word count limits
+16. Sign-off structure (no double sign-offs)
+17. Sentence-rhythm uniformity (flags suspiciously even sentence lengths)
+18. Call-to-action presence (every email must include a clear next step)
 
 Three regeneration attempts, then human review.
 
@@ -172,7 +180,7 @@ JWT with HttpOnly cookies, 60-min access / 7-day refresh with rotation and black
 
 ## Monitoring and observability
 
-A full monitoring stack ships behind the `monitoring` profile — Prometheus, Grafana, Loki, Promtail, Alertmanager, a Celery exporter, and a Postgres exporter. Django exposes `/metrics` via `django-prometheus` with request latencies, ORM query counts, Celery task counters, and a custom training-duration histogram. Nothing runs by default, so the core stack stays small; you opt in when you want dashboards.
+A full monitoring stack ships behind the `monitoring` profile — Prometheus, Grafana, Loki, Promtail, Alertmanager, a Celery exporter, and a Postgres exporter. Django exposes `/metrics` via `django-prometheus` with request latencies, ORM query counts, Celery task counters, and custom histograms for training duration, end-to-end pipeline duration (`pipeline_e2e_seconds`), per-algorithm ML prediction latency, bias-review TTR, and an email-generation outcome counter. SLO targets and burn-rate alerts (`PipelineE2ESLOBurn`, `EmailGenerationErrorBudgetBurn`) are catalogued in [`docs/slo.md`](docs/slo.md). Nothing runs by default, so the core stack stays small; you opt in when you want dashboards.
 
 Grafana lives in `docker-compose.monitoring.yml` so the main stack parses without a Grafana admin password. Before launching, set `GRAFANA_ADMIN_PASSWORD` in `.env` (compose refuses to start the monitoring profile without it — no silent fallback), then launch alongside the regular stack:
 
@@ -192,7 +200,7 @@ A separate `watchdog` service runs in the core stack at all times. It polls ever
 
 ## Testing
 
-~1000 tests across 66 files. 60% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
+~1,125 tests across 84 files. 63% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST (high-severity / high-confidence gate), gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning. A `workflow_dispatch`-only smoke-e2e job runs the full pipeline (register → apply → orchestrate → decision → email) against an ephemeral stack.
 
 ## Verifying the build
 
@@ -245,7 +253,7 @@ docker compose exec backend python manage.py prune_model_artifacts            # 
 - **Trained on synthetic data.** The data generator is calibrated against ATO, ABS, APRA, and Equifax published statistics and runs the labels through a 1000-line rules-based underwriting engine plus a separate loan-performance simulator, so the learning task is non-trivial. It does not capture real-world feedback loops, fraud patterns, broker channel effects, or lender-specific heuristics. A production rollout would retrain on real historical data before trusting the outputs.
 - **Reported AUC is on the synthetic pipeline.** XGBoost achieves 0.88 AUC on the synthetic holdout of the active `ModelVersion` (see `backend/docs/MODEL_CARD.md`). The TSTR validator estimates a real-world AUC around 0.82 with moderate confidence. The project also reports a walk-forward temporal CV AUC in `training_metadata.temporal_cv_auc_mean` so the drift gap against random CV is visible.
 - **XGBoost lift over a simple scorecard is measured, not assumed.** Every training run fits a logistic-regression baseline on `credit_score, annual_income, loan_amount, debt_to_income` and records `training_metadata.baseline_auc` plus `xgb_lift_over_baseline` so the main model's value-add is a specific number on the model card, not marketing copy.
-- **Email generation is template-first.** Claude is used for creative variations only, and there is a $5/day spend cap on the Anthropic API. The guardrail layer runs 15 deterministic checks on every LLM-generated message before it ships.
+- **Email generation is template-first.** Claude is used for creative variations only, and there is a $5/day spend cap on the Anthropic API. The guardrail layer runs 18 deterministic checks on every LLM-generated message before it ships.
 - **Compliance framing is implemented, not audited.** APRA CPG 235, NCCP Act responsible lending, Banking Code disclosure, and the Australian regulatory language around adverse action are baked into the data model, email templates, and fairness gates. None of this has been independently reviewed by a compliance professional — it's a best-effort implementation for a portfolio project.
 - **Reliability is prototype-grade.** All eight core services ship with healthchecks, the watchdog auto-recovers stuck pipelines, and the monitoring stack exposes Prometheus metrics and Grafana dashboards. There is no paging, no multi-region failover, and no SLO enforcement. Good enough for a demo, not a fintech launch.
 
