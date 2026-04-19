@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 
@@ -10,6 +11,23 @@ from .documentation import build_documentation_checklist
 from .guardrails import GuardrailChecker
 from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
+
+_metrics_logger = logging.getLogger("email_engine.metrics")
+
+
+def _record_email_metric(decision: str, source: str, passed_guardrails: bool) -> None:
+    """Emit `email_generation_total` (see docs/slo.md). Best-effort."""
+    try:
+        from apps.email_engine.metrics import email_generation_total
+
+        status = "success" if passed_guardrails else "guardrail_fail"
+        email_generation_total.labels(
+            decision=decision or "unknown",
+            source=source,
+            status=status,
+        ).inc()
+    except Exception as exc:  # noqa: BLE001 — metric emission is best-effort
+        _metrics_logger.debug("email_generation_total emission failed: %s", exc)
 
 EMAIL_SUBMIT_TOOL = {
     "name": "submit_email",
@@ -388,6 +406,8 @@ class EmailGenerator:
                 application, decision, attempt=attempt + 1, confidence=confidence, profile_context=profile_context
             )
 
+        _record_email_metric(decision=decision, source="claude_api", passed_guardrails=all_passed)
+
         return {
             "subject": subject,
             "body": body,
@@ -573,6 +593,8 @@ class EmailGenerator:
             template_mode=True,
         )
         all_passed = all(r["passed"] for r in guardrail_results if r.get("severity") != "warning")
+
+        _record_email_metric(decision=decision, source="template_fallback", passed_guardrails=all_passed)
 
         return {
             "subject": result["subject"],

@@ -34,7 +34,7 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 **SLI:** time from application submission to decision persisted (all 6 pipeline stages).
 
-**Measurement:** custom histogram `pipeline_e2e_seconds` (instrument start/end of the orchestrator task in `apps/agents/services/orchestrator.py`; follow-up issue tracks this).
+**Measurement:** custom histogram `pipeline_e2e_seconds{status,decision}` — observed in `apps.agents.services.step_tracker.StepTracker.finalize_run` on every terminal run (completed / failed / escalated). Buckets: 1 – 120 s.
 
 **SLO target:** p95 < 30 s, p99 < 60 s.
 
@@ -46,7 +46,7 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 **SLI:** % of email generation tasks that complete without guardrail failure or Claude API error.
 
-**Measurement:** custom counter `email_generation_total{status="success|guardrail_fail|api_error"}` (instrument in `apps/email_engine/services/email_generator.py`; follow-up issue tracks this).
+**Measurement:** custom counter `email_generation_total{decision,source,status}` where `status` is `success` | `guardrail_fail`. Emitted from `apps.email_engine.services.email_generator.EmailGenerator.generate` on every return path (claude_api + template_fallback sources).
 
 **SLO target:** 98.0%.
 
@@ -58,7 +58,7 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 **SLI:** % of prediction tasks that return a probability without exception.
 
-**Measurement:** custom counter `ml_prediction_total{status="success|model_error|timeout"}` (follow-up issue tracks this).
+**Measurement:** counter `ml_predictions_total{decision,model_version}` + histogram `ml_prediction_latency_seconds{algorithm}` — both emitted in `apps.ml_engine.services.predictor.ModelPredictor`. `algorithm` label lets the Grafana latency panel segment xgboost / rf / logistic models separately.
 
 **SLO target:** 99.9%.
 
@@ -68,7 +68,7 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 **SLI:** % of emails that get escalated to human review via the bias pipeline.
 
-**Measurement:** counter `bias_review_total{decision="pass|claude_review|human"}` (follow-up issue tracks this).
+**Measurement:** counter `bias_review_total{outcome}` + histogram `bias_review_ttr_seconds{decision}` (time-to-resolution for escalated applications). Emitted from `apps.agents.services.human_review_handler.HumanReviewHandler.resume_after_review`.
 
 **SLO target:** not a latency/error SLO — tracked as a business quality signal. Alert on > 15% weekly (indicates the pre-screen or the model are drifting).
 
