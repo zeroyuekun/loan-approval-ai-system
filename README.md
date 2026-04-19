@@ -7,7 +7,15 @@
 ![Last commit](https://img.shields.io/github/last-commit/zeroyuekun/loan-approval-ai-system)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-Full-stack loan approval system built for Australian lending. ML scores applicants (XGBoost), Claude writes the decision emails, and an agent pipeline checks everything for bias before it goes out. The compliance layer — APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure requirements — is where most of the work went.
+Full-stack loan approval system for Australian lending. XGBoost scores applicants, Claude writes the decision emails, and an agent pipeline checks everything for bias before it ships.
+
+**What makes it different:**
+
+- **3-layer bias detection** — regex pre-screen → Claude review → human escalation, scored 0–100 per generated email
+- **15 deterministic guardrails** on every Claude message (prohibited language, hallucinated dollar amounts, aggressive tone, regulatory-element presence, and more)
+- **$5/day Claude spend cap** with template-first generation — production cost control built in, not an afterthought
+
+The compliance layer — APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure — is where most of the work went.
 
 <details>
 <summary><strong>Screenshots</strong> (click to expand)</summary>
