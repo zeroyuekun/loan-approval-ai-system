@@ -62,6 +62,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Generate ephemeral Fernet key for CI
+        # Fernet keys for CI test stacks don't need to be secret — they
+        # just need to be valid. Generating at runtime avoids both a
+        # hardcoded key in source and a required repo secret.
+        run: |
+          python3 -c "import os,base64; print('FIELD_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(os.urandom(32)).decode())" >> "$GITHUB_ENV"
+
       - name: Start application stack
         run: |
           docker compose build backend
@@ -95,7 +102,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
           REDIS_PASSWORD: testpass
-          FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
+          FIELD_ENCRYPTION_KEY: ${{ env.FIELD_ENCRYPTION_KEY }}
           ANTHROPIC_API_KEY: sk-ant-test-key
 
       - name: OWASP ZAP Baseline Scan
@@ -125,6 +132,10 @@ jobs:
     if: github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v6
+
+      - name: Generate ephemeral Fernet key for CI
+        run: |
+          python3 -c "import os,base64; print('FIELD_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(os.urandom(32)).decode())" >> "$GITHUB_ENV"
 
       - name: Start application stack
         run: |
@@ -159,7 +170,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
           REDIS_PASSWORD: testpass
-          FIELD_ENCRYPTION_KEY: "kA6H1LGRC3JUszuqLoXUyvxw_IX5bjJSDJ6B57rdexU="
+          FIELD_ENCRYPTION_KEY: ${{ env.FIELD_ENCRYPTION_KEY }}
           ANTHROPIC_API_KEY: sk-ant-test-key
 
       - name: Seed test data
