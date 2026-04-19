@@ -282,6 +282,7 @@ ALL_FIXTURE_STEMS = [
     "denial_03_employment",
     "denial_04_multiple_factors",
     "denial_05_policy",
+    "denial_06_live_shape",
     "marketing_01_three_options",
     "marketing_02_two_options",
     "marketing_03_single_option",

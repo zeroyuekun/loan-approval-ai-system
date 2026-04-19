@@ -298,6 +298,7 @@ OFFER_HEADER_RE = re.compile(r"^Option\s+(\d+)[\s:.\-\u2013\u2014]+(.+)$")
 UNSUBSCRIBE_LINE_RE = re.compile(r"^Unsubscribe:\s*(\S+)")
 CALL_SARAH_LINE_RE = re.compile(r"^Call Sarah on\s+(\d[\d\s]+)", re.I)
 MARKETING_BREAK_PREFIXES = ("ABN ", "Ph:", "Phone:", "Email:", "Website:", "Unsubscribe:")
+BUREAU_BULLET_RE = re.compile(r"^[\u2022•]\s*(Equifax|Illion|Experian)\b", re.I)
 
 
 def _extract_section_bullets(body: str, section_label: str) -> tuple[list[str], int, int]:
@@ -330,8 +331,8 @@ def _extract_section_bullets(body: str, section_label: str) -> tuple[list[str], 
 def _extract_factor_paragraphs(body: str) -> tuple[list[tuple[str, str]], int, int]:
     """Find factor-label paragraphs after the 'This decision was based on…' line.
 
-    Each factor is 'Label: explanation.' on its own line. Returns (factors, start_idx, end_idx)
-    where start_idx is the trigger line and end_idx is the last factor line.
+    Accepts both plain ``Label: explanation.`` and bulleted ``•  Label: explanation.``
+    shapes — live Claude output uses the bullet form per the prompt template.
     """
     lines = body.split("\n")
     trigger_idx = -1
@@ -349,7 +350,9 @@ def _extract_factor_paragraphs(body: str) -> tuple[list[tuple[str, str]], int, i
         if s == "":
             i += 1
             continue
-        m = FACTOR_LINE_RE.match(s)
+        bm = BULLET_LINE_RE.match(s)
+        inner = bm.group(1).strip() if bm else s
+        m = FACTOR_LINE_RE.match(inner)
         if m:
             factors.append((m.group(1).strip(), m.group(2).strip()))
             end = i
@@ -359,29 +362,79 @@ def _extract_factor_paragraphs(body: str) -> tuple[list[tuple[str, str]], int, i
     return factors, trigger_idx, end
 
 
-def _extract_free_credit_report_block(body: str) -> tuple[int, int]:
-    """Locate the 'Free Credit Report:' section so it can be replaced by the structured card.
+def _extract_credit_report_block(body: str) -> tuple[int, int]:
+    """Locate the credit report section so it can be replaced by the structured card.
 
-    Returns (start, end) spanning the label line through the last bureau URL line,
-    or (-1, -1) if not found.
+    Recognizes two shapes:
+
+    1. Explicit ``Free Credit Report:`` section label followed by intro + bureau URLs.
+    2. Prose intro mentioning "credit report" immediately followed (with optional
+       blank line) by two or more ``• Equifax/Illion/Experian – url`` bullets.
+       This is what the live denial prompt produces.
+
+    Returns (start, end) spanning the full section, or (-1, -1) if not found.
     """
     lines = body.split("\n")
-    start = -1
-    end = -1
     for i, line in enumerate(lines):
-        if start == -1:
-            if line.strip() == "Free Credit Report:":
-                start = i
-                end = i
+        if line.strip() == "Free Credit Report:":
+            start = i
+            end = start
+            for j in range(start + 1, len(lines)):
+                s = lines[j].strip()
+                if s in SECTION_LABELS or s in CLOSINGS:
+                    break
+                if s:
+                    end = j
+            return start, end
+
+    n = len(lines)
+    for i in range(n):
+        if not BUREAU_BULLET_RE.match(lines[i].strip()):
             continue
-        s = line.strip()
-        if s == "":
+        last_bureau = i
+        bureau_count = 1
+        j = i + 1
+        while j < n:
+            s = lines[j].strip()
+            if s == "":
+                j += 1
+                continue
+            if BUREAU_BULLET_RE.match(s):
+                last_bureau = j
+                bureau_count += 1
+                j += 1
+                continue
+            break
+        if bureau_count < 2:
             continue
-        if "equifax" in s.lower() or "experian" in s.lower() or "illion" in s.lower():
-            end = i
-            continue
-        break
-    return start, end
+        start = i
+        for k in range(i - 1, -1, -1):
+            s = lines[k].strip()
+            if s == "":
+                continue
+            if s in SECTION_LABELS or s in CLOSINGS:
+                break
+            if BULLET_LINE_RE.match(s):
+                break
+            if "credit report" in s.lower():
+                start = k
+                # Asymmetric with outer walk: outer `continue`s past blanks to
+                # locate the "credit report" intro across paragraph gaps; inner
+                # `break`s at the first blank so the prose intro stays bounded
+                # to its own paragraph and doesn't swallow preceding content.
+                for k2 in range(k - 1, -1, -1):
+                    s2 = lines[k2].strip()
+                    if s2 == "":
+                        break
+                    if s2 in SECTION_LABELS or s2 in CLOSINGS:
+                        break
+                    if BULLET_LINE_RE.match(s2):
+                        break
+                    start = k2
+                break
+            break
+        return start, last_bureau
+    return -1, -1
 
 
 def _render_factor_card(factors: list[tuple[str, str]]) -> str:
@@ -485,7 +538,7 @@ def _render_dual_cta() -> str:
 def _render_denial_body(plain_body: str) -> str:
     factors, f_start, f_end = _extract_factor_paragraphs(plain_body)
     wycd, w_start, w_end = _extract_section_bullets(plain_body, "What You Can Do:")
-    cr_start, cr_end = _extract_free_credit_report_block(plain_body)
+    cr_start, cr_end = _extract_credit_report_block(plain_body)
     pre_sig, sig_lines, post_sig = _split_at_signature(plain_body)
     pre_sig_end_idx = len(pre_sig.split("\n")) if pre_sig else 0
 
