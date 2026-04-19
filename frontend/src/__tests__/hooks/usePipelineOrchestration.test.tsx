@@ -5,9 +5,13 @@ import { AgentRun } from '@/types'
 
 // Mock the underlying hooks
 const mockMutateAsync = vi.fn()
+const mockForceRerunMutateAsync = vi.fn()
 vi.mock('@/hooks/useAgentStatus', () => ({
   useOrchestrate: () => ({
     mutateAsync: mockMutateAsync,
+  }),
+  useForceRerun: () => ({
+    mutateAsync: mockForceRerunMutateAsync,
   }),
   useAgentRun: () => ({
     data: undefined,
@@ -41,6 +45,8 @@ const mockAgentRun: AgentRun = {
 describe('usePipelineOrchestration', () => {
   beforeEach(() => {
     mockMutateAsync.mockReset()
+    mockForceRerunMutateAsync.mockReset()
+    mockForceRerunMutateAsync.mockResolvedValue({ task_id: 'force-task-1' })
   })
 
   it('returns initial state correctly', () => {
@@ -156,5 +162,69 @@ describe('usePipelineOrchestration', () => {
     })
 
     expect(result.current.pipelineDisabled).toBe(true)
+  })
+
+  it('escalates to force-rerun when backend returns already_completed', async () => {
+    // Backend short-circuits when a completed AgentRun exists for the
+    // application. The button must auto-escalate to force-rerun so the
+    // click triggers a real pipeline + new email, not a silent no-op.
+    mockMutateAsync.mockResolvedValue({
+      status: 'already_completed',
+      existing_run_id: 'run-old',
+    })
+
+    const { result } = renderHook(
+      () => usePipelineOrchestration('loan-123', null),
+      { wrapper: createWrapper() },
+    )
+
+    await act(async () => {
+      await result.current.handleOrchestrate()
+    })
+
+    expect(mockForceRerunMutateAsync).toHaveBeenCalledWith({
+      loanId: 'loan-123',
+      reason: expect.any(String),
+    })
+    expect(result.current.pipelineQueued).toBe(true)
+    expect(result.current.pipelineError).toBeNull()
+  })
+
+  it('does NOT escalate to force-rerun on a normal successful orchestration', async () => {
+    mockMutateAsync.mockResolvedValue({ task_id: 'task-1', status: 'pipeline_queued' })
+
+    const { result } = renderHook(
+      () => usePipelineOrchestration('loan-123', null),
+      { wrapper: createWrapper() },
+    )
+
+    await act(async () => {
+      await result.current.handleOrchestrate()
+    })
+
+    expect(mockForceRerunMutateAsync).not.toHaveBeenCalled()
+    expect(result.current.pipelineQueued).toBe(true)
+  })
+
+  it('surfaces pipelineError when force-rerun escalation fails', async () => {
+    mockMutateAsync.mockResolvedValue({
+      status: 'already_completed',
+      existing_run_id: 'run-old',
+    })
+    mockForceRerunMutateAsync.mockRejectedValue(new Error('Force rerun forbidden'))
+
+    const { result } = renderHook(
+      () => usePipelineOrchestration('loan-123', null),
+      { wrapper: createWrapper() },
+    )
+
+    await act(async () => {
+      await result.current.handleOrchestrate()
+    })
+
+    expect(mockForceRerunMutateAsync).toHaveBeenCalledTimes(1)
+    expect(result.current.pipelineError).toBe('Force rerun forbidden')
+    expect(result.current.pipelineQueued).toBe(false)
+    expect(result.current.orchestrating).toBe(false)
   })
 })

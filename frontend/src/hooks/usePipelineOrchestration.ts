@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { AgentRun } from '@/types'
-import { useOrchestrate, useAgentRun } from '@/hooks/useAgentStatus'
+import { useOrchestrate, useAgentRun, useForceRerun } from '@/hooks/useAgentStatus'
 
 interface UsePipelineOrchestrationReturn {
   agentRun: AgentRun | null | undefined
@@ -20,6 +20,7 @@ export function usePipelineOrchestration(
   onRefresh?: () => void,
 ): UsePipelineOrchestrationReturn {
   const orchestrate = useOrchestrate()
+  const forceRerun = useForceRerun()
   const [orchestrating, setOrchestrating] = useState(false)
   const [pipelineQueued, setPipelineQueued] = useState(false)
   const [preRunAgentId, setPreRunAgentId] = useState<string | null>(null)
@@ -78,7 +79,18 @@ export function usePipelineOrchestration(
     // Snapshot the current agent run ID so we can detect when a new one appears
     setPreRunAgentId(agentRun?.id ?? null)
     try {
-      await orchestrate.mutateAsync(String(applicationId))
+      const result = await orchestrate.mutateAsync(String(applicationId))
+      // Backend short-circuits with {status:"already_completed"} when a
+      // completed AgentRun exists. Staff clicking "Re-run AI Pipeline"
+      // expect a fresh run (+ new email) — escalate to force-rerun so the
+      // click isn't silently swallowed. The dashboard is staff-only, so
+      // this path is never reached by customers.
+      if (result?.status === 'already_completed') {
+        await forceRerun.mutateAsync({
+          loanId: String(applicationId),
+          reason: 'Staff re-run from application detail page',
+        })
+      }
       setPipelineQueued(true)
       onRefresh?.()
     } catch (error: any) {
