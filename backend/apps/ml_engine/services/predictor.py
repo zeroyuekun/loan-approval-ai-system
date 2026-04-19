@@ -289,7 +289,9 @@ class ModelPredictor:
         shap_values_dict = attribution["shap_values"]
         shap_available = attribution["shap_available"]
 
-        processing_time = int((time.time() - start_time) * 1000)
+        # NOTE: processing_time_ms is computed at the end of predict() so the
+        # metric reflects full wall-clock latency including SHAP, stress tests,
+        # counterfactuals, and shadow scoring — not just predict_proba().
 
         # Per-application drift flags: check if key features are far outside
         # the training distribution (APRA CPG 235 ongoing monitoring)
@@ -342,7 +344,7 @@ class ModelPredictor:
             "shap_values": shap_values_dict,
             "shap_available": shap_available,
             "shap_model_note": "Feature attributions computed on base model before probability calibration",
-            "processing_time_ms": processing_time,
+            "processing_time_ms": 0,  # stamped below after counterfactuals + shadow scoring
             "model_version": str(self.model_version.id),
             "consistency_warnings": consistency["warnings"],
             "drift_warnings": drift_warnings,
@@ -370,6 +372,11 @@ class ModelPredictor:
                 result["counterfactuals"] = []
         else:
             result["counterfactuals"] = []
+
+        # Stamp honest end-to-end latency now that all heavy work is done
+        # (transform, SHAP, stress tests, counterfactuals). Prometheus reads
+        # this below so the histogram reflects real SLA-relevant wall time.
+        result["processing_time_ms"] = int((time.time() - start_time) * 1000)
 
         # Emit Prometheus metrics for ML observability
         try:
