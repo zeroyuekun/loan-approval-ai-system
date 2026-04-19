@@ -120,11 +120,11 @@ def test_approval_renders_success_hero():
     assert "Congratulations" in html
 
 
-def test_denial_renders_caution_hero():
+def test_denial_hero_omits_orange_info_icon():
     body = "Dear John,\n\nWe reviewed your application.\n"
     html = render_html(body, email_type="denial")
-    assert f"background-color:{TOKENS['CAUTION']}" in html
-    assert "&#9432;" in html
+    assert "&#9432;" not in html
+    assert "Update on Your Application" in html
 
 
 def test_marketing_renders_marketing_hero():

@@ -675,6 +675,25 @@ def _render_offer_card(offer: dict) -> str:
     )
 
 
+def _render_marketing_closing(first_name: str) -> str:
+    """Warm closing paragraph between offer cards and the CTA button.
+
+    Kept short and low-pressure to match the Australian Big 4 / neobank tone:
+    acknowledge the options, invite a reply, don't push. Phrasing deliberately
+    avoids every term in MARKETING_AI_GIVEAWAY_TERMS ("rest assured", "please
+    feel free to", "we wish you", etc.).
+    """
+    return (
+        f'<div style="padding:4px 0 16px 0; font-size:{TOKENS["BODY_SIZE"]}; '
+        f'line-height:{TOKENS["LINE_HEIGHT"]}; color:{TOKENS["TEXT"]};">'
+        f"Take your time with the options above, {first_name} \u2013 there\u2019s "
+        f"no rush. If you\u2019d like to talk any of them through, or want to "
+        f"explore something different, I\u2019m happy to help. Just give me a call "
+        f"or reply to this email whenever you\u2019re ready."
+        f"</div>"
+    )
+
+
 def _render_marketing_footer(body: str) -> str:
     parts: list[str] = []
     if "term deposit" in body.lower():
@@ -727,6 +746,7 @@ def _render_marketing_body(plain_body: str) -> str:
             flush()
             for offer in offers:
                 parts.append(_render_offer_card(offer))
+            parts.append(_render_marketing_closing(_extract_applicant_name(plain_body)))
             parts.append(
                 _render_cta(
                     "Call Sarah on 1300 000 000",
@@ -814,15 +834,23 @@ def _render_hero(email_type: EmailType, body: str) -> str:
     else:
         headline = cfg["default_headline"]
         subtitle = "A few options tailored to you"
+    if email_type == "denial":
+        icon_html = ""
+        headline_margin = "0 0 4px 0"
+    else:
+        icon_html = (
+            f'<div style="width:48px; height:48px; border-radius:24px; '
+            f"background-color:{cfg['color']}; text-align:center; "
+            f"line-height:48px; color:#ffffff; font-size:24px; "
+            f'font-weight:600;">{cfg["icon"]}</div>'
+        )
+        headline_margin = "12px 0 4px 0"
     return (
         f'<tr><td style="padding:32px 24px 16px 24px; '
         f'font-family:{TOKENS["FONT_STACK"]};">'
-        f'<div style="width:48px; height:48px; border-radius:24px; '
-        f"background-color:{cfg['color']}; text-align:center; "
-        f"line-height:48px; color:#ffffff; font-size:24px; "
-        f'font-weight:600;">{cfg["icon"]}</div>'
+        f"{icon_html}"
         f'<h1 style="font-size:{TOKENS["HEAD_SIZE"]}; line-height:28px; '
-        f'color:{TOKENS["TEXT"]}; margin:12px 0 4px 0; font-weight:600;">'
+        f'color:{TOKENS["TEXT"]}; margin:{headline_margin}; font-weight:600;">'
         f"{headline}</h1>"
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; '
         f'color:{TOKENS["MUTED"]};">{subtitle}</div>'
@@ -848,10 +876,21 @@ def _render_legacy_body(body: str) -> str:
             )
             detail_rows.clear()
 
+    def _next_nonblank_matches(idx: int, pattern: re.Pattern[str], use_raw: bool = False) -> bool:
+        for j in range(idx + 1, len(lines)):
+            target = lines[j] if use_raw else lines[j].strip()
+            if target.strip() == "":
+                continue
+            return bool(pattern.match(target))
+        return False
+
+    _BULLET_PREFIX_RE = re.compile(r"^[\u2022•]\s*")
+    _NUM_PREFIX_RE = re.compile(r"^\s+\d+\.\s+")
+
     td_label = 'style="padding:4px 8px 4px 0;color:#888;border-bottom:1px solid #f0f0f0;"'
     td_value = 'style="padding:4px 0 4px 8px;text-align:right;border-bottom:1px solid #f0f0f0;"'
 
-    for line in lines:
+    for idx, line in enumerate(lines):
         stripped = line.strip()
         is_section = stripped in SECTION_LABELS
         is_option = bool(OPTION_PATTERN.match(stripped))
@@ -874,13 +913,15 @@ def _render_legacy_body(body: str) -> str:
         bullet_match = re.match(r"^[\u2022•]\s*(.+)$", stripped)
         if bullet_match:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;{bullet_match.group(1)}</p>')
+            bottom = "2px" if _next_nonblank_matches(idx, _BULLET_PREFIX_RE) else "12px"
+            html_parts.append(f'<p style="margin:2px 0 {bottom} 16px;">\u2022&nbsp;&nbsp;{bullet_match.group(1)}</p>')
             continue
 
         num_match = re.match(r"^\s+(\d+)\.\s+(.+)$", line)
         if num_match:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:2px 0 2px 16px;">{num_match.group(1)}. {num_match.group(2)}</p>')
+            bottom = "2px" if _next_nonblank_matches(idx, _NUM_PREFIX_RE, use_raw=True) else "12px"
+            html_parts.append(f'<p style="margin:2px 0 {bottom} 16px;">{num_match.group(1)}. {num_match.group(2)}</p>')
             continue
 
         detail_match = LOAN_DETAIL_RE.match(line)
@@ -897,18 +938,7 @@ def _render_legacy_body(body: str) -> str:
             html_parts.append('<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">')
             continue
 
-        if (
-            stripped.startswith("ABN ")
-            or stripped.startswith("Ph:")
-            or stripped.startswith("Phone:")
-            or stripped.startswith("Email:")
-            or stripped.startswith("Website:")
-        ):
-            html_parts.append(f'<p style="margin:0;font-size:12px;color:#888;">{stripped}</p>')
-            continue
-
         if stripped == "":
-            html_parts.append('<div style="height:12px;"></div>')
             continue
 
         margin = "16px" if stripped.endswith(".") else "4px"
@@ -920,12 +950,21 @@ def _render_legacy_body(body: str) -> str:
 
 
 def _render_header() -> str:
+    badge = (
+        f'<span style="display:inline-block; width:24px; height:24px; '
+        f'background-color:#ffffff; color:{TOKENS["BRAND_PRIMARY"]}; '
+        f"border-radius:12px; font-size:14px; font-weight:700; "
+        f"line-height:24px; text-align:center; margin-right:8px; "
+        f'vertical-align:middle;">$</span>'
+    )
     return (
         f'<tr><td style="background-color:{TOKENS["BRAND_PRIMARY"]}; '
         f'padding:16px 24px; border-radius:8px 8px 0 0;">'
+        f"{badge}"
         f'<span style="color:#ffffff; font-size:16px; font-weight:600; '
-        f'letter-spacing:0.3px;">AussieLoanAI</span>'
-        f'<span style="color:#bfdbfe; font-size:12px; margin-left:8px;">'
+        f'letter-spacing:0.3px; vertical-align:middle;">AussieLoanAI</span>'
+        f'<span style="color:#bfdbfe; font-size:12px; margin-left:8px; '
+        f'vertical-align:middle;">'
         f"Australian Credit Licence No. 012345</span>"
         f"</td></tr>"
     )
