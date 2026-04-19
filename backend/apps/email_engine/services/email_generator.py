@@ -564,11 +564,13 @@ class EmailGenerator:
         if "pricing" not in context and decision == "approved" and pricing:
             context["pricing"] = pricing
 
-        # Run full guardrails on template emails — templates are designed
-        # to pass all 18 checks including hallucinated numbers and required elements.
+        # Template emails are pre-vetted; use template_mode so hallucinated-
+        # number detection doesn't flag the static comparison-rate footnote
+        # ($30,000 example) and withhold the fallback email from the customer.
         guardrail_results = self.guardrail_checker.run_all_checks(
             result["body"],
             context,
+            template_mode=True,
         )
         all_passed = all(r["passed"] for r in guardrail_results if r.get("severity") != "warning")
 

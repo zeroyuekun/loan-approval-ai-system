@@ -76,7 +76,9 @@ class BiasDetector:
 
         # ── Severe violation: prohibited language or multiple failures ──
         # Clear compliance breach — no need for LLM interpretation.
-        if det_score > bias_threshold_review:
+        # Inclusive bound: a score equal to the review threshold is, by
+        # definition, at the "review" level and must escalate, not pass.
+        if det_score >= bias_threshold_review:
             logger.warning("Bias pre-screen: severe violation, deterministic_score=%d — blocking", det_score)
             return {
                 "score": det_score,

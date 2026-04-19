@@ -66,6 +66,15 @@ AI_GIVEAWAY_TERMS = [
         r"\bwe (?:understand|know) (?:this|how) (?:is|may be|must be) (?:difficult|hard|tough|frustrating)\b",
         re.IGNORECASE,
     ),
+    # Apology / sorry — hard red line: denial letters never apologise or express
+    # disappointment (project owner's explicit rule in CLAUDE.md). Enforcing
+    # here as a deterministic regex rather than relying on the LLM prompt alone.
+    re.compile(r"\bsorry\b", re.IGNORECASE),
+    re.compile(r"\bapologis(?:e|es|ing|ed)\b", re.IGNORECASE),
+    re.compile(r"\bapologiz(?:e|es|ing|ed)\b", re.IGNORECASE),
+    re.compile(r"\bapolog(?:y|ies)\b", re.IGNORECASE),
+    re.compile(r"\bdisappointment\b", re.IGNORECASE),
+    re.compile(r"\bregret(?:fully|ful|table)?\b", re.IGNORECASE),
     re.compile(r"\bwe want to be transparent about\b", re.IGNORECASE),
     # re.compile(r'\bwe appreciate the trust\b', re.IGNORECASE),  # Removed: legitimate closing in approval letters
     re.compile(r"\bregardless of (?:this|the) outcome\b", re.IGNORECASE),
@@ -395,6 +404,15 @@ MARKETING_AI_GIVEAWAY_TERMS = [
     re.compile(r"\bwe understand this (?:may be|is) disappointing\b", re.IGNORECASE),
     re.compile(r"\bnot the outcome you were hoping for\b", re.IGNORECASE),
     re.compile(r"\bnot what you (?:were hoping|wanted|expected)\b", re.IGNORECASE),
+    # Apology / sorry — mirrors AI_GIVEAWAY_TERMS. Marketing emails never
+    # apologise for the preceding denial; this would re-raise the negative
+    # moment and contradicts the peak-end rule.
+    re.compile(r"\bsorry\b", re.IGNORECASE),
+    re.compile(r"\bapologis(?:e|es|ing|ed)\b", re.IGNORECASE),
+    re.compile(r"\bapologiz(?:e|es|ing|ed)\b", re.IGNORECASE),
+    re.compile(r"\bapolog(?:y|ies)\b", re.IGNORECASE),
+    re.compile(r"\bdisappointment\b", re.IGNORECASE),
+    re.compile(r"\bregret(?:fully|ful|table)?\b", re.IGNORECASE),
     re.compile(r"\bwe value you as a customer\b", re.IGNORECASE),
     re.compile(r"\bwe (?:truly|genuinely) (?:want|care|value)\b", re.IGNORECASE),
     re.compile(r"\bwe are pleased to inform you\b", re.IGNORECASE),
