@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useApplication } from '@/hooks/useApplications'
@@ -184,19 +183,16 @@ function StatusPipeline({ status }: { status: string }) {
 
 export default function CustomerApplicationStatusPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: application, isLoading, refetch } = useApplication(id)
-
-  // Poll every 5 seconds while the application is still being processed
-  useEffect(() => {
-    if (!application) return
-    if (application.status === 'pending' || application.status === 'processing') {
-      const interval = setInterval(() => {
-        refetch()
-      }, 5000)
-      return () => clearInterval(interval)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- poll restart depends only on status change, not full application object
-  }, [application?.status, refetch])
+  const { data: application, isLoading } = useApplication(id, {
+    // Poll every 5s only while still being processed. Letting TanStack Query
+    // own the interval avoids stale closures / interval-leak races that the
+    // old useEffect(setInterval) pattern was prone to when the hook remounted
+    // faster than the cleanup timer fired.
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'pending' || status === 'processing' ? 5000 : false
+    },
+  })
 
   if (isLoading) {
     return (

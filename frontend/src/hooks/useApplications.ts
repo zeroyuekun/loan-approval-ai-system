@@ -14,7 +14,10 @@ export function useApplications(params?: Record<string, any>) {
   })
 }
 
-export function useApplication(id: string) {
+export function useApplication(
+  id: string,
+  options?: { refetchInterval?: number | false | ((query: { state: { data?: LoanApplication } }) => number | false) },
+) {
   return useQuery<LoanApplication>({
     queryKey: ['application', id],
     queryFn: async () => {
@@ -22,6 +25,7 @@ export function useApplication(id: string) {
       return data
     },
     enabled: !!id,
+    refetchInterval: options?.refetchInterval,
   })
 }
 
