@@ -184,8 +184,7 @@ class TestEnforceRetention:
         after = AuditLog.objects.filter(action__startswith="retention_").count()
 
         assert after - before >= 2, (
-            "Expected at least 2 retention_* audit rows (1 purge + 1 archive); "
-            f"got {after - before}"
+            f"Expected at least 2 retention_* audit rows (1 purge + 1 archive); got {after - before}"
         )
 
         latest = AuditLog.objects.filter(action__startswith="retention_").order_by("-timestamp").first()
