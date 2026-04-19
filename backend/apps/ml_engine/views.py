@@ -85,13 +85,8 @@ class ModelMetricsView(APIView):
         )
 
 
-class TrainModelThrottle(UserRateThrottle):
-    rate = "10/hour"
-
-
 class TrainModelView(APIView):
     permission_classes = [IsAdmin]
-    throttle_classes = [TrainModelThrottle]
 
     TRAIN_LOCK_KEY = "train_model_lock"
 
