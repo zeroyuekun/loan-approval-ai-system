@@ -98,7 +98,8 @@ Then:
 
 Something broken? See [runbooks](docs/runbooks/).
 
-## Project layout
+<details>
+<summary><strong>Project layout</strong> (click to expand)</summary>
 
 ```
 backend/
@@ -120,6 +121,8 @@ tools/              # standalone training + evaluation scripts
 workflows/          # markdown SOPs for each pipeline stage
 ```
 
+</details>
+
 ## Design decisions
 
 | Decision | ADR |
@@ -133,7 +136,8 @@ workflows/          # markdown SOPs for each pipeline stage
 | WAT architecture (workflows, agents, tools) | [007](backend/docs/adr/007-wat-architecture.md) |
 | Security architecture | [008](backend/docs/adr/008-security-architecture.md) |
 
-## ML model
+<details>
+<summary><strong>ML model details</strong> (click to expand)</summary>
 
 XGBoost trained on synthetic Australian lending data. 71 raw applicant input fields (48 numeric + categoricals) with 31 engineered interactions, Optuna Bayesian hyperparameter optimisation, isotonic probability calibration, 21 monotonic constraints (higher income -> lower risk, etc.).
 
@@ -158,14 +162,17 @@ Every email Claude generates goes through 10 checks before sending:
 
 Three regeneration attempts, then human review.
 
-## Retraining the model
+### Retraining the model
 
 ```bash
 docker compose exec backend python manage.py generate_data --num-records 10000 --output .tmp/synthetic_loans.csv
 docker compose exec backend python manage.py train_model --algorithm xgb --data-path .tmp/synthetic_loans.csv
 ```
 
-## API
+</details>
+
+<details>
+<summary><strong>API reference</strong> (click to expand)</summary>
 
 Auth: `POST /api/v1/auth/{register,login,refresh,logout}/`, `GET /api/v1/auth/me/`
 
@@ -177,11 +184,14 @@ Emails: `POST /api/v1/emails/generate/{id}/`, `GET /api/v1/emails/{id}/`
 
 Agents: `POST /api/v1/agents/orchestrate/{id}/`, `GET /api/v1/agents/runs/{id}/`, `POST /api/v1/agents/review/{id}/`
 
+</details>
+
 ## Security
 
 JWT with HttpOnly cookies, 60-min access / 7-day refresh with rotation and blacklisting. Argon2 password hashing. Fernet field-level encryption for PII. Rate limiting (20/min anon, 60/min auth). CORS locked to frontend origin. Three roles with per-endpoint permission checks. Prompt injection defences on user text entering LLM prompts.
 
-## Monitoring and observability
+<details>
+<summary><strong>Monitoring and observability</strong> (click to expand)</summary>
 
 A full monitoring stack ships behind the `monitoring` profile — Prometheus, Grafana, Loki, Promtail, Alertmanager, a Celery exporter, and a Postgres exporter. Django exposes `/metrics` via `django-prometheus` with request latencies, ORM query counts, Celery task counters, and a custom training-duration histogram. Nothing runs by default, so the core stack stays small; you opt in when you want dashboards.
 
@@ -201,11 +211,14 @@ Then:
 
 A separate `watchdog` service runs in the core stack at all times. It polls every 30 seconds for loan applications stuck in the `pending` state for more than 5 minutes and re-queues their orchestration task — so transient worker or broker failures self-recover rather than leaving zombie applications in the queue.
 
+</details>
+
 ## Testing
 
 ~1000 tests across 66 files. 60% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
 
-## Verifying the build
+<details>
+<summary><strong>Verifying the build</strong> (click to expand)</summary>
 
 An end-to-end smoke script exercises the full pipeline (register → apply → orchestrate → decision → email) against a locally-running stack:
 
@@ -232,7 +245,10 @@ Result is written to `.tmp/smoke_result.json`:
 
 The same script runs as a manually-triggered GitHub Actions job under `smoke-e2e` (see `.github/workflows/smoke-e2e.yml`). The workflow is `workflow_dispatch`-only by design — cost-conscious default; add a cron once the signal is known stable.
 
-## Housekeeping
+</details>
+
+<details>
+<summary><strong>Housekeeping</strong> (click to expand)</summary>
 
 Local development accumulates build artifacts, test caches, and trained model files. To reclaim disk:
 
@@ -250,6 +266,8 @@ To prune stale trained-model `.joblib` artifacts from `backend/ml_models/` (afte
 docker compose exec backend python manage.py prune_model_artifacts --dry-run  # preview
 docker compose exec backend python manage.py prune_model_artifacts            # delete
 ```
+
+</details>
 
 ## Limitations and honest caveats
 
