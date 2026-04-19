@@ -555,6 +555,16 @@ class ModelTrainer:
         # Load data
         df = pd.read_csv(data_path)
 
+        # Defence-in-depth drop of any post-outcome leakage column at the load
+        # boundary — a single regression test cannot catch every way such a
+        # column could sneak through IV selection or monotone-constraint edits.
+        from apps.ml_engine.services.data_generator import POST_OUTCOME_FEATURES
+
+        leaked = [c for c in POST_OUTCOME_FEATURES if c in df.columns]
+        if leaked:
+            logger.warning("Dropping post-outcome leakage columns: %s", leaked)
+            df = df.drop(columns=leaked)
+
         if len(df) < 20:
             raise ValueError(f"Dataset too small for training: {len(df)} rows (minimum 20 required)")
 
