@@ -1,4 +1,4 @@
-.PHONY: dev down build test lint seed train logs health clean clean-soft clean-deep typecheck security verify deadcode
+.PHONY: dev down build test lint seed train logs health clean clean-soft clean-deep typecheck security verify deadcode benchmark-gmsc
 
 # Development
 dev:                     ## Start all services
@@ -82,6 +82,10 @@ verify:                  ## Full verification gate: lint + typecheck + security 
 	$(MAKE) security
 	docker compose exec backend pytest -x --tb=short
 	cd frontend && npm test -- --run
+
+# Benchmarks
+benchmark-gmsc:          ## Run external GMSC benchmark (Kaggle Give Me Some Credit, 150k real borrowers)
+	docker compose exec backend python scripts/benchmark_gmsc.py --yes
 
 # Health
 health:                  ## Check service health
