@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.10.6 — Renderer XSS Hardening + External Benchmark + Realism Audit (2026-04-20)
+
+Four atomic PRs closing the last of the v1.10.3 senior-review deferred items and re-landing the two previously-stale concept PRs as fresh atomic changes. No data migrations, no model retraining, no API surface changes.
+
+### Deliverables
+
+- **#139 — HTML escape on both renderers.** Defense-in-depth HTML escape pass on every string-interpolated value in `backend/apps/email_engine/services/html_renderer.py` and `frontend/src/lib/emailHtmlRenderer.ts`. Closes the v1.10.3 deferred parity item flagged by senior review — escape is now belt-and-braces on both sides of the Py↔TS parity contract, not just body rendering. All 16 fixture snapshots remain byte-identical.
+- **#142 — URL scheme allowlist.** `_e()` escapes `<>&"'` but does not block `javascript:alert(1)` — the scheme has no special chars. The marketing footer parses the unsubscribe URL out of the LLM-rendered body via `UNSUBSCRIBE_LINE_RE`, so a prompt-injected value could previously land in `<a href="javascript:…">` as-is. New `_safe_url()` helper (Python) and mirroring `safeUrl()` (TS) gate every `href=` interpolation: http/https/mailto/tel pass through (case-insensitive, whitespace-trimmed), everything else falls back to `https://aussieloanai.com.au/unsubscribe`. Eight unit tests per side plus an end-to-end injection test that renders a marketing body with `Unsubscribe: javascript:alert('xss')` and asserts no href starts with the dangerous scheme. Snapshot parity CI unaffected.
+- **#141 — GMSC external benchmark re-land.** Re-lands closed-stale PR #92 as a fresh atomic change: `scripts/benchmark_gmsc.py` runs 5-fold stratified CV on the Kaggle Give Me Some Credit dataset (150k real 2011-vintage borrowers) with SHA256-pinned download, 50-trial Optuna search on a 30k sub-sample, and isotonic calibration. Reports AUC 0.8663 ± 0.0035, KS 0.581, Brier 0.049 — a documented external ceiling reviewers can sanity-check against synthetic-only metrics. New `make benchmark-gmsc` target; full 150k-row CV is manual (not CI-gated) but 12 CI-safe unit tests exercise the loader/preprocessor/integrity checks against a synthetic mimic CSV. `backend/docs/MODEL_CARD.md` gains an "External Benchmark Validation" section.
+- **#140 — Synthetic data realism audit.** Re-lands the concept deferred when v1.9.8 PR #93 went stale (the `postcode_default_rate` noise-std fix already shipped in v1.10.4 as #118). New `docs/experiments/synthetic_data_realism_audit.md` catalogues every `DataGenerator` feature with ANCHORED / APPROXIMATED / UNCITED grading against 14 AU data sources (ATO, ABS, APRA, RBA, Equifax, CoreLogic, HEM, etc.) — ~28 anchored, ~18 approximated, ~6 uncited. Known gaps and 7 recalibration triggers are explicit. Reciprocal link added from MODEL_CARD.md Training Data section. Docs-only PR, no CI impact.
+
+### Version bump
+
+`APP_VERSION` advances `1.10.5` → `1.10.6`. No data migrations. No trained-model invalidation. No API surface changes.
+
+### Scope notes
+
+- v1.10.3 senior-review parity backlog is now fully closed: #139 (escape) + #142 (scheme allowlist) together cover the HTML-escape-parity follow-up that was deferred across v1.10.3, v1.10.4, and v1.10.5.
+- The stale concept PRs from earlier cycles — #92 (v1.9.7 GMSC benchmark) and #93 (v1.9.8 realism audit documentation) — have both been re-landed and can be closed.
+
 ## v1.10.5 — Live Denial Shape + Aesthetic v3 + Staff Re-run (2026-04-20)
 
 Three atomic PRs fixing a silent email-rendering regression observed in production, layering on the v3 aesthetic polish pass, and unblocking staff re-runs from the application detail page. No data migrations, no model retraining, no API surface changes.
