@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { TOKENS, renderEmailHtml, escapeHtml, type EmailType } from '@/lib/emailHtmlRenderer'
+import {
+  TOKENS,
+  renderEmailHtml,
+  escapeHtml,
+  safeUrl,
+  SAFE_URL_FALLBACK,
+  type EmailType,
+} from '@/lib/emailHtmlRenderer'
 
 describe('TOKENS', () => {
   it('has required keys', () => {
@@ -157,5 +164,71 @@ describe('renderEmailHtml escapes untrusted markup', () => {
     expect(out).toContain('Jane &amp; Co')
     expect(out).toContain('Personal &amp; Household')
     expect(out).not.toContain('Jane & Co')
+  })
+})
+
+describe('safeUrl', () => {
+  it('accepts http, https, mailto, tel schemes', () => {
+    expect(safeUrl('https://example.com/path')).toBe('https://example.com/path')
+    expect(safeUrl('http://example.com')).toBe('http://example.com')
+    expect(safeUrl('mailto:user@example.com')).toBe('mailto:user@example.com')
+    expect(safeUrl('tel:1300000000')).toBe('tel:1300000000')
+  })
+
+  it('accepts schemes case-insensitively', () => {
+    expect(safeUrl('HTTPS://example.com')).toBe('HTTPS://example.com')
+    expect(safeUrl('HttP://example.com')).toBe('HttP://example.com')
+  })
+
+  it('strips surrounding whitespace', () => {
+    expect(safeUrl('  https://example.com  ')).toBe('https://example.com')
+  })
+
+  it('rejects the javascript: scheme in any casing', () => {
+    expect(safeUrl('javascript:alert(1)')).toBe(SAFE_URL_FALLBACK)
+    expect(safeUrl('JaVaScRiPt:alert(1)')).toBe(SAFE_URL_FALLBACK)
+    expect(safeUrl(' javascript:alert(1)')).toBe(SAFE_URL_FALLBACK)
+  })
+
+  it('rejects other dangerous schemes', () => {
+    expect(safeUrl('data:text/html,<script>alert(1)</script>')).toBe(SAFE_URL_FALLBACK)
+    expect(safeUrl('vbscript:msgbox(1)')).toBe(SAFE_URL_FALLBACK)
+    expect(safeUrl('file:///etc/passwd')).toBe(SAFE_URL_FALLBACK)
+  })
+
+  it('rejects schemeless or garbage input', () => {
+    expect(safeUrl('')).toBe(SAFE_URL_FALLBACK)
+    expect(safeUrl('not a url')).toBe(SAFE_URL_FALLBACK)
+    expect(safeUrl('//example.com/path')).toBe(SAFE_URL_FALLBACK)
+  })
+})
+
+describe('marketing footer URL sanitisation', () => {
+  it('strips javascript: URLs injected via the LLM-parsed unsubscribe line', () => {
+    const body =
+      'Dear Customer,\n\n' +
+      'Special term deposit offer.\n\n' +
+      'Sarah\n\n' +
+      'ABN 00 000 000 000\n' +
+      "Unsubscribe: javascript:alert('xss')"
+    const out = renderEmailHtml(body, 'marketing')
+    // The dangerous scheme must never appear inside an href — it's fine if it
+    // remains in body text (it's escaped and harmless there).
+    const hrefs = Array.from(out.matchAll(/href\s*=\s*"([^"]*)"/g)).map((m) => m[1])
+    for (const href of hrefs) {
+      expect(href.toLowerCase().startsWith('javascript:')).toBe(false)
+    }
+    expect(out).toContain('href="https://aussieloanai.com.au/unsubscribe"')
+  })
+
+  it('preserves a legitimate unsubscribe URL', () => {
+    const body =
+      'Dear Customer,\n\n' +
+      'Special offer.\n\n' +
+      'Sarah\n\n' +
+      'ABN 00 000 000 000\n' +
+      'Unsubscribe: https://aussieloanai.com.au/unsubscribe?u=abc123'
+    const out = renderEmailHtml(body, 'marketing')
+    expect(out).toContain('https://aussieloanai.com.au/unsubscribe?u=abc123')
   })
 })
