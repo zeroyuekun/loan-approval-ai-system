@@ -413,3 +413,84 @@ def test_tables_have_role_presentation():
         assert role_count == table_count, (
             f"{stem}: {table_count - role_count} of {table_count} <table> tags missing role=presentation"
         )
+
+
+# ----------------------------------------------------------------------------
+# HTML escape parity with frontend/src/lib/emailHtmlRenderer.ts
+# ----------------------------------------------------------------------------
+
+_XSS_BODY = (
+    'Dear <script>alert("x\'s")</script>,\n\n'
+    "Congratulations! Your Personal Loan has been approved.\n\n"
+    "Loan Details:\n"
+    "- Loan Type: <img src=x onerror=alert(1)>\n"
+    "- Amount: $15,000\n"
+    "- Term: 3 years\n"
+    "- Interest Rate: 12.5% p.a.\n\n"
+    "We're Here For You:\n"
+    'Reach us at "support@aussieloanai.com".\n\n'
+    "Kind regards,\n"
+    'The AussieLoanAI "Team"\n'
+)
+
+_XSS_DENIAL_BODY = (
+    "Dear <b>attacker</b>,\n\n"
+    "Unfortunately we are unable to approve your application at this time.\n\n"
+    "Factors:\n"
+    "Serviceability: debt-to-income exceeds <script>alert(1)</script> policy\n"
+    "Credit: score below our O'Brien benchmark\n\n"
+    "What you can do:\n"
+    '- Visit "https://example.com/help" for guidance\n'
+    "- Reapply after 3 months\n"
+)
+
+
+@pytest.mark.parametrize(
+    "body,email_type",
+    [
+        (_XSS_BODY, "approval"),
+        (_XSS_DENIAL_BODY, "denial"),
+    ],
+)
+def test_escapes_untrusted_markup_in_body(body, email_type):
+    """Injected <script>, <img>, and attribute-breaking chars must be HTML-escaped."""
+    out = render_html(body, email_type=email_type)
+    assert "<script>" not in out, f"{email_type}: raw <script> tag survived escaping"
+    assert "<img src=x" not in out, f"{email_type}: raw <img> tag survived escaping"
+    assert "&lt;script&gt;" in out, f"{email_type}: expected &lt;script&gt; entity"
+    assert "&quot;" in out, f'{email_type}: expected &quot; entity for injected "'
+    assert "&#x27;" in out, f"{email_type}: expected &#x27; entity for injected '"
+
+
+def test_escapes_ampersand_without_double_escaping():
+    """An injected `&` becomes `&amp;`, and an injected `&amp;` becomes `&amp;amp;`."""
+    body = (
+        "Dear Jane & Co,\n\n"
+        "Your loan is approved.\n\n"
+        "Loan Details:\n"
+        "- Loan Type: Personal & Household\n"
+        "- Amount: $10,000\n\n"
+        "Regards,\n"
+        "Team\n"
+    )
+    out = render_html(body, email_type="approval")
+    assert "Jane &amp; Co" in out
+    assert "Personal &amp; Household" in out
+    assert "Jane & Co" not in out  # ensure raw & was escaped in output
+
+
+def test_escape_helper_matches_ts_five_char_contract():
+    """_e() must escape exactly the five chars that escapeHtml() in the TS renderer escapes.
+
+    If this contract drifts, the snapshot parity test in
+    frontend/src/__tests__/lib/emailHtmlRenderer.test.ts will fail on the next run.
+    """
+    from apps.email_engine.services.html_renderer import _e
+
+    assert _e("&") == "&amp;"
+    assert _e("<") == "&lt;"
+    assert _e(">") == "&gt;"
+    assert _e('"') == "&quot;"
+    assert _e("'") == "&#x27;"
+    assert _e("plain text") == "plain text"
+    assert _e("a&b<c>d\"e'f") == "a&amp;b&lt;c&gt;d&quot;e&#x27;f"

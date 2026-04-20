@@ -7,6 +7,18 @@
 
 export type EmailType = 'approval' | 'denial' | 'marketing'
 
+// Mirror of _e()/html.escape(quote=True) in backend/apps/email_engine/services/
+// html_renderer.py — keep the five character mappings (& < > " ') in lockstep
+// or the snapshot parity test will fail. Exported for direct parity tests.
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+}
+
 export const TOKENS = {
   BRAND_PRIMARY: '#1e40af',
   BRAND_ACCENT: '#3b82f6',
@@ -106,9 +118,9 @@ function renderLoanDetailsCard(rows: Array<[string, string]>): string {
     const border = isLast ? '' : `border-bottom:1px solid ${TOKENS.BORDER};`
     rowHtml += (
       `<tr>` +
-      `<td style="padding:8px 0; font-size:14px; color:${TOKENS.MUTED}; ${border}">${label}</td>` +
+      `<td style="padding:8px 0; font-size:14px; color:${TOKENS.MUTED}; ${border}">${escapeHtml(label)}</td>` +
       `<td style="padding:8px 0; font-size:14px; color:${TOKENS.TEXT}; ` +
-      `font-weight:600; text-align:right; ${border}">${value}</td>` +
+      `font-weight:600; text-align:right; ${border}">${escapeHtml(value)}</td>` +
       `</tr>`
     )
   })
@@ -170,7 +182,7 @@ function renderNextStepsBlock(steps: string[]): string {
       `font-size:12px; font-weight:600; line-height:24px; text-align:center;">${i}</div>` +
       `</td>` +
       `<td style="padding:0 0 12px 12px; font-size:${TOKENS.BODY_SIZE}; ` +
-      `color:${TOKENS.TEXT};">${text}</td>` +
+      `color:${TOKENS.TEXT};">${escapeHtml(text)}</td>` +
       `</tr>`
     )
   })
@@ -207,7 +219,7 @@ function renderAttachmentsChips(names: string[]): string {
       (n) =>
         `<td style="padding:6px 12px; background-color:${TOKENS.PAGE_BG}; ` +
         `border:1px solid ${TOKENS.BORDER}; border-radius:4px; ` +
-        `font-size:${TOKENS.LABEL_SIZE}; color:#374151;">&#128206; ${n}</td>`
+        `font-size:${TOKENS.LABEL_SIZE}; color:#374151;">&#128206; ${escapeHtml(n)}</td>`
     )
     .join('<td style="width:8px;"></td>')
   return (
@@ -250,19 +262,19 @@ function renderSignatureBlock(sigLines: string[]): string {
   const contactHtml = contact
     .map(
       (ln) =>
-        `<div style="font-size:${TOKENS.FINE_SIZE}; color:${TOKENS.FINE};">${ln}</div>`
+        `<div style="font-size:${TOKENS.FINE_SIZE}; color:${TOKENS.FINE};">${escapeHtml(ln)}</div>`
     )
     .join('')
   return (
     `<div style="padding:24px 0 0 0; margin-top:16px; ` +
     `border-top:1px solid ${TOKENS.BORDER};">` +
     `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
-    `padding-bottom:8px;">${closing}</div>` +
+    `padding-bottom:8px;">${escapeHtml(closing)}</div>` +
     `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
-    `font-weight:600;">${name}</div>` +
-    `<div style="font-size:${TOKENS.LABEL_SIZE}; color:${TOKENS.MUTED};">${title}</div>` +
+    `font-weight:600;">${escapeHtml(name)}</div>` +
+    `<div style="font-size:${TOKENS.LABEL_SIZE}; color:${TOKENS.MUTED};">${escapeHtml(title)}</div>` +
     `<div style="font-size:${TOKENS.LABEL_SIZE}; color:${TOKENS.MUTED}; ` +
-    `padding-bottom:8px;">${company}</div>` +
+    `padding-bottom:8px;">${escapeHtml(company)}</div>` +
     `${contactHtml}` +
     `</div>`
   )
@@ -411,9 +423,9 @@ function renderFactorCard(factors: Array<[string, string]>): string {
     rows += (
       `<tr><td style="padding:12px 0; ${border}">` +
       `<div style="font-size:14px; font-weight:600; ` +
-      `color:${TOKENS.TEXT};">${label}</div>` +
+      `color:${TOKENS.TEXT};">${escapeHtml(label)}</div>` +
       `<div style="font-size:14px; color:${TOKENS.TEXT}; ` +
-      `padding-top:4px;">${text}</div>` +
+      `padding-top:4px;">${escapeHtml(text)}</div>` +
       `</td></tr>`
     )
   })
@@ -438,12 +450,12 @@ function renderWhatYouCanDoCard(bullets: string[], intro: string = ''): string {
       (b) =>
         `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
         `padding:4px 0;">` +
-        `<span style="color:${TOKENS.SUCCESS}; font-weight:600;">&#10003;</span> &nbsp;${b}</div>`
+        `<span style="color:${TOKENS.SUCCESS}; font-weight:600;">&#10003;</span> &nbsp;${escapeHtml(b)}</div>`
     )
     .join('')
   const introHtml = intro
     ? `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
-      `padding-bottom:8px;">${intro}</div>`
+      `padding-bottom:8px;">${escapeHtml(intro)}</div>`
     : ''
   return (
     `<div style="margin:16px 0;">` +
@@ -670,13 +682,13 @@ function renderOfferCard(offer: MarketingOffer): string {
     .map(
       (b) =>
         `<div style="font-size:14px; color:#374151; padding:4px 0;">` +
-        `&#8226;&nbsp;&nbsp;${b}</div>`
+        `&#8226;&nbsp;&nbsp;${escapeHtml(b)}</div>`
     )
     .join('')
   const fitHtml = offer.fit
     ? `<div style="font-size:${TOKENS.LABEL_SIZE}; color:${TOKENS.MUTED}; ` +
       `font-style:italic; padding-top:8px; margin-top:8px; ` +
-      `border-top:1px solid ${TOKENS.BORDER};">${offer.fit}</div>`
+      `border-top:1px solid ${TOKENS.BORDER};">${escapeHtml(offer.fit)}</div>`
     : ''
   return (
     `<div style="margin:12px 0;">` +
@@ -686,9 +698,9 @@ function renderOfferCard(offer: MarketingOffer): string {
     `<tr><td style="padding:16px 20px;">` +
     `<div style="font-size:11px; font-weight:600; ` +
     `color:${TOKENS.MARKETING}; text-transform:uppercase; ` +
-    `letter-spacing:0.5px;">${offer.label}</div>` +
+    `letter-spacing:0.5px;">${escapeHtml(offer.label)}</div>` +
     `<div style="font-size:17px; font-weight:600; ` +
-    `color:${TOKENS.TEXT}; padding:4px 0 12px 0;">${offer.title}</div>` +
+    `color:${TOKENS.TEXT}; padding:4px 0 12px 0;">${escapeHtml(offer.title)}</div>` +
     `${bulletsHtml}` +
     `${fitHtml}` +
     `</td></tr></table>` +
@@ -703,7 +715,7 @@ function renderMarketingClosing(firstName: string): string {
   return (
     `<div style="padding:4px 0 16px 0; font-size:${TOKENS.BODY_SIZE}; ` +
     `line-height:${TOKENS.LINE_HEIGHT}; color:${TOKENS.TEXT};">` +
-    `Take your time with the options above, ${firstName} \u2013 there\u2019s ` +
+    `Take your time with the options above, ${escapeHtml(firstName)} \u2013 there\u2019s ` +
     `no rush. If you\u2019d like to talk any of them through, or want to ` +
     `explore something different, I\u2019m happy to help. Just give me a call ` +
     `or reply to this email whenever you\u2019re ready.` +
@@ -732,7 +744,7 @@ function renderMarketingFooter(body: string): string {
   parts.push(
     `<div style="padding:16px 0 0 0; margin-top:16px; ` +
       `border-top:1px solid ${TOKENS.BORDER};">` +
-      `<a href="${unsubUrl}" ` +
+      `<a href="${escapeHtml(unsubUrl)}" ` +
       `style="font-size:${TOKENS.FINE_SIZE}; ` +
       `color:${TOKENS.BRAND_ACCENT}; ` +
       `text-decoration:underline;">Unsubscribe</a>` +
@@ -796,11 +808,11 @@ function renderHero(emailType: EmailType, body: string): string {
   let subtitle: string
   if (emailType === 'approval') {
     const loanType = extractApprovalLoanType(body)
-    headline = `Your ${loanType} Is Approved`
-    subtitle = `Congratulations, ${name}!`
+    headline = `Your ${escapeHtml(loanType)} Is Approved`
+    subtitle = `Congratulations, ${escapeHtml(name)}!`
   } else if (emailType === 'denial') {
     headline = cfg.defaultHeadline
-    subtitle = `${name}, we've reviewed your application`
+    subtitle = `${escapeHtml(name)}, we've reviewed your application`
   } else {
     headline = cfg.defaultHeadline
     subtitle = 'A few options tailored to you'
@@ -867,17 +879,17 @@ function renderLegacyBody(body: string): string {
 
     if (isSection || isOption) {
       flushRows()
-      parts.push(`<p style="margin:20px 0 4px 0;"><strong>${stripped}</strong></p>`)
+      parts.push(`<p style="margin:20px 0 4px 0;"><strong>${escapeHtml(stripped)}</strong></p>`)
       continue
     }
     if (isDear) {
       flushRows()
-      parts.push(`<p style="margin:0 0 4px 0;"><strong>${stripped}</strong></p>`)
+      parts.push(`<p style="margin:0 0 4px 0;"><strong>${escapeHtml(stripped)}</strong></p>`)
       continue
     }
     if (isClosing) {
       flushRows()
-      parts.push(`<p style="margin:20px 0 4px 0;"><strong>${stripped}</strong></p>`)
+      parts.push(`<p style="margin:20px 0 4px 0;"><strong>${escapeHtml(stripped)}</strong></p>`)
       continue
     }
 
@@ -885,7 +897,7 @@ function renderLegacyBody(body: string): string {
     if (bulletMatch) {
       flushRows()
       const bottom = nextNonblankMatches(idx, BULLET_PREFIX_RE) ? '2px' : '12px'
-      parts.push(`<p style="margin:2px 0 ${bottom} 16px;">\u2022&nbsp;&nbsp;${bulletMatch[1]}</p>`)
+      parts.push(`<p style="margin:2px 0 ${bottom} 16px;">\u2022&nbsp;&nbsp;${escapeHtml(bulletMatch[1])}</p>`)
       continue
     }
 
@@ -893,7 +905,7 @@ function renderLegacyBody(body: string): string {
     if (numMatch) {
       flushRows()
       const bottom = nextNonblankMatches(idx, NUM_PREFIX_RE, true) ? '2px' : '12px'
-      parts.push(`<p style="margin:2px 0 ${bottom} 16px;">${numMatch[1]}. ${numMatch[2]}</p>`)
+      parts.push(`<p style="margin:2px 0 ${bottom} 16px;">${numMatch[1]}. ${escapeHtml(numMatch[2])}</p>`)
       continue
     }
 
@@ -902,7 +914,7 @@ function renderLegacyBody(body: string): string {
       const label = detailMatch[2]
       const value = detailMatch[3]
       if (label.length < 35 && value.length < 50) {
-        detailRows.push(`<tr><td ${tdLabel}>${label}</td><td ${tdValue}>${value}</td></tr>`)
+        detailRows.push(`<tr><td ${tdLabel}>${escapeHtml(label)}</td><td ${tdValue}>${escapeHtml(value)}</td></tr>`)
         continue
       }
     }
@@ -918,7 +930,7 @@ function renderLegacyBody(body: string): string {
 
     const margin = stripped.endsWith('.') ? '16px' : '4px'
     const topMargin = stripped.startsWith('Congratulations') ? '16px' : '0'
-    parts.push(`<p style="margin:${topMargin} 0 ${margin} 0;">${stripped}</p>`)
+    parts.push(`<p style="margin:${topMargin} 0 ${margin} 0;">${escapeHtml(stripped)}</p>`)
   }
 
   flushRows()
