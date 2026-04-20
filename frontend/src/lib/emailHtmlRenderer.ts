@@ -19,6 +19,22 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, '&#x27;')
 }
 
+export const SAFE_URL_FALLBACK = 'https://aussieloanai.com.au/unsubscribe'
+const ALLOWED_URL_SCHEMES = ['http://', 'https://', 'mailto:', 'tel:']
+
+// Mirror of _safe_url() in backend/apps/email_engine/services/html_renderer.py
+// — blocks javascript:, data:, vbscript:, file:, and any other scheme outside
+// the allowlist. LLM-extracted unsubscribe URLs flow through this before being
+// written into an href, defending against prompt-injection XSS.
+export function safeUrl(url: string, fallback: string = SAFE_URL_FALLBACK): string {
+  if (typeof url !== 'string') return fallback
+  const stripped = url.trim().toLowerCase()
+  for (const scheme of ALLOWED_URL_SCHEMES) {
+    if (stripped.startsWith(scheme)) return url.trim()
+  }
+  return fallback
+}
+
 export const TOKENS = {
   BRAND_PRIMARY: '#1e40af',
   BRAND_ACCENT: '#3b82f6',
@@ -203,7 +219,7 @@ function renderCta(text: string, href: string, color?: string): string {
     `<table role="presentation" cellspacing="0" cellpadding="0" ` +
     `style="margin:0 auto;">` +
     `<tr><td style="background-color:${bg}; border-radius:6px;">` +
-    `<a href="${href}" target="_blank" ` +
+    `<a href="${escapeHtml(safeUrl(href))}" target="_blank" ` +
     `style="display:inline-block; padding:12px 28px; color:#ffffff; ` +
     `font-size:${TOKENS.BODY_SIZE}; font-weight:600; ` +
     `text-decoration:none;">${text}</a>` +
@@ -483,7 +499,7 @@ function renderCreditReportCard(): string {
       ([name, url]) =>
         `<tr><td style="padding:6px 0; font-size:14px; color:${TOKENS.TEXT};">` +
         `<strong>${name}</strong> &mdash; ` +
-        `<a href="${url}" style="color:${TOKENS.BRAND_ACCENT};">` +
+        `<a href="${escapeHtml(safeUrl(url))}" style="color:${TOKENS.BRAND_ACCENT};">` +
         `${url.replace('https://', '')}</a>` +
         `</td></tr>`
     )
@@ -740,11 +756,11 @@ function renderMarketingFooter(body: string): string {
     )
   }
   const m = body.match(UNSUBSCRIBE_LINE_RE)
-  const unsubUrl = m ? m[1] : 'https://aussieloanai.com.au/unsubscribe'
+  const unsubUrl = m ? m[1] : SAFE_URL_FALLBACK
   parts.push(
     `<div style="padding:16px 0 0 0; margin-top:16px; ` +
       `border-top:1px solid ${TOKENS.BORDER};">` +
-      `<a href="${escapeHtml(unsubUrl)}" ` +
+      `<a href="${escapeHtml(safeUrl(unsubUrl))}" ` +
       `style="font-size:${TOKENS.FINE_SIZE}; ` +
       `color:${TOKENS.BRAND_ACCENT}; ` +
       `text-decoration:underline;">Unsubscribe</a>` +

@@ -494,3 +494,77 @@ def test_escape_helper_matches_ts_five_char_contract():
     assert _e("'") == "&#x27;"
     assert _e("plain text") == "plain text"
     assert _e("a&b<c>d\"e'f") == "a&amp;b&lt;c&gt;d&quot;e&#x27;f"
+
+
+def test_safe_url_accepts_allowed_schemes():
+    from apps.email_engine.services.html_renderer import _safe_url
+
+    assert _safe_url("https://example.com/path") == "https://example.com/path"
+    assert _safe_url("http://example.com") == "http://example.com"
+    assert _safe_url("mailto:user@example.com") == "mailto:user@example.com"
+    assert _safe_url("tel:1300000000") == "tel:1300000000"
+
+
+def test_safe_url_accepts_case_insensitive_schemes():
+    from apps.email_engine.services.html_renderer import _safe_url
+
+    assert _safe_url("HTTPS://example.com") == "HTTPS://example.com"
+    assert _safe_url("HttP://example.com") == "HttP://example.com"
+
+
+def test_safe_url_strips_surrounding_whitespace():
+    from apps.email_engine.services.html_renderer import _safe_url
+
+    assert _safe_url("  https://example.com  ") == "https://example.com"
+
+
+def test_safe_url_rejects_javascript_scheme():
+    from apps.email_engine.services.html_renderer import SAFE_URL_FALLBACK, _safe_url
+
+    assert _safe_url("javascript:alert(1)") == SAFE_URL_FALLBACK
+    assert _safe_url("JaVaScRiPt:alert(1)") == SAFE_URL_FALLBACK
+    assert _safe_url(" javascript:alert(1)") == SAFE_URL_FALLBACK
+
+
+def test_safe_url_rejects_other_dangerous_schemes():
+    from apps.email_engine.services.html_renderer import SAFE_URL_FALLBACK, _safe_url
+
+    assert _safe_url("data:text/html,<script>alert(1)</script>") == SAFE_URL_FALLBACK
+    assert _safe_url("vbscript:msgbox(1)") == SAFE_URL_FALLBACK
+    assert _safe_url("file:///etc/passwd") == SAFE_URL_FALLBACK
+
+
+def test_safe_url_rejects_schemeless_or_garbage_input():
+    from apps.email_engine.services.html_renderer import SAFE_URL_FALLBACK, _safe_url
+
+    assert _safe_url("") == SAFE_URL_FALLBACK
+    assert _safe_url("not a url") == SAFE_URL_FALLBACK
+    assert _safe_url("//example.com/path") == SAFE_URL_FALLBACK
+    # Non-string input must not explode (defensive guard for LLM-parsed bodies)
+    assert _safe_url(None) == SAFE_URL_FALLBACK  # type: ignore[arg-type]
+
+
+def test_marketing_footer_sanitizes_llm_injected_javascript_url():
+    """End-to-end: malicious unsubscribe URL in LLM-rendered body must not reach the href."""
+    body = (
+        "Dear Customer,\n\nSpecial term deposit offer.\n\n"
+        "Sarah\n\nABN 00 000 000 000\n"
+        "Unsubscribe: javascript:alert('xss')"
+    )
+    out = render_html(body, email_type="marketing")
+    # The scheme must never appear inside an href — it's fine if it remains in
+    # body text (it's escaped and harmless there).
+    hrefs = re.findall(r'href\s*=\s*"([^"]*)"', out)
+    for href in hrefs:
+        assert not href.lower().startswith("javascript:"), f"Unsafe href: {href}"
+    assert 'href="https://aussieloanai.com.au/unsubscribe"' in out
+
+
+def test_marketing_footer_preserves_legitimate_unsubscribe_url():
+    body = (
+        "Dear Customer,\n\nSpecial offer.\n\n"
+        "Sarah\n\nABN 00 000 000 000\n"
+        "Unsubscribe: https://aussieloanai.com.au/unsubscribe?u=abc123"
+    )
+    out = render_html(body, email_type="marketing")
+    assert "https://aussieloanai.com.au/unsubscribe?u=abc123" in out

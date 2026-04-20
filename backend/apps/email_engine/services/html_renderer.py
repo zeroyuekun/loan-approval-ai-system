@@ -21,6 +21,23 @@ def _e(value: str) -> str:
     return html.escape(value, quote=True)
 
 
+SAFE_URL_FALLBACK = "https://aussieloanai.com.au/unsubscribe"
+_ALLOWED_URL_SCHEMES = ("http://", "https://", "mailto:", "tel:")
+
+
+def _safe_url(url: str, fallback: str = SAFE_URL_FALLBACK) -> str:
+    # Mirror of safeUrl() in frontend/src/lib/emailHtmlRenderer.ts — blocks
+    # javascript:, data:, vbscript:, file:, and any other scheme outside the
+    # allowlist. LLM-extracted unsubscribe URLs flow through this before being
+    # written into an href, defending against prompt-injection XSS.
+    if not isinstance(url, str):
+        return fallback
+    stripped = url.strip().lower()
+    if stripped.startswith(_ALLOWED_URL_SCHEMES):
+        return url.strip()
+    return fallback
+
+
 TOKENS: dict[str, str] = {
     "BRAND_PRIMARY": "#1e40af",
     "BRAND_ACCENT": "#3b82f6",
@@ -212,7 +229,7 @@ def _render_cta(text: str, href: str, color: str | None = None) -> str:
         f'<table role="presentation" cellspacing="0" cellpadding="0" '
         f'style="margin:0 auto;">'
         f'<tr><td style="background-color:{bg}; border-radius:6px;">'
-        f'<a href="{href}" target="_blank" '
+        f'<a href="{_e(_safe_url(href))}" target="_blank" '
         f'style="display:inline-block; padding:12px 28px; color:#ffffff; '
         f"font-size:{TOKENS['BODY_SIZE']}; font-weight:600; "
         f'text-decoration:none;">{text}</a>'
@@ -510,7 +527,7 @@ def _render_credit_report_card() -> str:
     rows = "".join(
         f'<tr><td style="padding:6px 0; font-size:14px; color:{TOKENS["TEXT"]};">'
         f"<strong>{name}</strong> &mdash; "
-        f'<a href="{url}" style="color:{TOKENS["BRAND_ACCENT"]};">'
+        f'<a href="{_e(_safe_url(url))}" style="color:{TOKENS["BRAND_ACCENT"]};">'
         f"{url.replace('https://', '')}</a>"
         f"</td></tr>"
         for name, url in bureaus
@@ -718,11 +735,11 @@ def _render_marketing_footer(body: str) -> str:
             f"monthly deposit and transaction conditions.</div>"
         )
     m = UNSUBSCRIBE_LINE_RE.search(body)
-    unsub_url = m.group(1) if m else "https://aussieloanai.com.au/unsubscribe"
+    unsub_url = m.group(1) if m else SAFE_URL_FALLBACK
     parts.append(
         f'<div style="padding:16px 0 0 0; margin-top:16px; '
         f'border-top:1px solid {TOKENS["BORDER"]};">'
-        f'<a href="{_e(unsub_url)}" '
+        f'<a href="{_e(_safe_url(unsub_url))}" '
         f'style="font-size:{TOKENS["FINE_SIZE"]}; '
         f"color:{TOKENS['BRAND_ACCENT']}; "
         f'text-decoration:underline;">Unsubscribe</a>'
