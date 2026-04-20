@@ -349,9 +349,7 @@ class TestTemplateFallback:
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result()
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[15000.0, 476.50], start_time=0.0, nbo_result=nbo
-        )
+        result = agent._marketing_template_fallback(app, nbo_amounts=[15000.0, 476.50], start_time=0.0, nbo_result=nbo)
         assert "Option 1: Secured Personal Loan" in result["body"]
         assert "Option 2: Rewards Savings Account" in result["body"]
         assert "$15,000.00" in result["body"]
@@ -360,9 +358,7 @@ class TestTemplateFallback:
     def test_without_offers_returns_generic_fallback(self):
         agent = self._agent()
         app = _make_mock_application()
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[], start_time=0.0, nbo_result={"offers": []}
-        )
+        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result={"offers": []})
         assert result["subject"] == "Next Steps for Your Banking Needs"
         # Generic fallback mentions a loan enquiry and the lending team contact
         assert "loan enquiry" in result["body"].lower()
@@ -373,9 +369,7 @@ class TestTemplateFallback:
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result(with_term_deposit=True)
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[], start_time=0.0, nbo_result=nbo
-        )
+        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result=nbo)
         assert "Financial Claims Scheme" in result["body"]
         assert "$250,000" in result["body"]
 
@@ -383,17 +377,13 @@ class TestTemplateFallback:
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result(with_term_deposit=False)
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[], start_time=0.0, nbo_result=nbo
-        )
+        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result=nbo)
         assert "Financial Claims Scheme" not in result["body"]
 
     def test_returns_required_keys(self):
         agent = self._agent()
         app = _make_mock_application()
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[], start_time=0.0, nbo_result={"offers": []}
-        )
+        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result={"offers": []})
         expected = {
             "subject",
             "body",
@@ -417,18 +407,14 @@ class TestTemplateFallback:
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result()
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[], start_time=0.0, nbo_result=nbo
-        )
+        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result=nbo)
         assert result["subject"] == "Next steps for your AussieLoanAI loan application"
 
     def test_includes_australian_regulatory_footer(self):
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result()
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[], start_time=0.0, nbo_result=nbo
-        )
+        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result=nbo)
         body = result["body"]
         assert "Target Market Determination" in body
         assert "Product Disclosure Statement" in body
@@ -474,8 +460,7 @@ class TestGenerate:
     def test_claude_success_returns_parsed_response(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
         mock_call.return_value = _make_mock_text_response(
-            "Subject: Next steps for your AussieLoanAI loan application\n\n"
-            "Dear Jane,\n\nContact me at 1300 000 000.\n"
+            "Subject: Next steps for your AussieLoanAI loan application\n\nDear Jane,\n\nContact me at 1300 000 000.\n"
         )
         agent = MarketingAgent()
         app = _make_mock_application()
@@ -576,13 +561,10 @@ class TestGenerate:
     def test_prompt_includes_offer_data_and_customer_fields(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
         mock_call.return_value = _make_mock_text_response(
-            "Subject: Next steps for your AussieLoanAI loan application\n\n"
-            "Dear Jane,\n\nContact me at 1300 000 000."
+            "Subject: Next steps for your AussieLoanAI loan application\n\nDear Jane,\n\nContact me at 1300 000 000."
         )
         agent = MarketingAgent()
-        app = _make_mock_application(
-            first_name="Jane", last_name="Doe", loan_amount=20000, credit_score=620
-        )
+        app = _make_mock_application(first_name="Jane", last_name="Doe", loan_amount=20000, credit_score=620)
         agent.generate(app, _sample_nbo_result())
 
         prompt_passed = mock_call.call_args.kwargs["messages"][0]["content"]
