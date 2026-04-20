@@ -420,7 +420,7 @@ def test_tables_have_role_presentation():
 # ----------------------------------------------------------------------------
 
 _XSS_BODY = (
-    "Dear <script>alert(\"x's\")</script>,\n\n"
+    'Dear <script>alert("x\'s")</script>,\n\n'
     "Congratulations! Your Personal Loan has been approved.\n\n"
     "Loan Details:\n"
     "- Loan Type: <img src=x onerror=alert(1)>\n"
@@ -428,9 +428,9 @@ _XSS_BODY = (
     "- Term: 3 years\n"
     "- Interest Rate: 12.5% p.a.\n\n"
     "We're Here For You:\n"
-    "Reach us at \"support@aussieloanai.com\".\n\n"
+    'Reach us at "support@aussieloanai.com".\n\n'
     "Kind regards,\n"
-    "The AussieLoanAI \"Team\"\n"
+    'The AussieLoanAI "Team"\n'
 )
 
 _XSS_DENIAL_BODY = (
@@ -440,7 +440,7 @@ _XSS_DENIAL_BODY = (
     "Serviceability: debt-to-income exceeds <script>alert(1)</script> policy\n"
     "Credit: score below our O'Brien benchmark\n\n"
     "What you can do:\n"
-    "- Visit \"https://example.com/help\" for guidance\n"
+    '- Visit "https://example.com/help" for guidance\n'
     "- Reapply after 3 months\n"
 )
 
@@ -458,7 +458,7 @@ def test_escapes_untrusted_markup_in_body(body, email_type):
     assert "<script>" not in out, f"{email_type}: raw <script> tag survived escaping"
     assert "<img src=x" not in out, f"{email_type}: raw <img> tag survived escaping"
     assert "&lt;script&gt;" in out, f"{email_type}: expected &lt;script&gt; entity"
-    assert "&quot;" in out, f"{email_type}: expected &quot; entity for injected \""
+    assert "&quot;" in out, f'{email_type}: expected &quot; entity for injected "'
     assert "&#x27;" in out, f"{email_type}: expected &#x27; entity for injected '"
 
 

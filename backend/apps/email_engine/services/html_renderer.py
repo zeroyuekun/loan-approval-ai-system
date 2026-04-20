@@ -20,6 +20,7 @@ def _e(value: str) -> str:
     # test will fail.
     return html.escape(value, quote=True)
 
+
 TOKENS: dict[str, str] = {
     "BRAND_PRIMARY": "#1e40af",
     "BRAND_ACCENT": "#3b82f6",
