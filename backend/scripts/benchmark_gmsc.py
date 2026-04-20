@@ -45,15 +45,12 @@ logger = logging.getLogger("benchmark_gmsc")
 # ---------------------------------------------------------------------------
 
 GMSC_URL = (
-    "https://raw.githubusercontent.com/"
-    "DrIanGregory/Kaggle-GiveMeSomeCredit/master/data/GiveMeSomeCredit-training.csv"
+    "https://raw.githubusercontent.com/DrIanGregory/Kaggle-GiveMeSomeCredit/master/data/GiveMeSomeCredit-training.csv"
 )
 EXPECTED_ROWS = 150_000
 # SHA256 of the mirror-hosted CSV, pinned 2026-04-18. Re-pinning is only
 # legitimate if the upstream mirror is intentionally updated — inspect first.
-EXPECTED_SHA256: str | None = (
-    "e333eb8001576d7eb140cdfad9801c6b000ddfa6a528b6268a640230eb2a9994"
-)
+EXPECTED_SHA256: str | None = "e333eb8001576d7eb140cdfad9801c6b000ddfa6a528b6268a640230eb2a9994"
 
 TARGET_COL = "SeriousDlqin2yrs"
 FEATURE_COLS = [
@@ -121,8 +118,7 @@ def download_gmsc(assume_yes: bool = False) -> Path:
     sha = _sha256_file(target)
     if EXPECTED_SHA256 is None:
         logger.warning(
-            "EXPECTED_SHA256 is not pinned. Got SHA256=%s. "
-            "Pin this hash in the script for future runs.",
+            "EXPECTED_SHA256 is not pinned. Got SHA256=%s. Pin this hash in the script for future runs.",
             sha,
         )
     elif sha != EXPECTED_SHA256:
@@ -156,9 +152,7 @@ def load_and_preprocess(csv_path: Path) -> tuple[pd.DataFrame, pd.Series]:
         df = df.drop(columns=["Unnamed: 0"])
 
     if len(df) != EXPECTED_ROWS:
-        raise RuntimeError(
-            f"Expected {EXPECTED_ROWS} rows, got {len(df)}. Wrong file?"
-        )
+        raise RuntimeError(f"Expected {EXPECTED_ROWS} rows, got {len(df)}. Wrong file?")
 
     missing = set(FEATURE_COLS + [TARGET_COL]) - set(df.columns)
     if missing:
@@ -271,15 +265,17 @@ def run_cv(X: pd.DataFrame, y: pd.Series, best_params: dict) -> dict:
         briers.append(brier)
         logger.info(
             "Fold %d/%d — AUC=%.4f  KS=%.4f  Brier=%.4f",
-            fold_idx, CV_FOLDS, auc, ks, brier,
+            fold_idx,
+            CV_FOLDS,
+            auc,
+            ks,
+            brier,
         )
 
     auc_mean = float(np.mean(aucs))
     auc_std = float(np.std(aucs))
     if auc_std > MAX_AUC_STD:
-        raise RuntimeError(
-            f"CV AUC std {auc_std:.4f} > {MAX_AUC_STD} — unstable. Investigate."
-        )
+        raise RuntimeError(f"CV AUC std {auc_std:.4f} > {MAX_AUC_STD} — unstable. Investigate.")
 
     return {
         "auc_mean": auc_mean,
@@ -320,7 +316,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="GMSC external benchmark")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip download prompt")
     parser.add_argument(
-        "--trials", type=int, default=OPTUNA_TRIALS, help="Optuna trial count",
+        "--trials",
+        type=int,
+        default=OPTUNA_TRIALS,
+        help="Optuna trial count",
     )
     parser.add_argument(
         "--output",
@@ -335,12 +334,18 @@ def main() -> int:
     X, y = load_and_preprocess(csv_path)
     logger.info(
         "Loaded %d rows, %d features, positive rate %.2f%%",
-        len(X), X.shape[1], 100 * y.mean(),
+        len(X),
+        X.shape[1],
+        100 * y.mean(),
     )
 
     # Sub-sample for Optuna to keep wall time reasonable; full 150k for CV eval.
     X_search, _, y_search, _ = train_test_split(
-        X, y, train_size=30_000, stratify=y, random_state=RANDOM_STATE,
+        X,
+        y,
+        train_size=30_000,
+        stratify=y,
+        random_state=RANDOM_STATE,
     )
     logger.info("Running Optuna search (%d trials) on 30k stratified sample...", args.trials)
     best_params = search_best_params(X_search, y_search, n_trials=args.trials)
@@ -371,7 +376,8 @@ def main() -> int:
     logger.info("=" * 70)
     logger.info(
         "RESULT — 5-fold CV AUC: %.4f ± %.4f  (top-1%% leaderboard: 0.869)",
-        cv_results["auc_mean"], cv_results["auc_std"],
+        cv_results["auc_mean"],
+        cv_results["auc_std"],
     )
     logger.info("KS mean: %.4f  |  Brier mean: %.4f", cv_results["ks_mean"], cv_results["brier_mean"])
     logger.info("Elapsed: %.1fs  |  Results written to %s", elapsed, out_path)

@@ -85,9 +85,7 @@ class TestLoadAndPreprocess:
         assert pd.api.types.is_integer_dtype(X["NumberOfDependents"])
 
     def test_wrong_row_count_raises(self, tmp_path: Path):
-        df = pd.DataFrame(
-            {col: [0.0] for col in bg.FEATURE_COLS + [bg.TARGET_COL]}
-        )
+        df = pd.DataFrame({col: [0.0] for col in bg.FEATURE_COLS + [bg.TARGET_COL]})
         p = tmp_path / "bad.csv"
         df.to_csv(p, index=False)
         with pytest.raises(RuntimeError, match="Expected 150000 rows"):
@@ -96,9 +94,7 @@ class TestLoadAndPreprocess:
     def test_missing_column_raises(self, tmp_path: Path):
         rng = np.random.default_rng(0)
         # Correct row count but missing a feature column
-        df = pd.DataFrame(
-            {col: rng.random(bg.EXPECTED_ROWS) for col in bg.FEATURE_COLS[:-1]}
-        )
+        df = pd.DataFrame({col: rng.random(bg.EXPECTED_ROWS) for col in bg.FEATURE_COLS[:-1]})
         df[bg.TARGET_COL] = rng.integers(0, 2, bg.EXPECTED_ROWS)
         p = tmp_path / "short.csv"
         df.to_csv(p, index=False)
