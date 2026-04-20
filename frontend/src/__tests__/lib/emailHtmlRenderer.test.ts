@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { TOKENS, renderEmailHtml, type EmailType } from '@/lib/emailHtmlRenderer'
+import { TOKENS, renderEmailHtml, escapeHtml, type EmailType } from '@/lib/emailHtmlRenderer'
 
 describe('TOKENS', () => {
   it('has required keys', () => {
@@ -85,4 +85,77 @@ describe('snapshot parity with Python renderer', () => {
       expect(actual).toBe(expected)
     })
   }
+})
+
+// ---------------------------------------------------------------------------
+// HTML escape parity with backend/apps/email_engine/services/html_renderer.py
+// ---------------------------------------------------------------------------
+
+describe('escapeHtml', () => {
+  it('matches the Python _e() five-char contract', () => {
+    expect(escapeHtml('&')).toBe('&amp;')
+    expect(escapeHtml('<')).toBe('&lt;')
+    expect(escapeHtml('>')).toBe('&gt;')
+    expect(escapeHtml('"')).toBe('&quot;')
+    expect(escapeHtml("'")).toBe('&#x27;')
+    expect(escapeHtml('plain text')).toBe('plain text')
+    expect(escapeHtml('a&b<c>d"e\'f')).toBe('a&amp;b&lt;c&gt;d&quot;e&#x27;f')
+  })
+
+  it('does not double-escape already-escaped entities', () => {
+    // After a single pass, the raw `&` in `&amp;` becomes `&amp;` again → `&amp;amp;`.
+    // This is expected: we always escape once. Input must arrive unescaped.
+    expect(escapeHtml('&amp;')).toBe('&amp;amp;')
+  })
+})
+
+const XSS_APPROVAL_BODY =
+  'Dear <script>alert("x\'s")</script>,\n\n' +
+  'Congratulations! Your Personal Loan has been approved.\n\n' +
+  'Loan Details:\n' +
+  '- Loan Type: <img src=x onerror=alert(1)>\n' +
+  '- Amount: $15,000\n' +
+  '- Term: 3 years\n' +
+  '- Interest Rate: 12.5% p.a.\n\n' +
+  'We\'re Here For You:\n' +
+  'Reach us at "support@aussieloanai.com".\n\n' +
+  'Kind regards,\n' +
+  'The AussieLoanAI "Team"\n'
+
+const XSS_DENIAL_BODY =
+  'Dear <b>attacker</b>,\n\n' +
+  'Unfortunately we are unable to approve your application at this time.\n\n' +
+  'Factors:\n' +
+  'Serviceability: debt-to-income exceeds <script>alert(1)</script> policy\n' +
+  "Credit: score below our O'Brien benchmark\n\n" +
+  'What you can do:\n' +
+  '- Visit "https://example.com/help" for guidance\n' +
+  '- Reapply after 3 months\n'
+
+describe('renderEmailHtml escapes untrusted markup', () => {
+  it.each<[string, EmailType]>([
+    [XSS_APPROVAL_BODY, 'approval'],
+    [XSS_DENIAL_BODY, 'denial'],
+  ])('escapes injected <script> / <img> / quotes in %s body', (body, emailType) => {
+    const out = renderEmailHtml(body, emailType)
+    expect(out).not.toContain('<script>')
+    expect(out).not.toContain('<img src=x')
+    expect(out).toContain('&lt;script&gt;')
+    expect(out).toContain('&quot;')
+    expect(out).toContain('&#x27;')
+  })
+
+  it('escapes `&` without double-escaping downstream', () => {
+    const body =
+      'Dear Jane & Co,\n\n' +
+      'Your loan is approved.\n\n' +
+      'Loan Details:\n' +
+      '- Loan Type: Personal & Household\n' +
+      '- Amount: $10,000\n\n' +
+      'Regards,\nTeam\n'
+    const out = renderEmailHtml(body, 'approval')
+    expect(out).toContain('Jane &amp; Co')
+    expect(out).toContain('Personal &amp; Household')
+    expect(out).not.toContain('Jane & Co')
+  })
 })

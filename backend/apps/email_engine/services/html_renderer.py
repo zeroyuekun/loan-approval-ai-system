@@ -7,10 +7,18 @@ A CI snapshot parity test fails if the two drift.
 See: docs/superpowers/specs/2026-04-17-email-redesign-design.md
 """
 
+import html
 import re
 from typing import Literal
 
 EmailType = Literal["approval", "denial", "marketing"]
+
+
+def _e(value: str) -> str:
+    # Mirror of escapeHtml() in frontend/src/lib/emailHtmlRenderer.ts — keep the
+    # five character mappings (& < > " ') in lockstep or the snapshot parity
+    # test will fail.
+    return html.escape(value, quote=True)
 
 TOKENS: dict[str, str] = {
     "BRAND_PRIMARY": "#1e40af",
@@ -122,9 +130,9 @@ def _render_loan_details_card(rows: list[tuple[str, str]]) -> str:
         border = "" if is_last else f"border-bottom:1px solid {TOKENS['BORDER']};"
         row_html += (
             f"<tr>"
-            f'<td style="padding:8px 0; font-size:14px; color:{TOKENS["MUTED"]}; {border}">{label}</td>'
+            f'<td style="padding:8px 0; font-size:14px; color:{TOKENS["MUTED"]}; {border}">{_e(label)}</td>'
             f'<td style="padding:8px 0; font-size:14px; color:{TOKENS["TEXT"]}; '
-            f'font-weight:600; text-align:right; {border}">{value}</td>'
+            f'font-weight:600; text-align:right; {border}">{_e(value)}</td>'
             f"</tr>"
         )
     return (
@@ -183,7 +191,7 @@ def _render_next_steps_block(steps: list[str]) -> str:
             f'font-size:12px; font-weight:600; line-height:24px; text-align:center;">{i}</div>'
             f"</td>"
             f'<td style="padding:0 0 12px 12px; font-size:{TOKENS["BODY_SIZE"]}; '
-            f'color:{TOKENS["TEXT"]};">{text}</td>'
+            f'color:{TOKENS["TEXT"]};">{_e(text)}</td>'
             f"</tr>"
         )
     return (
@@ -218,7 +226,7 @@ def _render_attachments_chips(names: list[str]) -> str:
     chips = '<td style="width:8px;"></td>'.join(
         f'<td style="padding:6px 12px; background-color:{TOKENS["PAGE_BG"]}; '
         f"border:1px solid {TOKENS['BORDER']}; border-radius:4px; "
-        f'font-size:{TOKENS["LABEL_SIZE"]}; color:#374151;">&#128206; {n}</td>'
+        f'font-size:{TOKENS["LABEL_SIZE"]}; color:#374151;">&#128206; {_e(n)}</td>'
         for n in names
     )
     return (
@@ -268,18 +276,18 @@ def _render_signature_block(sig_lines: list[str]) -> str:
     company = non_blank[2] if len(non_blank) > 2 else ""
     contact = [ln for ln in non_blank[3:] if ln.startswith(("ABN ", "Ph:", "Phone:", "Email:", "Website:"))]
     contact_html = "".join(
-        f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]};">{ln}</div>' for ln in contact
+        f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]};">{_e(ln)}</div>' for ln in contact
     )
     return (
         f'<div style="padding:24px 0 0 0; margin-top:16px; '
         f'border-top:1px solid {TOKENS["BORDER"]};">'
         f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
-        f'padding-bottom:8px;">{closing}</div>'
+        f'padding-bottom:8px;">{_e(closing)}</div>'
         f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
-        f'font-weight:600;">{name}</div>'
-        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; color:{TOKENS["MUTED"]};">{title}</div>'
+        f'font-weight:600;">{_e(name)}</div>'
+        f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; color:{TOKENS["MUTED"]};">{_e(title)}</div>'
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; color:{TOKENS["MUTED"]}; '
-        f'padding-bottom:8px;">{company}</div>'
+        f'padding-bottom:8px;">{_e(company)}</div>'
         f"{contact_html}"
         f"</div>"
     )
@@ -445,9 +453,9 @@ def _render_factor_card(factors: list[tuple[str, str]]) -> str:
         rows += (
             f'<tr><td style="padding:12px 0; {border}">'
             f'<div style="font-size:14px; font-weight:600; '
-            f'color:{TOKENS["TEXT"]};">{label}</div>'
+            f'color:{TOKENS["TEXT"]};">{_e(label)}</div>'
             f'<div style="font-size:14px; color:{TOKENS["TEXT"]}; '
-            f'padding-top:4px;">{text}</div>'
+            f'padding-top:4px;">{_e(text)}</div>'
             f"</td></tr>"
         )
     return (
@@ -469,11 +477,11 @@ def _render_what_you_can_do_card(bullets: list[str], intro: str = "") -> str:
     items = "".join(
         f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
         f'padding:4px 0;">'
-        f'<span style="color:{TOKENS["SUCCESS"]}; font-weight:600;">&#10003;</span> &nbsp;{b}</div>'
+        f'<span style="color:{TOKENS["SUCCESS"]}; font-weight:600;">&#10003;</span> &nbsp;{_e(b)}</div>'
         for b in bullets
     )
     intro_html = (
-        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; padding-bottom:8px;">{intro}</div>'
+        f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; padding-bottom:8px;">{_e(intro)}</div>'
         if intro
         else ""
     )
@@ -647,13 +655,13 @@ def _extract_marketing_offers(body: str) -> tuple[list[dict], int, int]:
 
 def _render_offer_card(offer: dict) -> str:
     bullets_html = "".join(
-        f'<div style="font-size:14px; color:#374151; padding:4px 0;">&#8226;&nbsp;&nbsp;{b}</div>'
+        f'<div style="font-size:14px; color:#374151; padding:4px 0;">&#8226;&nbsp;&nbsp;{_e(b)}</div>'
         for b in offer["bullets"]
     )
     fit_html = (
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; color:{TOKENS["MUTED"]}; '
         f"font-style:italic; padding-top:8px; margin-top:8px; "
-        f'border-top:1px solid {TOKENS["BORDER"]};">{offer["fit"]}</div>'
+        f'border-top:1px solid {TOKENS["BORDER"]};">{_e(offer["fit"])}</div>'
         if offer["fit"]
         else ""
     )
@@ -665,9 +673,9 @@ def _render_offer_card(offer: dict) -> str:
         f'<tr><td style="padding:16px 20px;">'
         f'<div style="font-size:11px; font-weight:600; '
         f"color:{TOKENS['MARKETING']}; text-transform:uppercase; "
-        f'letter-spacing:0.5px;">{offer["label"]}</div>'
+        f'letter-spacing:0.5px;">{_e(offer["label"])}</div>'
         f'<div style="font-size:17px; font-weight:600; '
-        f'color:{TOKENS["TEXT"]}; padding:4px 0 12px 0;">{offer["title"]}</div>'
+        f'color:{TOKENS["TEXT"]}; padding:4px 0 12px 0;">{_e(offer["title"])}</div>'
         f"{bullets_html}"
         f"{fit_html}"
         f"</td></tr></table>"
@@ -686,7 +694,7 @@ def _render_marketing_closing(first_name: str) -> str:
     return (
         f'<div style="padding:4px 0 16px 0; font-size:{TOKENS["BODY_SIZE"]}; '
         f'line-height:{TOKENS["LINE_HEIGHT"]}; color:{TOKENS["TEXT"]};">'
-        f"Take your time with the options above, {first_name} \u2013 there\u2019s "
+        f"Take your time with the options above, {_e(first_name)} \u2013 there\u2019s "
         f"no rush. If you\u2019d like to talk any of them through, or want to "
         f"explore something different, I\u2019m happy to help. Just give me a call "
         f"or reply to this email whenever you\u2019re ready."
@@ -713,7 +721,7 @@ def _render_marketing_footer(body: str) -> str:
     parts.append(
         f'<div style="padding:16px 0 0 0; margin-top:16px; '
         f'border-top:1px solid {TOKENS["BORDER"]};">'
-        f'<a href="{unsub_url}" '
+        f'<a href="{_e(unsub_url)}" '
         f'style="font-size:{TOKENS["FINE_SIZE"]}; '
         f"color:{TOKENS['BRAND_ACCENT']}; "
         f'text-decoration:underline;">Unsubscribe</a>'
@@ -826,11 +834,11 @@ def _render_hero(email_type: EmailType, body: str) -> str:
     name = _extract_applicant_name(body)
     if email_type == "approval":
         loan_type = _extract_approval_loan_type(body)
-        headline = f"Your {loan_type} Is Approved"
-        subtitle = f"Congratulations, {name}!"
+        headline = f"Your {_e(loan_type)} Is Approved"
+        subtitle = f"Congratulations, {_e(name)}!"
     elif email_type == "denial":
         headline = cfg["default_headline"]
-        subtitle = f"{name}, we've reviewed your application"
+        subtitle = f"{_e(name)}, we've reviewed your application"
     else:
         headline = cfg["default_headline"]
         subtitle = "A few options tailored to you"
@@ -899,29 +907,33 @@ def _render_legacy_body(body: str) -> str:
 
         if is_section or is_option:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{_e(stripped)}</strong></p>')
             continue
         if is_dear:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:0 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(f'<p style="margin:0 0 4px 0;"><strong>{_e(stripped)}</strong></p>')
             continue
         if is_closing:
             _flush_detail_rows()
-            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{stripped}</strong></p>')
+            html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{_e(stripped)}</strong></p>')
             continue
 
         bullet_match = re.match(r"^[\u2022•]\s*(.+)$", stripped)
         if bullet_match:
             _flush_detail_rows()
             bottom = "2px" if _next_nonblank_matches(idx, _BULLET_PREFIX_RE) else "12px"
-            html_parts.append(f'<p style="margin:2px 0 {bottom} 16px;">\u2022&nbsp;&nbsp;{bullet_match.group(1)}</p>')
+            html_parts.append(
+                f'<p style="margin:2px 0 {bottom} 16px;">\u2022&nbsp;&nbsp;{_e(bullet_match.group(1))}</p>'
+            )
             continue
 
         num_match = re.match(r"^\s+(\d+)\.\s+(.+)$", line)
         if num_match:
             _flush_detail_rows()
             bottom = "2px" if _next_nonblank_matches(idx, _NUM_PREFIX_RE, use_raw=True) else "12px"
-            html_parts.append(f'<p style="margin:2px 0 {bottom} 16px;">{num_match.group(1)}. {num_match.group(2)}</p>')
+            html_parts.append(
+                f'<p style="margin:2px 0 {bottom} 16px;">{num_match.group(1)}. {_e(num_match.group(2))}</p>'
+            )
             continue
 
         detail_match = LOAN_DETAIL_RE.match(line)
@@ -929,7 +941,7 @@ def _render_legacy_body(body: str) -> str:
             label = detail_match.group(2)
             value = detail_match.group(3)
             if len(label) < 35 and len(value) < 50:
-                detail_rows.append(f"<tr><td {td_label}>{label}</td><td {td_value}>{value}</td></tr>")
+                detail_rows.append(f"<tr><td {td_label}>{_e(label)}</td><td {td_value}>{_e(value)}</td></tr>")
                 continue
 
         _flush_detail_rows()
@@ -943,7 +955,7 @@ def _render_legacy_body(body: str) -> str:
 
         margin = "16px" if stripped.endswith(".") else "4px"
         top_margin = "16px" if stripped.startswith("Congratulations") else "0"
-        html_parts.append(f'<p style="margin:{top_margin} 0 {margin} 0;">{stripped}</p>')
+        html_parts.append(f'<p style="margin:{top_margin} 0 {margin} 0;">{_e(stripped)}</p>')
 
     _flush_detail_rows()
     return "\n".join(html_parts)
