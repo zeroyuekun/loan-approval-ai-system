@@ -120,11 +120,11 @@ def test_approval_renders_success_hero():
     assert "Congratulations" in html
 
 
-def test_denial_renders_caution_hero():
+def test_denial_hero_omits_orange_info_icon():
     body = "Dear John,\n\nWe reviewed your application.\n"
     html = render_html(body, email_type="denial")
-    assert f"background-color:{TOKENS['CAUTION']}" in html
-    assert "&#9432;" in html
+    assert "&#9432;" not in html
+    assert "Update on Your Application" in html
 
 
 def test_marketing_renders_marketing_hero():
@@ -282,6 +282,7 @@ ALL_FIXTURE_STEMS = [
     "denial_03_employment",
     "denial_04_multiple_factors",
     "denial_05_policy",
+    "denial_06_live_shape",
     "marketing_01_three_options",
     "marketing_02_two_options",
     "marketing_03_single_option",

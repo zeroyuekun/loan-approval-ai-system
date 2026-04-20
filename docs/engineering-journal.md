@@ -3,8 +3,8 @@
 > A narrative record of how this project was built, why each major decision was made, what went wrong, and how the rough edges were ground down. Written so a reader (hiring manager, teammate, future-me) can understand not just *what* was shipped but *why it was shipped that way*.
 
 **Project:** Australian Loan Approval AI System
-**Timeline:** project start → current polish pass (2026-04-17)
-**Current version:** see `CHANGELOG.md` top entry (v1.8.2)
+**Timeline:** project start → v1.10.4 SLO instrumentation (2026-04-19)
+**Current version:** see `CHANGELOG.md` top entry (v1.10.4)
 **Status:** portfolio / demonstrator — not in production use
 
 ---
@@ -165,3 +165,31 @@ This is a portfolio project. Before real users, it would need:
 ---
 
 *Reviewed: 2026-04-17. Next review on the next major polish pass or if the project restarts after ≥90 days of dormancy.*
+
+---
+
+## 13. The v1.9.x → v1.10.x sprint (2026-04-17 → 2026-04-19)
+
+The 8.9 → 9.5 polish pass landed v1.9.0. Over the next forty-eight hours the project went through six successive review cycles — internal, two adversarial passes from Codex, a senior engineer review, and a final SLO/observability gap check — that produced fifteen tagged releases and roughly forty merged PRs. The pattern that held throughout: keep PRs small and atomic, land each one green, accept that "consolidation release" is a category of work that's worth its own version bump.
+
+**v1.9.1 (review response, 2026-04-17).** External review surfaced four concrete defects. Coverage moved from 61.35% to 63.98% in the same release, and the 60% CI floor was tightened to 63%.
+
+**v1.9.2 — v1.9.4 (Codex adversarial passes, 2026-04-18).** Two rounds of Codex review caught: missing CSRF on a Celery-triggered endpoint; an ops endpoint that was authenticated but not staff-gated; an idempotency hole in `force_rerun`; an outbox edge case where a worker crash could lose a queued email; throttle caps on complaint-filing and data-export endpoints. Each PR landed one fix, ran green, and merged independently — no bundled "Codex round 2" PR.
+
+**v1.9.5 — v1.9.6 (workstream cleanup, 2026-04-18).** Workstream D removed 610 lines of dead frontend code (eight unused components carried from earlier iterations). Workstream B added throttle caps. Workstream C extracted customer-label maps out of a 1,400-line component file. The Optuna pin (PR #86) fixed a regression where "Train New Model" silently 500'd because Optuna's API had moved.
+
+**v1.10.0 (Australian-lender parity, 2026-04-18).** Arm A of the AU-lender parity work shipped eight deliverables — APRA serviceability buffer at +3% baked into the rules engine; LVR and DTI rules calibrated against actual CBA / Westpac credit policies; postcode default-rate noise tightened; a 1,000-record reproducibility benchmark in `docs/experiments/benchmark.md`; and a CI regression gate that fails if AUC on the held-out benchmark drops by more than 2 points. Arm C Phase 1 refactored `predictor.py` from 1,217 lines down to 436 by extracting ten focused modules (calibration, conformal, SHAP mapping, explanation, etc.) — the kind of refactor that's safer once the regression gate is in place.
+
+**v1.10.1 (production hardening, 2026-04-19).** Six PRs (D1–D6): `tools/smoke_e2e.sh` exercising the full pipeline against a live stack; a `workflow_dispatch` GitHub Actions job that runs it in CI; a mypy gate on ten modules (start small, expand outward); httpx swap on the watchdog (the previous `requests` dependency wasn't installed); calibration lazy-import (a top-of-file sklearn import was crashing in production); Python 3.13 datetime deprecation cleanup.
+
+**v1.10.2 (consolidation, 2026-04-19).** Seven deliverables that fit the "fix latent bugs without changing model behaviour" bar. Notable: removed the dead DiCE counterfactual code path (DiCE was never in `requirements.txt`; `CounterfactualEngine` always fell through to binary search), split `make clean` into `clean-soft` (caches only) and `clean` (full wipe including the Postgres volume) to stop people accidentally nuking their seed data, and required a `GRAFANA_ADMIN_PASSWORD` env var instead of shipping a default `admin/changeme`.
+
+**v1.10.3 (senior code review, 2026-04-19).** Four atomic PRs from a full senior-engineer review: caught a `Fernet.InvalidToken` swallowed by a bare `except Exception` (which would have masked rotation failures silently), corrected a bias-threshold `>` → `>=`, replaced a hand-rolled `useEffect`+`setInterval` polling loop with TanStack Query's `refetchInterval` (the manual cleanup was the source of subtle race conditions on unmount), and pinned every monitoring-stack image so `:latest` couldn't silently major-upgrade a production observability tool.
+
+**v1.10.4 (SLO instrumentation, 2026-04-19).** The `docs/slo.md` catalogue had four SLOs whose underlying metrics were marked _"follow-up issue tracks this"_ and were never actually emitted. Grafana panels couldn't render them; alerts couldn't fire. This release wired up `pipeline_e2e_seconds`, `email_generation_total`, an `algorithm` label on `ml_prediction_latency_seconds`, and `bias_review_ttr_seconds` — every emission wrapped in `try/except` with a debug log so a Prometheus client failure can't propagate into the pipeline. Also: ephemeral per-CI-run Fernet key generation (replacing a hardcoded test key — flagged as credential-in-source by the senior review), Bandit gate tightened to `--severity-level high --confidence-level high`, and an eight-test regression suite for the `enforce_retention` management command (which was previously at 0% coverage despite enforcing AML/CTF Act, APRA CPG 235, and Privacy Act APP 11.2 retention windows — a silent regression there is a compliance incident).
+
+**Pattern that held:** each cycle started with someone (Codex, senior reviewer, or me reading the SLO doc with fresh eyes) flagging gaps, was scoped into atomic PRs sized for an independent rollback, ran green-CI before merge, and ended with a tagged release + CHANGELOG entry. Forty PRs in forty-eight hours sounds like a sprint death-march; in practice it was sustainable because the discipline of "one thing per PR, green CI before merge" never bent.
+
+**What's left.** HTML-escape parity between the Python and TypeScript email renderers (deferred since v1.10.3 — needs coordinated regen of fifteen byte-for-byte parity snapshots), and an unsubscribe-URL protocol allowlist that bundles with it. Both are scoped for a single coordinated future PR rather than a panicked spot-fix.
+
+*Reviewed: 2026-04-19.*
