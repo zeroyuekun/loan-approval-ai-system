@@ -696,6 +696,21 @@ function renderOfferCard(offer: MarketingOffer): string {
   )
 }
 
+function renderMarketingClosing(firstName: string): string {
+  // Warm closing paragraph between offer cards and the CTA button.
+  // Mirrors _render_marketing_closing in backend html_renderer.py — parity test
+  // in CI fails if these drift.
+  return (
+    `<div style="padding:4px 0 16px 0; font-size:${TOKENS.BODY_SIZE}; ` +
+    `line-height:${TOKENS.LINE_HEIGHT}; color:${TOKENS.TEXT};">` +
+    `Take your time with the options above, ${firstName} \u2013 there\u2019s ` +
+    `no rush. If you\u2019d like to talk any of them through, or want to ` +
+    `explore something different, I\u2019m happy to help. Just give me a call ` +
+    `or reply to this email whenever you\u2019re ready.` +
+    `</div>`
+  )
+}
+
 function renderMarketingFooter(body: string): string {
   const parts: string[] = []
   if (body.toLowerCase().includes('term deposit')) {
@@ -751,6 +766,7 @@ function renderMarketingBody(plainBody: string): string {
     if (offers.length && i === oStart) {
       flush()
       for (const offer of offers) parts.push(renderOfferCard(offer))
+      parts.push(renderMarketingClosing(extractApplicantName(plainBody)))
       parts.push(renderCta('Call Sarah on 1300 000 000', 'tel:1300000000', TOKENS.MARKETING))
       i = oEnd + 1
       continue
@@ -789,15 +805,26 @@ function renderHero(emailType: EmailType, body: string): string {
     headline = cfg.defaultHeadline
     subtitle = 'A few options tailored to you'
   }
+  let iconHtml: string
+  let headlineMargin: string
+  if (emailType === 'denial') {
+    iconHtml = ''
+    headlineMargin = '0 0 4px 0'
+  } else {
+    iconHtml = (
+      `<div style="width:48px; height:48px; border-radius:24px; ` +
+      `background-color:${cfg.color}; text-align:center; ` +
+      `line-height:48px; color:#ffffff; font-size:24px; ` +
+      `font-weight:600;">${cfg.icon}</div>`
+    )
+    headlineMargin = '12px 0 4px 0'
+  }
   return (
     `<tr><td style="padding:32px 24px 16px 24px; ` +
     `font-family:${TOKENS.FONT_STACK};">` +
-    `<div style="width:48px; height:48px; border-radius:24px; ` +
-    `background-color:${cfg.color}; text-align:center; ` +
-    `line-height:48px; color:#ffffff; font-size:24px; ` +
-    `font-weight:600;">${cfg.icon}</div>` +
+    `${iconHtml}` +
     `<h1 style="font-size:${TOKENS.HEAD_SIZE}; line-height:28px; ` +
-    `color:${TOKENS.TEXT}; margin:12px 0 4px 0; font-weight:600;">` +
+    `color:${TOKENS.TEXT}; margin:${headlineMargin}; font-weight:600;">` +
     `${headline}</h1>` +
     `<div style="font-size:${TOKENS.LABEL_SIZE}; ` +
     `color:${TOKENS.MUTED};">${subtitle}</div>` +
@@ -811,6 +838,8 @@ function renderLegacyBody(body: string): string {
   let detailRows: string[] = []
   const tdLabel = 'style="padding:4px 8px 4px 0;color:#888;border-bottom:1px solid #f0f0f0;"'
   const tdValue = 'style="padding:4px 0 4px 8px;text-align:right;border-bottom:1px solid #f0f0f0;"'
+  const BULLET_PREFIX_RE = /^[\u2022•]\s*/
+  const NUM_PREFIX_RE = /^\s+\d+\.\s+/
 
   const flushRows = () => {
     if (detailRows.length) {
@@ -819,7 +848,17 @@ function renderLegacyBody(body: string): string {
     }
   }
 
-  for (const line of lines) {
+  const nextNonblankMatches = (idx: number, pattern: RegExp, useRaw = false): boolean => {
+    for (let j = idx + 1; j < lines.length; j++) {
+      const target = useRaw ? lines[j] : lines[j].trim()
+      if (target.trim() === '') continue
+      return pattern.test(target)
+    }
+    return false
+  }
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx]
     const stripped = line.trim()
     const isSection = SECTION_LABELS.includes(stripped)
     const isOption = OPTION_RE.test(stripped)
@@ -845,14 +884,16 @@ function renderLegacyBody(body: string): string {
     const bulletMatch = stripped.match(BULLET_RE)
     if (bulletMatch) {
       flushRows()
-      parts.push(`<p style="margin:2px 0 2px 16px;">\u2022&nbsp;&nbsp;${bulletMatch[1]}</p>`)
+      const bottom = nextNonblankMatches(idx, BULLET_PREFIX_RE) ? '2px' : '12px'
+      parts.push(`<p style="margin:2px 0 ${bottom} 16px;">\u2022&nbsp;&nbsp;${bulletMatch[1]}</p>`)
       continue
     }
 
     const numMatch = line.match(NUM_RE)
     if (numMatch) {
       flushRows()
-      parts.push(`<p style="margin:2px 0 2px 16px;">${numMatch[1]}. ${numMatch[2]}</p>`)
+      const bottom = nextNonblankMatches(idx, NUM_PREFIX_RE, true) ? '2px' : '12px'
+      parts.push(`<p style="margin:2px 0 ${bottom} 16px;">${numMatch[1]}. ${numMatch[2]}</p>`)
       continue
     }
 
@@ -873,21 +914,7 @@ function renderLegacyBody(body: string): string {
       continue
     }
 
-    if (
-      stripped.startsWith('ABN ') ||
-      stripped.startsWith('Ph:') ||
-      stripped.startsWith('Phone:') ||
-      stripped.startsWith('Email:') ||
-      stripped.startsWith('Website:')
-    ) {
-      parts.push(`<p style="margin:0;font-size:12px;color:#888;">${stripped}</p>`)
-      continue
-    }
-
-    if (stripped === '') {
-      parts.push('<div style="height:12px;"></div>')
-      continue
-    }
+    if (stripped === '') continue
 
     const margin = stripped.endsWith('.') ? '16px' : '4px'
     const topMargin = stripped.startsWith('Congratulations') ? '16px' : '0'
@@ -899,12 +926,21 @@ function renderLegacyBody(body: string): string {
 }
 
 function renderHeader(): string {
+  const badge = (
+    `<span style="display:inline-block; width:24px; height:24px; ` +
+    `background-color:#ffffff; color:${TOKENS.BRAND_PRIMARY}; ` +
+    `border-radius:12px; font-size:14px; font-weight:700; ` +
+    `line-height:24px; text-align:center; margin-right:8px; ` +
+    `vertical-align:middle;">$</span>`
+  )
   return (
     `<tr><td style="background-color:${TOKENS.BRAND_PRIMARY}; ` +
     `padding:16px 24px; border-radius:8px 8px 0 0;">` +
+    `${badge}` +
     `<span style="color:#ffffff; font-size:16px; font-weight:600; ` +
-    `letter-spacing:0.3px;">AussieLoanAI</span>` +
-    `<span style="color:#bfdbfe; font-size:12px; margin-left:8px;">` +
+    `letter-spacing:0.3px; vertical-align:middle;">AussieLoanAI</span>` +
+    `<span style="color:#bfdbfe; font-size:12px; margin-left:8px; ` +
+    `vertical-align:middle;">` +
     `Australian Credit Licence No. 012345</span>` +
     `</td></tr>`
   )
