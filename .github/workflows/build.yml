@@ -34,7 +34,7 @@ jobs:
       - name: Trivy scan backend image
         # Pinned to v0.35.0 commit SHA — trivy-action was supply-chain compromised
         # on 2026-03-19 (GHSA-69fq-xp46-6x23). Never use @master or mutable tags.
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: loan-backend
           format: table
@@ -44,7 +44,7 @@ jobs:
           trivyignores: .trivyignore
 
       - name: Trivy scan frontend image
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: loan-frontend
           format: table
