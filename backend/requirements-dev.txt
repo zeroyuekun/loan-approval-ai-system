@@ -9,6 +9,6 @@ hypothesis>=6.100
 schemathesis>=3.36
 pre-commit>=4.0
 ruff>=0.8.6
-pip-audit>=2.7
+pip-audit>=2.10.0
 vulture>=2.13
 mypy>=1.13
