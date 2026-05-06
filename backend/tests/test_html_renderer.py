@@ -116,7 +116,7 @@ def test_approval_hero_is_iconless():
     body = _load_fixture("approval_01_personal")
     html = render_html(body, email_type="approval")
     assert "&#10003;" not in html
-    assert 'width:48px; height:48px; border-radius:24px' not in html
+    assert "width:48px; height:48px; border-radius:24px" not in html
     assert "Congratulations" in html
 
 
@@ -124,7 +124,7 @@ def test_denial_hero_is_iconless():
     body = "Dear John,\n\nWe reviewed your application.\n"
     html = render_html(body, email_type="denial")
     assert "&#9432;" not in html
-    assert 'width:48px; height:48px; border-radius:24px' not in html
+    assert "width:48px; height:48px; border-radius:24px" not in html
     assert "Update on Your Application" in html
 
 
@@ -132,7 +132,7 @@ def test_marketing_hero_is_iconless():
     body = "Dear John,\n\nHere are some options.\n"
     html = render_html(body, email_type="marketing")
     assert "&#10022;" not in html
-    assert 'width:48px; height:48px; border-radius:24px' not in html
+    assert "width:48px; height:48px; border-radius:24px" not in html
     assert "A Few Options for You" in html
 
 
