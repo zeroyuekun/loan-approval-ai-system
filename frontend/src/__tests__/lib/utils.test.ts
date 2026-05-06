@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cn, formatCurrency, formatPercent, formatDate, getStatusColor, getDisplayStatus } from '@/lib/utils'
+import { cn, formatCurrency, formatPercent, formatDate, formatPurpose, getStatusColor, getDisplayStatus } from '@/lib/utils'
 
 describe('cn', () => {
   it('merges class names', () => {
@@ -136,5 +136,44 @@ describe('getDisplayStatus', () => {
   it('ignores decision for non-review statuses', () => {
     const result = getDisplayStatus('pending', { decision: 'approved' })
     expect(result.label).toBe('PENDING')
+  })
+})
+
+describe('formatPurpose', () => {
+  it('maps known purposes to canonical labels', () => {
+    expect(formatPurpose('home')).toBe('Home Purchase')
+    expect(formatPurpose('home_improvement')).toBe('Home Improvement')
+    expect(formatPurpose('auto')).toBe('Vehicle')
+    expect(formatPurpose('personal')).toBe('Personal')
+    expect(formatPurpose('business')).toBe('Business')
+    expect(formatPurpose('education')).toBe('Education')
+  })
+
+  it('is case-insensitive for known purposes', () => {
+    expect(formatPurpose('HOME')).toBe('Home Purchase')
+    expect(formatPurpose('Home')).toBe('Home Purchase')
+    expect(formatPurpose('HOME_IMPROVEMENT')).toBe('Home Improvement')
+    expect(formatPurpose('Home_Improvement')).toBe('Home Improvement')
+  })
+
+  it('falls back to title-cased label for unknown purposes', () => {
+    expect(formatPurpose('investment')).toBe('Investment')
+    expect(formatPurpose('home_renovation')).toBe('Home Renovation')
+    expect(formatPurpose('debt_consolidation')).toBe('Debt Consolidation')
+    expect(formatPurpose('solar_panel_installation')).toBe('Solar Panel Installation')
+  })
+
+  it('lowercases trailing characters in the fallback (parity with Python str.title)', () => {
+    // Regression guard — earlier version preserved input case in unmapped values,
+    // diverging from the Python _loan_type fallback (str.replace("_", " ").title()).
+    expect(formatPurpose('HOME_RENOVATION')).toBe('Home Renovation')
+    expect(formatPurpose('HoMe_RenOvAtIon')).toBe('Home Renovation')
+    expect(formatPurpose('XYZ_UNKNOWN')).toBe('Xyz Unknown')
+  })
+
+  it('handles empty, null, and undefined inputs', () => {
+    expect(formatPurpose('')).toBe('')
+    expect(formatPurpose(null)).toBe('')
+    expect(formatPurpose(undefined)).toBe('')
   })
 })

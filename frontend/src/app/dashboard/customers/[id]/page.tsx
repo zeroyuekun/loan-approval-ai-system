@@ -18,7 +18,7 @@ import { WorkflowTimeline } from '@/components/agents/WorkflowTimeline'
 import { AgentStepCard } from '@/components/agents/AgentStepCard'
 import { NextBestOfferCard } from '@/components/agents/NextBestOfferCard'
 import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
-import { formatCurrency, formatDate, getStatusColor, getDisplayStatus } from '@/lib/utils'
+import { formatCurrency, formatDate, formatPurpose, getStatusColor, getDisplayStatus } from '@/lib/utils'
 import {
   tierColors,
   residencyLabels,
@@ -771,7 +771,7 @@ export default function CustomerProfilePage() {
                   >
                     <TableCell className="font-mono text-xs">{loan.id.slice(0, 8)}</TableCell>
                     <TableCell className="font-semibold">{formatCurrency(loan.loan_amount)}</TableCell>
-                    <TableCell className="capitalize">{loan.purpose}</TableCell>
+                    <TableCell>{formatPurpose(loan.purpose)}</TableCell>
                     <TableCell>{loan.credit_score}</TableCell>
                     <TableCell>
                       {(() => { const s = getDisplayStatus(loan.status, loan.decision); return (

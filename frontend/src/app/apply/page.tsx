@@ -7,7 +7,7 @@ import { useApplications } from '@/hooks/useApplications'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { getDisplayStatus, formatCurrency, formatDate } from '@/lib/utils'
+import { getDisplayStatus, formatCurrency, formatDate, formatPurpose } from '@/lib/utils'
 import { Plus, ArrowRight, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { CustomerProfile } from '@/types'
@@ -123,7 +123,7 @@ export default function CustomerApplyPage() {
                 <CardContent className="flex items-center justify-between py-4">
                   <div className="flex items-center gap-6">
                     <div>
-                      <p className="font-medium capitalize">{app.purpose} Loan</p>
+                      <p className="font-medium">{formatPurpose(app.purpose)} Loan</p>
                       <p className="text-sm text-muted-foreground">
                         {formatDate(app.created_at)}
                       </p>

@@ -74,13 +74,13 @@ const LOAN_DETAIL_RE = /^(\s{2,})(\S[^:]+:)\s+(.+)$/
 const HR_RE = /^[\u2500\u2501\-]{5,}$/
 const BULLET_RE = /^[\u2022•]\s*(.+)$/
 const NUM_RE = /^\s+(\d+)\.\s+(.+)$/
-const APPROVAL_LOAN_TYPE_RE = /application for an? ([A-Z][A-Za-z]+ Loan)/
+const APPROVAL_LOAN_TYPE_RE = /application for an? ([A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)* Loan)/
 
-type HeroEntry = { icon: string; color: string; defaultHeadline: string }
+type HeroEntry = { defaultHeadline: string }
 const HERO_CONFIG: Record<EmailType, HeroEntry> = {
-  approval: { icon: '&#10003;', color: TOKENS.SUCCESS, defaultHeadline: 'Your Loan Is Approved' },
-  denial: { icon: '&#9432;', color: TOKENS.CAUTION, defaultHeadline: 'Update on Your Application' },
-  marketing: { icon: '&#10022;', color: TOKENS.MARKETING, defaultHeadline: 'A Few Options for You' },
+  approval: { defaultHeadline: 'Your Loan Is Approved' },
+  denial: { defaultHeadline: 'Update on Your Application' },
+  marketing: { defaultHeadline: 'A Few Options for You' },
 }
 
 function extractApplicantName(body: string): string {
@@ -731,10 +731,9 @@ function renderMarketingClosing(firstName: string): string {
   return (
     `<div style="padding:4px 0 16px 0; font-size:${TOKENS.BODY_SIZE}; ` +
     `line-height:${TOKENS.LINE_HEIGHT}; color:${TOKENS.TEXT};">` +
-    `Take your time with the options above, ${escapeHtml(firstName)} \u2013 there\u2019s ` +
-    `no rush. If you\u2019d like to talk any of them through, or want to ` +
-    `explore something different, I\u2019m happy to help. Just give me a call ` +
-    `or reply to this email whenever you\u2019re ready.` +
+    `Not sure which one suits you, ${escapeHtml(firstName)}? I\u2019m happy to ` +
+    `talk any of them through \u2013 no pressure, no obligation. Give ` +
+    `me a call or reply to this email whenever you\u2019re ready.` +
     `</div>`
   )
 }
@@ -833,26 +832,11 @@ function renderHero(emailType: EmailType, body: string): string {
     headline = cfg.defaultHeadline
     subtitle = 'A few options tailored to you'
   }
-  let iconHtml: string
-  let headlineMargin: string
-  if (emailType === 'denial') {
-    iconHtml = ''
-    headlineMargin = '0 0 4px 0'
-  } else {
-    iconHtml = (
-      `<div style="width:48px; height:48px; border-radius:24px; ` +
-      `background-color:${cfg.color}; text-align:center; ` +
-      `line-height:48px; color:#ffffff; font-size:24px; ` +
-      `font-weight:600;">${cfg.icon}</div>`
-    )
-    headlineMargin = '12px 0 4px 0'
-  }
   return (
     `<tr><td style="padding:32px 24px 16px 24px; ` +
     `font-family:${TOKENS.FONT_STACK};">` +
-    `${iconHtml}` +
     `<h1 style="font-size:${TOKENS.HEAD_SIZE}; line-height:28px; ` +
-    `color:${TOKENS.TEXT}; margin:${headlineMargin}; font-weight:600;">` +
+    `color:${TOKENS.TEXT}; margin:0 0 4px 0; font-weight:600;">` +
     `${headline}</h1>` +
     `<div style="font-size:${TOKENS.LABEL_SIZE}; ` +
     `color:${TOKENS.MUTED};">${subtitle}</div>` +
