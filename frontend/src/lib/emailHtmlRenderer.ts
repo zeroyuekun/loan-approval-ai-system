@@ -131,12 +131,12 @@ function renderLoanDetailsCard(rows: Array<[string, string]>): string {
   let rowHtml = ''
   rows.forEach(([label, value], i) => {
     const isLast = i === rows.length - 1
-    const border = isLast ? '' : `border-bottom:1px solid ${TOKENS.BORDER};`
+    const border = isLast ? '' : ` border-bottom:1px solid ${TOKENS.BORDER};`
     rowHtml += (
       `<tr>` +
-      `<td style="padding:8px 0; font-size:14px; color:${TOKENS.MUTED}; ${border}">${escapeHtml(label)}</td>` +
+      `<td style="padding:8px 0; font-size:14px; color:${TOKENS.MUTED};${border}">${escapeHtml(label)}</td>` +
       `<td style="padding:8px 0; font-size:14px; color:${TOKENS.TEXT}; ` +
-      `font-weight:600; text-align:right; ${border}">${escapeHtml(value)}</td>` +
+      `font-weight:600; text-align:right;${border}">${escapeHtml(value)}</td>` +
       `</tr>`
     )
   })
@@ -192,13 +192,13 @@ function renderNextStepsBlock(steps: string[]): string {
     const i = idx + 1
     rows += (
       `<tr>` +
-      `<td style="width:28px; padding:0 0 12px 0; vertical-align:top;">` +
+      `<td style="width:28px; padding:0 0 12px 0; vertical-align:middle;">` +
       `<div style="width:24px; height:24px; border-radius:12px; ` +
       `background-color:${TOKENS.BRAND_PRIMARY}; color:#ffffff; ` +
       `font-size:12px; font-weight:600; line-height:24px; text-align:center;">${i}</div>` +
       `</td>` +
       `<td style="padding:0 0 12px 12px; font-size:${TOKENS.BODY_SIZE}; ` +
-      `color:${TOKENS.TEXT};">${escapeHtml(text)}</td>` +
+      `color:${TOKENS.TEXT}; vertical-align:middle;">${escapeHtml(text)}</td>` +
       `</tr>`
     )
   })
@@ -278,11 +278,11 @@ function renderSignatureBlock(sigLines: string[]): string {
   const contactHtml = contact
     .map(
       (ln) =>
-        `<div style="font-size:${TOKENS.FINE_SIZE}; color:${TOKENS.FINE};">${escapeHtml(ln)}</div>`
+        `<div style="font-size:${TOKENS.FINE_SIZE}; color:${TOKENS.FINE}; padding:2px 0;">${escapeHtml(ln)}</div>`
     )
     .join('')
   return (
-    `<div style="padding:24px 0 0 0; margin-top:16px; ` +
+    `<div style="padding:24px 0 0 0; ` +
     `border-top:1px solid ${TOKENS.BORDER};">` +
     `<div style="font-size:${TOKENS.BODY_SIZE}; color:${TOKENS.TEXT}; ` +
     `padding-bottom:8px;">${escapeHtml(closing)}</div>` +
@@ -435,9 +435,9 @@ function renderFactorCard(factors: Array<[string, string]>): string {
   let rows = ''
   factors.forEach(([label, text], i) => {
     const isLast = i === factors.length - 1
-    const border = isLast ? '' : `border-bottom:1px solid ${TOKENS.BORDER};`
+    const border = isLast ? '' : ` border-bottom:1px solid ${TOKENS.BORDER};`
     rows += (
-      `<tr><td style="padding:12px 0; ${border}">` +
+      `<tr><td style="padding:12px 0;${border}">` +
       `<div style="font-size:14px; font-weight:600; ` +
       `color:${TOKENS.TEXT};">${escapeHtml(label)}</div>` +
       `<div style="font-size:14px; color:${TOKENS.TEXT}; ` +
@@ -757,7 +757,7 @@ function renderMarketingFooter(body: string): string {
   const m = body.match(UNSUBSCRIBE_LINE_RE)
   const unsubUrl = m ? m[1] : SAFE_URL_FALLBACK
   parts.push(
-    `<div style="padding:16px 0 0 0; margin-top:16px; ` +
+    `<div style="padding:16px 0 0 0; ` +
       `border-top:1px solid ${TOKENS.BORDER};">` +
       `<a href="${escapeHtml(safeUrl(unsubUrl))}" ` +
       `style="font-size:${TOKENS.FINE_SIZE}; ` +
@@ -958,14 +958,6 @@ function renderHeader(): string {
   )
 }
 
-function renderFooterShell(): string {
-  return (
-    `<tr><td style="padding:24px; background-color:${TOKENS.CARD_BG}; ` +
-    `border-radius:0 0 8px 8px; font-size:${TOKENS.FINE_SIZE}; ` +
-    `color:${TOKENS.FINE};">&nbsp;</td></tr>`
-  )
-}
-
 export function renderEmailHtml(plainBody: string, emailType: EmailType): string {
   let bodyHtml: string
   if (emailType === 'approval') bodyHtml = renderApprovalBody(plainBody)
@@ -982,10 +974,9 @@ export function renderEmailHtml(plainBody: string, emailType: EmailType): string
     `box-shadow:0 1px 3px rgba(0,0,0,0.06);">` +
     `${renderHeader()}` +
     `${renderHero(emailType, plainBody)}` +
-    `<tr><td style="padding:0 24px 24px 24px; font-family:${TOKENS.FONT_STACK}; ` +
+    `<tr><td style="padding:0 24px 32px 24px; font-family:${TOKENS.FONT_STACK}; ` +
     `font-size:${TOKENS.BODY_SIZE}; line-height:${TOKENS.LINE_HEIGHT}; ` +
     `color:${TOKENS.TEXT};">${bodyHtml}</td></tr>` +
-    `${renderFooterShell()}` +
     `</table>` +
     `</td></tr>` +
     `</table>`

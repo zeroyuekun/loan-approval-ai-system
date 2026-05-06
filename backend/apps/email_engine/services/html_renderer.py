@@ -142,12 +142,12 @@ def _render_loan_details_card(rows: list[tuple[str, str]]) -> str:
     row_html = ""
     for i, (label, value) in enumerate(rows):
         is_last = i == len(rows) - 1
-        border = "" if is_last else f"border-bottom:1px solid {TOKENS['BORDER']};"
+        border = "" if is_last else f" border-bottom:1px solid {TOKENS['BORDER']};"
         row_html += (
             f"<tr>"
-            f'<td style="padding:8px 0; font-size:14px; color:{TOKENS["MUTED"]}; {border}">{_e(label)}</td>'
+            f'<td style="padding:8px 0; font-size:14px; color:{TOKENS["MUTED"]};{border}">{_e(label)}</td>'
             f'<td style="padding:8px 0; font-size:14px; color:{TOKENS["TEXT"]}; '
-            f'font-weight:600; text-align:right; {border}">{_e(value)}</td>'
+            f'font-weight:600; text-align:right;{border}">{_e(value)}</td>'
             f"</tr>"
         )
     return (
@@ -200,13 +200,13 @@ def _render_next_steps_block(steps: list[str]) -> str:
     for i, text in enumerate(steps, start=1):
         rows += (
             f"<tr>"
-            f'<td style="width:28px; padding:0 0 12px 0; vertical-align:top;">'
+            f'<td style="width:28px; padding:0 0 12px 0; vertical-align:middle;">'
             f'<div style="width:24px; height:24px; border-radius:12px; '
             f"background-color:{TOKENS['BRAND_PRIMARY']}; color:#ffffff; "
             f'font-size:12px; font-weight:600; line-height:24px; text-align:center;">{i}</div>'
             f"</td>"
             f'<td style="padding:0 0 12px 12px; font-size:{TOKENS["BODY_SIZE"]}; '
-            f'color:{TOKENS["TEXT"]};">{_e(text)}</td>'
+            f'color:{TOKENS["TEXT"]}; vertical-align:middle;">{_e(text)}</td>'
             f"</tr>"
         )
     return (
@@ -291,10 +291,11 @@ def _render_signature_block(sig_lines: list[str]) -> str:
     company = non_blank[2] if len(non_blank) > 2 else ""
     contact = [ln for ln in non_blank[3:] if ln.startswith(("ABN ", "Ph:", "Phone:", "Email:", "Website:"))]
     contact_html = "".join(
-        f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]};">{_e(ln)}</div>' for ln in contact
+        f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]}; padding:2px 0;">{_e(ln)}</div>'
+        for ln in contact
     )
     return (
-        f'<div style="padding:24px 0 0 0; margin-top:16px; '
+        f'<div style="padding:24px 0 0 0; '
         f'border-top:1px solid {TOKENS["BORDER"]};">'
         f'<div style="font-size:{TOKENS["BODY_SIZE"]}; color:{TOKENS["TEXT"]}; '
         f'padding-bottom:8px;">{_e(closing)}</div>'
@@ -464,9 +465,9 @@ def _render_factor_card(factors: list[tuple[str, str]]) -> str:
     rows = ""
     for i, (label, text) in enumerate(factors):
         is_last = i == len(factors) - 1
-        border = "" if is_last else f"border-bottom:1px solid {TOKENS['BORDER']};"
+        border = "" if is_last else f" border-bottom:1px solid {TOKENS['BORDER']};"
         rows += (
-            f'<tr><td style="padding:12px 0; {border}">'
+            f'<tr><td style="padding:12px 0;{border}">'
             f'<div style="font-size:14px; font-weight:600; '
             f'color:{TOKENS["TEXT"]};">{_e(label)}</div>'
             f'<div style="font-size:14px; color:{TOKENS["TEXT"]}; '
@@ -733,7 +734,7 @@ def _render_marketing_footer(body: str) -> str:
     m = UNSUBSCRIBE_LINE_RE.search(body)
     unsub_url = m.group(1) if m else SAFE_URL_FALLBACK
     parts.append(
-        f'<div style="padding:16px 0 0 0; margin-top:16px; '
+        f'<div style="padding:16px 0 0 0; '
         f'border-top:1px solid {TOKENS["BORDER"]};">'
         f'<a href="{_e(_safe_url(unsub_url))}" '
         f'style="font-size:{TOKENS["FINE_SIZE"]}; '
@@ -984,16 +985,6 @@ def _render_header() -> str:
     )
 
 
-def _render_footer_shell() -> str:
-    return (
-        f'<tr><td style="padding:24px; background-color:{TOKENS["CARD_BG"]}; '
-        f"border-radius:0 0 8px 8px; font-size:{TOKENS['FINE_SIZE']}; "
-        f'color:{TOKENS["FINE"]};">'
-        f"&nbsp;"
-        f"</td></tr>"
-    )
-
-
 def render_html(plain_body: str, email_type: EmailType) -> str:
     """Convert plain-text email body into Gmail-safe HTML.
 
@@ -1024,12 +1015,11 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
         f'box-shadow:0 1px 3px rgba(0,0,0,0.06);">'
         f"{_render_header()}"
         f"{_render_hero(email_type, plain_body)}"
-        f'<tr><td style="padding:0 24px 24px 24px; font-family:{TOKENS["FONT_STACK"]}; '
+        f'<tr><td style="padding:0 24px 32px 24px; font-family:{TOKENS["FONT_STACK"]}; '
         f"font-size:{TOKENS['BODY_SIZE']}; line-height:{TOKENS['LINE_HEIGHT']}; "
         f'color:{TOKENS["TEXT"]};">'
         f"{body_html}"
         f"</td></tr>"
-        f"{_render_footer_shell()}"
         f"</table>"
         f"</td></tr>"
         f"</table>"
