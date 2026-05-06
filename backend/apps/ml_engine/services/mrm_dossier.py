@@ -161,8 +161,48 @@ def _header_section(mv) -> str:
     return "\n".join(lines)
 
 
+_OUT_OF_SCOPE_BY_OVERLAY_MODE = {
+    "off": (
+        "No policy overlay is active in this deployment. Out-of-scope predictions "
+        "are not flagged or blocked at runtime — manual scope review is required at "
+        "intake (see §9)."
+    ),
+    "shadow": (
+        "The policy overlay runs in `shadow` (observational) mode in this deployment. "
+        "Out-of-scope predictions are flagged for monitoring but **not blocked**; "
+        "manual underwriter review depends on operator workflow rather than automated "
+        "routing (see §9)."
+    ),
+    "enforce": (
+        "The policy overlay runs in `enforce` mode in this deployment. Out-of-scope "
+        "predictions are blocked by the overlay and routed to manual underwriter "
+        "review (see §9 P-codes)."
+    ),
+}
+
+
 def _purpose_section(mv) -> str:
-    """§2 — Purpose & limitations."""
+    """§2 — Purpose & limitations.
+
+    The closing paragraph used to assert that out-of-scope predictions "must be
+    treated as advisory only and referred to human underwriter review" — but
+    that referral is only enforced by the policy overlay in `enforce` mode
+    (`credit_policy.py:418-425`). The default deployment mode is `shadow`,
+    which is observational. Read the effective mode at generation time and
+    emit the wording that matches actual runtime behaviour.
+    """
+    # Deferred import keeps the module importable in unit tests that fake the
+    # ModelVersion without booting Django (existing test pattern).
+    try:
+        from django.conf import settings
+
+        mode = getattr(settings, "CREDIT_POLICY_OVERLAY_MODE", "shadow")
+    except Exception:
+        mode = "shadow"
+    if mode not in _OUT_OF_SCOPE_BY_OVERLAY_MODE:
+        # Mirrors credit_policy.py:405 — unknown values default to shadow.
+        mode = "shadow"
+
     purpose = _SEGMENT_PURPOSE.get(mv.segment, "Segment-specific purpose statement not yet registered.")
     return "\n".join(
         [
@@ -170,9 +210,7 @@ def _purpose_section(mv) -> str:
             "",
             purpose,
             "",
-            "All scope boundaries above reflect the training distribution. "
-            "Predictions on applications outside scope must be treated as advisory "
-            "only and referred to human underwriter review (see §9 policy overlay).",
+            "All scope boundaries above reflect the training distribution. " + _OUT_OF_SCOPE_BY_OVERLAY_MODE[mode],
         ]
     )
 

@@ -223,6 +223,77 @@ def test_policy_section_enumerates_all_p_codes():
 
 
 # ---------------------------------------------------------------------------
+# Out-of-scope wording is conditional on the runtime overlay mode.
+# (Codex 2026-05-06 finding 1 — the dossier used to claim mandatory referral
+# unconditionally, but the runtime only enforces it in `enforce` mode.)
+# ---------------------------------------------------------------------------
+
+
+def test_purpose_section_default_mode_emits_shadow_wording():
+    """Default settings (no env override) → shadow wording, **not blocked**."""
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    assert "shadow" in md.lower()
+    assert "not blocked" in md
+    # The old unconditional mandate must not appear in shadow mode.
+    assert "must be treated as advisory" not in md
+
+
+def test_purpose_section_enforce_mode_emits_mandatory_referral():
+    from django.test import override_settings
+
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with (
+        override_settings(CREDIT_POLICY_OVERLAY_MODE="enforce"),
+        patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+    ):
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    assert "`enforce` mode" in md
+    assert "blocked by the overlay" in md
+    assert "routed to manual underwriter review" in md
+
+
+def test_purpose_section_off_mode_emits_no_overlay_message():
+    from django.test import override_settings
+
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with (
+        override_settings(CREDIT_POLICY_OVERLAY_MODE="off"),
+        patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+    ):
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    assert "No policy overlay is active" in md
+    assert "manual scope review is required at intake" in md
+
+
+def test_purpose_section_unknown_mode_falls_through_to_shadow():
+    """Mirrors credit_policy.py:405 — unknown values default to shadow."""
+    from django.test import override_settings
+
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with (
+        override_settings(CREDIT_POLICY_OVERLAY_MODE="bogus_value"),
+        patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+    ):
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    assert "`shadow` (observational) mode" in md
+    assert "not blocked" in md
+
+
+# ---------------------------------------------------------------------------
 # Compliance status banner — derived from gate evidence so an auditor reads
 # the failure on the first page rather than digging through §8 / §7 / §6.
 # (Codex 2026-05-06 finding 2.)
