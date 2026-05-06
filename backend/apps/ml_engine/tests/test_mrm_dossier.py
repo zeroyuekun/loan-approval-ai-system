@@ -365,7 +365,7 @@ def _make_compliant_mv(**overrides):
 
 
 def test_compliance_status_compliant_when_all_gates_pass_and_evidence_present():
-    from apps.ml_engine.services.mrm_dossier import _compliance_status
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
 
     status, reasons = _compliance_status(_make_compliant_mv())
     assert status == "COMPLIANT"
@@ -373,7 +373,7 @@ def test_compliance_status_compliant_when_all_gates_pass_and_evidence_present():
 
 
 def test_compliance_status_non_compliant_on_failed_fairness():
-    from apps.ml_engine.services.mrm_dossier import _compliance_status
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(
         fairness_metrics={
@@ -388,7 +388,7 @@ def test_compliance_status_non_compliant_on_failed_fairness():
 
 
 def test_compliance_status_non_compliant_on_high_psi():
-    from apps.ml_engine.services.mrm_dossier import _compliance_status
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(
         training_metadata={
@@ -401,7 +401,7 @@ def test_compliance_status_non_compliant_on_high_psi():
 
 
 def test_compliance_status_non_compliant_on_high_ece():
-    from apps.ml_engine.services.mrm_dossier import _compliance_status
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(ece=0.08)
     status, reasons = _compliance_status(mv)
@@ -410,7 +410,7 @@ def test_compliance_status_non_compliant_on_high_ece():
 
 
 def test_compliance_status_needs_review_when_fairness_evidence_missing():
-    from apps.ml_engine.services.mrm_dossier import _compliance_status
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(fairness_metrics={})
     status, reasons = _compliance_status(mv)
@@ -419,7 +419,7 @@ def test_compliance_status_needs_review_when_fairness_evidence_missing():
 
 
 def test_compliance_status_needs_review_when_psi_missing():
-    from apps.ml_engine.services.mrm_dossier import _compliance_status
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(training_metadata={"psi_by_feature": {}})
     status, reasons = _compliance_status(mv)
@@ -428,7 +428,7 @@ def test_compliance_status_needs_review_when_psi_missing():
 
 
 def test_compliance_status_needs_review_when_calibration_missing():
-    from apps.ml_engine.services.mrm_dossier import _compliance_status
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(calibration_data={})
     status, reasons = _compliance_status(mv)
