@@ -251,6 +251,17 @@ CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shado
 # docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
 ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
 
+# Pre-activation champion-challenger promotion gate mode for `train_model_task`.
+# Mirrors ML_FAIRNESS_GATE_MODE: "warn" (default — gates run, decision recorded
+# on training_metadata, model activates regardless), "block" (refuse activation
+# if model_selector.promote_if_eligible reports any of the 4 gates failed —
+# KS regression, PSI stability, ECE calibration, AUC regression), "off" (skip
+# the check entirely). Default "warn" so the PR ships zero behaviour change for
+# any deployment that doesn't set the env var; flip to "block" only after
+# validating the trainer produces compliant promotion metrics for the segments
+# in scope. See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
+ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
+
 # D7 — MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
 MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").lower() == "true"
