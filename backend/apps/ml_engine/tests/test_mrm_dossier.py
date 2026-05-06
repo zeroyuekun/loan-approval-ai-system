@@ -222,6 +222,155 @@ def test_policy_section_enumerates_all_p_codes():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Compliance status banner — derived from gate evidence so an auditor reads
+# the failure on the first page rather than digging through §8 / §7 / §6.
+# (Codex 2026-05-06 finding 2.)
+# ---------------------------------------------------------------------------
+
+
+def _make_compliant_mv(**overrides):
+    """Default `_make_mv` is intentionally NON-COMPLIANT (failed age_group +
+    PSI on dti). For positive-path tests build a clean MV here. Overrides
+    take precedence over the clean defaults so callers can flip individual
+    fields without wrestling with duplicate-kwarg errors."""
+    defaults = {
+        "fairness_metrics": {
+            "gender": {"disparate_impact_ratio": 0.92, "passes_80_percent_rule": True},
+            "age_group": {"disparate_impact_ratio": 0.88, "passes_80_percent_rule": True},
+        },
+        "training_metadata": {
+            "training_seconds": 45,
+            "n_training_samples": 10000,
+            "positive_rate": 0.22,
+            "psi_by_feature": {"credit_score": 0.05, "annual_income": 0.12, "dti": 0.18},
+            "data_source": "synthetic + GMSC",
+            "temporal_start": "2024-01-01",
+            "temporal_end": "2026-04-01",
+        },
+        "ece": 0.02,
+    }
+    defaults.update(overrides)
+    return _make_mv(**defaults)
+
+
+def test_compliance_status_compliant_when_all_gates_pass_and_evidence_present():
+    from apps.ml_engine.services.mrm_dossier import _compliance_status
+
+    status, reasons = _compliance_status(_make_compliant_mv())
+    assert status == "COMPLIANT"
+    assert reasons == []
+
+
+def test_compliance_status_non_compliant_on_failed_fairness():
+    from apps.ml_engine.services.mrm_dossier import _compliance_status
+
+    mv = _make_compliant_mv(
+        fairness_metrics={
+            "gender": {"disparate_impact_ratio": 0.92, "passes_80_percent_rule": True},
+            "age_group": {"disparate_impact_ratio": 0.78, "passes_80_percent_rule": False},
+        }
+    )
+    status, reasons = _compliance_status(mv)
+    assert status == "NON-COMPLIANT"
+    assert any("age_group" in r for r in reasons)
+    assert any("80%-rule" in r for r in reasons)
+
+
+def test_compliance_status_non_compliant_on_high_psi():
+    from apps.ml_engine.services.mrm_dossier import _compliance_status
+
+    mv = _make_compliant_mv(
+        training_metadata={
+            "psi_by_feature": {"credit_score": 0.05, "dti": 0.30},
+        }
+    )
+    status, reasons = _compliance_status(mv)
+    assert status == "NON-COMPLIANT"
+    assert any("PSI" in r and "dti" in r for r in reasons)
+
+
+def test_compliance_status_non_compliant_on_high_ece():
+    from apps.ml_engine.services.mrm_dossier import _compliance_status
+
+    mv = _make_compliant_mv(ece=0.08)
+    status, reasons = _compliance_status(mv)
+    assert status == "NON-COMPLIANT"
+    assert any("ECE" in r for r in reasons)
+
+
+def test_compliance_status_needs_review_when_fairness_evidence_missing():
+    from apps.ml_engine.services.mrm_dossier import _compliance_status
+
+    mv = _make_compliant_mv(fairness_metrics={})
+    status, reasons = _compliance_status(mv)
+    assert status == "NEEDS REVIEW"
+    assert any("fairness metrics" in r for r in reasons)
+
+
+def test_compliance_status_needs_review_when_psi_missing():
+    from apps.ml_engine.services.mrm_dossier import _compliance_status
+
+    mv = _make_compliant_mv(training_metadata={"psi_by_feature": {}})
+    status, reasons = _compliance_status(mv)
+    assert status == "NEEDS REVIEW"
+    assert any("PSI" in r for r in reasons)
+
+
+def test_compliance_status_needs_review_when_calibration_missing():
+    from apps.ml_engine.services.mrm_dossier import _compliance_status
+
+    mv = _make_compliant_mv(calibration_data={})
+    status, reasons = _compliance_status(mv)
+    assert status == "NEEDS REVIEW"
+    assert any("calibration" in r for r in reasons)
+
+
+def test_header_renders_non_compliant_status_when_fairness_fails():
+    """Even with is_active=True, a failed fairness gate must surface in §1."""
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    mv = _make_mv(is_active=True)  # default has age_group failing
+    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(mv)
+
+    assert "**Compliance status:** NON-COMPLIANT" in md
+    assert "age_group" in md  # named reason surfaces in the header sub-list
+
+
+def test_header_renders_compliant_status_when_clean():
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    assert "**Compliance status:** COMPLIANT" in md
+
+
+def test_document_subtitle_drops_alignment_keeps_format_reference():
+    """Regression guard for the implicit-claim removal (Codex finding 2)."""
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    # Locate the subtitle line (second line of the document).
+    lines = md.splitlines()
+    subtitle = next((ln for ln in lines[:5] if ln.startswith("_Generated")), "")
+    assert subtitle, "Document subtitle line not found"
+    assert "alignment" not in subtitle, f"Subtitle still implies alignment: {subtitle!r}"
+    assert "APRA CPS 220 / SR 11-7" in subtitle
+    assert "Format:" in subtitle
+
+
+# ---------------------------------------------------------------------------
+# File-write helper
+# ---------------------------------------------------------------------------
+
+
 def test_write_dossier_creates_file_at_expected_path():
     from apps.ml_engine.services.mrm_dossier import write_dossier
 
