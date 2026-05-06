@@ -58,7 +58,7 @@ export function StatsCards({ totalApplications, approvalRate, avgProcessingTime,
       {stats.map((stat) => (
         <div
           key={stat.title}
-          className="group relative rounded-xl border bg-white p-5 sheen-card gradient-border"
+          className="group relative rounded-xl bg-white p-5 sheen-card gradient-border"
         >
           <div className="flex items-start justify-between">
             <div className="space-y-2">

@@ -118,13 +118,19 @@
   .gradient-border {
     position: relative;
   }
+  /* 1px brand-tinted ring rendered via padding+mask trick. The gradient stops
+     are kept at consistent opacity around the full perimeter so the ring is
+     visually uniform on every side — earlier the gradient faded to transparent
+     at one corner, leaving the bottom-right of every card visibly thinner /
+     less colored than the top-left. Use this in place of (not in addition to)
+     Tailwind's `border` class so we don't stack two 1px rings. */
   .gradient-border::before {
     content: '';
     position: absolute;
     inset: 0;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(145deg, rgba(99,102,241,0.15), rgba(139,92,246,0.08), transparent);
+    background: linear-gradient(145deg, rgba(99,102,241,0.18) 0%, rgba(139,92,246,0.14) 50%, rgba(99,102,241,0.18) 100%);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
