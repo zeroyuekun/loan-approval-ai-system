@@ -200,13 +200,13 @@ def _render_next_steps_block(steps: list[str]) -> str:
     for i, text in enumerate(steps, start=1):
         rows += (
             f"<tr>"
-            f'<td style="width:28px; padding:0 0 12px 0; vertical-align:middle;">'
+            f'<td style="width:28px; padding:0 0 12px 0; vertical-align:top;">'
             f'<div style="width:24px; height:24px; border-radius:12px; '
             f"background-color:{TOKENS['BRAND_PRIMARY']}; color:#ffffff; "
             f'font-size:12px; font-weight:600; line-height:24px; text-align:center;">{i}</div>'
             f"</td>"
             f'<td style="padding:0 0 12px 12px; font-size:{TOKENS["BODY_SIZE"]}; '
-            f'color:{TOKENS["TEXT"]}; vertical-align:middle;">{_e(text)}</td>'
+            f'color:{TOKENS["TEXT"]}; vertical-align:top;">{_e(text)}</td>'
             f"</tr>"
         )
     return (
@@ -1017,7 +1017,7 @@ def render_html(plain_body: str, email_type: EmailType) -> str:
         f"{_render_hero(email_type, plain_body)}"
         f'<tr><td style="padding:0 24px 32px 24px; font-family:{TOKENS["FONT_STACK"]}; '
         f"font-size:{TOKENS['BODY_SIZE']}; line-height:{TOKENS['LINE_HEIGHT']}; "
-        f'color:{TOKENS["TEXT"]};">'
+        f'color:{TOKENS["TEXT"]}; border-radius:0 0 8px 8px;">'
         f"{body_html}"
         f"</td></tr>"
         f"</table>"

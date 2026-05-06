@@ -192,13 +192,13 @@ function renderNextStepsBlock(steps: string[]): string {
     const i = idx + 1
     rows += (
       `<tr>` +
-      `<td style="width:28px; padding:0 0 12px 0; vertical-align:middle;">` +
+      `<td style="width:28px; padding:0 0 12px 0; vertical-align:top;">` +
       `<div style="width:24px; height:24px; border-radius:12px; ` +
       `background-color:${TOKENS.BRAND_PRIMARY}; color:#ffffff; ` +
       `font-size:12px; font-weight:600; line-height:24px; text-align:center;">${i}</div>` +
       `</td>` +
       `<td style="padding:0 0 12px 12px; font-size:${TOKENS.BODY_SIZE}; ` +
-      `color:${TOKENS.TEXT}; vertical-align:middle;">${escapeHtml(text)}</td>` +
+      `color:${TOKENS.TEXT}; vertical-align:top;">${escapeHtml(text)}</td>` +
       `</tr>`
     )
   })
@@ -976,7 +976,7 @@ export function renderEmailHtml(plainBody: string, emailType: EmailType): string
     `${renderHero(emailType, plainBody)}` +
     `<tr><td style="padding:0 24px 32px 24px; font-family:${TOKENS.FONT_STACK}; ` +
     `font-size:${TOKENS.BODY_SIZE}; line-height:${TOKENS.LINE_HEIGHT}; ` +
-    `color:${TOKENS.TEXT};">${bodyHtml}</td></tr>` +
+    `color:${TOKENS.TEXT}; border-radius:0 0 8px 8px;">${bodyHtml}</td></tr>` +
     `</table>` +
     `</td></tr>` +
     `</table>`
