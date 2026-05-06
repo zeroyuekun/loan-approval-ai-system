@@ -49,10 +49,16 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
 
 def _do_train(task, algorithm, data_path, lock, *, segment=None):
     """Inner training logic — called with lock held."""
+    from types import SimpleNamespace
+
     from apps.ml_engine.services.fairness_gate_mode import (
         evaluate_fairness_gate_for_activation,
     )
+    from apps.ml_engine.services.model_selector import promote_if_eligible
     from apps.ml_engine.services.predictor import clear_model_cache
+    from apps.ml_engine.services.promotion_gate_mode import (
+        evaluate_promotion_gates_for_activation,
+    )
     from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.trainer import ModelTrainer
 
@@ -84,6 +90,27 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
     fairness_data = metrics.get("fairness", {})
     gate_mode = getattr(settings, "ML_FAIRNESS_GATE_MODE", "warn")
     gate_decision = evaluate_fairness_gate_for_activation(fairness_data, gate_mode)
+
+    # Pre-activation champion-challenger promotion gates. Build a transient
+    # candidate stub from the in-memory metrics — promote_if_eligible reads
+    # via getattr + training_metadata, no DB write needed. The pk=None makes
+    # the .exclude(pk=...) clause inside promote_if_eligible a no-op which is
+    # correct here (we want the existing active model excluded only if it
+    # shares pk with us). In `block` mode this raises PromotionGateBlocked
+    # BEFORE the atomic activation block. See
+    # docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
+    candidate_stub = SimpleNamespace(
+        id="(pre-activation)",
+        pk=None,
+        segment=segment,
+        auc_roc=metrics["auc_roc"],
+        ks_statistic=metrics["ks_statistic"],
+        ece=metrics.get("calibration_data", {}).get("ece"),
+        training_metadata=metrics.get("training_metadata", {}),
+    )
+    promotion_decision = promote_if_eligible(candidate_stub)
+    promotion_mode = getattr(settings, "ML_PROMOTION_GATE_MODE", "warn")
+    promotion_gate_decision = evaluate_promotion_gates_for_activation(promotion_decision, promotion_mode)
 
     # Deactivate old models and activate new one atomically — if create()
     # fails, the old active model remains active (no zero-model gap).
@@ -131,10 +158,14 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
             next_review_date=(timezone.now() + timedelta(days=90)).date(),
         )
 
-    # Record the gate decision (mode + result) on the activated mv so the
-    # MRM dossier §1 banner has the audit trail. In `warn` mode a failed
-    # gate is logged + flagged; activation already happened.
-    gate_meta = {**(mv.training_metadata or {}), "fairness_gate_mode": gate_decision["mode"]}
+    # Record the gate decisions (mode + result) on the activated mv so the
+    # MRM dossier §1 banner has the audit trail for both gates. In `warn`
+    # mode a failed gate is logged + flagged; activation already happened.
+    gate_meta = {
+        **(mv.training_metadata or {}),
+        "fairness_gate_mode": gate_decision["mode"],
+        "promotion_gate_mode": promotion_gate_decision["mode"],
+    }
     gate_result = gate_decision["gate_result"]
     if gate_result is not None:
         gate_meta["fairness_gate"] = gate_result
@@ -148,6 +179,23 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
                 gate_result["minimum_dir"],
             )
             gate_meta["requires_fairness_review"] = True
+
+    # Promotion gate decision — record only when the dispatcher inspected it
+    # (None when mode == "off"). In `warn` mode log a clear line if rejected
+    # so audit trails capture the regression-vs-champion verdict even though
+    # activation proceeded.
+    promo_decision_payload = promotion_gate_decision["decision"]
+    if promo_decision_payload is not None:
+        gate_meta["promotion_gate"] = promo_decision_payload.to_dict()
+        if not promo_decision_payload.promoted:
+            logger.warning(
+                "Model %s REJECTED by promotion gates (mode=%s, reasons: %s). "
+                "Model remains active but flagged for human review.",
+                mv.id,
+                promotion_gate_decision["mode"],
+                "; ".join(promo_decision_payload.reasons),
+            )
+            gate_meta["requires_promotion_review"] = True
     mv.training_metadata = gate_meta
     mv.save(update_fields=["training_metadata"])
 
