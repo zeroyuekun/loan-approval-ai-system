@@ -49,6 +49,9 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
 
 def _do_train(task, algorithm, data_path, lock, *, segment=None):
     """Inner training logic — called with lock held."""
+    from apps.ml_engine.services.fairness_gate_mode import (
+        evaluate_fairness_gate_for_activation,
+    )
     from apps.ml_engine.services.predictor import clear_model_cache
     from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.trainer import ModelTrainer
@@ -71,6 +74,16 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
         for chunk in iter(lambda: f.read(8192), b""):
             sha256.update(chunk)
     file_hash = sha256.hexdigest()
+
+    # Pre-activation fairness gate. In `block` mode this raises
+    # FairnessGateBlocked BEFORE the atomic activation block — old segment
+    # models stay `is_active=True` because we never enter the transaction
+    # below. The outer `train_model_task` wrapper releases the training
+    # lock on the raise path. See
+    # docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
+    fairness_data = metrics.get("fairness", {})
+    gate_mode = getattr(settings, "ML_FAIRNESS_GATE_MODE", "warn")
+    gate_decision = evaluate_fairness_gate_for_activation(fairness_data, gate_mode)
 
     # Deactivate old models and activate new one atomically — if create()
     # fails, the old active model remains active (no zero-model gap).
@@ -118,24 +131,25 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
             next_review_date=(timezone.now() + timedelta(days=90)).date(),
         )
 
-    # Pre-deployment fairness gate — check DIR >= 0.80 for all protected attributes
-    from apps.ml_engine.services.fairness_gate import check_fairness_gate
-
-    fairness_data = metrics.get("fairness", {})
-    if fairness_data:
-        gate_result = check_fairness_gate(fairness_data)
-        # Store gate result in the model version metadata
-        mv.training_metadata = {**(mv.training_metadata or {}), "fairness_gate": gate_result}
+    # Record the gate decision (mode + result) on the activated mv so the
+    # MRM dossier §1 banner has the audit trail. In `warn` mode a failed
+    # gate is logged + flagged; activation already happened.
+    gate_meta = {**(mv.training_metadata or {}), "fairness_gate_mode": gate_decision["mode"]}
+    gate_result = gate_decision["gate_result"]
+    if gate_result is not None:
+        gate_meta["fairness_gate"] = gate_result
         if not gate_result["passed"]:
             logger.warning(
-                "Model %s FAILED fairness gate (failing: %s, min DIR: %s). "
+                "Model %s FAILED fairness gate (mode=%s, failing: %s, min DIR: %s). "
                 "Model remains active but flagged for human review.",
                 mv.id,
+                gate_decision["mode"],
                 gate_result["failing_attributes"],
                 gate_result["minimum_dir"],
             )
-            mv.training_metadata["requires_fairness_review"] = True
-        mv.save(update_fields=["training_metadata"])
+            gate_meta["requires_fairness_review"] = True
+    mv.training_metadata = gate_meta
+    mv.save(update_fields=["training_metadata"])
 
     # Invalidate cached models so workers pick up the new version
     clear_model_cache()
