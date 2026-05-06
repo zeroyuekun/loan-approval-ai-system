@@ -27,6 +27,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
+from apps.ml_engine.services.mrm_compliance import _compliance_status
+
 # ---------------------------------------------------------------------------
 # Purpose statements per segment. Kept adjacent so a change to the training
 # scope is one place, not scattered across templates.
@@ -64,26 +66,69 @@ def _header_section(mv) -> str:
     trained_at = getattr(mv, "created_at", None)
     algorithm_display = mv.get_algorithm_display() if hasattr(mv, "get_algorithm_display") else mv.algorithm
     training_meta = mv.training_metadata or {}
-    return "\n".join(
-        [
-            "## 1. Header",
-            "",
-            f"- **Model ID:** `{mv.id}`",
-            f"- **Algorithm:** {algorithm_display}",
-            f"- **Version:** {mv.version}",
-            f"- **Segment:** `{mv.segment}`",
-            f"- **Trained at:** {trained_at.isoformat() if trained_at else 'unknown'}",
-            f"- **Training duration:** {training_meta.get('training_seconds', 'unknown')}s",
-            f"- **Training samples:** {training_meta.get('n_training_samples', 'unknown')}",
-            f"- **Class balance (positive rate):** {training_meta.get('positive_rate', 'unknown')}",
-            f"- **Active:** {mv.is_active}",
-            f"- **File hash (SHA-256):** `{mv.file_hash or 'not recorded'}`",
-        ]
-    )
+    status, reasons = _compliance_status(mv)
+    lines = [
+        "## 1. Header",
+        "",
+        f"- **Model ID:** `{mv.id}`",
+        f"- **Algorithm:** {algorithm_display}",
+        f"- **Version:** {mv.version}",
+        f"- **Segment:** `{mv.segment}`",
+        f"- **Trained at:** {trained_at.isoformat() if trained_at else 'unknown'}",
+        f"- **Training duration:** {training_meta.get('training_seconds', 'unknown')}s",
+        f"- **Training samples:** {training_meta.get('n_training_samples', 'unknown')}",
+        f"- **Class balance (positive rate):** {training_meta.get('positive_rate', 'unknown')}",
+        f"- **Active:** {mv.is_active}",
+        f"- **Compliance status:** {status}",
+    ]
+    for reason in reasons:
+        lines.append(f"  - {reason}")
+    lines.append(f"- **File hash (SHA-256):** `{mv.file_hash or 'not recorded'}`")
+    return "\n".join(lines)
+
+
+_OUT_OF_SCOPE_BY_OVERLAY_MODE = {
+    "off": (
+        "No policy overlay is active in this deployment. Out-of-scope predictions "
+        "are not flagged or blocked at runtime — manual scope review is required at "
+        "intake (see §9)."
+    ),
+    "shadow": (
+        "The policy overlay runs in `shadow` (observational) mode in this deployment. "
+        "Out-of-scope predictions are flagged for monitoring but **not blocked**; "
+        "manual underwriter review depends on operator workflow rather than automated "
+        "routing (see §9)."
+    ),
+    "enforce": (
+        "The policy overlay runs in `enforce` mode in this deployment. Out-of-scope "
+        "predictions are blocked by the overlay and routed to manual underwriter "
+        "review (see §9 P-codes)."
+    ),
+}
 
 
 def _purpose_section(mv) -> str:
-    """§2 — Purpose & limitations."""
+    """§2 — Purpose & limitations.
+
+    The closing paragraph used to assert that out-of-scope predictions "must be
+    treated as advisory only and referred to human underwriter review" — but
+    that referral is only enforced by the policy overlay in `enforce` mode
+    (`credit_policy.py:418-425`). The default deployment mode is `shadow`,
+    which is observational. Read the effective mode at generation time and
+    emit the wording that matches actual runtime behaviour.
+    """
+    # Deferred import keeps the module importable in unit tests that fake the
+    # ModelVersion without booting Django (existing test pattern).
+    try:
+        from django.conf import settings
+
+        mode = getattr(settings, "CREDIT_POLICY_OVERLAY_MODE", "shadow")
+    except Exception:
+        mode = "shadow"
+    if mode not in _OUT_OF_SCOPE_BY_OVERLAY_MODE:
+        # Mirrors credit_policy.py:405 — unknown values default to shadow.
+        mode = "shadow"
+
     purpose = _SEGMENT_PURPOSE.get(mv.segment, "Segment-specific purpose statement not yet registered.")
     return "\n".join(
         [
@@ -91,9 +136,7 @@ def _purpose_section(mv) -> str:
             "",
             purpose,
             "",
-            "All scope boundaries above reflect the training distribution. "
-            "Predictions on applications outside scope must be treated as advisory "
-            "only and referred to human underwriter review (see §9 policy overlay).",
+            "All scope boundaries above reflect the training distribution. " + _OUT_OF_SCOPE_BY_OVERLAY_MODE[mode],
         ]
     )
 
@@ -176,7 +219,10 @@ def _performance_section(mv) -> str:
             "",
             "KS > 0.30 and AUC > 0.75 are the regulator-expected performance floor "
             "for AU retail-credit scorecards. Champion-challenger promotion gates "
-            "(see model_selector.py) enforce these + PSI and calibration ceilings.",
+            "exist in `model_selector.py` (PSI, calibration, KS); the current "
+            "activation path in `tasks.py` activates new models directly, so "
+            "confirm pre-promotion review for production deployments before "
+            "relying on these gates.",
         ]
     )
 
@@ -295,7 +341,7 @@ def _monitoring_section(mv) -> str:
             "- **ECE re-validation cadence:** quarterly.",
             "- **KS regression trigger:** drop > 5pp vs champion baseline triggers retrain.",
             "- **Fairness audit cadence:** every training run pre-promotion (see fairness_gate.py).",
-            "- **Drift dashboard:** `/api/ml-engine/drift/` (weekly DriftReport cron).",
+            "- **Drift dashboard:** `/api/v1/ml/models/active/drift/` (weekly DriftReport cron).",
         ]
     )
 
@@ -351,7 +397,7 @@ def generate_dossier_markdown(mv) -> str:
     generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     sections: Iterable[str] = [
         f"# Model Risk Management Dossier — `{mv.id}`",
-        f"_Generated {generated_at} — APRA CPS 220 / SR 11-7 alignment_",
+        f"_Generated {generated_at} — Format: APRA CPS 220 / SR 11-7_",
         "",
         _header_section(mv),
         "",
