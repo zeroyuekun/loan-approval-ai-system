@@ -53,6 +53,11 @@ class LoanApplicationAdmin(admin.ModelAdmin):
         from apps.agents.tasks import orchestrate_pipeline_task
 
         def _dispatch():
+            # NOTE: messages.warning is NOT reliable here — transaction.on_commit fires
+            # after MessageMiddleware has serialized request._messages, so any message
+            # added in this closure is lost. Failure visibility comes from the
+            # QUEUE_FAILED status flip below, surfaced via the dashboard's status
+            # filter. Mirrors loans/views.py:73 perform_create.
             try:
                 orchestrate_pipeline_task.delay(str(obj.pk))
                 logger.info("Admin-triggered pipeline for application %s", obj.pk)
@@ -66,10 +71,7 @@ class LoanApplicationAdmin(admin.ModelAdmin):
                     application=obj,
                     defaults={"last_error": str(exc)[:1000]},
                 )
-                messages.warning(
-                    request,
-                    f"Application saved but pipeline dispatch failed ({exc}). Queued to outbox for retry.",
-                )
+                LoanApplication.objects.filter(pk=obj.pk).update(status=LoanApplication.Status.QUEUE_FAILED)
 
         transaction.on_commit(_dispatch)
 
@@ -77,12 +79,12 @@ class LoanApplicationAdmin(admin.ModelAdmin):
         if recipient:
             messages.success(
                 request,
-                f"Pipeline started. Decision email will be sent to {recipient}.",
+                f"Application queued — the decision email will be sent to {recipient} once processing completes.",
             )
         else:
             messages.warning(
                 request,
-                "Pipeline started but applicant has no email on file — no decision email will be sent.",
+                "Application queued, but applicant has no email on file — no decision email will be sent.",
             )
 
 
