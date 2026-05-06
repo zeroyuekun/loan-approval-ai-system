@@ -549,4 +549,127 @@ print(f'Steps: {run.steps}')
 "
 ```
 
+## Pre-Activation Gate Enablement
+
+Three opt-in env-var-driven gates control model and prediction safety. Each
+defaults to a non-blocking mode so deployments ship zero behaviour change;
+flip to enforcing modes only after confirming the prerequisites below.
+
+| Variable | Default | Enforcing value | Effect when enforcing |
+|---|---|---|---|
+| `ML_FAIRNESS_GATE_MODE` | `warn` | `block` | `train_model_task` refuses activation if the EEOC 80% rule fails for any protected attribute, or if `metrics["fairness"]` is empty. Old segment models keep `is_active=True`; no zero-model gap. |
+| `ML_PROMOTION_GATE_MODE` | `warn` | `block` | `train_model_task` refuses activation if `model_selector.promote_if_eligible` reports any of the four champion-challenger gates failed (KS regression, PSI stability, ECE calibration, AUC regression). |
+| `CREDIT_POLICY_OVERLAY_MODE` | `shadow` | `enforce` | `apply_overlay_to_decision` overrides the model verdict on every prediction when policy rules trigger (P-codes in `services/credit_policy.py`). Shadow mode logs the would-be override but returns the model verdict; enforce mode actually applies it. |
+
+The first two gate `train_model_task` (rare event — runs on retraining
+cadence). The third gates **every prediction** that hits the policy overlay,
+so its blast radius is broader and rollout deserves more care.
+
+### Prerequisite checklist — `ML_FAIRNESS_GATE_MODE=block`
+
+- [ ] Recent training runs produce `metrics["fairness"]` with all protected
+      attributes recorded. Verify by inspecting
+      `mv.training_metadata["fairness_gate"]` on the most recent active
+      `ModelVersion` in each segment.
+- [ ] Every currently-active model passes the EEOC 80% rule. Review the
+      §1 Header `Compliance status` line in each active model's MRM
+      dossier (`python manage.py generate_mrm_dossier <model_id>`) — if
+      any show `NON-COMPLIANT` for fairness, retrain *before* flipping
+      to `block`. The runtime gate runs on new training only and will not
+      retroactively deactivate existing failing models, but operators
+      should not be flying blind on the existing ones either.
+- [ ] On-call alerting picks up `FairnessGateBlocked` Celery task
+      failures (the exception subclass is `RuntimeError` so any generic
+      Celery-failure alert catches it; you may want a dedicated alert
+      that names the env var so the on-call sees the remediation path).
+- [ ] Documented rollback acknowledged: set `ML_FAIRNESS_GATE_MODE=warn`
+      and restart the `worker_ml` Celery worker.
+
+### Prerequisite checklist — `ML_PROMOTION_GATE_MODE=block`
+
+- [ ] Trainer emits `training_metadata.psi_by_feature` on every run
+      (introduced in v1.9.9). Verify on the most recent training run.
+- [ ] `metrics["calibration_data"]["ece"]` is populated (introduced
+      pre-v1.9.0; legacy models without it will fail Gate 3).
+- [ ] At least one champion exists per segment you train, OR you are
+      okay with first-model-in-segment auto-promotion after PSI+ECE
+      pass (the gate short-circuits Gates 1+4 in this case).
+- [ ] Documented rollback acknowledged: set `ML_PROMOTION_GATE_MODE=warn`
+      and restart the `worker_ml` Celery worker.
+
+### Prerequisite checklist — `CREDIT_POLICY_OVERLAY_MODE=enforce`
+
+This one is **not** purely an ML concern — the policy overlay can flip a
+model `approved` to a hard `decline` (or vice versa for hard-pass rules).
+Customer-facing impact is real.
+
+- [ ] Shadow-mode telemetry has been collected for **at least four weeks**
+      (or one full training cycle, whichever is longer). Review
+      `PolicyOverlayDecision` rows or whatever observability surface the
+      shadow-mode logs land in. Confirm the per-rule trigger rate matches
+      expectations and there are no obvious false positives.
+- [ ] Each P-code in `services/credit_policy.POLICY_RULES` has been
+      reviewed by Compliance + Product for AU regulatory alignment.
+      Hard-fail rules (P04 ATO tax-debt default, etc.) must be confirmed
+      acceptable as decline drivers.
+- [ ] Customer-facing decline messaging is in place for blocked
+      predictions. The MRM dossier §2 wording will switch from
+      "policy overlay runs in `shadow` (observational) mode" to
+      "policy overlay runs in `enforce` mode" automatically — but the
+      *email content* sent to declined customers is owned by
+      `email_engine` and must reference policy-driven declines properly
+      (see `email_engine/services/template_fallback.py` denial templates).
+- [ ] On-call alerting picks up an unexpected spike in policy-driven
+      declines (e.g. >20% of decisions in any 1-hour window). A bad rule
+      could cause mass declines; an alert short-circuits the blast.
+- [ ] Documented rollback acknowledged: set
+      `CREDIT_POLICY_OVERLAY_MODE=shadow` and restart the backend +
+      Celery workers (or `off` if you suspect a code-level overlay bug
+      and need to bypass entirely while you investigate).
+
+### Enablement procedure
+
+1. Confirm all prerequisites for the gate you're enabling.
+2. Update the deployment env file (or your secrets manager) with the new
+   value. Do **not** edit `backend/config/settings/base.py` — the default
+   stays at the safe value so a misconfigured deployment doesn't silently
+   downgrade.
+3. Restart the affected services:
+   - `ML_FAIRNESS_GATE_MODE` and `ML_PROMOTION_GATE_MODE`: restart `worker_ml`
+     (the Celery worker that runs `train_model_task`).
+   - `CREDIT_POLICY_OVERLAY_MODE`: restart `backend` + all Celery workers
+     (the setting is read on every prediction, but workers cache the
+     resolved settings module on import).
+4. Trigger a smoke test:
+   - Fairness/promotion: kick off a training run via
+     `POST /api/v1/ml/models/train/` and verify the resulting
+     `mv.training_metadata.{fairness_gate_mode,promotion_gate_mode}` reflects
+     the new mode. If `block` mode rejects the run, that is the gate working
+     as intended — review the failure reasons before flipping back.
+   - Overlay: hit a known out-of-scope application via the predictions
+     endpoint and verify the response carries the policy-overlay decision
+     in the audit log.
+5. Monitor for 24 hours before considering the rollout permanent. The
+   safe rollback is a one-line env-var change — there is no DB state or
+   migration to worry about.
+
+### Rollback
+
+Set the relevant env var back to its safe default and restart the affected
+services (see step 3 above):
+
+| Variable | Safe default |
+|---|---|
+| `ML_FAIRNESS_GATE_MODE` | `warn` |
+| `ML_PROMOTION_GATE_MODE` | `warn` |
+| `CREDIT_POLICY_OVERLAY_MODE` | `shadow` |
+
+Currently-active models with failed gates remain active across the flip —
+the rollback path is symmetric with the enablement path. There is no
+data-migration step.
+
+The code paths for the safe defaults are byte-identical to the pre-gate
+behaviour shipped before PRs #163 and #164, so reverting should never
+introduce new failure modes — only remove the gate's protection.
+
 **Prevention:** The circuit breaker auto-recovers after a 10-minute cooldown period (`AI_CIRCUIT_BREAKER_COOLDOWN = 600`). Template fallback ensures decision emails always go out regardless of API availability. The daily API budget (500 calls / $50 USD) resets at midnight UTC.
