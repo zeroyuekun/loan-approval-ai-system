@@ -223,6 +223,45 @@ def test_policy_section_enumerates_all_p_codes():
 
 
 # ---------------------------------------------------------------------------
+# Performance section: dossier should not assert champion-challenger gates
+# are *enforced* on activation (they are not — tasks.py:82-88 activates
+# directly). (Codex 2026-05-06 finding 3a.)
+# ---------------------------------------------------------------------------
+
+
+def test_performance_section_no_longer_claims_gates_are_enforced():
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    # Regression guard for the original overstated language.
+    assert "enforce these" not in md
+    # Honest replacement language must be present.
+    assert "gates exist" in md.lower() or "exist in `model_selector.py`" in md
+    assert "confirm pre-promotion review" in md
+
+
+# ---------------------------------------------------------------------------
+# Monitoring drift URL must point at a real route. (Codex 2026-05-06
+# finding 3b — the original /api/ml-engine/drift/ was a 404.)
+# ---------------------------------------------------------------------------
+
+
+def test_monitoring_drift_url_uses_actual_route():
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    assert "/api/v1/ml/models/active/drift/" in md
+    # Regression guard against the dead legacy URL.
+    assert "/api/ml-engine/drift/" not in md
+
+
+# ---------------------------------------------------------------------------
 # Out-of-scope wording is conditional on the runtime overlay mode.
 # (Codex 2026-05-06 finding 1 — the dossier used to claim mandatory referral
 # unconditionally, but the runtime only enforces it in `enforce` mode.)

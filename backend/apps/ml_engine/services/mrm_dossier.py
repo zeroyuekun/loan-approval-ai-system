@@ -293,7 +293,10 @@ def _performance_section(mv) -> str:
             "",
             "KS > 0.30 and AUC > 0.75 are the regulator-expected performance floor "
             "for AU retail-credit scorecards. Champion-challenger promotion gates "
-            "(see model_selector.py) enforce these + PSI and calibration ceilings.",
+            "exist in `model_selector.py` (PSI, calibration, KS); the current "
+            "activation path in `tasks.py` activates new models directly, so "
+            "confirm pre-promotion review for production deployments before "
+            "relying on these gates.",
         ]
     )
 
@@ -412,7 +415,7 @@ def _monitoring_section(mv) -> str:
             "- **ECE re-validation cadence:** quarterly.",
             "- **KS regression trigger:** drop > 5pp vs champion baseline triggers retrain.",
             "- **Fairness audit cadence:** every training run pre-promotion (see fairness_gate.py).",
-            "- **Drift dashboard:** `/api/ml-engine/drift/` (weekly DriftReport cron).",
+            "- **Drift dashboard:** `/api/v1/ml/models/active/drift/` (weekly DriftReport cron).",
         ]
     )
 
