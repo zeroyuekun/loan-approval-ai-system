@@ -109,11 +109,15 @@
   }
   .sheen-card {
     background: linear-gradient(145deg, #ffffff 0%, #fdfdff 40%, #fafaff 70%, #ffffff 100%);
+    /* Neutralised: same 4-stack architecture (drop, soft-drop, top inset
+       highlight, bottom inset shadow) but the drop and inset are now slate-900
+       not indigo. The indigo tint is the "AI-generated" tell — every fintech
+       template ships with it. Slate keeps the depth without the giveaway. */
     box-shadow:
-      0 2px 8px -2px rgb(99 102 241 / 0.08),
+      0 2px 8px -2px rgb(15 23 42 / 0.06),
       0 1px 2px 0 rgb(0 0 0 / 0.03),
       inset 0 1px 0 0 rgb(255 255 255 / 0.8),
-      inset 0 -1px 0 0 rgb(99 102 241 / 0.04);
+      inset 0 -1px 0 0 rgb(15 23 42 / 0.03);
   }
   .gradient-border {
     position: relative;
@@ -130,7 +134,10 @@
     inset: 0;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(145deg, rgba(99,102,241,0.18) 0%, rgba(139,92,246,0.14) 50%, rgba(99,102,241,0.18) 100%);
+    /* Neutralised: was indigo→violet→indigo (a fintech-template cliche).
+       Now a uniform slate-900 ring with a gentle midpoint dip — same
+       directional flow, no colour cast. */
+    background: linear-gradient(145deg, rgba(15,23,42,0.10) 0%, rgba(15,23,42,0.07) 50%, rgba(15,23,42,0.10) 100%);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
