@@ -158,7 +158,11 @@ def test_get_form_keeps_applicant_required_on_change(admin_request, admin_user):
 
 
 def test_save_model_warns_when_applicant_has_no_email(admin_request, db):
-    """If the resolved applicant has no email, surface a warning so admin knows."""
+    """If the resolved applicant has no email, surface a warning so admin knows.
+
+    Tightened to assert exactly one message of warning level — defends against
+    any future change that adds duplicate or stray messages on this path.
+    """
     no_email_user = User.objects.create_user(
         username="noemail",
         password="test1234",
@@ -173,5 +177,38 @@ def test_save_model_warns_when_applicant_has_no_email(admin_request, db):
         _admin().save_model(admin_request, app, form=None, change=False)
 
     messages_storage = list(admin_request._messages)
-    assert any("no email on file" in str(m).lower() for m in messages_storage)
-    assert any("application queued" in str(m).lower() for m in messages_storage)
+    assert len(messages_storage) == 1, f"expected exactly 1 message, got {len(messages_storage)}: {messages_storage}"
+    only_msg = str(messages_storage[0]).lower()
+    assert "application queued" in only_msg
+    assert "no email on file" in only_msg
+
+
+def test_save_model_celery_failure_emits_no_warning_message(admin_request, admin_user):
+    """Regression guard: messages added inside the transaction.on_commit closure
+    are silently lost (MessageMiddleware has already serialized request._messages
+    by the time on_commit fires). The Celery-failure path must therefore NOT
+    add any message — failure visibility comes from the QUEUE_FAILED status flip.
+
+    Without this guard, a future contributor who tests against the on_commit
+    patch (which fires the closure synchronously) might re-introduce a warning
+    that 'works in tests' but disappears in production.
+    """
+    app = _make_app(applicant=admin_user)
+    mock_task = MagicMock()
+    mock_task.delay.side_effect = ConnectionError("broker down")
+
+    with (
+        patch("apps.agents.tasks.orchestrate_pipeline_task", mock_task),
+        patch("apps.loans.admin.transaction.on_commit", side_effect=lambda fn: fn()),
+    ):
+        _admin().save_model(admin_request, app, form=None, change=False)
+
+    messages_storage = list(admin_request._messages)
+    # Exactly one synchronous success message (added before on_commit). No
+    # extras from the closure.
+    assert len(messages_storage) == 1, (
+        f"expected exactly 1 message (synchronous success), got {len(messages_storage)}: {messages_storage}"
+    )
+    only_msg = str(messages_storage[0]).lower()
+    assert "application queued" in only_msg, "synchronous success message expected"
+    assert "failed" not in only_msg, "no failure verbiage — that signal goes via QUEUE_FAILED status, not messages"

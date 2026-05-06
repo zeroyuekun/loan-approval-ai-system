@@ -355,6 +355,18 @@ def test_inner_max_width_600():
     assert "max-width:600px" in html
 
 
+def test_render_html_includes_outlook_bottom_radius():
+    """Body td carries border-radius:0 0 8px 8px so Outlook's MSO renderer
+    (which doesn't honor table-level border-radius) still gets rounded
+    bottom corners. Regression guard against silently dropping the
+    declaration during refactors that auto-regenerate snapshots."""
+    for email_type in ("approval", "denial", "marketing"):
+        html = render_html("Dear John,\n\nHello.\n", email_type=email_type)
+        assert "border-radius:0 0 8px 8px" in html, (
+            f"{email_type}: body td must carry bottom border-radius for Outlook clients"
+        )
+
+
 # ----------------------------------------------------------------------------
 # Gmail-safe lint hardening (PR 6 Task 6.3)
 # ----------------------------------------------------------------------------
