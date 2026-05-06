@@ -120,8 +120,10 @@ def test_save_model_does_not_enqueue_on_update(admin_request, admin_user):
 
 
 def test_save_model_handles_celery_failure_gracefully(admin_request, admin_user):
-    """If orchestrate_pipeline_task.delay() blows up, save still succeeds and
-    application is queued in PipelineDispatchOutbox for retry."""
+    """If orchestrate_pipeline_task.delay() blows up, save still succeeds,
+    application is queued in PipelineDispatchOutbox for retry, AND status is
+    flipped to QUEUE_FAILED so the dashboard surfaces the dispatch failure
+    (matches loans/views.py:73 perform_create behaviour)."""
     app = _make_app(applicant=admin_user)
     mock_task = MagicMock()
     mock_task.delay.side_effect = ConnectionError("broker down")
@@ -136,6 +138,8 @@ def test_save_model_handles_celery_failure_gracefully(admin_request, admin_user)
     assert LoanApplication.objects.filter(pk=app.pk).exists()
     # Outbox row exists for retry
     assert PipelineDispatchOutbox.objects.filter(application=app).exists()
+    # Status flipped to QUEUE_FAILED so the dashboard QUEUE_FAILED filter surfaces it
+    assert LoanApplication.objects.get(pk=app.pk).status == LoanApplication.Status.QUEUE_FAILED
 
 
 def test_get_form_marks_applicant_optional_on_create(admin_request, admin_user):
@@ -170,3 +174,4 @@ def test_save_model_warns_when_applicant_has_no_email(admin_request, db):
 
     messages_storage = list(admin_request._messages)
     assert any("no email on file" in str(m).lower() for m in messages_storage)
+    assert any("application queued" in str(m).lower() for m in messages_storage)
