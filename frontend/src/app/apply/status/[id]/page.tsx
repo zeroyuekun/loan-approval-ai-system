@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
-import { formatCurrency, formatDate, getDisplayStatus } from '@/lib/utils'
+import { formatCurrency, formatDate, formatPurpose, getDisplayStatus } from '@/lib/utils'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
 
 const statusIcons: Record<string, React.ReactNode> = {
@@ -235,7 +235,7 @@ export default function CustomerApplicationStatusPage() {
         <CardContent className="flex items-center gap-6 py-8">
           {statusIcons[application.status] || statusIcons.pending}
           <div>
-            <h2 className="text-xl font-bold capitalize mb-1">{application.purpose} Loan</h2>
+            <h2 className="text-xl font-bold mb-1">{formatPurpose(application.purpose)} Loan</h2>
             <div aria-live="polite" aria-atomic="true">
               <div className="flex items-center gap-3 mb-1">
                 {(() => { const s = getDisplayStatus(application.status, application.decision); return (
@@ -315,7 +315,7 @@ export default function CustomerApplicationStatusPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Purpose</span>
-              <span className="capitalize">{application.purpose}</span>
+              <span>{formatPurpose(application.purpose)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Home Ownership</span>

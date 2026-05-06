@@ -112,26 +112,28 @@ def test_render_html_includes_legacy_body():
     assert "Hello." in result
 
 
-def test_approval_renders_success_hero():
+def test_approval_hero_is_iconless():
     body = _load_fixture("approval_01_personal")
     html = render_html(body, email_type="approval")
-    assert f"background-color:{TOKENS['SUCCESS']}" in html
-    assert "&#10003;" in html
+    assert "&#10003;" not in html
+    assert "width:48px; height:48px; border-radius:24px" not in html
     assert "Congratulations" in html
 
 
-def test_denial_hero_omits_orange_info_icon():
+def test_denial_hero_is_iconless():
     body = "Dear John,\n\nWe reviewed your application.\n"
     html = render_html(body, email_type="denial")
     assert "&#9432;" not in html
+    assert "width:48px; height:48px; border-radius:24px" not in html
     assert "Update on Your Application" in html
 
 
-def test_marketing_renders_marketing_hero():
+def test_marketing_hero_is_iconless():
     body = "Dear John,\n\nHere are some options.\n"
     html = render_html(body, email_type="marketing")
-    assert f"background-color:{TOKENS['MARKETING']}" in html
-    assert "&#10022;" in html
+    assert "&#10022;" not in html
+    assert "width:48px; height:48px; border-radius:24px" not in html
+    assert "A Few Options for You" in html
 
 
 def test_hero_extracts_first_name_from_greeting():
@@ -144,6 +146,27 @@ def test_hero_approval_extracts_loan_type():
     body = "Dear Emma,\n\nWe are pleased to advise that your application for a Home Loan has been approved.\n"
     html = render_html(body, email_type="approval")
     assert "Your Home Loan Is Approved" in html
+
+
+def test_hero_approval_extracts_multi_word_loan_type():
+    # APPROVAL_LOAN_TYPE_RE was widened to capture multi-word product names like
+    # "Home Improvement Loan" and "Investment Property Loan" — single-word
+    # capture would otherwise truncate to "Improvement Loan" / "Property Loan".
+    body = (
+        "Dear Aiyana,\n\nWe are pleased to advise that your application for a "
+        "Home Improvement Loan has been approved.\n"
+    )
+    html = render_html(body, email_type="approval")
+    assert "Your Home Improvement Loan Is Approved" in html
+
+
+def test_hero_approval_extracts_three_word_loan_type():
+    body = (
+        "Dear Aiyana,\n\nWe are pleased to advise that your application for an "
+        "Investment Property Loan has been approved.\n"
+    )
+    html = render_html(body, email_type="approval")
+    assert "Your Investment Property Loan Is Approved" in html
 
 
 def test_approval_loan_details_renders_as_card():

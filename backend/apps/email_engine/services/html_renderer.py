@@ -77,21 +77,18 @@ CLOSINGS = ["Kind regards,", "Warm regards,"]
 
 OPTION_PATTERN = re.compile(r"^Option\s+\d+[\s:.\-\u2013\u2014]")
 LOAN_DETAIL_RE = re.compile(r"^(\s{2,})(\S[^:]+:)\s+(.+)$")
-APPROVAL_LOAN_TYPE_RE = re.compile(r"application for an? ([A-Z][A-Za-z]+ Loan)")
+APPROVAL_LOAN_TYPE_RE = re.compile(r"application for an? ([A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)* Loan)")
 
 HERO_CONFIG: dict[str, dict[str, str]] = {
     "approval": {
-        "icon": "&#10003;",
         "color": TOKENS["SUCCESS"],
         "default_headline": "Your Loan Is Approved",
     },
     "denial": {
-        "icon": "&#9432;",
         "color": TOKENS["CAUTION"],
         "default_headline": "Update on Your Application",
     },
     "marketing": {
-        "icon": "&#10022;",
         "color": TOKENS["MARKETING"],
         "default_headline": "A Few Options for You",
     },
@@ -712,10 +709,9 @@ def _render_marketing_closing(first_name: str) -> str:
     return (
         f'<div style="padding:4px 0 16px 0; font-size:{TOKENS["BODY_SIZE"]}; '
         f'line-height:{TOKENS["LINE_HEIGHT"]}; color:{TOKENS["TEXT"]};">'
-        f"Take your time with the options above, {_e(first_name)} \u2013 there\u2019s "
-        f"no rush. If you\u2019d like to talk any of them through, or want to "
-        f"explore something different, I\u2019m happy to help. Just give me a call "
-        f"or reply to this email whenever you\u2019re ready."
+        f"Not sure which one suits you, {_e(first_name)}? I\u2019m happy to "
+        f"talk any of them through \u2013 no pressure, no obligation. Give "
+        f"me a call or reply to this email whenever you\u2019re ready."
         f"</div>"
     )
 
@@ -860,23 +856,11 @@ def _render_hero(email_type: EmailType, body: str) -> str:
     else:
         headline = cfg["default_headline"]
         subtitle = "A few options tailored to you"
-    if email_type == "denial":
-        icon_html = ""
-        headline_margin = "0 0 4px 0"
-    else:
-        icon_html = (
-            f'<div style="width:48px; height:48px; border-radius:24px; '
-            f"background-color:{cfg['color']}; text-align:center; "
-            f"line-height:48px; color:#ffffff; font-size:24px; "
-            f'font-weight:600;">{cfg["icon"]}</div>'
-        )
-        headline_margin = "12px 0 4px 0"
     return (
         f'<tr><td style="padding:32px 24px 16px 24px; '
         f'font-family:{TOKENS["FONT_STACK"]};">'
-        f"{icon_html}"
         f'<h1 style="font-size:{TOKENS["HEAD_SIZE"]}; line-height:28px; '
-        f'color:{TOKENS["TEXT"]}; margin:{headline_margin}; font-weight:600;">'
+        f'color:{TOKENS["TEXT"]}; margin:0 0 4px 0; font-weight:600;">'
         f"{headline}</h1>"
         f'<div style="font-size:{TOKENS["LABEL_SIZE"]}; '
         f'color:{TOKENS["MUTED"]};">{subtitle}</div>'

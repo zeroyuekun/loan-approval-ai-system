@@ -28,15 +28,21 @@ def _ref_number(purpose, applicant_name):
 
 
 def _loan_type(purpose):
-    """Convert purpose to display loan type."""
+    """Convert purpose to display loan type.
+
+    Falls back to a human-readable Title Case conversion for any value not in
+    the explicit mapping — strips underscores so legacy/unknown values like
+    "home_improvement" render as "Home Improvement" rather than "Home_Improvement".
+    """
     mapping = {
         "home": "Home Purchase",
+        "home_improvement": "Home Improvement",
         "auto": "Vehicle",
         "personal": "Personal",
         "business": "Business",
         "education": "Education",
     }
-    return mapping.get(purpose.lower(), purpose.title())
+    return mapping.get(purpose.lower(), purpose.replace("_", " ").title())
 
 
 def _first_name(applicant_name):

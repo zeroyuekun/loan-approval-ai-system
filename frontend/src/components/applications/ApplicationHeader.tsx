@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { LoanApplication } from '@/types'
-import { formatDate, getDisplayStatus } from '@/lib/utils'
+import { formatDate, formatPurpose, getDisplayStatus } from '@/lib/utils'
 
 interface ApplicationHeaderProps {
   application: LoanApplication
@@ -39,7 +39,7 @@ export function ApplicationHeader({ application }: ApplicationHeaderProps) {
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Purpose</span>
-          <span className="capitalize">{application.purpose}</span>
+          <span>{formatPurpose(application.purpose)}</span>
         </div>
       </CardContent>
     </Card>

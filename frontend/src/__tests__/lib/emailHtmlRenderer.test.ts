@@ -54,6 +54,38 @@ describe('renderEmailHtml', () => {
     const result = renderEmailHtml('Dear John,', 'approval')
     expect(result).toContain('max-width:600px')
   })
+
+  it('extracts single-word loan type into hero headline', () => {
+    const body = 'Dear Emma,\n\nWe are pleased to advise that your application for a Home Loan has been approved.\n'
+    const result = renderEmailHtml(body, 'approval')
+    expect(result).toContain('Your Home Loan Is Approved')
+  })
+
+  it('extracts multi-word loan type into hero headline', () => {
+    // APPROVAL_LOAN_TYPE_RE was widened to capture "Home Improvement Loan",
+    // "Investment Property Loan", etc. The single-word version of the regex
+    // would otherwise truncate the first word.
+    const body = 'Dear Aiyana,\n\nWe are pleased to advise that your application for a Home Improvement Loan has been approved.\n'
+    const result = renderEmailHtml(body, 'approval')
+    expect(result).toContain('Your Home Improvement Loan Is Approved')
+  })
+
+  it('extracts three-word loan type into hero headline', () => {
+    const body = 'Dear Aiyana,\n\nWe are pleased to advise that your application for an Investment Property Loan has been approved.\n'
+    const result = renderEmailHtml(body, 'approval')
+    expect(result).toContain('Your Investment Property Loan Is Approved')
+  })
+
+  it('does not render hero icon circle for any email type', () => {
+    // Regression guard for the iconless-hero design (approval/denial/marketing).
+    for (const t of ['approval', 'denial', 'marketing'] as const) {
+      const result = renderEmailHtml('Dear John,\n\nHello.\n', t)
+      expect(result).not.toContain('width:48px; height:48px; border-radius:24px')
+      expect(result).not.toContain('&#10003;') // approval check
+      expect(result).not.toContain('&#9432;') // denial info
+      expect(result).not.toContain('&#10022;') // marketing sparkle
+    }
+  })
 })
 
 const FIXTURE_DIR = path.resolve(__dirname, '../fixtures/email_bodies')

@@ -42,3 +42,21 @@ export function getDisplayStatus(status: string, decision?: { decision: string }
   return { label, color: getStatusColor(status) }
 }
 
+const PURPOSE_LABELS: Record<string, string> = {
+  home: 'Home Purchase',
+  home_improvement: 'Home Improvement',
+  auto: 'Vehicle',
+  personal: 'Personal',
+  business: 'Business',
+  education: 'Education',
+}
+
+export function formatPurpose(purpose: string | null | undefined): string {
+  if (!purpose) return ''
+  const key = purpose.toLowerCase()
+  if (PURPOSE_LABELS[key]) return PURPOSE_LABELS[key]
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
