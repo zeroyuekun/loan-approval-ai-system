@@ -107,6 +107,10 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             from apps.loans.models import PipelineDispatchOutbox
 
             def _dispatch():
+                # The outbox-record and status-flip each get their own try/except so a
+                # failure in one (e.g., DB lock on the outbox table) doesn't prevent
+                # the other from running. on_commit hooks must not raise — Django
+                # logs but there's no recovery path post-response.
                 try:
                     orchestrate_pipeline_task.delay(str(instance.pk))
                     logger.info("Auto-triggered pipeline for application %s", instance.pk)
@@ -116,11 +120,27 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                         instance.pk,
                         exc,
                     )
-                    PipelineDispatchOutbox.objects.get_or_create(
-                        application=instance,
-                        defaults={"last_error": str(exc)[:1000]},
-                    )
-                    LoanApplication.objects.filter(pk=instance.pk).update(status=LoanApplication.Status.QUEUE_FAILED)
+                    try:
+                        PipelineDispatchOutbox.objects.get_or_create(
+                            application=instance,
+                            defaults={"last_error": str(exc)[:1000]},
+                        )
+                    except Exception as outbox_exc:
+                        logger.exception(
+                            "Failed to record PipelineDispatchOutbox row for %s: %s",
+                            instance.pk,
+                            outbox_exc,
+                        )
+                    try:
+                        LoanApplication.objects.filter(pk=instance.pk).update(
+                            status=LoanApplication.Status.QUEUE_FAILED
+                        )
+                    except Exception as status_exc:
+                        logger.exception(
+                            "Failed to flip status to QUEUE_FAILED for %s: %s",
+                            instance.pk,
+                            status_exc,
+                        )
 
             transaction.on_commit(_dispatch)
 

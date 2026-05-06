@@ -58,6 +58,11 @@ class LoanApplicationAdmin(admin.ModelAdmin):
             # added in this closure is lost. Failure visibility comes from the
             # QUEUE_FAILED status flip below, surfaced via the dashboard's status
             # filter. Mirrors loans/views.py:73 perform_create.
+            #
+            # The outbox-record and status-flip steps each get their own try/except so
+            # one failure (e.g., DB lock on the outbox table) doesn't prevent the other
+            # from running. The on_commit hook itself must not raise — Django logs but
+            # there's no recovery path post-response.
             try:
                 orchestrate_pipeline_task.delay(str(obj.pk))
                 logger.info("Admin-triggered pipeline for application %s", obj.pk)
@@ -67,11 +72,25 @@ class LoanApplicationAdmin(admin.ModelAdmin):
                     obj.pk,
                     exc,
                 )
-                PipelineDispatchOutbox.objects.get_or_create(
-                    application=obj,
-                    defaults={"last_error": str(exc)[:1000]},
-                )
-                LoanApplication.objects.filter(pk=obj.pk).update(status=LoanApplication.Status.QUEUE_FAILED)
+                try:
+                    PipelineDispatchOutbox.objects.get_or_create(
+                        application=obj,
+                        defaults={"last_error": str(exc)[:1000]},
+                    )
+                except Exception as outbox_exc:
+                    logger.exception(
+                        "Failed to record PipelineDispatchOutbox row for %s: %s",
+                        obj.pk,
+                        outbox_exc,
+                    )
+                try:
+                    LoanApplication.objects.filter(pk=obj.pk).update(status=LoanApplication.Status.QUEUE_FAILED)
+                except Exception as status_exc:
+                    logger.exception(
+                        "Failed to flip status to QUEUE_FAILED for %s: %s",
+                        obj.pk,
+                        status_exc,
+                    )
 
         transaction.on_commit(_dispatch)
 
