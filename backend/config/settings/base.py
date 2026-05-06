@@ -240,6 +240,17 @@ ML_XGB_N_JOBS = 2
 # safeguards.
 CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shadow")
 
+# Pre-activation fairness gate mode for `train_model_task`. Three values:
+# "warn" (default — log + flag failures, leave model active; current
+# behaviour byte-identical), "block" (refuse activation if fairness gate
+# fails or no fairness data was recorded — old segment models keep serving),
+# "off" (skip the check entirely; emergency escape hatch). Default is "warn"
+# so the PR ships zero behaviour change for any deployment that doesn't set
+# the env var; flip to "block" only after validating the training pipeline
+# produces compliant fairness metrics for the segments in scope. See
+# docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
+ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
+
 # D7 — MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
 MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").lower() == "true"
