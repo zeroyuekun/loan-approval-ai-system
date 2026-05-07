@@ -23,7 +23,6 @@ from apps.accounts.models import CustomUser
 from apps.loans.models import AuditLog
 from apps.ml_engine.models import ModelVersion
 
-
 # Inlined fixtures — backend/tests/conftest.py is not on the auto-discovery
 # path for tests under backend/apps/ml_engine/tests/.
 
