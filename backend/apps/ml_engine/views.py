@@ -1,3 +1,4 @@
+from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from rest_framework import status
@@ -10,6 +11,10 @@ from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 from apps.loans.models import AuditLog
 from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
+from apps.ml_engine.services.validation_gate_mode import (
+    ValidationSignoffBlocked,
+    evaluate_validation_signoff_gate,
+)
 from apps.ml_engine.tasks import run_prediction_task, train_model_task
 
 
@@ -267,6 +272,40 @@ class ModelActivateView(APIView):
         except ModelVersion.DoesNotExist:
             return Response({"error": "Model not found"}, status=status.HTTP_404_NOT_FOUND)
 
+        # Codex v1.10.7 finding 2: validation sign-off gate. In `block` mode
+        # we refuse activation when no approved ModelValidationReport exists
+        # for this candidate, unless the caller passes ?force=true (audited
+        # break-glass). `warn` mode (default) records the decision but lets
+        # activation proceed.
+        force = request.query_params.get("force", "").lower() == "true"
+        validation_mode = getattr(django_settings, "ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
+        try:
+            validation_decision = evaluate_validation_signoff_gate(version, validation_mode, bypass=force)
+        except ValidationSignoffBlocked as exc:
+            return Response(
+                {
+                    "error": "validation_signoff_required",
+                    "details": exc.payload,
+                    "hint": (
+                        "Create + sign off a ModelValidationReport for this "
+                        "candidate, or pass ?force=true (audited override)."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Codex adversarial review (v1.10.7) finding 1: this used to clear
+        # is_active across ALL segments before re-activating one — silently
+        # breaking scoring for every other segment until an operator repaired
+        # traffic. The training path in tasks.py:save_model already filters
+        # deactivation by segment; manual activation now mirrors that
+        # invariant. The segment-scoped filter alone preserves coverage by
+        # construction (we only deactivate models that share this segment).
+        target_segment = version.segment
+        previous_active_segments = sorted(
+            ModelVersion.objects.filter(is_active=True).values_list("segment", flat=True).distinct()
+        )
+
         with transaction.atomic():
             # Scope deactivation to THIS model's segment, matching the trainer
             # (tasks.py) and ModelVersion.clean(). A blanket deactivation would
@@ -280,10 +319,31 @@ class ModelActivateView(APIView):
             version.traffic_percentage = 100
             version.save()
 
+            audit_decision = validation_decision.get("decision")
+            audit_payload = audit_decision.to_dict() if hasattr(audit_decision, "to_dict") else audit_decision
+            AuditLog.objects.create(
+                user=request.user,
+                action="model_activate_force" if force else "model_activate",
+                resource_type="ModelVersion",
+                resource_id=str(version.id),
+                details={
+                    "version": version.version,
+                    "segment": target_segment,
+                    "previous_active_segments": previous_active_segments,
+                    "validation_gate_mode": validation_decision.get("mode"),
+                    "validation_gate_decision": audit_payload,
+                    "force_bypass": force,
+                },
+                ip_address=request.META.get("REMOTE_ADDR"),
+            )
+
         return Response(
             {
                 "message": f"Model {version.version} activated as champion (100% traffic)",
                 "model_id": str(version.id),
+                "segment": target_segment,
+                "validation_gate": validation_decision.get("mode"),
+                "force": force,
             }
         )
 
