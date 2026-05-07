@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.10.7 — Codex Adversarial Response (2026-05-07)
+
+Codex graded the v1.10.6 master tree `needs-attention` on a project-wide adversarial review. Four findings, four atomic PRs, plus this release. No data migrations, no model retraining, no API contract breaks (warn-mode default for the new gate keeps the existing demo flow intact).
+
+### Deliverables
+
+- **#TBD — Segment-safe ModelActivateView (Codex finding 1, high).** `ModelActivateView` previously ran `ModelVersion.objects.filter(is_active=True).update(is_active=False, ...)` with no segment filter, then activated only the requested model. In a deployment with separate personal/home/unified champions, activating one challenger silently dropped the other segments to inactive — a real outage path. The training path in `tasks.py:save_model` already filters deactivation by `segment`; manual activation now mirrors that invariant. Added an `AuditLog` row capturing the activation with a `previous_active_segments` snapshot for post-incident triage. Three regression tests covering multi-segment isolation, first-activation of a new segment, and audit-log capture.
+- **#TBD — Validation sign-off gate (Codex finding 2, medium → enforced as warn-default).** `ModelValidationReport` was created by the `validate_model` command but neither training nor manual activation consulted it — making the SR 11-7 governance artefact documentation-only. New `apps/ml_engine/services/validation_gate_mode.py` mirrors the warn|block|off pattern of the sibling fairness (PR #163) and promotion (PRs #164–#165) gates. Setting `ML_VALIDATION_SIGNOFF_GATE_MODE` defaults to `warn` so existing flows are unaffected; flip to `block` to enforce. Manual activation accepts `?force=true` as an audited break-glass override; `AuditLog.action` becomes `model_activate_force` so bypasses are searchable. Fourteen tests covering the dispatcher mode matrix and end-to-end view behaviour (block 409, force bypass, warn pass, approved-report pass).
+- **#TBD — Customer-only filter on staff endpoints (Codex finding 3, high — PII trust boundary).** `StaffCustomerListView`, `StaffCustomerProfileView`, and `StaffCustomerActivityView` accepted any `CustomUser` regardless of role, allowing officers to enumerate admin/officer accounts and even auto-create `CustomerProfile` rows attached to staff users via the profile endpoint. All three endpoints now filter by `role='customer'`, and the profile endpoint gates the `get_or_create` behind that role check so phantom rows can never be attached to staff. Nine regression tests covering list filter, profile 404 + phantom-row guard, and activity 404 for admin/officer targets.
+- **#TBD — Safe key rotation with dry-run-default (Codex finding 4, medium).** `rotate_encryption_key` previously called `getattr(profile, field)` which triggered `EncryptedCharField.from_db_value` → which silently returns the raw ciphertext on `InvalidToken`. The old command then `save()`d that opaque value, double-encrypting corrupt rows irreversibly. Rewrite reads ciphertext via raw SQL (bypassing `from_db_value`), detects Fernet-shaped values via the `gAAAAA` token-version prefix so legitimate pre-migration plaintext still gets encrypted while corrupt ciphertext aborts the run. Default is dry-run; `--apply` is required to write; `--allow-failures` provides an audited skip-and-continue escape hatch. Six regression tests covering dry-run default, apply rotation, corrupt-ciphertext abort, allow-failures skip, plaintext promotion, and dry-run reporting.
+
+### Version bump
+
+`APP_VERSION` advances `1.10.6` → `1.10.7`. No data migrations. No trained-model invalidation. No API surface changes (the validation gate ships in `warn` mode by default, which preserves byte-identical activation behaviour).
+
+### Scope notes
+
+- 2FA on staff accounts remains deferred (since v1.9.4) — separate brainstorm session needed.
+- Per-segment traffic split UI is out of scope (Arm B/C work).
+- Refactoring `EncryptedCharField` itself is out of scope; we fixed the rotation tool, not the field semantics.
+
+### Spec / review trail
+
+- Spec: `docs/superpowers/specs/2026-05-07-codex-adversarial-response-v1-10-7-design.md`
+- Codex verdict: `needs-attention` vs root commit `096110e6`
+- Severity reordering vs Codex (documented in spec): finding 3 reclassified high (PII trust-boundary leak); finding 2 reclassified medium (governance maturity, existing fairness/promotion gates already block on poor metrics).
+
 ## v1.10.6 — Renderer XSS Hardening + External Benchmark + Realism Audit (2026-04-20)
 
 Four atomic PRs closing the last of the v1.10.3 senior-review deferred items and re-landing the two previously-stale concept PRs as fresh atomic changes. No data migrations, no model retraining, no API surface changes.
