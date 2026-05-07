@@ -21,6 +21,11 @@ ignore = [
 
 [lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "S107", "S108", "E402", "B017"]
+# Mirror the test-file relaxation for nested test directories (apps/*/tests/)
+# — ruff's "tests/**" pattern is glob-anchored to the top-level path. S608 is
+# included here because tests legitimately use raw-SQL helpers to seed corrupt
+# ciphertext / read raw column bytes via hardcoded column names.
+"**/tests/**" = ["S101", "S105", "S106", "S107", "S108", "S608", "E402", "B017"]
 "*/migrations/**" = ["E501"]
 "*/management/commands/**" = ["S311"]  # random OK for data generation/seeding
 "config/settings/**" = ["F405"]  # star imports from base settings

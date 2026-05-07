@@ -194,7 +194,10 @@ class Command(BaseCommand):
     @staticmethod
     def _fetch_rows(column_list: str):
         with connection.cursor() as cursor:
-            cursor.execute(f"SELECT {column_list} FROM {CUSTOMER_PROFILE_TABLE}")
+            # column_list is composed exclusively from the hardcoded
+            # ENCRYPTED_FIELDS constant + literal "id"; CUSTOMER_PROFILE_TABLE
+            # is also a module-level constant. No user input is interpolated.
+            cursor.execute(f"SELECT {column_list} FROM {CUSTOMER_PROFILE_TABLE}")  # noqa: S608
             return cursor.fetchall()
 
     @staticmethod
@@ -203,8 +206,11 @@ class Command(BaseCommand):
         params = list(updates.values()) + [row_id]
         with transaction.atomic():
             with connection.cursor() as cursor:
+                # set_clause column names come from the ENCRYPTED_FIELDS
+                # constant (filtered through `updates` keys); values + row_id
+                # are passed through %s placeholders.
                 cursor.execute(
-                    f'UPDATE {CUSTOMER_PROFILE_TABLE} SET {set_clause} WHERE "id" = %s',
+                    f'UPDATE {CUSTOMER_PROFILE_TABLE} SET {set_clause} WHERE "id" = %s',  # noqa: S608
                     params,
                 )
 
