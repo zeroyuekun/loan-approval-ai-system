@@ -127,61 +127,6 @@ const mockDashboardStats = {
   },
 }
 
-const mockModelCard = {
-  model_details: {
-    name: 'XGBoost Loan Approval',
-    version: '1.0.0',
-    algorithm: 'xgboost',
-    created_at: '2026-03-01T00:00:00Z',
-    description: 'Loan approval prediction model',
-  },
-  intended_use: {
-    primary_use: 'Loan approval decisions',
-    users: 'Loan officers',
-    out_of_scope: 'Commercial lending',
-  },
-  training_data: {
-    description: 'Synthetic Australian lending data',
-    size: 10000,
-    features: 65,
-    label_distribution: { approved: 0.68, denied: 0.32 },
-  },
-  performance_metrics: {
-    accuracy: 0.85,
-    precision: 0.83,
-    recall: 0.80,
-    f1_score: 0.81,
-    auc_roc: 0.87,
-    gini: 0.74,
-    brier_score: 0.12,
-    ece: 0.05,
-  },
-  fairness_analysis: {
-    protected_attributes: ['gender', 'age_group'],
-    disparate_impact_ratio: {
-      gender: { disparate_impact_ratio: 0.92, passes_80_percent_rule: true },
-    },
-    mitigation: 'Reweighting applied',
-  },
-  governance: {
-    decision_thresholds: { approve: 0.6, deny: 0.3, human_review: null },
-    explainability_method: 'SHAP TreeExplainer',
-    next_review_date: '2026-06-01',
-    retired_at: null,
-    status: 'active',
-    retraining_policy: { frequency: 'quarterly', trigger: 'psi > 0.2' },
-  },
-  independent_validation: { status: 'pending', note: 'Awaiting independent validation' },
-  limitations: ['Synthetic data only', 'Australian market only'],
-  synthetic_data_validation: { status: 'validated' },
-  regulatory_compliance: {
-    apra_cpg_235: true,
-    nccp_act: true,
-    banking_code: true,
-  },
-  last_updated: '2026-03-28T10:00:00Z',
-}
-
 const mockDriftReports = [
   {
     id: 'drift-1',
@@ -258,15 +203,10 @@ export const handlers = [
     return HttpResponse.json(mockDashboardStats)
   }),
 
-  // ML: Model card
-  http.get(`${API_URL}/ml/models/active/model-card/`, () => {
-    return HttpResponse.json({ model_card: mockModelCard })
-  }),
-
   // ML: Drift reports
   http.get(`${API_URL}/ml/models/active/drift-reports/`, () => {
     return HttpResponse.json(mockDriftReports)
   }),
 ]
 
-export { mockUser, mockCustomerUser, mockCustomerProfile, mockLoanApplication, mockDashboardStats, mockModelCard, mockDriftReports }
+export { mockUser, mockCustomerUser, mockCustomerProfile, mockLoanApplication, mockDashboardStats, mockDriftReports }

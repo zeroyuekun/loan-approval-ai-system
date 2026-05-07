@@ -176,7 +176,6 @@ export const mlApi = {
   predict: (loanId: string) => api.post(`/ml/predict/${loanId}/`),
   getMetrics: () => api.get('/ml/models/active/metrics/'),
   trainModel: (algorithm: string) => api.post('/ml/models/train/', { algorithm }),
-  getModelCard: () => api.get('/ml/models/active/model-card/'),
   getDriftReports: (limit?: number) => api.get('/ml/models/active/drift-reports/', { params: { limit: limit || 12 } }),
 }
 
