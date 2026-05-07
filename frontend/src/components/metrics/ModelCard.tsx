@@ -83,6 +83,78 @@ function eceContext(ece: number | null | undefined): string {
   return `exceeds ${ECE_CEILING.toFixed(2)} ceiling`
 }
 
+// ---------------------------------------------------------------------------
+// Credibility section — top-3 drivers normalised from either feature
+// importance shape (object map or array). The point is to show a senior
+// reviewer the model relies on plausible economic features, not noise.
+// ---------------------------------------------------------------------------
+
+interface DriverRow {
+  feature: string
+  importance: number
+}
+
+function topDrivers(
+  fi: ModelMetrics['feature_importances'],
+  limit = 3,
+): DriverRow[] {
+  if (!fi) return []
+  let rows: DriverRow[]
+  if (Array.isArray(fi)) {
+    rows = fi
+      .filter(
+        (r): r is { feature: string; importance: number } =>
+          typeof r?.feature === 'string' && typeof r?.importance === 'number',
+      )
+      .map((r) => ({ feature: r.feature, importance: r.importance }))
+  } else {
+    rows = Object.entries(fi)
+      .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+      .map(([feature, importance]) => ({ feature, importance }))
+  }
+  return rows.sort((a, b) => b.importance - a.importance).slice(0, limit)
+}
+
+function CredibilitySection({ metrics }: { metrics: ModelMetrics }) {
+  const drivers = topDrivers(metrics.feature_importances, 3)
+  return (
+    <section className="space-y-3">
+      <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+        Credibility evidence
+      </h4>
+      <div className="space-y-2 rounded-md border border-slate-100 bg-slate-50/40 p-4">
+        <p className="text-xs text-muted-foreground">
+          Top drivers — the features the model leans on most for its decision.
+        </p>
+        {drivers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No feature-importance data recorded for this model.
+          </p>
+        ) : (
+          <ul className="space-y-1.5">
+            {drivers.map((d, idx) => (
+              <li
+                key={d.feature}
+                className="flex items-baseline justify-between gap-3 text-sm"
+              >
+                <span className="flex items-baseline gap-2">
+                  <span className="text-xs font-medium text-slate-400 tabular-nums">
+                    {idx + 1}.
+                  </span>
+                  <span className="font-mono text-slate-700">{d.feature}</span>
+                </span>
+                <span className="font-mono tabular-nums text-slate-900">
+                  {d.importance.toFixed(2)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function PerformanceSection({ metrics }: { metrics: ModelMetrics }) {
   const auc = metrics.auc_roc ?? null
   const ks = metrics.ks_statistic ?? null
@@ -156,7 +228,8 @@ export function ModelCard({ metrics }: ModelCardProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         <PerformanceSection metrics={metrics} />
-        {/* Sections wired in B5-B9 */}
+        <CredibilitySection metrics={metrics} />
+        {/* Sections wired in B6-B9 */}
       </CardContent>
     </Card>
   )

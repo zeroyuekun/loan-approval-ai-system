@@ -117,4 +117,46 @@ describe('ModelCard', () => {
       ).toBeInTheDocument()
     })
   })
+
+  describe('Credibility evidence section', () => {
+    it('renders the Credibility heading', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(
+        screen.getByRole('heading', { name: /credibility/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('shows the top driver feature with its importance', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      // credit_score 0.21 is the largest in the fixture
+      expect(screen.getByText(/credit_score/)).toBeInTheDocument()
+      expect(screen.getByText(/0\.21/)).toBeInTheDocument()
+    })
+
+    it('lists the top 3 drivers in descending importance order', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      // top 3 from fixture: credit_score 0.21, debt_to_income 0.18, annual_income 0.14
+      expect(screen.getByText(/credit_score/)).toBeInTheDocument()
+      expect(screen.getByText(/debt_to_income/)).toBeInTheDocument()
+      expect(screen.getByText(/annual_income/)).toBeInTheDocument()
+      // employment_length 0.09 should NOT make the top-3 cut
+      expect(screen.queryByText(/employment_length/)).not.toBeInTheDocument()
+    })
+
+    it('handles array-form feature_importances', () => {
+      const m = buildMetrics({
+        feature_importances: [
+          { feature: 'foo', importance: 0.3 },
+          { feature: 'bar', importance: 0.2 },
+          { feature: 'baz', importance: 0.1 },
+          { feature: 'qux', importance: 0.05 },
+        ],
+      })
+      render(<ModelCard metrics={m} />)
+      expect(screen.getByText(/foo/)).toBeInTheDocument()
+      expect(screen.getByText(/bar/)).toBeInTheDocument()
+      expect(screen.getByText(/baz/)).toBeInTheDocument()
+      expect(screen.queryByText(/qux/)).not.toBeInTheDocument()
+    })
+  })
 })
