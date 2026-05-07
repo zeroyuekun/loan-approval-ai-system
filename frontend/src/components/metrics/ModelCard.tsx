@@ -232,6 +232,40 @@ function NotValidatedForSection() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Production posture section — explicit Active/Retired badge plus a one-line
+// statement of what that means in user-facing terms. Anchors the rest of the
+// card to a current operational state — a good model card without this is
+// just a sales sheet.
+// ---------------------------------------------------------------------------
+
+function ProductionPostureSection({ metrics }: { metrics: ModelMetrics }) {
+  const active = metrics.is_active === true
+  return (
+    <section className="space-y-3">
+      <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+        Production posture
+      </h4>
+      <div className="flex items-start gap-3 rounded-md border border-slate-100 bg-slate-50/40 p-4">
+        {active ? (
+          <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+            Active
+          </span>
+        ) : (
+          <span className="inline-flex shrink-0 items-center rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
+            Retired
+          </span>
+        )}
+        <p className="text-sm text-slate-700">
+          {active
+            ? 'Serving live predictions on /dashboard/applications. Decisions made by this model are persisted to LoanDecision rows with full audit context.'
+            : 'Not currently serving predictions. This card is shown for historical reference only.'}
+        </p>
+      </div>
+    </section>
+  )
+}
+
 function PerformanceSection({ metrics }: { metrics: ModelMetrics }) {
   const auc = metrics.auc_roc ?? null
   const ks = metrics.ks_statistic ?? null
@@ -308,7 +342,8 @@ export function ModelCard({ metrics }: ModelCardProps) {
         <CredibilitySection metrics={metrics} />
         <TrainedOnSection />
         <NotValidatedForSection />
-        {/* Sections wired in B8-B9 */}
+        <ProductionPostureSection metrics={metrics} />
+        {/* Sections wired in B9 */}
       </CardContent>
     </Card>
   )

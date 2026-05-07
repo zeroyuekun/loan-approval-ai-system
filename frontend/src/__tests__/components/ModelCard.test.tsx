@@ -203,4 +203,30 @@ describe('ModelCard', () => {
       expect(screen.getByText(/outside Australia/i)).toBeInTheDocument()
     })
   })
+
+  describe('Production posture section', () => {
+    it('renders the Production posture heading', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(
+        screen.getByRole('heading', { name: /production posture/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('shows Active when is_active=true', () => {
+      render(<ModelCard metrics={buildMetrics({ is_active: true })} />)
+      // The badge text appears in the posture section. Use the role-aware
+      // matcher to avoid clashing with other "Active" copy elsewhere.
+      const posture = screen.getByText(
+        /serving live predictions on \/dashboard\/applications/i,
+      )
+      expect(posture).toBeInTheDocument()
+    })
+
+    it('shows Retired when is_active=false', () => {
+      render(<ModelCard metrics={buildMetrics({ is_active: false })} />)
+      expect(
+        screen.getByText(/not currently serving predictions/i),
+      ).toBeInTheDocument()
+    })
+  })
 })
