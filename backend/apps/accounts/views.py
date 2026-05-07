@@ -276,7 +276,11 @@ class StaffCustomerListView(generics.ListAPIView):
     permission_classes = (IsAdminOrOfficer,)
 
     def get_queryset(self):
-        qs = CustomUser.objects.select_related("profile").order_by("-created_at")
+        qs = (
+            CustomUser.objects.filter(role=CustomUser.Role.CUSTOMER)
+            .select_related("profile")
+            .order_by("-created_at")
+        )
         search = self.request.query_params.get("search", "").strip()
         if search:
             from django.db.models import Q
@@ -304,8 +308,11 @@ class StaffCustomerProfileView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         user_id = self.kwargs["user_id"]
-        get_object_or_404(CustomUser, pk=user_id)
-        profile, _ = CustomerProfile.objects.select_related("user").get_or_create(user_id=user_id)
+        # Gate the profile fetch on role=customer BEFORE the get_or_create so we
+        # never auto-attach a CustomerProfile row to a staff account. Codex
+        # adversarial review (v1.10.7) flagged this as a PII trust-boundary leak.
+        user = get_object_or_404(CustomUser, pk=user_id, role=CustomUser.Role.CUSTOMER)
+        profile, _ = CustomerProfile.objects.select_related("user").get_or_create(user=user)
         return profile
 
     def check_permissions(self, request):
@@ -336,7 +343,7 @@ class StaffCustomerActivityView(generics.GenericAPIView):
 
     def get(self, request, user_id):
         try:
-            customer = CustomUser.objects.get(pk=user_id)
+            customer = CustomUser.objects.get(pk=user_id, role=CustomUser.Role.CUSTOMER)
         except CustomUser.DoesNotExist:
             return Response(
                 {"error": "Customer not found"},
