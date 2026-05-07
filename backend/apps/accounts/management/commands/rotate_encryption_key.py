@@ -138,11 +138,7 @@ class Command(BaseCommand):
                         )
                     )
                     raise CommandError("Rotation aborted: ciphertext decryption failures detected.")
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"Skipping profile {row_id}: decryption failed on {row_errors}"
-                    )
-                )
+                self.stdout.write(self.style.WARNING(f"Skipping profile {row_id}: decryption failed on {row_errors}"))
                 continue
 
             if not updates:
@@ -171,9 +167,7 @@ class Command(BaseCommand):
                 )
             )
         if not apply_changes:
-            self.stdout.write(
-                self.style.NOTICE("DRY-RUN: no database changes written. Re-run with --apply to commit.")
-            )
+            self.stdout.write(self.style.NOTICE("DRY-RUN: no database changes written. Re-run with --apply to commit."))
 
     # ------------------------------------------------------------------
     # Helpers

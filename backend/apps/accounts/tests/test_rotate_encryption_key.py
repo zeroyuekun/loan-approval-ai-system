@@ -76,7 +76,7 @@ def _clear_all_encrypted_fields(profile_id):
     params = [""] * len(encrypted_fields) + [profile_id]
     with connection.cursor() as cursor:
         cursor.execute(
-            f"UPDATE accounts_customerprofile SET {set_clause} WHERE \"id\" = %s",
+            f'UPDATE accounts_customerprofile SET {set_clause} WHERE "id" = %s',
             params,
         )
 
@@ -160,9 +160,7 @@ class TestRotateEncryptionKey:
             _set_raw_field(customer_profile.id, "address_line_1", corrupt_ciphertext)
 
             out = StringIO()
-            call_command(
-                "rotate_encryption_key", "--apply", "--allow-failures", stdout=out
-            )
+            call_command("rotate_encryption_key", "--apply", "--allow-failures", stdout=out)
 
             # Whole row is skipped — partial writes risk inconsistency.
             assert _read_raw_field(customer_profile.id, "phone") == ciphertext_old
