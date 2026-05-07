@@ -13,6 +13,7 @@ import { FairnessCard } from '@/components/metrics/FairnessCard'
 import { DecileChart } from '@/components/metrics/DecileChart'
 import { DriftOverview } from '@/components/metrics/DriftOverview'
 import { DriftPsiChart } from '@/components/metrics/DriftPsiChart'
+import { TrainingMetadataCard } from '@/components/metrics/TrainingMetadataCard'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectItem } from '@/components/ui/select'
@@ -316,38 +317,10 @@ export default function ModelMetricsPage() {
               <DecileChart deciles={metrics.decile_analysis.deciles} />
             )}
             {metrics.training_metadata && Object.keys(metrics.training_metadata).length > 0 && (
-              <Card>
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-base">Training Metadata</CardTitle>
-                </CardHeader>
-                <CardContent className="px-0">
-                  <div className="divide-y divide-border">
-                    {Object.entries(metrics.training_metadata).map(([key, value]) => (
-                      <div key={key} className="grid grid-cols-2 gap-4 px-6 py-2.5">
-                        <span className="text-sm text-muted-foreground">
-                          {key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                        </span>
-                        <span
-                          className="text-sm font-mono text-right tabular-nums truncate"
-                          title={typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                        >
-                          {typeof value === 'number'
-                            ? (Number.isInteger(value) ? value.toLocaleString() : value.toFixed(4))
-                            : typeof value === 'object'
-                              ? JSON.stringify(value)
-                              : String(value)}
-                        </span>
-                      </div>
-                    ))}
-                    {metrics.optimal_threshold != null && (
-                      <div className="grid grid-cols-2 gap-4 px-6 py-2.5 bg-muted/30">
-                        <span className="text-sm font-medium text-muted-foreground">Active Threshold</span>
-                        <span className="text-sm font-mono font-semibold text-right tabular-nums">{metrics.optimal_threshold.toFixed(2)}</span>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+              <TrainingMetadataCard
+                metadata={metrics.training_metadata}
+                optimalThreshold={metrics.optimal_threshold}
+              />
             )}
           </div>
         </>
