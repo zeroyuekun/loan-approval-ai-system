@@ -61,6 +61,10 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
     )
     from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.trainer import ModelTrainer
+    from apps.ml_engine.services.validation_gate_mode import (
+        ValidationSignoffBlocked,
+        evaluate_validation_signoff_gate,
+    )
 
     if data_path is None:
         data_path = str(settings.BASE_DIR / ".tmp" / "synthetic_loans.csv")
@@ -158,6 +162,34 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
             next_review_date=(timezone.now() + timedelta(days=90)).date(),
         )
 
+    # Validation sign-off gate (Codex v1.10.7 finding 2). The candidate now
+    # has a real PK so the gate can query ModelValidationReport. In `block`
+    # mode the gate raises — at training time there is by construction no
+    # approved sign-off (the row was just created), so block mode demotes
+    # the candidate to is_active=False rather than re-raising past the
+    # already-completed activation transaction. Operators then create +
+    # sign off a report and manually activate via ModelActivateView.
+    validation_mode = getattr(settings, "ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
+    validation_blocked_demoted = False
+    try:
+        validation_gate_decision = evaluate_validation_signoff_gate(mv, validation_mode)
+    except ValidationSignoffBlocked as exc:
+        logger.warning(
+            "Model %s training-path activation blocked by validation gate: %s. "
+            "Candidate retained as is_active=False; manual activation required after sign-off.",
+            mv.id,
+            exc,
+        )
+        ModelVersion.objects.filter(pk=mv.pk).update(is_active=False, traffic_percentage=0)
+        mv.refresh_from_db()
+        validation_gate_decision = {
+            "action": "blocked_demoted",
+            "decision": exc.payload,
+            "mode": "block",
+            "bypass": False,
+        }
+        validation_blocked_demoted = True
+
     # Record the gate decisions (mode + result) on the activated mv so the
     # MRM dossier §1 banner has the audit trail for both gates. In `warn`
     # mode a failed gate is logged + flagged; activation already happened.
@@ -165,7 +197,17 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
         **(mv.training_metadata or {}),
         "fairness_gate_mode": gate_decision["mode"],
         "promotion_gate_mode": promotion_gate_decision["mode"],
+        "validation_gate_mode": validation_gate_decision["mode"],
     }
+    validation_decision_payload = validation_gate_decision.get("decision")
+    if validation_decision_payload is not None:
+        gate_meta["validation_gate"] = (
+            validation_decision_payload.to_dict()
+            if hasattr(validation_decision_payload, "to_dict")
+            else validation_decision_payload
+        )
+    if validation_blocked_demoted:
+        gate_meta["validation_gate_blocked_demoted"] = True
     gate_result = gate_decision["gate_result"]
     if gate_result is not None:
         gate_meta["fairness_gate"] = gate_result
