@@ -10,6 +10,7 @@ import {
   GMSC_REFERENCE_URL,
   AU_CALIBRATION_SOURCES,
   CALIBRATION_SOURCES_URL,
+  NOT_VALIDATED_FOR,
 } from '@/lib/benchmarks'
 import type { ModelMetrics } from '@/types'
 
@@ -201,6 +202,36 @@ function TrainedOnSection() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Not-Validated-For section — explicit out-of-scope statement. Mirrors the
+// "intended_use.out_of_scope" section in the canonical model card and the
+// risk register. The point is honesty: a portfolio reader should be able to
+// see at-a-glance which populations the project owner does NOT claim to
+// have validated against.
+// ---------------------------------------------------------------------------
+
+function NotValidatedForSection() {
+  return (
+    <section className="space-y-3">
+      <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+        Not validated for
+      </h4>
+      <div className="rounded-md border border-amber-200 bg-amber-50/40 p-4">
+        <ul className="space-y-1 text-sm text-slate-700">
+          {NOT_VALIDATED_FOR.map((item) => (
+            <li key={item} className="flex gap-2">
+              <span className="text-amber-600" aria-hidden>
+                ·
+              </span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  )
+}
+
 function PerformanceSection({ metrics }: { metrics: ModelMetrics }) {
   const auc = metrics.auc_roc ?? null
   const ks = metrics.ks_statistic ?? null
@@ -276,7 +307,8 @@ export function ModelCard({ metrics }: ModelCardProps) {
         <PerformanceSection metrics={metrics} />
         <CredibilitySection metrics={metrics} />
         <TrainedOnSection />
-        {/* Sections wired in B7-B9 */}
+        <NotValidatedForSection />
+        {/* Sections wired in B8-B9 */}
       </CardContent>
     </Card>
   )

@@ -187,4 +187,20 @@ describe('ModelCard', () => {
       )
     })
   })
+
+  describe('Not-validated-for section', () => {
+    it('renders the Not validated for heading', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(
+        screen.getByRole('heading', { name: /not validated for/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('lists the out-of-scope segments', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      // From NOT_VALIDATED_FOR — at least the commercial + non-AU items
+      expect(screen.getByText(/Commercial \/ business lending/i)).toBeInTheDocument()
+      expect(screen.getByText(/outside Australia/i)).toBeInTheDocument()
+    })
+  })
 })
