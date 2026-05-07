@@ -7,6 +7,23 @@ interface ModelCardProps {
   metrics: ModelMetrics
 }
 
+const ALGORITHM_LABELS: Record<string, string> = {
+  rf: 'Random Forest',
+  xgb: 'XGBoost',
+  lr: 'Logistic Regression',
+}
+
+function formatAlgorithm(alg: string | undefined): string {
+  if (!alg) return 'Unknown'
+  return ALGORITHM_LABELS[alg] ?? alg
+}
+
+function readSegment(metadata: ModelMetrics['training_metadata']): string {
+  const seg = metadata?.training_segment
+  if (typeof seg === 'string' && seg.trim().length > 0) return seg
+  return 'segment unspecified'
+}
+
 /**
  * ModelCard — portfolio-facing receipt for the active model.
  *
@@ -18,13 +35,21 @@ interface ModelCardProps {
  * `<ModelHealthCard />`.
  */
 export function ModelCard({ metrics }: ModelCardProps) {
+  const algorithm = formatAlgorithm(metrics.algorithm)
+  const version = metrics.version
+  const segment = readSegment(metrics.training_metadata)
+
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="space-y-1">
         <CardTitle>Model Card</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          {algorithm} <span className="text-slate-400">·</span> v{version}{' '}
+          <span className="text-slate-400">·</span> {segment}
+        </p>
       </CardHeader>
-      <CardContent>
-        {/* Sections wired in B3-B9 */}
+      <CardContent className="space-y-6">
+        {/* Sections wired in B4-B9 */}
       </CardContent>
     </Card>
   )

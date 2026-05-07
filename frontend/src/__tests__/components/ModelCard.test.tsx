@@ -63,4 +63,24 @@ describe('ModelCard', () => {
       screen.getByRole('heading', { name: /model card/i }),
     ).toBeInTheDocument()
   })
+
+  describe('segment sub-title', () => {
+    it('shows the training_segment from training_metadata', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(screen.getByText(/AU PAYG/)).toBeInTheDocument()
+    })
+
+    it('shows the algorithm + version next to the segment', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      // XGBoost label, not raw "xgb"
+      expect(screen.getByText(/XGBoost/)).toBeInTheDocument()
+      expect(screen.getByText(/v1\.0\.0/)).toBeInTheDocument()
+    })
+
+    it('falls back to "segment unspecified" when training_segment missing', () => {
+      const m = buildMetrics({ training_metadata: { psi_by_feature: {} } })
+      render(<ModelCard metrics={m} />)
+      expect(screen.getByText(/segment unspecified/i)).toBeInTheDocument()
+    })
+  })
 })
