@@ -1,5 +1,6 @@
 'use client'
 
+import { Info } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   AUC_REGULATOR_FLOOR,
@@ -62,28 +63,23 @@ function MetricRow({ label, value, context }: MetricRowProps) {
   )
 }
 
+// Reference thresholds are shown next to each metric for context, but the
+// rendered copy is intentionally neutral — no "above/below" language and no
+// pass/fail icons — because the underlying training data is synthetic and a
+// hard verdict against industry floors would overclaim real-world performance.
 function aucContext(auc: number | null | undefined): string {
   if (auc == null) return 'AUC not recorded'
-  if (auc >= AUC_REGULATOR_FLOOR) {
-    return `above ${AUC_REGULATOR_FLOOR.toFixed(2)} regulator floor`
-  }
-  return `below ${AUC_REGULATOR_FLOOR.toFixed(2)} regulator floor`
+  return `regulator floor: ${AUC_REGULATOR_FLOOR.toFixed(2)}`
 }
 
 function ksContext(ks: number | null | undefined): string {
   if (ks == null) return 'KS not recorded'
-  if (ks >= KS_REGULATOR_FLOOR) {
-    return `above ${KS_REGULATOR_FLOOR.toFixed(2)} regulator floor`
-  }
-  return `below ${KS_REGULATOR_FLOOR.toFixed(2)} regulator floor`
+  return `regulator floor: ${KS_REGULATOR_FLOOR.toFixed(2)}`
 }
 
 function eceContext(ece: number | null | undefined): string {
   if (ece == null) return 'ECE not recorded'
-  if (ece <= ECE_CEILING) {
-    return `below ${ECE_CEILING.toFixed(2)} ceiling`
-  }
-  return `exceeds ${ECE_CEILING.toFixed(2)} ceiling`
+  return `industry ceiling: ${ECE_CEILING.toFixed(2)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +366,15 @@ export function ModelCard({ metrics }: ModelCardProps) {
           {algorithm} <span className="text-slate-400">·</span> v{version}{' '}
           <span className="text-slate-400">·</span> {segment}
         </p>
+        <div className="mt-2 flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2">
+          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-slate-500" />
+          <p className="text-xs text-slate-600 leading-snug">
+            Trained on synthetic Australian retail-lending data calibrated against
+            public regulator and statistical-agency releases. Reference thresholds
+            are shown for context; numbers should not be read as a real-world
+            performance claim.
+          </p>
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {!evidence && <EmptyStateBanner />}

@@ -92,19 +92,23 @@ describe('ModelCard', () => {
       ).toBeInTheDocument()
     })
 
-    it('shows AUC with regulator-floor framing when above floor', () => {
+    it('shows AUC alongside the regulator-floor reference', () => {
       render(<ModelCard metrics={buildMetrics({ auc_roc: 0.872 })} />)
       // Section value uses .toFixed(3) for the AUC number itself
       expect(screen.getByText('0.872')).toBeInTheDocument()
+      // Neutral framing — no above/below verdict, just the reference threshold
       expect(
-        screen.getByText(/above 0\.75 regulator floor/i),
+        screen.getByText(/regulator floor: 0\.75/i),
       ).toBeInTheDocument()
     })
 
-    it('flags AUC below floor as below', () => {
+    it('shows the same regulator-floor reference regardless of whether AUC clears it', () => {
       render(<ModelCard metrics={buildMetrics({ auc_roc: 0.71 })} />)
+      // The AUC value renders, but the context line stays neutral — no
+      // pass/fail framing because the training data is synthetic.
+      expect(screen.getByText('0.710')).toBeInTheDocument()
       expect(
-        screen.getByText(/below 0\.75 regulator floor/i),
+        screen.getByText(/regulator floor: 0\.75/i),
       ).toBeInTheDocument()
     })
 
