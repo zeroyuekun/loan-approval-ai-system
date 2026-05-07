@@ -313,6 +313,39 @@ function PerformanceSection({ metrics }: { metrics: ModelMetrics }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Empty-state banner — fires when the active ModelVersion was trained against
+// an older pipeline that never produced AUC, calibration data, or feature
+// importances. The Card still renders the surrounding sections honestly
+// ("AUC not recorded", "no feature-importance data") but the banner up-top
+// turns the cumulative absence into a single actionable message instead of
+// leaving the reader to piece it together row by row.
+// ---------------------------------------------------------------------------
+
+function hasEvidence(metrics: ModelMetrics): boolean {
+  if (metrics.auc_roc != null) return true
+  const ece = metrics.calibration_data?.ece ?? metrics.ece
+  if (ece != null) return true
+  const fi = metrics.feature_importances
+  if (Array.isArray(fi)) return fi.length > 0
+  if (fi && typeof fi === 'object') return Object.keys(fi).length > 0
+  return false
+}
+
+function EmptyStateBanner() {
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      <p className="font-semibold">Limited evidence available</p>
+      <p className="mt-1 text-amber-800">
+        This model was trained against an older pipeline that did not record
+        the metrics this card surfaces. Re-train against the latest trainer
+        (run "Train New Model" above) to populate AUC, calibration error, and
+        feature importances.
+      </p>
+    </div>
+  )
+}
+
 /**
  * ModelCard — portfolio-facing receipt for the active model.
  *
@@ -327,6 +360,7 @@ export function ModelCard({ metrics }: ModelCardProps) {
   const algorithm = formatAlgorithm(metrics.algorithm)
   const version = metrics.version
   const segment = readSegment(metrics.training_metadata)
+  const evidence = hasEvidence(metrics)
 
   return (
     <Card>
@@ -338,12 +372,12 @@ export function ModelCard({ metrics }: ModelCardProps) {
         </p>
       </CardHeader>
       <CardContent className="space-y-6">
+        {!evidence && <EmptyStateBanner />}
         <PerformanceSection metrics={metrics} />
         <CredibilitySection metrics={metrics} />
         <TrainedOnSection />
         <NotValidatedForSection />
         <ProductionPostureSection metrics={metrics} />
-        {/* Sections wired in B9 */}
       </CardContent>
     </Card>
   )

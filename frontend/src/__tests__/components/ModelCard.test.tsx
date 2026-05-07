@@ -229,4 +229,23 @@ describe('ModelCard', () => {
       ).toBeInTheDocument()
     })
   })
+
+  describe('Empty-state banner', () => {
+    it('renders an explanatory banner when AUC, ECE, and feature_importances are all missing', () => {
+      const m = buildMetrics({
+        auc_roc: null,
+        ks_statistic: null,
+        ece: null,
+        calibration_data: null,
+        feature_importances: {},
+      })
+      render(<ModelCard metrics={m} />)
+      expect(
+        screen.getByText(/limited evidence available/i),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByText(/re-train.*latest trainer/i),
+      ).toBeInTheDocument()
+    })
+  })
 })
