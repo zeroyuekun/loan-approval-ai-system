@@ -357,7 +357,7 @@ class ModelVersionListView(APIView):
 
 
 class ModelActivateView(APIView):
-    """Activate a model as champion with 100% traffic."""
+    """Activate a model as champion with 100% traffic for its segment."""
 
     permission_classes = [IsAdmin]
 
@@ -367,8 +367,23 @@ class ModelActivateView(APIView):
         except ModelVersion.DoesNotExist:
             return Response({"error": "Model not found"}, status=status.HTTP_404_NOT_FOUND)
 
+        # Codex adversarial review (v1.10.7) flagged that this used to clear
+        # is_active across ALL segments before re-activating one — silently
+        # breaking scoring for every other segment until an operator repaired
+        # traffic. The training path in tasks.py:save_model already filters
+        # deactivation by segment; manual activation now mirrors that
+        # invariant. The segment-scoped filter alone preserves coverage by
+        # construction (we only deactivate models that share this segment).
+        target_segment = version.segment
+        previous_active_segments = sorted(
+            ModelVersion.objects.filter(is_active=True).values_list("segment", flat=True).distinct()
+        )
+
         with transaction.atomic():
-            ModelVersion.objects.filter(is_active=True).update(
+            ModelVersion.objects.filter(
+                is_active=True,
+                segment=target_segment,
+            ).update(
                 is_active=False,
                 traffic_percentage=0,
             )
@@ -376,10 +391,24 @@ class ModelActivateView(APIView):
             version.traffic_percentage = 100
             version.save()
 
+            AuditLog.objects.create(
+                user=request.user,
+                action="model_activate",
+                resource_type="ModelVersion",
+                resource_id=str(version.id),
+                details={
+                    "version": version.version,
+                    "segment": target_segment,
+                    "previous_active_segments": previous_active_segments,
+                },
+                ip_address=request.META.get("REMOTE_ADDR"),
+            )
+
         return Response(
             {
-                "message": f"Model {version.version} activated as champion (100% traffic)",
+                "message": f"Model {version.version} activated as champion for segment '{target_segment}'",
                 "model_id": str(version.id),
+                "segment": target_segment,
             }
         )
 
