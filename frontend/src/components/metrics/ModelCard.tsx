@@ -8,6 +8,8 @@ import {
   GMSC_AUC,
   GMSC_DATASET_LABEL,
   GMSC_REFERENCE_URL,
+  AU_CALIBRATION_SOURCES,
+  CALIBRATION_SOURCES_URL,
 } from '@/lib/benchmarks'
 import type { ModelMetrics } from '@/types'
 
@@ -155,6 +157,50 @@ function CredibilitySection({ metrics }: { metrics: ModelMetrics }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Trained-On section — anchors the calibration claim. Lists the short names
+// of the AU public statistical sources DataGenerator calibrates against, with
+// a single "View calibration sources" link to the manifest in the repo. The
+// link points at master so a CV/portfolio reader can audit the evidence
+// without logging in.
+// ---------------------------------------------------------------------------
+
+function TrainedOnSection() {
+  return (
+    <section className="space-y-3">
+      <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+        Trained on
+      </h4>
+      <div className="space-y-3 rounded-md border border-slate-100 bg-slate-50/40 p-4">
+        <p className="text-xs text-muted-foreground">
+          Synthetic Australian retail-lending data calibrated against public
+          regulator and statistical-agency releases:
+        </p>
+        <ul className="flex flex-wrap gap-2">
+          {AU_CALIBRATION_SOURCES.map((source) => (
+            <li key={source.short}>
+              <span
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-700"
+                title={source.full}
+              >
+                {source.short}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <a
+          className="inline-block text-xs font-medium text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-800"
+          href={CALIBRATION_SOURCES_URL}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          View calibration sources →
+        </a>
+      </div>
+    </section>
+  )
+}
+
 function PerformanceSection({ metrics }: { metrics: ModelMetrics }) {
   const auc = metrics.auc_roc ?? null
   const ks = metrics.ks_statistic ?? null
@@ -229,7 +275,8 @@ export function ModelCard({ metrics }: ModelCardProps) {
       <CardContent className="space-y-6">
         <PerformanceSection metrics={metrics} />
         <CredibilitySection metrics={metrics} />
-        {/* Sections wired in B6-B9 */}
+        <TrainedOnSection />
+        {/* Sections wired in B7-B9 */}
       </CardContent>
     </Card>
   )

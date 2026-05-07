@@ -159,4 +159,32 @@ describe('ModelCard', () => {
       expect(screen.queryByText(/qux/)).not.toBeInTheDocument()
     })
   })
+
+  describe('Trained-On section', () => {
+    it('renders the Trained on heading', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(
+        screen.getByRole('heading', { name: /trained on/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('lists the AU calibration source short names', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      // From AU_CALIBRATION_SOURCES — at minimum ABS / APRA / RBA must appear
+      expect(screen.getByText(/ABS/)).toBeInTheDocument()
+      expect(screen.getByText(/APRA/)).toBeInTheDocument()
+      expect(screen.getByText(/RBA/)).toBeInTheDocument()
+    })
+
+    it('exposes a "View calibration sources" link to the GitHub manifest', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      const link = screen.getByRole('link', {
+        name: /view calibration sources/i,
+      })
+      expect(link).toHaveAttribute(
+        'href',
+        'https://github.com/zeroyuekun/loan-approval-ai-system/blob/master/backend/docs/CALIBRATION_SOURCES.md',
+      )
+    })
+  })
 })
