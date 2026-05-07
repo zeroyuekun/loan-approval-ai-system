@@ -312,7 +312,7 @@ export default function ModelMetricsPage() {
       {(metrics.decile_analysis?.deciles || metrics.training_metadata) && (
         <>
           <h3 className="text-lg font-semibold pt-2">Model Diagnostics</h3>
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className="flex flex-col gap-6">
             {metrics.decile_analysis?.deciles && (
               <DecileChart deciles={metrics.decile_analysis.deciles} />
             )}
