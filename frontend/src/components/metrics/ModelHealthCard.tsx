@@ -1,23 +1,21 @@
 'use client'
 
 import { useState } from 'react'
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  Info,
-  MinusCircle,
-  XCircle,
-} from 'lucide-react'
+import { ChevronDown, Info } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-// Acceptance thresholds — surfaced inline in the card so a reader sees what
-// "good" means without leaving the page. Sourced from the live codebase:
+// Reference thresholds — shown next to each metric so a reader can compare
+// the synthetic-data values to industry guidelines, but no pass/fail verdict
+// is rendered. The model is trained on synthetic AU data calibrated against
+// public benchmarks (see backend/docs/CALIBRATION_SOURCES.md); pass/fail
+// claims would overreach beyond what the training distribution supports.
+//
+// Sources:
 //   AUC floor 0.75 + KS floor 0.30  → mrm_dossier._performance_section
 //   ECE ceiling 0.03                → model_selector.MAX_ECE_THRESHOLD
 //   PSI stable 0.10 / drift 0.25    → drift_monitor + mrm_dossier._psi_section
 //   Generalization gap ceiling 0.05 → trainer.py overfitting warning trigger
-const THRESHOLDS = {
+const REFERENCE = {
   AUC_FLOOR: 0.75,
   KS_FLOOR: 0.3,
   ECE_CEIL: 0.03,
@@ -27,15 +25,12 @@ const THRESHOLDS = {
   FAIRNESS_RATIO: 0.8,
 } as const
 
-type Verdict = 'pass' | 'watch' | 'fail' | 'unknown'
-
 interface Dimension {
   name: string
   headline: string
   detail: string
-  verdict: Verdict
-  // Optional: a secondary metric line (e.g. KS under Discrimination)
-  secondary?: { label: string; value: string; verdict: Verdict }
+  // Optional secondary metric on the same dimension (e.g. KS under Discrimination)
+  secondary?: { label: string; value: string; detail: string }
 }
 
 interface ModelHealthCardProps {
@@ -51,9 +46,8 @@ interface ModelHealthCardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Dimension verdict computations — each function returns one row. They all
-// fail-closed: if the underlying metric is missing the row renders 'unknown'
-// instead of pretending the model passed.
+// Dimension computations — each function returns one row. Empty/missing data
+// renders an explicit "not recorded" string rather than a fabricated value.
 // ---------------------------------------------------------------------------
 
 function computeDiscrimination(m: ModelHealthCardProps['metrics']): Dimension {
@@ -62,27 +56,20 @@ function computeDiscrimination(m: ModelHealthCardProps['metrics']): Dimension {
   if (auc == null) {
     return {
       name: 'Discrimination',
-      headline: 'AUC unavailable',
-      detail: 'no AUC recorded for this model',
-      verdict: 'unknown',
+      headline: 'AUC not recorded',
+      detail: 'no AUC available for this model',
     }
   }
-  const aucVerdict: Verdict = auc >= THRESHOLDS.AUC_FLOOR ? 'pass' : 'fail'
-  const aucDetail =
-    aucVerdict === 'pass'
-      ? `above ${THRESHOLDS.AUC_FLOOR.toFixed(2)} regulator floor`
-      : `below ${THRESHOLDS.AUC_FLOOR.toFixed(2)} regulator floor`
   const dim: Dimension = {
     name: 'Discrimination',
     headline: `AUC ${auc.toFixed(3)}`,
-    detail: aucDetail,
-    verdict: aucVerdict,
+    detail: `industry floor: ${REFERENCE.AUC_FLOOR.toFixed(2)}`,
   }
   if (ks != null) {
     dim.secondary = {
       label: 'KS',
       value: ks.toFixed(3),
-      verdict: ks >= THRESHOLDS.KS_FLOOR ? 'pass' : 'fail',
+      detail: `industry floor: ${REFERENCE.KS_FLOOR.toFixed(2)}`,
     }
   }
   return dim
@@ -93,20 +80,14 @@ function computeCalibration(m: ModelHealthCardProps['metrics']): Dimension {
   if (ece == null) {
     return {
       name: 'Calibration',
-      headline: 'ECE unavailable',
+      headline: 'ECE not recorded',
       detail: 'no calibration data — re-train with v1.9.0+ trainer',
-      verdict: 'unknown',
     }
   }
-  const verdict: Verdict = ece <= THRESHOLDS.ECE_CEIL ? 'pass' : 'fail'
   return {
     name: 'Calibration',
     headline: `ECE ${ece.toFixed(4)}`,
-    detail:
-      verdict === 'pass'
-        ? `below ${THRESHOLDS.ECE_CEIL.toFixed(2)} ceiling`
-        : `exceeds ${THRESHOLDS.ECE_CEIL.toFixed(2)} ceiling`,
-    verdict,
+    detail: `industry ceiling: ${REFERENCE.ECE_CEIL.toFixed(2)}`,
   }
 }
 
@@ -118,24 +99,13 @@ function computeStability(m: ModelHealthCardProps['metrics']): Dimension {
       name: 'Stability (PSI)',
       headline: 'no PSI data',
       detail: 'train with v1.9.9+ trainer to record per-feature PSI',
-      verdict: 'unknown',
     }
   }
   const max = Math.max(...values)
-  let verdict: Verdict = 'pass'
-  let detail = `max feature PSI below ${THRESHOLDS.PSI_STABLE.toFixed(2)} stable boundary`
-  if (max >= THRESHOLDS.PSI_DRIFT) {
-    verdict = 'fail'
-    detail = `at or above ${THRESHOLDS.PSI_DRIFT.toFixed(2)} significant-drift boundary`
-  } else if (max >= THRESHOLDS.PSI_STABLE) {
-    verdict = 'watch'
-    detail = `between ${THRESHOLDS.PSI_STABLE.toFixed(2)} and ${THRESHOLDS.PSI_DRIFT.toFixed(2)} — moderate drift`
-  }
   return {
     name: 'Stability (PSI)',
     headline: `max ${max.toFixed(3)}`,
-    detail,
-    verdict,
+    detail: `stable < ${REFERENCE.PSI_STABLE.toFixed(2)} · significant drift ≥ ${REFERENCE.PSI_DRIFT.toFixed(2)}`,
   }
 }
 
@@ -144,20 +114,14 @@ function computeGeneralization(m: ModelHealthCardProps['metrics']): Dimension {
   if (typeof gap !== 'number') {
     return {
       name: 'Generalization',
-      headline: 'gap unavailable',
-      detail: 'no train/test gap recorded',
-      verdict: 'unknown',
+      headline: 'gap not recorded',
+      detail: 'no train/test gap available',
     }
   }
-  const verdict: Verdict = gap <= THRESHOLDS.GAP_CEIL ? 'pass' : 'fail'
   return {
     name: 'Generalization',
     headline: `train→test gap ${gap.toFixed(3)}`,
-    detail:
-      verdict === 'pass'
-        ? `below ${THRESHOLDS.GAP_CEIL.toFixed(2)} ceiling`
-        : `exceeds ${THRESHOLDS.GAP_CEIL.toFixed(2)} ceiling — overfitting risk`,
-    verdict,
+    detail: `industry ceiling: ${REFERENCE.GAP_CEIL.toFixed(2)}`,
   }
 }
 
@@ -167,23 +131,15 @@ function computeLift(m: ModelHealthCardProps['metrics']): Dimension {
   if (typeof lift !== 'number' || typeof baselineAuc !== 'number') {
     return {
       name: 'Lift over LR',
-      headline: 'baseline unavailable',
-      detail: 'no logistic-regression baseline recorded',
-      verdict: 'unknown',
+      headline: 'baseline not recorded',
+      detail: 'no logistic-regression baseline available',
     }
   }
   const sign = lift >= 0 ? '+' : ''
-  const verdict: Verdict = lift > 0 ? 'pass' : lift === 0 ? 'watch' : 'fail'
   return {
     name: 'Lift over LR',
     headline: `${sign}${lift.toFixed(3)} AUC`,
-    detail:
-      verdict === 'pass'
-        ? `vs LR baseline AUC ${baselineAuc.toFixed(3)}`
-        : verdict === 'watch'
-          ? 'no measurable improvement over LR baseline'
-          : `LR baseline AUC ${baselineAuc.toFixed(3)} beats this model`,
-    verdict,
+    detail: `vs LR baseline AUC ${baselineAuc.toFixed(3)}`,
   }
 }
 
@@ -195,7 +151,6 @@ function computeFairness(m: ModelHealthCardProps['metrics']): Dimension {
       name: 'Fairness',
       headline: 'no fairness data',
       detail: 'check that the fairness evaluator ran during training',
-      verdict: 'unknown',
     }
   }
   let passing = 0
@@ -208,23 +163,19 @@ function computeFairness(m: ModelHealthCardProps['metrics']): Dimension {
     }
   }
   const total = passing + failing.length
-  const verdict: Verdict = failing.length === 0 ? 'pass' : 'fail'
+  const detail =
+    failing.length === 0
+      ? `industry rule: DI ≥ ${REFERENCE.FAIRNESS_RATIO.toFixed(2)} on all attributes`
+      : `slices below ${(REFERENCE.FAIRNESS_RATIO * 100).toFixed(0)}% rule: ${failing.join(', ')}`
   return {
     name: 'Fairness',
-    headline: `${passing}/${total} attrs`,
-    detail:
-      verdict === 'pass'
-        ? `all protected attributes meet ${(THRESHOLDS.FAIRNESS_RATIO * 100).toFixed(0)}% rule`
-        : `${(THRESHOLDS.FAIRNESS_RATIO * 100).toFixed(0)}% rule fails on: ${failing.join(', ')}`,
-    verdict,
+    headline: `${passing}/${total} attrs above 80% rule`,
+    detail,
   }
 }
 
 // ---------------------------------------------------------------------------
-// Governance gate row — dedicated lane separate from the metric dimensions
-// because gate verdicts pass the ML team's own pre-activation checklist
-// (warn/block/off pattern from PRs #163-#165). A failed gate always trumps a
-// passing metric, so this row drives the headline verdict if any gate failed.
+// Governance gate row — shows recorded gate verdicts as plain text, no icons.
 // ---------------------------------------------------------------------------
 
 interface GateInfo {
@@ -232,23 +183,18 @@ interface GateInfo {
   display: string
   mode?: string
   decision?: Record<string, unknown> | null
-  verdict: Verdict
   reason?: string
+  result?: string
 }
 
-function gateVerdict(decision: Record<string, unknown> | null | undefined): Verdict {
-  if (!decision) return 'unknown'
-  if (decision.passed === true) return 'pass'
-  if (decision.passed === false) return 'fail'
-  if (decision.promoted === true) return 'pass'
-  if (decision.promoted === false) return 'fail'
-  if (typeof decision.result === 'string') {
-    const r = (decision.result as string).toLowerCase()
-    if (r === 'passed') return 'pass'
-    if (r === 'blocked' || r === 'failed' || r === 'rejected') return 'fail'
-    if (r === 'skipped') return 'unknown'
-  }
-  return 'unknown'
+function gateResultText(decision: Record<string, unknown> | null | undefined): string | undefined {
+  if (!decision) return undefined
+  if (decision.passed === true) return 'passed'
+  if (decision.passed === false) return 'rejected'
+  if (decision.promoted === true) return 'promoted'
+  if (decision.promoted === false) return 'rejected'
+  if (typeof decision.result === 'string') return (decision.result as string).toLowerCase()
+  return undefined
 }
 
 function readGates(m: ModelHealthCardProps['metrics']): GateInfo[] {
@@ -283,120 +229,31 @@ function readGates(m: ModelHealthCardProps['metrics']): GateInfo[] {
       display: labels[key],
       mode,
       decision,
-      verdict: gateVerdict(decision),
       reason,
+      result: gateResultText(decision),
     })
   }
   return gates
 }
 
 // ---------------------------------------------------------------------------
-// Headline verdict — collapses the dimension + gate matrix into a single
-// pill. Fail wins over watch wins over pass. Unknown rows count as watch
-// because "I don't know" should never present as healthy.
+// Presentational primitives — no icons; the card is intentionally text-only.
 // ---------------------------------------------------------------------------
-
-function rollupVerdict(dimensions: Dimension[], gates: GateInfo[]): {
-  verdict: Verdict
-  failed: number
-  watch: number
-  unknown: number
-} {
-  let failed = 0
-  let watch = 0
-  let unknown = 0
-  for (const d of dimensions) {
-    if (d.verdict === 'fail') failed += 1
-    else if (d.verdict === 'watch') watch += 1
-    else if (d.verdict === 'unknown') unknown += 1
-  }
-  for (const g of gates) {
-    if (g.verdict === 'fail') failed += 1
-    else if (g.verdict === 'unknown' && g.mode !== 'off') unknown += 1
-  }
-  let verdict: Verdict = 'pass'
-  if (failed > 0) verdict = 'fail'
-  else if (watch > 0 || unknown > 0) verdict = 'watch'
-  return { verdict, failed, watch, unknown }
-}
-
-// ---------------------------------------------------------------------------
-// Presentational primitives — kept inline so this card is self-contained.
-// ---------------------------------------------------------------------------
-
-function VerdictIcon({ verdict, className = '' }: { verdict: Verdict; className?: string }) {
-  const cls = `h-4 w-4 ${className}`
-  if (verdict === 'pass') return <CheckCircle2 className={`${cls} text-emerald-600`} />
-  if (verdict === 'fail') return <XCircle className={`${cls} text-red-600`} />
-  if (verdict === 'watch') return <AlertTriangle className={`${cls} text-amber-600`} />
-  return <Info className={`${cls} text-slate-400`} />
-}
-
-function HeadlinePill({
-  verdict,
-  failed,
-  watch,
-  unknown,
-}: {
-  verdict: Verdict
-  failed: number
-  watch: number
-  unknown: number
-}) {
-  const styles: Record<Verdict, string> = {
-    pass: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
-    watch: 'bg-amber-50 text-amber-800 ring-amber-200',
-    fail: 'bg-red-50 text-red-800 ring-red-200',
-    unknown: 'bg-slate-50 text-slate-700 ring-slate-200',
-  }
-  const labels: Record<Verdict, string> = {
-    pass: 'GOOD',
-    watch: 'WATCH',
-    fail: 'FAIL',
-    unknown: 'UNKNOWN',
-  }
-  const subParts: string[] = []
-  if (failed > 0) subParts.push(`${failed} failing`)
-  if (watch > 0) subParts.push(`${watch} on watch`)
-  if (unknown > 0) subParts.push(`${unknown} unknown`)
-  if (subParts.length === 0) subParts.push('all checks passing')
-  return (
-    <div className="flex items-center gap-3">
-      <span
-        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ring-1 ring-inset ${styles[verdict]}`}
-      >
-        <VerdictIcon verdict={verdict} className="!h-3.5 !w-3.5" />
-        {labels[verdict]}
-      </span>
-      <span className="text-xs text-muted-foreground">{subParts.join(' · ')}</span>
-    </div>
-  )
-}
 
 function DimensionRow({ dim }: { dim: Dimension }) {
   return (
     <div className="grid grid-cols-12 gap-3 items-baseline px-6 py-2.5">
       <span className="col-span-3 text-sm font-medium text-foreground">{dim.name}</span>
-      <span className="col-span-3 text-sm font-mono tabular-nums">{dim.headline}</span>
-      <span className="col-span-1 flex items-center">
-        <VerdictIcon verdict={dim.verdict} />
-      </span>
+      <span className="col-span-4 text-sm font-mono tabular-nums">{dim.headline}</span>
       <span className="col-span-5 text-xs text-muted-foreground">{dim.detail}</span>
       {dim.secondary && (
         <>
           <span className="col-span-3" />
-          <span className="col-span-3 text-xs font-mono tabular-nums text-muted-foreground">
+          <span className="col-span-4 text-xs font-mono tabular-nums text-muted-foreground">
             {dim.secondary.label} {dim.secondary.value}
           </span>
-          <span className="col-span-1 flex items-center">
-            <VerdictIcon verdict={dim.secondary.verdict} className="!h-3 !w-3" />
-          </span>
           <span className="col-span-5 text-xs text-muted-foreground/80">
-            {dim.secondary.verdict === 'pass'
-              ? `above ${THRESHOLDS.KS_FLOOR.toFixed(2)} floor`
-              : dim.secondary.verdict === 'fail'
-                ? `below ${THRESHOLDS.KS_FLOOR.toFixed(2)} floor`
-                : ''}
+            {dim.secondary.detail}
           </span>
         </>
       )}
@@ -419,22 +276,24 @@ function GateRow({ gates }: { gates: GateInfo[] }) {
     <div className="px-6 py-2.5 space-y-1.5">
       <div className="grid grid-cols-12 gap-3 items-baseline">
         <span className="col-span-3 text-sm font-medium text-foreground">Governance gates</span>
-        <span className="col-span-9 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="col-span-9 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
           {gates.map((g) => (
-            <span key={g.key} className="inline-flex items-center gap-1 text-xs">
-              <VerdictIcon verdict={g.verdict} className="!h-3.5 !w-3.5" />
+            <span key={g.key} className="inline-flex items-center gap-1">
               <span className="font-medium text-foreground">{g.display}</span>
               {g.mode && (
                 <span className="text-[11px] uppercase text-muted-foreground tracking-wide">
                   ({g.mode})
                 </span>
               )}
+              {g.result && (
+                <span className="text-muted-foreground">— {g.result}</span>
+              )}
             </span>
           ))}
         </span>
       </div>
       {gates
-        .filter((g) => g.reason && g.verdict !== 'pass')
+        .filter((g) => g.reason)
         .map((g) => (
           <div key={`${g.key}-reason`} className="text-xs text-muted-foreground pl-1">
             <span className="font-medium text-foreground">{g.display}:</span> {g.reason}
@@ -500,7 +359,7 @@ function RawMetadataTable({
 }
 
 // ---------------------------------------------------------------------------
-// Top-level card
+// Top-level card — text-only training diagnostics, no pass/fail verdicts.
 // ---------------------------------------------------------------------------
 
 export function ModelHealthCard({ metrics }: ModelHealthCardProps) {
@@ -515,7 +374,6 @@ export function ModelHealthCard({ metrics }: ModelHealthCardProps) {
     computeFairness(metrics),
   ]
   const gates = readGates(metrics)
-  const rollup = rollupVerdict(dimensions, gates)
 
   const trainingSamples = metrics.training_metadata?.train_size as number | undefined
   const segment = metrics.training_metadata?.segment as string | undefined
@@ -524,23 +382,22 @@ export function ModelHealthCard({ metrics }: ModelHealthCardProps) {
   return (
     <Card>
       <CardHeader className="pb-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-1.5">
-            <CardTitle className="text-base">Model Health</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              {trainingSamples != null
-                ? `Trained on ${trainingSamples.toLocaleString()} samples`
-                : 'Trained on (sample size unavailable)'}
-              {segment ? ` · segment: ${segment}` : ''}
-              {classBalance != null ? ` · ${(classBalance * 100).toFixed(1)}% positive rate` : ''}
-            </p>
-          </div>
-          <HeadlinePill
-            verdict={rollup.verdict}
-            failed={rollup.failed}
-            watch={rollup.watch}
-            unknown={rollup.unknown}
-          />
+        <CardTitle className="text-base">Training Diagnostics</CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          {trainingSamples != null
+            ? `Trained on ${trainingSamples.toLocaleString()} synthetic samples`
+            : 'Trained on (sample size unavailable)'}
+          {segment ? ` · segment: ${segment}` : ''}
+          {classBalance != null ? ` · ${(classBalance * 100).toFixed(1)}% positive rate` : ''}
+        </p>
+        <div className="mt-3 rounded-md border border-border bg-muted/30 px-3 py-2 flex items-start gap-2">
+          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+          <p className="text-xs text-muted-foreground leading-snug">
+            Values are reported on synthetic AU lending data calibrated against public sources
+            (see backend/docs/CALIBRATION_SOURCES.md). Reference thresholds are shown for context;
+            no pass/fail verdict is computed because the training distribution does not include
+            real lender data.
+          </p>
         </div>
       </CardHeader>
       <CardContent className="px-0 space-y-0">
@@ -568,15 +425,6 @@ export function ModelHealthCard({ metrics }: ModelHealthCardProps) {
             />
           )}
         </div>
-        {!metrics.training_metadata && (
-          <div className="px-6 py-3 text-xs text-muted-foreground flex items-start gap-2">
-            <MinusCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <span>
-              No training metadata recorded for this model. Re-train with v1.9.9+ trainer to
-              populate gate evidence and per-feature PSI.
-            </span>
-          </div>
-        )}
       </CardContent>
     </Card>
   )
