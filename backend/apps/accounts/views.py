@@ -276,11 +276,7 @@ class StaffCustomerListView(generics.ListAPIView):
     permission_classes = (IsAdminOrOfficer,)
 
     def get_queryset(self):
-        qs = (
-            CustomUser.objects.filter(role=CustomUser.Role.CUSTOMER)
-            .select_related("profile")
-            .order_by("-created_at")
-        )
+        qs = CustomUser.objects.filter(role=CustomUser.Role.CUSTOMER).select_related("profile").order_by("-created_at")
         search = self.request.query_params.get("search", "").strip()
         if search:
             from django.db.models import Q

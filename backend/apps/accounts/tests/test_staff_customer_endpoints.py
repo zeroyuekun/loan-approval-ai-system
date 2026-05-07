@@ -87,9 +87,7 @@ def second_officer(db):
 
 @pytest.mark.django_db
 class TestStaffCustomerListView:
-    def test_list_excludes_admin_and_officer_rows(
-        self, authed_officer_client, admin_user, officer_user, customer_user
-    ):
+    def test_list_excludes_admin_and_officer_rows(self, authed_officer_client, admin_user, officer_user, customer_user):
         # Plus a second customer so the response is non-trivial.
         CustomUser.objects.create_user(
             username="customer_two",
@@ -109,9 +107,7 @@ class TestStaffCustomerListView:
         assert "customer_test" in usernames
         assert "customer_two" in usernames
 
-    def test_list_search_does_not_leak_admin_email(
-        self, authed_officer_client, admin_user, customer_user
-    ):
+    def test_list_search_does_not_leak_admin_email(self, authed_officer_client, admin_user, customer_user):
         # Admin's email contains "admin"; an officer searching "admin" must NOT see it.
         response = authed_officer_client.get(reverse("staff-customer-list") + "?search=admin")
 
@@ -134,9 +130,7 @@ class TestStaffCustomerProfileView:
         response = authed_officer_client.get(url)
         assert response.status_code == 404
 
-    def test_profile_does_not_create_phantom_row_for_admin(
-        self, authed_officer_client, admin_user
-    ):
+    def test_profile_does_not_create_phantom_row_for_admin(self, authed_officer_client, admin_user):
         # Pre-condition: no CustomerProfile attached to the admin.
         assert not CustomerProfile.objects.filter(user_id=admin_user.id).exists()
 
@@ -165,9 +159,7 @@ class TestStaffCustomerActivityView:
         response = authed_officer_client.get(url)
         assert response.status_code == 404
 
-    def test_activity_customer_target_returns_200(
-        self, authed_officer_client, customer_user
-    ):
+    def test_activity_customer_target_returns_200(self, authed_officer_client, customer_user):
         url = reverse("staff-customer-activity", kwargs={"user_id": customer_user.id})
         response = authed_officer_client.get(url)
         assert response.status_code == 200
