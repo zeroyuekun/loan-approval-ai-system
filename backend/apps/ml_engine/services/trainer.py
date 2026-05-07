@@ -1010,6 +1010,12 @@ class ModelTrainer:
             "iv_features_selected": len(getattr(self, "_iv_result", {}).get("selected_features", [])),
             "iv_features_excluded_weak": len(getattr(self, "_iv_result", {}).get("excluded_weak", [])),
             "iv_features_excluded_leakage": len(getattr(self, "_iv_result", {}).get("excluded_leakage", [])),
+            # psi_by_feature is computed at metrics["psi_by_feature"] above and
+            # consumed by model_selector._max_psi, mrm_dossier._psi_section, and
+            # mrm_compliance._compliance_status — all of which read it from
+            # training_metadata. Without this propagation the promotion gate's
+            # PSI check returns float('inf') for every candidate.
+            "psi_by_feature": metrics.get("psi_by_feature", {}),
             **split_meta,
         }
 
