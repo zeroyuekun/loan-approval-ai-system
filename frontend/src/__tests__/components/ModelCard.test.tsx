@@ -83,4 +83,38 @@ describe('ModelCard', () => {
       expect(screen.getByText(/segment unspecified/i)).toBeInTheDocument()
     })
   })
+
+  describe('Performance section', () => {
+    it('renders the Performance heading', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(
+        screen.getByRole('heading', { name: /performance/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('shows AUC with regulator-floor framing when above floor', () => {
+      render(<ModelCard metrics={buildMetrics({ auc_roc: 0.872 })} />)
+      // Section value uses .toFixed(3) for the AUC number itself
+      expect(screen.getByText('0.872')).toBeInTheDocument()
+      expect(
+        screen.getByText(/above 0\.75 regulator floor/i),
+      ).toBeInTheDocument()
+    })
+
+    it('flags AUC below floor as below', () => {
+      render(<ModelCard metrics={buildMetrics({ auc_roc: 0.71 })} />)
+      expect(
+        screen.getByText(/below 0\.75 regulator floor/i),
+      ).toBeInTheDocument()
+    })
+
+    it('shows the GMSC external benchmark next to AUC', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      // GMSC_AUC = 0.866
+      expect(screen.getByText(/0\.866/)).toBeInTheDocument()
+      expect(
+        screen.getByText(/Give Me Some Credit/i),
+      ).toBeInTheDocument()
+    })
+  })
 })
