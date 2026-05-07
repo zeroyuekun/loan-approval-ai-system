@@ -25,7 +25,7 @@ export function DriftOverview({ reports }: DriftOverviewProps) {
     <Card>
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Drift Status</CardTitle>
+          <CardTitle className="text-base">Stability</CardTitle>
           <Badge variant={config.variant}>{config.label}</Badge>
         </div>
       </CardHeader>

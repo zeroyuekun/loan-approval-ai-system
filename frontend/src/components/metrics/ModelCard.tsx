@@ -588,14 +588,14 @@ function RawMetadataFooter({
 }
 
 /**
- * ModelCard — portfolio-facing receipt for the active model.
+ * ModelCard — single-source-of-truth model receipt for `/dashboard/model-metrics`.
  *
- * Top of `/dashboard/model-metrics`. Compresses what a senior reviewer needs
- * at a glance: which segment the model was trained on, how it performs versus
- * regulator floors and an external benchmark, what evidence backs those
- * numbers, what populations it should NOT be used on, and what the production
- * posture is. The detailed gate verdicts and raw metadata live below in
- * `<ModelHealthCard />`.
+ * Compresses what a lending analyst and a senior reviewer need at a glance:
+ * which segment the model was trained on, how it performs versus regulator
+ * floors and an external benchmark, what decision thresholds are in force,
+ * which features it relies on, what populations it should NOT be used on, and
+ * what its production posture is. Raw `training_metadata` lives behind a
+ * collapsed footer for power users.
  */
 export function ModelCard({ metrics }: ModelCardProps) {
   const algorithm = formatAlgorithm(metrics.algorithm)

@@ -4,23 +4,18 @@ import { useState, useEffect } from 'react'
 import { useModelMetrics, useTrainModel } from '@/hooks/useMetrics'
 import { useDriftReports } from '@/hooks/useDriftReports'
 import { useAuth } from '@/lib/auth'
-import { ConfusionMatrix } from '@/components/metrics/ConfusionMatrix'
-import { ROCCurve } from '@/components/metrics/ROCCurve'
-import { FeatureImportance } from '@/components/metrics/FeatureImportance'
 import { CalibrationChart } from '@/components/metrics/CalibrationChart'
-import { ThresholdChart } from '@/components/metrics/ThresholdChart'
 import { FairnessCard } from '@/components/metrics/FairnessCard'
 import { DecileChart } from '@/components/metrics/DecileChart'
 import { DriftOverview } from '@/components/metrics/DriftOverview'
-import { DriftPsiChart } from '@/components/metrics/DriftPsiChart'
-import { ModelHealthCard } from '@/components/metrics/ModelHealthCard'
+import { DriftTrendChart } from '@/components/metrics/DriftTrendChart'
 import { ModelCard } from '@/components/metrics/ModelCard'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { KpiStrip } from '@/components/metrics/KpiStrip'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectItem } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatPercent } from '@/lib/utils'
 import { Cpu, Loader2, CheckCircle, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -138,10 +133,12 @@ export default function ModelMetricsPage() {
   }
 
   const algorithmLabel = algorithmLabels[metrics.algorithm] || metrics.algorithm
+  const latestDrift = driftReports && driftReports.length > 0 ? driftReports[0] : null
+  const previousDrift = driftReports && driftReports.length > 1 ? driftReports[1] : null
 
   return (
     <div className="space-y-6">
-      {/* Model Info + Train */}
+      {/* Header — algorithm + version + Active badge + Train control */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold">{algorithmLabel}</h3>
@@ -221,122 +218,49 @@ export default function ModelMetricsPage() {
         </Card>
       )}
 
-      {/* Model Card — portfolio-facing receipt at the top of the page so a
-          senior reviewer or CV reader sees the explainability surface first
-          (segment, regulator-floor framing, AU calibration sources, out-of-
-          scope statement, production posture). The detailed Training
-          Diagnostics card sits at the bottom of the page under "Audit &
-          Governance". */}
+      {/* Lender-style KPI strip — first glance "is the model working today?" */}
+      <KpiStrip metrics={metrics} latestDrift={latestDrift} previousDrift={previousDrift} />
+
+      {/* ModelCard — performance + drivers + scope + posture, with raw
+          training metadata behind a collapse. Absorbs every signal that
+          legacy ConfusionMatrix / ROCCurve / ThresholdChart / ModelHealthCard
+          used to render on this page. */}
       <ModelCard metrics={metrics} />
 
-      {/* Key Metrics */}
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-        {[
-          { label: 'Accuracy', value: metrics.accuracy },
-          { label: 'Precision', value: metrics.precision },
-          { label: 'Recall', value: metrics.recall },
-          { label: 'F1 Score', value: metrics.f1_score },
-          { label: 'AUC-ROC', value: metrics.auc_roc },
-          ...(metrics.gini_coefficient != null ? [{ label: 'Gini', value: metrics.gini_coefficient }] : []),
-          ...(metrics.ks_statistic != null ? [{ label: 'KS Statistic', value: metrics.ks_statistic }] : []),
-          ...(metrics.brier_score != null ? [{ label: 'Brier Score', value: metrics.brier_score }] : []),
-        ].map((m) => (
-          <Card key={m.label}>
-            <CardContent className="pt-5 pb-4">
-              <p className="text-xs font-medium text-muted-foreground mb-1.5">{m.label}</p>
-              <p className="text-2xl font-bold tabular-nums">
-                {m.value != null
-                  ? ['Brier Score', 'Gini', 'KS Statistic'].includes(m.label)
-                    ? m.value.toFixed(4)
-                    : formatPercent(m.value)
-                  : '—'}
-              </p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Charts */}
-      <div className="grid gap-6 md:grid-cols-2">
-        {metrics.confusion_matrix && Object.keys(metrics.confusion_matrix).length > 0 && (
-          <ConfusionMatrix matrix={metrics.confusion_matrix} />
-        )}
-        {metrics.roc_curve_data?.fpr && metrics.roc_curve_data?.tpr && (
-          <ROCCurve
-            fpr={metrics.roc_curve_data.fpr}
-            tpr={metrics.roc_curve_data.tpr}
-            auc={metrics.auc_roc ?? 0}
-          />
-        )}
-      </div>
-
-      {metrics.feature_importances && (Array.isArray(metrics.feature_importances) ? metrics.feature_importances.length > 0 : Object.keys(metrics.feature_importances).length > 0) && (
-        <FeatureImportance features={metrics.feature_importances} />
+      {/* Calibration + Decile — the two visuals analysts actually use:
+          "are the probabilities trustworthy" and "is risk concentrated
+          where it should be". */}
+      {(metrics.calibration_data?.fraction_of_positives || metrics.decile_analysis?.deciles) && (
+        <div className="grid gap-6 md:grid-cols-2">
+          {metrics.calibration_data?.fraction_of_positives && (
+            <CalibrationChart
+              fractionOfPositives={metrics.calibration_data.fraction_of_positives}
+              meanPredictedValue={metrics.calibration_data.mean_predicted_value}
+              ece={metrics.calibration_data.ece}
+            />
+          )}
+          {metrics.decile_analysis?.deciles && (
+            <DecileChart deciles={metrics.decile_analysis.deciles} />
+          )}
+        </div>
       )}
 
-      {/* Banking Metrics */}
-      {(metrics.calibration_data?.fraction_of_positives || metrics.threshold_analysis?.sweep) && (
-        <>
-          <h3 className="text-lg font-semibold pt-2">Banking Metrics</h3>
-          <div className="grid gap-6 md:grid-cols-2">
-            {metrics.calibration_data?.fraction_of_positives && (
-              <CalibrationChart
-                fractionOfPositives={metrics.calibration_data.fraction_of_positives}
-                meanPredictedValue={metrics.calibration_data.mean_predicted_value}
-                ece={metrics.calibration_data.ece}
-              />
-            )}
-            {metrics.threshold_analysis?.sweep && (
-              <ThresholdChart
-                sweep={metrics.threshold_analysis.sweep}
-                f1OptimalThreshold={metrics.threshold_analysis.f1_optimal_threshold}
-                youdenJThreshold={metrics.threshold_analysis.youden_j_threshold}
-                costOptimalThreshold={metrics.threshold_analysis.cost_optimal_threshold}
-              />
-            )}
-          </div>
-        </>
+      {/* Stability summary + drift trend — population shifts and operational
+          shifts on one row. */}
+      {driftReports && driftReports.length > 0 && (
+        <div className="grid gap-6 md:grid-cols-2">
+          <DriftOverview reports={driftReports} />
+          <DriftTrendChart reports={driftReports} />
+        </div>
       )}
 
-      {/* Fairness Analysis */}
+      {/* Fairness — one card per protected attribute, 4/5ths rule pass/fail */}
       {metrics.fairness_metrics && Object.keys(metrics.fairness_metrics).length > 0 && (
         <>
           <h3 className="text-lg font-semibold pt-2">Fairness Analysis</h3>
           <FairnessCard fairnessMetrics={metrics.fairness_metrics} />
         </>
       )}
-
-      {/* Drift Monitoring */}
-      {driftReports && driftReports.length > 0 && (
-        <>
-          <h3 className="text-lg font-semibold pt-2">Drift Monitoring</h3>
-          <div className="grid gap-6 md:grid-cols-2">
-            <DriftOverview reports={driftReports} />
-            <DriftPsiChart reports={driftReports} />
-          </div>
-        </>
-      )}
-
-      {/* Model Diagnostics — decile chart sits here. The raw training
-          metadata KV view was folded into the Training Diagnostics card
-          ("Show raw training metadata" toggle) which now sits at the
-          bottom of the page. */}
-      {metrics.decile_analysis?.deciles && (
-        <>
-          <h3 className="text-lg font-semibold pt-2">Model Diagnostics</h3>
-          <DecileChart deciles={metrics.decile_analysis.deciles} />
-        </>
-      )}
-
-      {/* Audit & Governance — Training Diagnostics card lives at the
-          bottom (after Decile analysis) so reviewers reach it after the
-          visual charts above. The card is informational only — no
-          pass/fail verdict is computed because the training distribution
-          is synthetic. Risk reviewers who need the gate verdicts +
-          per-dimension threshold matrix + raw training_metadata KV will
-          find them inside this card. */}
-      <h3 className="text-lg font-semibold pt-4">Audit &amp; Governance</h3>
-      <ModelHealthCard metrics={metrics} />
     </div>
   )
 }

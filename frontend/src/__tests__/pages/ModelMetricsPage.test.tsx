@@ -92,7 +92,7 @@ describe('ModelMetricsPage', () => {
     localStorage.clear()
   })
 
-  it('renders metrics when model exists', async () => {
+  it('renders header + KPI strip + ModelCard when an active model exists', async () => {
     server.use(
       http.get(`${API_URL}/ml/models/active/metrics/`, () => {
         return HttpResponse.json(mockMetrics)
@@ -101,18 +101,28 @@ describe('ModelMetricsPage', () => {
 
     renderPage()
 
+    // Header — algorithm name, version, Active badge
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument()
     })
     expect(screen.getByText('v3')).toBeInTheDocument()
-    expect(screen.getByText('Active')).toBeInTheDocument()
+    // "Active" appears twice (header badge + ModelCard production-posture badge)
+    expect(screen.getAllByText('Active').length).toBeGreaterThanOrEqual(1)
 
-    // Key metrics should be rendered
-    expect(screen.getByText('Accuracy')).toBeInTheDocument()
-    expect(screen.getByText('Precision')).toBeInTheDocument()
-    expect(screen.getByText('Recall')).toBeInTheDocument()
-    expect(screen.getByText('F1 Score')).toBeInTheDocument()
-    expect(screen.getByText('AUC-ROC')).toBeInTheDocument()
+    // KPI strip — lender headline tiles (replaces the legacy 8-tile grid)
+    expect(
+      screen.getByRole('region', { name: /model kpi summary/i }),
+    ).toBeInTheDocument()
+    // AUC and KS values appear in BOTH the KPI strip and ModelCard's
+    // Performance section — that's by design, both surfaces read the same
+    // benchmarks.ts thresholds. Just assert presence.
+    expect(screen.getAllByText('0.910').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('0.650').length).toBeGreaterThanOrEqual(1)
+
+    // ModelCard — single source of truth for performance + drivers
+    expect(
+      screen.getByRole('heading', { name: /model card/i }),
+    ).toBeInTheDocument()
   })
 
   it('shows "no model" state when metrics returns 404', async () => {
@@ -161,7 +171,7 @@ describe('ModelMetricsPage', () => {
     })
   })
 
-  it('shows training status during training', async () => {
+  it('shows training banner during training', async () => {
     server.use(
       http.get(`${API_URL}/ml/models/active/metrics/`, () => {
         return HttpResponse.json(mockMetrics)
@@ -184,11 +194,13 @@ describe('ModelMetricsPage', () => {
     const trainButton = screen.getByRole('button', { name: /train new model/i })
     await user.click(trainButton)
 
+    // Banner copy is unique to the training-in-progress state — no duplicate
+    // "Training" matches like the legacy test triggered.
     await waitFor(() => {
-      expect(screen.getByText(/Training XGBoost model/)).toBeInTheDocument()
+      expect(
+        screen.getByText(/Running Optuna Bayesian optimization/i),
+      ).toBeInTheDocument()
     })
-    // Button should show training state
-    expect(screen.getByRole('button', { name: /training/i })).toBeInTheDocument()
   })
 
   it('shows error state on API failure', async () => {
