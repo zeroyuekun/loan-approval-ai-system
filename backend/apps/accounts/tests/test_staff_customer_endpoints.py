@@ -19,7 +19,6 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomerProfile, CustomUser
 
-
 # Fixtures are inlined here because backend/tests/conftest.py is not on the
 # auto-discovery path for tests under backend/apps/accounts/tests/. Mirroring
 # the existing fixtures in backend/tests/conftest.py keeps behaviour aligned
