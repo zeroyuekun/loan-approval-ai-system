@@ -220,11 +220,6 @@ export default function ModelMetricsPage() {
         </Card>
       )}
 
-      {/* Model Health — executive summary derived from training_metadata,
-          fairness, calibration, and gate verdicts. Stays at top so the
-          GOOD / WATCH / FAIL pill anchors all the detail charts below. */}
-      <ModelHealthCard metrics={metrics} />
-
       {/* Key Metrics */}
       <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
         {[
@@ -313,15 +308,24 @@ export default function ModelMetricsPage() {
         </>
       )}
 
-      {/* Model Diagnostics — raw training_metadata moved into ModelHealthCard
-          ("Show raw training metadata" toggle), so this section is purely for
-          the decile chart. */}
+      {/* Model Diagnostics — decile chart sits here. The raw training
+          metadata KV view was folded into the Training Diagnostics card
+          ("Show raw training metadata" toggle) which now sits at the
+          bottom of the page. */}
       {metrics.decile_analysis?.deciles && (
         <>
           <h3 className="text-lg font-semibold pt-2">Model Diagnostics</h3>
           <DecileChart deciles={metrics.decile_analysis.deciles} />
         </>
       )}
+
+      {/* Audit & Governance — Training Diagnostics card lives at the bottom
+          (after Decile analysis) so reviewers reach it after the visual
+          charts above. The card is informational only — no pass/fail
+          verdict is computed because the training distribution is
+          synthetic. */}
+      <h3 className="text-lg font-semibold pt-4">Audit &amp; Governance</h3>
+      <ModelHealthCard metrics={metrics} />
     </div>
   )
 }
