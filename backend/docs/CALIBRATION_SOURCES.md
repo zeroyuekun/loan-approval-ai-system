@@ -63,10 +63,13 @@ borrowers).
 ## Acknowledged gaps
 
 - **Synthetic positive-class rate vs real arrears.** The project deliberately
-  trains at ~22-44% positive-class rate (the supervised label) to give the
+  trains at ~56% positive-class rate (the supervised label) to give the
   model tractable signal without resampling. Real AU mortgage 90+ day
-  arrears sit at 1.68% (APRA Q1 2025) — the gap is intentional. A future
-  iteration could match real prevalence with class weighting + focal loss.
+  arrears sit at 1.68% (APRA Q1 2025) — the gap is intentional for ML
+  tractability. Measured on n=10000, seed=42: positive-class rate
+  0.5595 ± 0.008 (across seeds 1/42/99) — see also
+  `test_data_generator_realism.py`. A future iteration could match real
+  prevalence with class weighting + focal loss.
 - **No real lender data.** Out of reach without partnerships. The Kaggle
   GMSC validation is the closest available substitute.
 - **No RBA stress-scenario simulator.** RBA April 2025's severe scenario
