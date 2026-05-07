@@ -1,11 +1,14 @@
 'use client'
 
-import { Info } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, Info } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { FeatureImportance } from '@/components/metrics/FeatureImportance'
 import {
   AUC_REGULATOR_FLOOR,
   KS_REGULATOR_FLOOR,
   ECE_CEILING,
+  GAP_CEILING,
   GMSC_AUC,
   GMSC_DATASET_LABEL,
   GMSC_REFERENCE_URL,
@@ -82,6 +85,32 @@ function eceContext(ece: number | null | undefined): string {
   return `industry ceiling: ${ECE_CEILING.toFixed(2)}`
 }
 
+function gapContext(gap: number | null | undefined): string {
+  if (gap == null) return 'gap not recorded'
+  return `industry ceiling: ${GAP_CEILING.toFixed(2)}`
+}
+
+// ---------------------------------------------------------------------------
+// Confusion matrix row — folds the legacy ConfusionMatrix card into a single
+// text line. Senior reviewers and lending analysts read precision/recall/n,
+// not a 2×2 grid.
+// ---------------------------------------------------------------------------
+
+function readConfusion(
+  cm: ModelMetrics['confusion_matrix'] | null | undefined,
+): { p: number; r: number; n: number } | null {
+  if (!cm) return null
+  const tp = cm.tp ?? cm.true_positives ?? 0
+  const fp = cm.fp ?? cm.false_positives ?? 0
+  const tn = cm.tn ?? cm.true_negatives ?? 0
+  const fn = cm.fn ?? cm.false_negatives ?? 0
+  const n = tp + fp + tn + fn
+  if (n === 0) return null
+  const p = tp + fp > 0 ? tp / (tp + fp) : 0
+  const r = tp + fn > 0 ? tp / (tp + fn) : 0
+  return { p, r, n }
+}
+
 // ---------------------------------------------------------------------------
 // Credibility section — top-3 drivers normalised from either feature
 // importance shape (object map or array). The point is to show a senior
@@ -114,8 +143,20 @@ function topDrivers(
   return rows.sort((a, b) => b.importance - a.importance).slice(0, limit)
 }
 
+function hasMoreFeatures(
+  fi: ModelMetrics['feature_importances'],
+  topShown: number,
+): boolean {
+  if (!fi) return false
+  if (Array.isArray(fi)) return fi.length > topShown
+  return Object.keys(fi).length > topShown
+}
+
 function CredibilitySection({ metrics }: { metrics: ModelMetrics }) {
   const drivers = topDrivers(metrics.feature_importances, 3)
+  const [showAll, setShowAll] = useState(false)
+  const moreAvailable = hasMoreFeatures(metrics.feature_importances, 3)
+
   return (
     <section className="space-y-3">
       <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
@@ -148,6 +189,29 @@ function CredibilitySection({ metrics }: { metrics: ModelMetrics }) {
               </li>
             ))}
           </ul>
+        )}
+        {moreAvailable && (
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setShowAll((s) => !s)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
+              aria-expanded={showAll}
+            >
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform ${showAll ? 'rotate-180' : ''}`}
+              />
+              {showAll ? 'Hide full feature ranking' : 'Show all features'}
+            </button>
+            {showAll && (
+              <div className="mt-3">
+                <FeatureImportance
+                  features={metrics.feature_importances}
+                  title="All features by importance"
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </section>
@@ -266,6 +330,16 @@ function PerformanceSection({ metrics }: { metrics: ModelMetrics }) {
   const auc = metrics.auc_roc ?? null
   const ks = metrics.ks_statistic ?? null
   const ece = metrics.calibration_data?.ece ?? metrics.ece ?? null
+  const gini = metrics.gini_coefficient ?? null
+  const brier = metrics.brier_score ?? null
+  const gap = (metrics.training_metadata?.overfitting_gap as number | undefined) ?? null
+  const lift = (metrics.training_metadata?.xgb_lift_over_baseline as
+    | number
+    | undefined) ?? null
+  const baselineAuc = (metrics.training_metadata?.baseline_auc as
+    | number
+    | undefined) ?? null
+  const confusion = readConfusion(metrics.confusion_matrix)
 
   return (
     <section className="space-y-3">
@@ -283,11 +357,46 @@ function PerformanceSection({ metrics }: { metrics: ModelMetrics }) {
           value={ks != null ? ks.toFixed(3) : '—'}
           context={ksContext(ks)}
         />
+        {gini != null && (
+          <MetricRow
+            label="Gini"
+            value={gini.toFixed(3)}
+            context="industry floor: 0.40"
+          />
+        )}
         <MetricRow
           label="ECE (calibration error)"
           value={ece != null ? ece.toFixed(4) : '—'}
           context={eceContext(ece)}
         />
+        {brier != null && (
+          <MetricRow
+            label="Brier score"
+            value={brier.toFixed(4)}
+            context="lower is better"
+          />
+        )}
+        {gap != null && (
+          <MetricRow
+            label="Train→test gap"
+            value={gap.toFixed(3)}
+            context={gapContext(gap)}
+          />
+        )}
+        {lift != null && baselineAuc != null && (
+          <MetricRow
+            label="Lift over LR"
+            value={`${lift >= 0 ? '+' : ''}${lift.toFixed(3)} AUC`}
+            context={`vs LR baseline AUC ${baselineAuc.toFixed(3)}`}
+          />
+        )}
+        {confusion && (
+          <MetricRow
+            label="Confusion"
+            value={`P ${confusion.p.toFixed(2)} · R ${confusion.r.toFixed(2)}`}
+            context={`n = ${confusion.n.toLocaleString()}`}
+          />
+        )}
         <div className="border-t border-slate-200 pt-2 text-xs text-muted-foreground">
           <span className="font-medium text-slate-600">External benchmark:</span>{' '}
           AUC{' '}
@@ -304,6 +413,65 @@ function PerformanceSection({ metrics }: { metrics: ModelMetrics }) {
             {GMSC_DATASET_LABEL}
           </a>
         </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Decision thresholds row — folds ThresholdChart's three optimal-cutoff badges
+// into a single one-liner. The threshold sweep visual is gone; analysts read
+// the chosen cutoffs as numbers, not as a four-line trade-off plot.
+// ---------------------------------------------------------------------------
+
+function DecisionThresholdsSection({ metrics }: { metrics: ModelMetrics }) {
+  const active = metrics.optimal_threshold ?? null
+  const ta = metrics.threshold_analysis ?? null
+  const f1Opt = ta?.f1_optimal_threshold ?? null
+  const youden = ta?.youden_j_threshold ?? null
+  const costOpt = ta?.cost_optimal_threshold ?? null
+
+  if (active == null && f1Opt == null && youden == null && costOpt == null) {
+    return null
+  }
+
+  const fmt = (v: number | null) => (v != null ? v.toFixed(2) : '—')
+
+  return (
+    <section className="space-y-3">
+      <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+        Decision thresholds
+      </h4>
+      <div className="rounded-md border border-slate-100 bg-slate-50/40 p-4 text-sm text-slate-700">
+        <span className="font-medium">Active</span>{' '}
+        <span className="font-mono tabular-nums text-slate-900">{fmt(active)}</span>
+        {f1Opt != null && (
+          <>
+            <span className="text-slate-400"> · </span>
+            F1-optimal{' '}
+            <span className="font-mono tabular-nums text-slate-900">
+              {fmt(f1Opt)}
+            </span>
+          </>
+        )}
+        {youden != null && (
+          <>
+            <span className="text-slate-400"> · </span>
+            Youden{"'"}s J{' '}
+            <span className="font-mono tabular-nums text-slate-900">
+              {fmt(youden)}
+            </span>
+          </>
+        )}
+        {costOpt != null && (
+          <>
+            <span className="text-slate-400"> · </span>
+            Cost-optimal{' '}
+            <span className="font-mono tabular-nums text-slate-900">
+              {fmt(costOpt)}
+            </span>
+          </>
+        )}
       </div>
     </section>
   )
@@ -338,6 +506,83 @@ function EmptyStateBanner() {
         (run "Train New Model" above) to populate AUC, calibration error, and
         feature importances.
       </p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Raw metadata footer — lifted verbatim from the legacy ModelHealthCard so
+// the same KV escape hatch survives the consolidation. Power users (risk
+// reviewers, ML engineers auditing a run) keep one collapsible KV view of the
+// full training_metadata JSON without leaving the page.
+// ---------------------------------------------------------------------------
+
+function humanizeKey(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function formatRawValue(value: unknown): string {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(4)
+  }
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function RawMetadataFooter({
+  metadata,
+  optimalThreshold,
+}: {
+  metadata: Record<string, unknown> | null | undefined
+  optimalThreshold: number | null | undefined
+}) {
+  const [open, setOpen] = useState(false)
+  const entries = metadata ? Object.entries(metadata) : []
+  if (entries.length === 0 && optimalThreshold == null) return null
+
+  return (
+    <div className="border-t border-slate-200 pt-4">
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+        aria-expanded={open}
+      >
+        <ChevronDown
+          className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+        {open ? 'Hide raw training metadata' : 'Show raw training metadata'}
+      </button>
+      {open && (
+        <div className="mt-3 rounded-md border border-border overflow-hidden">
+          <div className="divide-y divide-border bg-muted/10">
+            {entries.map(([key, value]) => (
+              <div key={key} className="grid grid-cols-2 gap-4 px-4 py-2">
+                <span className="text-xs text-muted-foreground">
+                  {humanizeKey(key)}
+                </span>
+                <span
+                  className="text-xs font-mono text-right tabular-nums truncate"
+                  title={typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                >
+                  {formatRawValue(value)}
+                </span>
+              </div>
+            ))}
+            {optimalThreshold != null && (
+              <div className="grid grid-cols-2 gap-4 px-4 py-2 bg-muted/40">
+                <span className="text-xs font-medium text-foreground">
+                  Active threshold
+                </span>
+                <span className="text-xs font-mono font-semibold text-right tabular-nums">
+                  {optimalThreshold.toFixed(2)}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -379,10 +624,15 @@ export function ModelCard({ metrics }: ModelCardProps) {
       <CardContent className="space-y-6">
         {!evidence && <EmptyStateBanner />}
         <PerformanceSection metrics={metrics} />
+        <DecisionThresholdsSection metrics={metrics} />
         <CredibilitySection metrics={metrics} />
         <TrainedOnSection />
         <NotValidatedForSection />
         <ProductionPostureSection metrics={metrics} />
+        <RawMetadataFooter
+          metadata={metrics.training_metadata}
+          optimalThreshold={metrics.optimal_threshold}
+        />
       </CardContent>
     </Card>
   )

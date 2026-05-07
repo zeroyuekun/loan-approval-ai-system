@@ -252,4 +252,137 @@ describe('ModelCard', () => {
       ).toBeInTheDocument()
     })
   })
+
+  describe('Migrated rows from ModelHealthCard', () => {
+    it('shows the train→test gap row when overfitting_gap is recorded', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(screen.getByText(/Train→test gap/i)).toBeInTheDocument()
+      // overfitting_gap = 0.022 in fixture
+      expect(screen.getByText('0.022')).toBeInTheDocument()
+      expect(
+        screen.getByText(/industry ceiling: 0\.05/i),
+      ).toBeInTheDocument()
+    })
+
+    it('shows lift over LR when baseline_auc + xgb_lift_over_baseline are recorded', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(screen.getByText(/Lift over LR/i)).toBeInTheDocument()
+      // xgb_lift_over_baseline = 0.062 in fixture (positive → "+0.062 AUC")
+      expect(screen.getByText(/\+0\.062 AUC/)).toBeInTheDocument()
+      // baseline_auc = 0.81 in fixture
+      expect(screen.getByText(/vs LR baseline AUC 0\.810/i)).toBeInTheDocument()
+    })
+
+    it('omits gap and lift rows when their training_metadata fields are missing', () => {
+      const m = buildMetrics({
+        training_metadata: { training_segment: 'AU PAYG' },
+      })
+      render(<ModelCard metrics={m} />)
+      expect(screen.queryByText(/Train→test gap/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Lift over LR/i)).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Confusion row (replaces ConfusionMatrix card)', () => {
+    it('shows precision, recall, and sample count derived from confusion_matrix', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      // tp=100, fp=20, tn=110, fn=30 → P 100/120 = 0.83, R 100/130 = 0.77, n 260
+      expect(screen.getByText(/Confusion/i)).toBeInTheDocument()
+      expect(screen.getByText(/P 0\.83 · R 0\.77/)).toBeInTheDocument()
+      expect(screen.getByText(/n = 260/)).toBeInTheDocument()
+    })
+
+    it('skips the row when confusion_matrix is empty (n=0)', () => {
+      const m = buildMetrics({
+        confusion_matrix: { tp: 0, fp: 0, tn: 0, fn: 0 },
+      })
+      render(<ModelCard metrics={m} />)
+      expect(screen.queryByText(/^Confusion$/)).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Decision thresholds section', () => {
+    it('shows the active threshold when only optimal_threshold is set', () => {
+      const m = buildMetrics({ optimal_threshold: 0.55, threshold_analysis: null })
+      render(<ModelCard metrics={m} />)
+      expect(
+        screen.getByRole('heading', { name: /decision thresholds/i }),
+      ).toBeInTheDocument()
+      expect(screen.getByText('0.55')).toBeInTheDocument()
+    })
+
+    it('shows F1, Youden, and Cost-optimal thresholds from threshold_analysis', () => {
+      const m = buildMetrics({
+        optimal_threshold: 0.5,
+        threshold_analysis: {
+          sweep: [],
+          f1_optimal_threshold: 0.47,
+          youden_j_threshold: 0.49,
+          cost_optimal_threshold: 0.52,
+        },
+      })
+      render(<ModelCard metrics={m} />)
+      expect(screen.getByText(/F1-optimal/i)).toBeInTheDocument()
+      expect(screen.getByText('0.47')).toBeInTheDocument()
+      expect(screen.getByText(/Youden's J/i)).toBeInTheDocument()
+      expect(screen.getByText('0.49')).toBeInTheDocument()
+      expect(screen.getByText(/Cost-optimal/i)).toBeInTheDocument()
+      expect(screen.getByText('0.52')).toBeInTheDocument()
+    })
+
+    it('hides the section entirely when no threshold data is recorded', () => {
+      const m = buildMetrics({
+        optimal_threshold: null,
+        threshold_analysis: null,
+      })
+      render(<ModelCard metrics={m} />)
+      expect(
+        screen.queryByRole('heading', { name: /decision thresholds/i }),
+      ).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Show all features toggle', () => {
+    it('shows a "Show all features" button when more than 3 features exist', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      // Fixture has 5 features → 2 hidden → toggle visible
+      expect(
+        screen.getByRole('button', { name: /show all features/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('does not render the toggle when only top-3 features exist', () => {
+      const m = buildMetrics({
+        feature_importances: {
+          credit_score: 0.3,
+          debt_to_income: 0.2,
+          annual_income: 0.1,
+        },
+      })
+      render(<ModelCard metrics={m} />)
+      expect(
+        screen.queryByRole('button', { name: /show all features/i }),
+      ).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Raw training metadata footer', () => {
+    it('renders a collapsed "Show raw training metadata" toggle', () => {
+      render(<ModelCard metrics={buildMetrics()} />)
+      expect(
+        screen.getByRole('button', { name: /show raw training metadata/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('hides the footer when no metadata and no optimal_threshold are recorded', () => {
+      const m = buildMetrics({
+        training_metadata: null,
+        optimal_threshold: null,
+      })
+      render(<ModelCard metrics={m} />)
+      expect(
+        screen.queryByRole('button', { name: /show raw training metadata/i }),
+      ).not.toBeInTheDocument()
+    })
+  })
 })
