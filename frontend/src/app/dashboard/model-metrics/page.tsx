@@ -14,6 +14,7 @@ import { DecileChart } from '@/components/metrics/DecileChart'
 import { DriftOverview } from '@/components/metrics/DriftOverview'
 import { DriftPsiChart } from '@/components/metrics/DriftPsiChart'
 import { ModelHealthCard } from '@/components/metrics/ModelHealthCard'
+import { ModelCard } from '@/components/metrics/ModelCard'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectItem } from '@/components/ui/select'
@@ -220,6 +221,14 @@ export default function ModelMetricsPage() {
         </Card>
       )}
 
+      {/* Model Card — portfolio-facing receipt at the top of the page so a
+          senior reviewer or CV reader sees the explainability surface first
+          (segment, regulator-floor framing, AU calibration sources, out-of-
+          scope statement, production posture). The detailed Training
+          Diagnostics card sits at the bottom of the page under "Audit &
+          Governance". */}
+      <ModelCard metrics={metrics} />
+
       {/* Key Metrics */}
       <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
         {[
@@ -319,11 +328,13 @@ export default function ModelMetricsPage() {
         </>
       )}
 
-      {/* Audit & Governance — Training Diagnostics card lives at the bottom
-          (after Decile analysis) so reviewers reach it after the visual
-          charts above. The card is informational only — no pass/fail
-          verdict is computed because the training distribution is
-          synthetic. */}
+      {/* Audit & Governance — Training Diagnostics card lives at the
+          bottom (after Decile analysis) so reviewers reach it after the
+          visual charts above. The card is informational only — no
+          pass/fail verdict is computed because the training distribution
+          is synthetic. Risk reviewers who need the gate verdicts +
+          per-dimension threshold matrix + raw training_metadata KV will
+          find them inside this card. */}
       <h3 className="text-lg font-semibold pt-4">Audit &amp; Governance</h3>
       <ModelHealthCard metrics={metrics} />
     </div>
