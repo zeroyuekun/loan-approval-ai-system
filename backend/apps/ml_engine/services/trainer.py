@@ -1291,16 +1291,19 @@ class ModelTrainer:
         attributes are set to safe empty defaults so training never blocks.
         """
         cap = 1000
+        rng = np.random.default_rng(42)
+        sample_indices = None  # set once if subsampling kicks in, reused for features
+
         try:
             probs_arr = np.asarray(holdout_probs, dtype=float).ravel()
+            probs_arr = probs_arr[np.isfinite(probs_arr)]
             if probs_arr.size == 0:
                 self._holdout_probabilities = []
             elif probs_arr.size <= cap:
                 self._holdout_probabilities = probs_arr.tolist()
             else:
-                rng = np.random.default_rng(42)
-                idx = rng.choice(probs_arr.size, size=cap, replace=False)
-                self._holdout_probabilities = probs_arr[idx].tolist()
+                sample_indices = rng.choice(probs_arr.size, size=cap, replace=False)
+                self._holdout_probabilities = probs_arr[sample_indices].tolist()
         except Exception:
             logger.warning("Holdout probability capture failed", exc_info=True)
             self._holdout_probabilities = []
@@ -1310,13 +1313,18 @@ class ModelTrainer:
             if hasattr(holdout_features, "columns") and len(holdout_features) > 0:
                 n = len(holdout_features)
                 if n <= cap:
-                    indices = list(range(n))
+                    for col in holdout_features.columns:
+                        feature_samples[col] = holdout_features[col].tolist()
                 else:
-                    rng = np.random.default_rng(42)
-                    indices = rng.choice(n, size=cap, replace=False).tolist()
-                for col in holdout_features.columns:
-                    series = holdout_features[col].iloc[indices]
-                    feature_samples[col] = series.tolist()
+                    if sample_indices is None or len(sample_indices) != cap or n != len(sample_indices) and n != probs_arr.size:
+                        # Probabilities did not subsample, or sizes diverge — draw a
+                        # fresh aligned set from the shared RNG so feature rows are
+                        # internally consistent (and reproducible across runs).
+                        feature_indices = rng.choice(n, size=cap, replace=False)
+                    else:
+                        feature_indices = sample_indices
+                    for col in holdout_features.columns:
+                        feature_samples[col] = holdout_features[col].iloc[feature_indices].tolist()
         except Exception:
             logger.warning("Holdout feature sampling failed", exc_info=True)
             feature_samples = {}
