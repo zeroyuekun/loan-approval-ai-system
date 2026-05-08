@@ -244,17 +244,26 @@ def _calibration_section(mv) -> str:
             "emits `decile_analysis.deciles` on every run."
         )
 
-    rows = ["| Decile | Expected PD | Observed default rate | n |", "|---|---|---|---|"]
-    for i, row in enumerate(deciles, start=1):
-        if isinstance(row, dict):
-            exp = row.get("expected") or row.get("predicted_rate") or row.get("mean_pred") or row.get("predicted_default_rate")
-            obs = row.get("observed") or row.get("observed_rate") or row.get("default_rate") or row.get("actual_default_rate")
-            n = row.get("n") or row.get("count") or "—"
-        else:
-            exp = obs = n = "—"
-        exp_s = f"{exp:.4f}" if isinstance(exp, (int, float)) else str(exp)
-        obs_s = f"{obs:.4f}" if isinstance(obs, (int, float)) else str(obs)
-        rows.append(f"| {i} | {exp_s} | {obs_s} | {n} |")
+    rows = ["| Decile | Actual default rate | Cumulative rate | Lift | n |",
+            "|---|---|---|---|---|"]
+    for row in deciles:
+        if not isinstance(row, dict):
+            rows.append("| — | — | — | — | — |")
+            continue
+        decile_idx = row.get("decile") or row.get("rank") or "—"
+        actual = (
+            row.get("actual_rate")
+            or row.get("observed")
+            or row.get("observed_rate")
+            or row.get("default_rate")
+        )
+        cum = row.get("cumulative_rate") or row.get("cumulative")
+        lift = row.get("lift")
+        n = row.get("count") or row.get("n") or "—"
+        actual_s = f"{actual:.4f}" if isinstance(actual, (int, float)) else "—"
+        cum_s = f"{cum:.4f}" if isinstance(cum, (int, float)) else "—"
+        lift_s = f"{lift:.4f}" if isinstance(lift, (int, float)) else "—"
+        rows.append(f"| {decile_idx} | {actual_s} | {cum_s} | {lift_s} | {n} |")
     return "## 6. Calibration report\n\n" + "\n".join(rows)
 
 
