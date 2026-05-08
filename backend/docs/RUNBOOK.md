@@ -716,3 +716,47 @@ The seed command creates one synthetic `LoanApplication` per ModelVersion
 (deterministic username `seed_predictions_mv_<uuid>`, status `approved`)
 to satisfy the `PredictionLog.application` FK. The application is kept in
 a terminal status so it never enters the agents' pending-batch queue.
+
+## Strict gate defaults — when and how to relax
+
+The deployment defaults to enforcement on three model-governance gates:
+
+| Variable | Default | Effect when default is active |
+|---|---|---|
+| `ML_FAIRNESS_GATE_MODE` | `block` | A new training run that fails the 4/5ths fairness rule raises `FairnessGateBlocked` BEFORE atomic activation. Old segment model stays `is_active=True`. |
+| `ML_PROMOTION_GATE_MODE` | `block` | A new model that fails champion-challenger promotion gates (PSI / calibration / KS) is rejected pre-activation. |
+| `CREDIT_POLICY_OVERLAY_MODE` | `enforce` | Out-of-scope predictions (commercial lending, applicants outside AU residency, etc.) are routed to manual review automatically rather than silently scored. |
+
+### What you see when a gate fires
+
+The training task wrapper releases the lock and surfaces the blocked condition in:
+
+- Celery worker logs (`docker compose logs celery_worker_ml`)
+- Flower UI (`http://localhost:5555` → failed task with the gate exception class in the traceback)
+- `ModelVersion.training_metadata` on the most recent training run carries `fairness_gate_mode` / `promotion_gate_mode` plus the rejection reason
+
+### Decision tree when a real violation surfaces
+
+1. **Re-train with adjusted features.** Most fairness violations come from a single feature with strong protected-class correlation. Re-binning, dropping, or interacting it with a less-correlated feature usually clears the gate without sacrificing AUC.
+2. **Accept the violation explicitly.** If the violation is unavoidable for the segment (e.g. limited training data for a protected group), set the env var to `warn` for ONE training run, document the operator decision in the model's MRM dossier, then flip back to `block`.
+3. **Skip activation.** Train the model; do not promote. The blocked state is not destructive — the existing active model continues serving.
+
+### Emergency rollback
+
+If a gate misfires (false positive — e.g. a bug in the gate logic itself rather than a real violation), relax the relevant variable in `.env`:
+
+```bash
+ML_FAIRNESS_GATE_MODE=warn
+ML_PROMOTION_GATE_MODE=warn
+CREDIT_POLICY_OVERLAY_MODE=shadow
+```
+
+Restart the affected services:
+
+```bash
+docker compose restart backend celery_worker_ml
+```
+
+Confirm via `docker compose logs backend` that the new mode is active. Re-trigger the training run. Once the underlying issue is fixed, restore the env vars to enforcement defaults and restart again.
+
+See [`docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md`](../../docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md) for the gate-mode machinery internals.
