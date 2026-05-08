@@ -236,6 +236,8 @@ class ModelTrainer:
         self.metrics_service = MetricsService()
         self._reference_distribution = None  # saved for PSI drift detection
         self._imputation_values = {}  # stored in model bundle for predictor alignment
+        self._holdout_probabilities = []
+        self._holdout_feature_samples = {}
 
     def add_derived_features(self, df):
         """Impute missing values and compute derived features via shared module."""
@@ -1275,6 +1277,50 @@ class ModelTrainer:
         final_model.fit(X_train, y_train, **fit_kwargs)
 
         return final_model, best_params
+
+    def _capture_holdout_reference(self, holdout_probs, holdout_features):
+        """Stash a sample of holdout probabilities + per-feature values.
+
+        Called after final model fit + predict_proba(X_test). The samples
+        feed save_model (bundle.reference_distribution.probability_distribution
+        + feature_distributions) and the metrics["training_metadata"] block
+        (reference_probabilities). Cap each list at 1000 entries to keep the
+        bundle small.
+
+        Drift readiness is opportunistic: any failure is logged and the
+        attributes are set to safe empty defaults so training never blocks.
+        """
+        cap = 1000
+        try:
+            probs_arr = np.asarray(holdout_probs, dtype=float).ravel()
+            if probs_arr.size == 0:
+                self._holdout_probabilities = []
+            elif probs_arr.size <= cap:
+                self._holdout_probabilities = probs_arr.tolist()
+            else:
+                rng = np.random.default_rng(42)
+                idx = rng.choice(probs_arr.size, size=cap, replace=False)
+                self._holdout_probabilities = probs_arr[idx].tolist()
+        except Exception:
+            logger.warning("Holdout probability capture failed", exc_info=True)
+            self._holdout_probabilities = []
+
+        feature_samples = {}
+        try:
+            if hasattr(holdout_features, "columns") and len(holdout_features) > 0:
+                n = len(holdout_features)
+                if n <= cap:
+                    indices = list(range(n))
+                else:
+                    rng = np.random.default_rng(42)
+                    indices = rng.choice(n, size=cap, replace=False).tolist()
+                for col in holdout_features.columns:
+                    series = holdout_features[col].iloc[indices]
+                    feature_samples[col] = series.tolist()
+        except Exception:
+            logger.warning("Holdout feature sampling failed", exc_info=True)
+            feature_samples = {}
+        self._holdout_feature_samples = feature_samples
 
     def save_model(self, model, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
