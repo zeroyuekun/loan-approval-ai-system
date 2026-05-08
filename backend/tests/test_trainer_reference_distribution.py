@@ -104,3 +104,24 @@ def test_save_model_writes_probability_and_feature_distributions(tmp_path):
     # Existing keys must survive the augmentation.
     assert "credit_score" in rd
     assert "percentiles" in rd["credit_score"]
+
+
+@pytest.mark.django_db
+def test_train_metrics_include_reference_probabilities(tmp_path, monkeypatch):
+    """metrics['training_metadata']['reference_probabilities'] mirrors holdout probs."""
+    from apps.ml_engine.services.data_generator import DataGenerator
+
+    gen = DataGenerator()
+    df = gen.generate(num_records=300, random_seed=42, label_noise_rate=0.05)
+    csv_path = tmp_path / "tiny.csv"
+    df.to_csv(csv_path, index=False)
+
+    trainer = ModelTrainer()
+    monkeypatch.setattr(trainer, "_train_xgb", trainer._train_rf)
+    _model, metrics = trainer.train(str(csv_path), algorithm="rf")
+
+    ref_probs = metrics["training_metadata"].get("reference_probabilities")
+    assert ref_probs is not None
+    assert len(ref_probs) > 0
+    assert len(ref_probs) <= 1000
+    assert ref_probs == trainer._holdout_probabilities
