@@ -3,6 +3,10 @@
 Patches an existing model bundle that lacks probability_distribution +
 feature_distributions, then re-runs to verify idempotent refusal and
 --force overwrite.
+
+ModelPredictor is fully monkeypatched in every test so the management
+command's new pipeline (predictor._transform → predictor.model.predict_proba)
+works without requiring a real trained bundle on disk.
 """
 
 import joblib
@@ -51,10 +55,42 @@ def stub_model(tmp_path):
     yield mv, bundle_path, tmp_path
 
 
+def _patch_predictor(monkeypatch, model, feature_cols):
+    """Monkeypatch ModelPredictor so tests don't need a real trained bundle.
+
+    Replaces __init__ with a lightweight initialiser that sets the minimal
+    attributes the backfill command depends on, and makes _transform a
+    passthrough so the DataFrame flows through unchanged.
+    """
+
+    def _fake_init(self, model_version=None, **kwargs):
+        self.model_version = model_version
+        self.model = model
+        self.feature_cols = feature_cols
+
+    def _fake_transform(self, df):
+        # Passthrough — test DataFrames already have the right columns.
+        return df
+
+    monkeypatch.setattr(
+        "apps.ml_engine.services.predictor.ModelPredictor.__init__",
+        _fake_init,
+    )
+    monkeypatch.setattr(
+        "apps.ml_engine.services.predictor.ModelPredictor._transform",
+        _fake_transform,
+    )
+
+
 @pytest.mark.django_db
 def test_backfill_populates_missing_fields(stub_model, monkeypatch):
     """Bundle gets probability_distribution + feature_distributions; metadata gets reference_probabilities."""
     mv, bundle_path, tmp_path = stub_model
+
+    X = np.array([[600], [700], [800], [550], [720]])
+    y = np.array([0, 1, 1, 0, 1])
+    model = LogisticRegression().fit(X, y)
+    _patch_predictor(monkeypatch, model, ["credit_score"])
 
     import pandas as pd
     monkeypatch.setattr(
@@ -108,6 +144,11 @@ def test_backfill_force_overwrites(stub_model, monkeypatch):
     bundle = joblib.load(bundle_path)
     bundle["reference_distribution"]["probability_distribution"] = [0.5]
     joblib.dump(bundle, bundle_path)
+
+    X = np.array([[600], [700], [800], [550], [720]])
+    y = np.array([0, 1, 1, 0, 1])
+    model = LogisticRegression().fit(X, y)
+    _patch_predictor(monkeypatch, model, ["credit_score"])
 
     import pandas as pd
     monkeypatch.setattr(

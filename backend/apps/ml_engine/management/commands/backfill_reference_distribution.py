@@ -77,20 +77,30 @@ class Command(BaseCommand):
             if target_col in gen_df.columns:
                 gen_df = gen_df.drop(columns=[target_col])
 
-        feature_cols = bundle.get("feature_cols") or []
-        usable_cols = [c for c in feature_cols if c in gen_df.columns]
-        if not usable_cols:
-            usable_cols = [c for c in (bundle.get("numeric_cols") or []) if c in gen_df.columns]
-        if not usable_cols:
+        from apps.ml_engine.services.predictor import ModelPredictor
+
+        try:
+            predictor = ModelPredictor(model_version=mv)
+        except Exception as exc:
+            raise CommandError(f"Could not load predictor for {mv.id}: {exc}")
+
+        try:
+            transformed = predictor._transform(gen_df.copy())
+        except Exception as exc:
             raise CommandError(
-                f"Bundle for {mv.id} has no recognisable feature columns; cannot backfill."
+                f"Feature transformation failed for {mv.id}: {exc}. "
+                f"DataGenerator output may be missing columns the predictor pipeline expects."
             )
 
-        X = gen_df[usable_cols].copy()
         try:
-            probs = bundle["model"].predict_proba(X)[:, 1]
+            probs = predictor.model.predict_proba(transformed[predictor.feature_cols])[:, 1]
         except Exception as exc:
             raise CommandError(f"predict_proba failed for {mv.id}: {exc}")
+
+        # Capture raw (untransformed) numeric feature distributions — not the
+        # one-hot encoded transformed columns, which would balloon the bundle
+        # without adding statistical signal.
+        feature_capture_cols = [c for c in (bundle.get("numeric_cols") or []) if c in gen_df.columns]
 
         cap = 1000
         if len(probs) > cap:
@@ -98,10 +108,10 @@ class Command(BaseCommand):
             rng = np.random.default_rng(42)
             idx = rng.choice(len(probs), size=cap, replace=False)
             prob_sample = probs[idx].tolist()
-            feat_sample = {col: gen_df[col].iloc[idx].tolist() for col in usable_cols}
+            feat_sample = {col: gen_df[col].iloc[idx].tolist() for col in feature_capture_cols}
         else:
             prob_sample = list(map(float, probs))
-            feat_sample = {col: gen_df[col].tolist() for col in usable_cols}
+            feat_sample = {col: gen_df[col].tolist() for col in feature_capture_cols}
 
         ref_dist["probability_distribution"] = prob_sample
         ref_dist["feature_distributions"] = feat_sample
