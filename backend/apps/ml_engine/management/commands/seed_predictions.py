@@ -74,6 +74,28 @@ class Command(BaseCommand):
 
         predictor = ModelPredictor(model_version=mv)
 
+        # Batch-transform via the predictor's feature pipeline (mirrors the
+        # backfill command's approach). Calling predictor.predict() per row is
+        # not viable here because predict() expects a LoanApplication-like
+        # object with attribute access, not a dict — and seeding hundreds of
+        # rows through the full SHAP/drift/policy/decision stack is massive
+        # wasted work for a drift seed. We need only probabilities + decisions.
+        try:
+            transformed = predictor._transform(df.copy())
+        except Exception as exc:
+            raise CommandError(
+                f"Feature transformation failed: {exc}. "
+                f"DataGenerator output may be missing columns the predictor pipeline expects."
+            )
+        try:
+            probs = predictor.model.predict_proba(transformed[predictor.feature_cols])[:, 1]
+        except Exception as exc:
+            raise CommandError(f"predict_proba failed: {exc}")
+
+        # Decision threshold from the active ModelVersion. predict_proba returns
+        # P(approve), so probability >= threshold → approve, else deny.
+        threshold = float(mv.optimal_threshold or 0.5)
+
         # Create a shared seed user + application for all synthetic PredictionLog rows.
         # This avoids N user+application inserts while satisfying the non-null FK
         # constraint. The application is tagged with the model version so it can
@@ -83,19 +105,12 @@ class Command(BaseCommand):
         created_rows = []
         with transaction.atomic():
             for i in range(count):
-                row = df.iloc[i].to_dict()
-                try:
-                    result = predictor.predict(row)
-                except Exception as exc:
-                    raise CommandError(f"predict() failed on row {i}: {exc}")
-
-                decision = result.get("decision") or result.get("prediction", "approve")
-                probability = float(result.get("probability", 0.0))
-
+                probability = float(probs[i])
+                decision = "approve" if probability >= threshold else "deny"
                 pl = PredictionLog.objects.create(
                     model_version=mv,
                     application=seed_app,
-                    prediction=str(decision),
+                    prediction=decision,
                     probability=probability,
                 )
                 created_rows.append(pl)

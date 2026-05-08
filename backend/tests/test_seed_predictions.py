@@ -44,14 +44,41 @@ def active_model(tmp_path):
         mv = ModelVersion.objects.create(
             algorithm="rf", version="test-seed",
             file_path=str(bundle_path), is_active=True,
+            optimal_threshold=0.5,
             training_metadata={"reference_probabilities": [0.2, 0.5, 0.8]},
         )
-    return mv, tmp_path
+    return mv, tmp_path, model
+
+
+def _patch_predictor(monkeypatch, model, feature_cols):
+    """Monkeypatch ModelPredictor so tests don't need a real bundle pipeline.
+
+    The seed command now batches via predictor._transform + predictor.model.predict_proba
+    instead of per-row predictor.predict(); we replace __init__ + _transform with
+    lightweight stubs and the test's fitted LogisticRegression handles predict_proba.
+    """
+
+    def _fake_init(self, model_version=None, **kwargs):
+        self.model_version = model_version
+        self.model = model
+        self.feature_cols = feature_cols
+
+    def _fake_transform(self, df):
+        return df  # passthrough — test DataFrames already have the right columns
+
+    monkeypatch.setattr(
+        "apps.ml_engine.services.predictor.ModelPredictor.__init__",
+        _fake_init,
+    )
+    monkeypatch.setattr(
+        "apps.ml_engine.services.predictor.ModelPredictor._transform",
+        _fake_transform,
+    )
 
 
 @pytest.mark.django_db
 def test_seed_creates_n_predictions_within_window(active_model, monkeypatch):
-    mv, tmp_path = active_model
+    mv, tmp_path, model = active_model
 
     import pandas as pd
     monkeypatch.setattr(
@@ -59,13 +86,7 @@ def test_seed_creates_n_predictions_within_window(active_model, monkeypatch):
         lambda self, num_records=100, random_seed=42, label_noise_rate=0.05:
             pd.DataFrame({"credit_score": [650] * num_records}),
     )
-
-    def _stub_predict(self, payload, **_kw):
-        return {"probability": 0.42, "decision": "approve"}
-    monkeypatch.setattr(
-        "apps.ml_engine.services.predictor.ModelPredictor.predict",
-        _stub_predict,
-    )
+    _patch_predictor(monkeypatch, model, ["credit_score"])
 
     with override_settings(ML_MODELS_DIR=str(tmp_path)):
         call_command(
@@ -89,7 +110,7 @@ def test_seed_creates_n_predictions_within_window(active_model, monkeypatch):
 @pytest.mark.django_db
 def test_seed_day_of_week_distribution_is_deterministic(active_model, monkeypatch):
     """Fixed seed + count produces a repeatable day-of-week shape (Tue-Thu peak)."""
-    mv, tmp_path = active_model
+    mv, tmp_path, model = active_model
 
     import pandas as pd
     monkeypatch.setattr(
@@ -97,13 +118,7 @@ def test_seed_day_of_week_distribution_is_deterministic(active_model, monkeypatc
         lambda self, num_records=100, random_seed=42, label_noise_rate=0.05:
             pd.DataFrame({"credit_score": [650] * num_records}),
     )
-
-    def _stub_predict(self, payload, **_kw):
-        return {"probability": 0.42, "decision": "approve"}
-    monkeypatch.setattr(
-        "apps.ml_engine.services.predictor.ModelPredictor.predict",
-        _stub_predict,
-    )
+    _patch_predictor(monkeypatch, model, ["credit_score"])
 
     with override_settings(ML_MODELS_DIR=str(tmp_path)):
         call_command(
@@ -131,7 +146,7 @@ def test_seed_day_of_week_distribution_is_deterministic(active_model, monkeypatc
 def test_seed_arg_validation(active_model):
     """Out-of-range count or spread-days are rejected."""
     from django.core.management.base import CommandError
-    mv, tmp_path = active_model
+    mv, tmp_path, _model = active_model
 
     with override_settings(ML_MODELS_DIR=str(tmp_path)):
         with pytest.raises((CommandError, SystemExit)):

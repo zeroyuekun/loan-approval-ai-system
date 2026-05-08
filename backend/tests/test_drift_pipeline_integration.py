@@ -55,12 +55,17 @@ def test_full_drift_pipeline(tmp_path, monkeypatch):
             pd.DataFrame({"credit_score": list(np.random.default_rng(42).integers(550, 820, size=num_records))}),
     )
 
-    def _stub_predict(self, payload, **_kw):
-        return {"probability": 0.55, "decision": "approve"}
-    monkeypatch.setattr(
-        "apps.ml_engine.services.predictor.ModelPredictor.predict",
-        _stub_predict,
-    )
+    # Stub the predictor so the seed_predictions command's batch-transform
+    # pipeline (predictor._transform → predictor.model.predict_proba) can run
+    # against the toy LogisticRegression without requiring full feature engineering.
+    def _fake_init(self, model_version=None, **kwargs):
+        self.model_version = model_version
+        self.model = model
+        self.feature_cols = ["credit_score"]
+    def _fake_transform(self, df):
+        return df  # passthrough
+    monkeypatch.setattr("apps.ml_engine.services.predictor.ModelPredictor.__init__", _fake_init)
+    monkeypatch.setattr("apps.ml_engine.services.predictor.ModelPredictor._transform", _fake_transform)
 
     with override_settings(ML_MODELS_DIR=str(tmp_path)):
         call_command(

@@ -77,6 +77,26 @@ class Command(BaseCommand):
             if target_col in gen_df.columns:
                 gen_df = gen_df.drop(columns=[target_col])
 
+        # Sync mv.file_hash with the current on-disk bundle BEFORE constructing
+        # the predictor. A previous backfill (or any external bundle modification)
+        # may have left a hash mismatch that would otherwise trip the integrity
+        # check inside ModelPredictor.__init__. The disk file is the source of
+        # truth for what the predictor should serve.
+        import hashlib
+        sha256 = hashlib.sha256()
+        with open(bundle_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        current_hash = sha256.hexdigest()
+        if mv.file_hash != current_hash:
+            mv.file_hash = current_hash
+            mv.save(update_fields=["file_hash"])
+            try:
+                from apps.ml_engine.services.predictor import clear_model_cache
+                clear_model_cache()
+            except Exception:
+                pass
+
         from apps.ml_engine.services.predictor import ModelPredictor
 
         try:
@@ -122,12 +142,31 @@ class Command(BaseCommand):
         joblib.dump(bundle, tmp_path)
         os.replace(tmp_path, bundle_path)
 
+        # Recompute the bundle hash so the predictor's integrity check accepts
+        # the modified file. Without this, _verify_model_hash refuses to load
+        # the bundle and all predictions break.
+        import hashlib
+        sha256 = hashlib.sha256()
+        with open(bundle_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        new_hash = sha256.hexdigest()
+
         meta = dict(mv.training_metadata or {})
         meta["reference_probabilities"] = prob_sample
         mv.training_metadata = meta
-        mv.save(update_fields=["training_metadata"])
+        mv.file_hash = new_hash
+        mv.save(update_fields=["training_metadata", "file_hash"])
+
+        # Invalidate the in-process bundle cache so subsequent predictions
+        # pick up the new hash + bundle.
+        try:
+            from apps.ml_engine.services.predictor import clear_model_cache
+            clear_model_cache()
+        except Exception:
+            pass
 
         self.stdout.write(self.style.SUCCESS(
             f"[ok] {mv.algorithm} v{mv.version}: wrote {len(prob_sample)} probs + "
-            f"{len(feat_sample)} feature columns"
+            f"{len(feat_sample)} feature columns; updated file_hash"
         ))
