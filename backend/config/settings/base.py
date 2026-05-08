@@ -238,7 +238,7 @@ ML_XGB_N_JOBS = 2
 # to enforce. Unknown values collapse to "shadow" at read time so a
 # misconfigured deployment never silently downgrades responsible-lending
 # safeguards.
-CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shadow")
+CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "enforce")
 
 # Pre-activation fairness gate mode for `train_model_task`. Three values:
 # "warn" (default — log + flag failures, leave model active; current
@@ -249,7 +249,7 @@ CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shado
 # the env var; flip to "block" only after validating the training pipeline
 # produces compliant fairness metrics for the segments in scope. See
 # docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
-ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
+ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "block")
 
 # Pre-activation champion-challenger promotion gate mode for `train_model_task`.
 # Mirrors ML_FAIRNESS_GATE_MODE: "warn" (default — gates run, decision recorded
@@ -260,7 +260,7 @@ ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
 # any deployment that doesn't set the env var; flip to "block" only after
 # validating the trainer produces compliant promotion metrics for the segments
 # in scope. See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
-ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
+ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "block")
 
 # D7 — MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
