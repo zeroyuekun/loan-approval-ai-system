@@ -673,3 +673,46 @@ behaviour shipped before PRs #163 and #164, so reverting should never
 introduce new failure modes — only remove the gate's protection.
 
 **Prevention:** The circuit breaker auto-recovers after a 10-minute cooldown period (`AI_CIRCUIT_BREAKER_COOLDOWN = 600`). Template fallback ensures decision emails always go out regardless of API availability. The daily API budget (500 calls / $50 USD) resets at midnight UTC.
+
+## Initial drift seed for new model deployments
+
+After training a new model the `/dashboard/model-metrics` KPI strip will
+show "—" for the **PSI (latest)** and **Approval rate** tiles until a
+`DriftReport` row exists. New models trained against this codebase are
+already drift-ready (the trainer hook stores `reference_probabilities`
++ `probability_distribution`), but they still need a recent prediction
+stream for the drift task to compute against.
+
+Two ways to get the tiles to populate:
+
+**Option A — wait for production traffic.** Once real predictions accrue
+through `/api/v1/ml/predict/<loan_id>/`, the Monday 02:00 AEDT
+`compute_weekly_drift_report` Celery beat task writes the row
+automatically. No manual step required.
+
+**Option B — seed a synthetic stream now.** Useful for demos, fresh
+deployments, and after `--all-segments` retraining when historical
+PredictionLog rows reference a deactivated model.
+
+```bash
+# Backfill any older models that pre-date the trainer hook (idempotent).
+docker exec loan-approval-ai-system-backend-1 \
+  python manage.py backfill_reference_distribution --all-active
+
+# Seed 200 AU-realistic synthetic predictions and trigger the drift task.
+docker exec loan-approval-ai-system-backend-1 \
+  python manage.py seed_predictions \
+    --model-id <UUID> --count 200 --spread-days 7 --seed 42
+```
+
+Reload `/dashboard/model-metrics` — the **PSI** and **Approval rate**
+tiles should now show numbers. Approval rate matches what the active
+model + threshold yield on a fresh AU-calibrated batch; PSI compares the
+seeded prediction-probability distribution against the model's stored
+`reference_probabilities` (≈ 0 for a freshly trained model — no drift
+expected when serving against a distribution close to training).
+
+The seed command creates one synthetic `LoanApplication` per ModelVersion
+(deterministic username `seed_predictions_mv_<uuid>`, status `approved`)
+to satisfy the `PredictionLog.application` FK. The application is kept in
+a terminal status so it never enters the agents' pending-batch queue.
