@@ -229,20 +229,26 @@ def _performance_section(mv) -> str:
 
 def _calibration_section(mv) -> str:
     """§6 — Calibration report (decile table)."""
+    decile_analysis = mv.decile_analysis or {}
     calibration = mv.calibration_data or {}
-    deciles = calibration.get("deciles") or calibration.get("decile_analysis") or []
+    deciles = (
+        decile_analysis.get("deciles")
+        or calibration.get("deciles")
+        or calibration.get("decile_analysis")
+        or []
+    )
     if not deciles:
         return (
             "## 6. Calibration report\n\n"
             "Decile calibration not recorded. Re-train with v1.9.0+ trainer which "
-            "emits `calibration_data.deciles` on every run."
+            "emits `decile_analysis.deciles` on every run."
         )
 
     rows = ["| Decile | Expected PD | Observed default rate | n |", "|---|---|---|---|"]
     for i, row in enumerate(deciles, start=1):
         if isinstance(row, dict):
-            exp = row.get("expected") or row.get("predicted_rate") or row.get("mean_pred")
-            obs = row.get("observed") or row.get("observed_rate") or row.get("default_rate")
+            exp = row.get("expected") or row.get("predicted_rate") or row.get("mean_pred") or row.get("predicted_default_rate")
+            obs = row.get("observed") or row.get("observed_rate") or row.get("default_rate") or row.get("actual_default_rate")
             n = row.get("n") or row.get("count") or "—"
         else:
             exp = obs = n = "—"
