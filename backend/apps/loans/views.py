@@ -202,11 +202,18 @@ class DashboardStatsView(APIView):
 
         now = timezone.now()
 
+        # Exclude synthetic applications created by `seed_predictions` to satisfy
+        # PredictionLog.application FK — they have status=approved and would
+        # otherwise inflate dashboard totals + approval rate.
+        real_apps = LoanApplication.objects.exclude(
+            applicant__username__startswith="seed_predictions_mv_"
+        )
+
         # Total applications
-        total = LoanApplication.objects.count()
+        total = real_apps.count()
 
         # Approval rate
-        decided = LoanApplication.objects.filter(status__in=["approved", "denied"])
+        decided = real_apps.filter(status__in=["approved", "denied"])
         decided_count = decided.count()
         approved = decided.filter(status="approved").count()
         approval_rate = round(approved / decided_count * 100, 1) if decided_count > 0 else 0
@@ -223,7 +230,7 @@ class DashboardStatsView(APIView):
         # Daily application volume (last 30 days)
         thirty_days_ago = now - timedelta(days=30)
         daily_volume = list(
-            LoanApplication.objects.filter(created_at__gte=thirty_days_ago)
+            real_apps.filter(created_at__gte=thirty_days_ago)
             .annotate(date=TruncDate("created_at"))
             .values("date")
             .annotate(count=Count("id"))
@@ -232,7 +239,7 @@ class DashboardStatsView(APIView):
 
         # Daily approval rate (last 30 days)
         daily_approvals = list(
-            LoanApplication.objects.filter(created_at__gte=thirty_days_ago, status__in=["approved", "denied"])
+            real_apps.filter(created_at__gte=thirty_days_ago, status__in=["approved", "denied"])
             .annotate(date=TruncDate("created_at"))
             .values("date")
             .annotate(total=Count("id"), approved=Count("id", filter=models.Q(status="approved")))
