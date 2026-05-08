@@ -55,3 +55,26 @@ def test_capture_reference_distribution_handles_empty_holdout():
 
     assert trainer._holdout_probabilities == []
     assert trainer._holdout_feature_samples == {}
+
+
+@pytest.mark.django_db
+def test_train_pipeline_populates_holdout_reference(tmp_path, monkeypatch):
+    """Full train() run populates trainer._holdout_probabilities and _holdout_feature_samples."""
+    import pandas as pd
+    from apps.ml_engine.services.data_generator import DataGenerator
+
+    # Tiny dataset so the test runs in seconds.
+    gen = DataGenerator()
+    df = gen.generate(num_records=300, random_seed=42, label_noise_rate=0.05)
+    csv_path = tmp_path / "tiny.csv"
+    df.to_csv(csv_path, index=False)
+
+    trainer = ModelTrainer()
+    # rf is fastest for a small dataset; xgb's Optuna timeout would dominate.
+    monkeypatch.setattr(trainer, "_train_xgb", trainer._train_rf)
+    model, metrics = trainer.train(str(csv_path), algorithm="rf")
+
+    assert len(trainer._holdout_probabilities) > 0
+    assert len(trainer._holdout_probabilities) <= 1000
+    assert isinstance(trainer._holdout_feature_samples, dict)
+    assert len(trainer._holdout_feature_samples) > 0

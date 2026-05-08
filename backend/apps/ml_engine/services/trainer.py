@@ -920,6 +920,10 @@ class ModelTrainer:
         y_pred = model.predict(X_test)
         y_prob = model.predict_proba(X_test)[:, 1]
 
+        # Stash holdout reference for drift-readiness — read by save_model and
+        # by the training_metadata block (see _capture_holdout_reference).
+        self._capture_holdout_reference(y_prob, X_test)
+
         metrics = self.metrics_service.compute_metrics(y_test, y_pred, y_prob)
         metrics["confusion_matrix"] = self.metrics_service.confusion_matrix_data(y_test, y_pred)
         metrics["roc_curve"] = self.metrics_service.roc_curve_data(y_test, y_prob)
