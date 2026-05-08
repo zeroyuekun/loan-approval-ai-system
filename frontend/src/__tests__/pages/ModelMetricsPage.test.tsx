@@ -92,7 +92,7 @@ describe('ModelMetricsPage', () => {
     localStorage.clear()
   })
 
-  it('renders header + KPI strip + ModelCard when an active model exists', async () => {
+  it('renders header + KPI strip when an active model exists', async () => {
     server.use(
       http.get(`${API_URL}/ml/models/active/metrics/`, () => {
         return HttpResponse.json(mockMetrics)
@@ -106,23 +106,14 @@ describe('ModelMetricsPage', () => {
       expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument()
     })
     expect(screen.getByText('v3')).toBeInTheDocument()
-    // "Active" appears twice (header badge + ModelCard production-posture badge)
-    expect(screen.getAllByText('Active').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Active')).toBeInTheDocument()
 
-    // KPI strip — lender headline tiles (replaces the legacy 8-tile grid)
+    // KPI strip — lender headline tiles
     expect(
       screen.getByRole('region', { name: /model kpi summary/i }),
     ).toBeInTheDocument()
-    // AUC and KS values appear in BOTH the KPI strip and ModelCard's
-    // Performance section — that's by design, both surfaces read the same
-    // benchmarks.ts thresholds. Just assert presence.
-    expect(screen.getAllByText('0.910').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('0.650').length).toBeGreaterThanOrEqual(1)
-
-    // ModelCard — single source of truth for performance + drivers
-    expect(
-      screen.getByRole('heading', { name: /model card/i }),
-    ).toBeInTheDocument()
+    expect(screen.getByText('0.910')).toBeInTheDocument()
+    expect(screen.getByText('0.650')).toBeInTheDocument()
   })
 
   it('shows "no model" state when metrics returns 404', async () => {

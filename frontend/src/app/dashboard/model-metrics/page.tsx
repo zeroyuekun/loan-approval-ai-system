@@ -9,7 +9,6 @@ import { FairnessCard } from '@/components/metrics/FairnessCard'
 import { DecileChart } from '@/components/metrics/DecileChart'
 import { DriftOverview } from '@/components/metrics/DriftOverview'
 import { DriftTrendChart } from '@/components/metrics/DriftTrendChart'
-import { ModelCard } from '@/components/metrics/ModelCard'
 import { KpiStrip } from '@/components/metrics/KpiStrip'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -220,12 +219,6 @@ export default function ModelMetricsPage() {
 
       {/* Lender-style KPI strip — first glance "is the model working today?" */}
       <KpiStrip metrics={metrics} latestDrift={latestDrift} previousDrift={previousDrift} />
-
-      {/* ModelCard — performance + drivers + scope + posture, with raw
-          training metadata behind a collapse. Absorbs every signal that
-          legacy ConfusionMatrix / ROCCurve / ThresholdChart / ModelHealthCard
-          used to render on this page. */}
-      <ModelCard metrics={metrics} />
 
       {/* Calibration + Decile — the two visuals analysts actually use:
           "are the probabilities trustworthy" and "is risk concentrated
