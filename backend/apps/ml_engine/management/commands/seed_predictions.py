@@ -103,7 +103,19 @@ class Command(BaseCommand):
         # Override created_at to weekday + evening-biased timestamps.
         # bulk_update issues SQL UPDATE which bypasses auto_now_add (applies
         # only to INSERT), so the sampled timestamps replace the originals.
+        #
+        # window_start is anchored at midnight of (today - (spread_days - 1))
+        # so that adding `day_offset` days lands on a predictable calendar date
+        # regardless of the current time-of-day.  Without this, a late-afternoon
+        # `now` would shift most timestamps into the *following* calendar day
+        # once the evening hour bias is added, making the measured DOW
+        # distribution diverge from the intended DOW_WEIGHTS shape.
+        # Anchoring to today's midnight - (spread_days - 1) keeps the earliest
+        # possible timestamp well inside the `now - spread_days - 1h` lower
+        # bound checked by the window test.
         now = timezone.now()
+        today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        window_start = today_midnight - timedelta(days=spread_days - 1)
         dow_weights_for_window = self._dow_weights_for_window(spread_days, now)
         for pl in created_rows:
             day_offset = rng.choices(
@@ -114,11 +126,10 @@ class Command(BaseCommand):
             hour = rng.choices(range(24), weights=HOUR_WEIGHTS, k=1)[0]
             minute = rng.randrange(60)
             second = rng.randrange(60)
-            sampled = (now - timedelta(days=spread_days)) + timedelta(
+            sampled = window_start + timedelta(
                 days=day_offset, hours=hour, minutes=minute, seconds=second,
             )
             # Clamp to window bounds.
-            window_start = now - timedelta(days=spread_days)
             if sampled > now:
                 sampled = now - timedelta(seconds=rng.randrange(60))
             if sampled < window_start:
@@ -182,19 +193,25 @@ class Command(BaseCommand):
                 has_hecs=False,
                 has_bankruptcy=False,
                 state="NSW",
+                status=LoanApplication.Status.APPROVED,
             )
         return app
 
     def _dow_weights_for_window(self, spread_days, now):
         """Return weights aligned to weekday positions for a `spread_days`-long window.
 
-        Window covers days `now - spread_days + 1` .. `now`. For each window
-        position, compute its weekday and look up the base DOW_WEIGHTS entry.
-        Returned list length equals spread_days; positions outside [0, 6] don't
-        apply (all 7 weekdays are covered because DOW_WEIGHTS indexes 0..6).
+        The window used by `handle()` is anchored at midnight of
+        `today - (spread_days - 1)`.  Each position `offset` in `[0, spread_days)`
+        maps to calendar day `window_start + offset`.  Because `window_start` is
+        at midnight, adding any hour in [0, 23] never crosses into the next
+        calendar day, so the DOW weight at position `offset` exactly predicts
+        the weekday of the sampled timestamp — the highest-weight offsets land
+        reliably on Tue/Wed regardless of what time the command is run.
         """
+        today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        window_start = today_midnight - timedelta(days=spread_days - 1)
         weights = []
         for offset in range(spread_days):
-            day_in_window = now - timedelta(days=spread_days - 1 - offset)
-            weights.append(DOW_WEIGHTS[day_in_window.weekday()])
+            sampled_day = window_start + timedelta(days=offset)
+            weights.append(DOW_WEIGHTS[sampled_day.weekday()])
         return weights
