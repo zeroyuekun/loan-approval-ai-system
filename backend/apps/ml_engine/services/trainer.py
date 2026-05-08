@@ -1336,23 +1336,24 @@ class ModelTrainer:
 
     def save_model(self, model, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        # Augment the per-feature reference distribution (already populated by
+        # train()) with the holdout-level keys the drift code paths consume:
+        #   - probability_distribution: feeds drift_monitor.compute_batch_drift_report
+        #   - feature_distributions: feeds drift_monitor.compute_csi
+        # Existing per-feature percentile/histogram keys are preserved.
+        ref_dist = dict(self._reference_distribution or {})
+        ref_dist["probability_distribution"] = list(getattr(self, "_holdout_probabilities", []) or [])
+        ref_dist["feature_distributions"] = dict(getattr(self, "_holdout_feature_samples", {}) or {})
+
         bundle = {
             "model": model,
             "scaler": self.scaler,
             "feature_cols": self.ohe_columns,
             "categorical_cols": self.CATEGORICAL_COLS,
             "numeric_cols": self.NUMERIC_COLS,
-            # Reference distribution for PSI drift detection (APRA CPG 235).
-            # Stores raw numeric feature values from training data so that
-            # incoming applications can be compared against what the model
-            # was trained on.
-            "reference_distribution": self._reference_distribution,
-            # Imputation values used during training so the predictor can
-            # apply identical imputation (prevents train/serve skew).
+            "reference_distribution": ref_dist,
             "imputation_values": self._imputation_values,
-            # Conformal prediction nonconformity scores (split conformal method).
-            # Used at inference to compute prediction intervals with guaranteed
-            # coverage. Stored as sorted array for fast quantile lookup.
             "conformal_scores": getattr(self, "_conformal_scores", np.array([])),
             "feature_bounds": getattr(self, "_feature_bounds", {}),
             "group_thresholds": getattr(self, "_group_thresholds", {}),

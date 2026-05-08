@@ -77,3 +77,30 @@ def test_train_pipeline_populates_holdout_reference(tmp_path, monkeypatch):
     assert len(trainer._holdout_probabilities) <= 1000
     assert isinstance(trainer._holdout_feature_samples, dict)
     assert len(trainer._holdout_feature_samples) > 0
+
+
+@pytest.mark.django_db
+def test_save_model_writes_probability_and_feature_distributions(tmp_path):
+    """save_model embeds the captured holdout samples in the bundle."""
+    import joblib
+    from sklearn.linear_model import LogisticRegression
+
+    trainer = ModelTrainer()
+    trainer._holdout_probabilities = [0.1, 0.4, 0.6, 0.9]
+    trainer._holdout_feature_samples = {"credit_score": [600, 650, 700, 750]}
+    # save_model still calls _validate_pipeline_consistency; satisfy its
+    # minimum requirements (feature_cols + imputation_values + reference_distribution).
+    trainer.ohe_columns = ["credit_score"]
+    trainer._imputation_values = {"credit_score": 650.0}
+    trainer._reference_distribution = {"credit_score": {"percentiles": [600, 650, 700, 750]}}
+
+    out = tmp_path / "tiny.joblib"
+    trainer.save_model(LogisticRegression(), str(out))
+
+    bundle = joblib.load(out)
+    rd = bundle["reference_distribution"]
+    assert rd["probability_distribution"] == [0.1, 0.4, 0.6, 0.9]
+    assert rd["feature_distributions"] == {"credit_score": [600, 650, 700, 750]}
+    # Existing keys must survive the augmentation.
+    assert "credit_score" in rd
+    assert "percentiles" in rd["credit_score"]
