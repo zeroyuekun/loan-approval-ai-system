@@ -60,7 +60,6 @@ def test_capture_reference_distribution_handles_empty_holdout():
 @pytest.mark.django_db
 def test_train_pipeline_populates_holdout_reference(tmp_path, monkeypatch):
     """Full train() run populates trainer._holdout_probabilities and _holdout_feature_samples."""
-    import pandas as pd
     from apps.ml_engine.services.data_generator import DataGenerator
 
     # Tiny dataset so the test runs in seconds.
