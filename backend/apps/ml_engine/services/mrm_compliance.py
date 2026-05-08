@@ -44,8 +44,14 @@ def _compliance_status(mv) -> tuple[str, list[str]]:
 
     fairness = mv.fairness_metrics or {}
     psi_map = (mv.training_metadata or {}).get("psi_by_feature") or {}
+    decile_analysis = mv.decile_analysis or {}
     calibration = mv.calibration_data or {}
-    deciles = calibration.get("deciles") or calibration.get("decile_analysis") or []
+    deciles = (
+        decile_analysis.get("deciles")
+        or calibration.get("deciles")
+        or calibration.get("decile_analysis")
+        or []
+    )
 
     failed_attrs: list[str] = []
     for attr, data in fairness.items():
