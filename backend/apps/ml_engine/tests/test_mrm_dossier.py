@@ -55,10 +55,11 @@ def _make_mv(**overrides):
             "gender": {"disparate_impact_ratio": 0.92, "passes_80_percent_rule": True},
             "age_group": {"disparate_impact_ratio": 0.78, "passes_80_percent_rule": False},
         },
-        calibration_data={
+        calibration_data={},
+        decile_analysis={
             "deciles": [
-                {"expected": 0.05, "observed": 0.04, "n": 1000},
-                {"expected": 0.15, "observed": 0.16, "n": 1000},
+                {"decile": 1, "actual_rate": 0.04, "cumulative_rate": 0.04, "lift": 0.18, "n": 1000},
+                {"decile": 2, "actual_rate": 0.16, "cumulative_rate": 0.10, "lift": 0.72, "n": 1000},
             ]
         },
         retraining_policy={"cadence_days": 90, "min_samples": 10000, "max_psi_before_retrain": 0.25},
@@ -172,7 +173,7 @@ def test_missing_fairness_metrics_renders_guidance():
 def test_missing_calibration_renders_guidance():
     from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
 
-    mv = _make_mv(calibration_data={})
+    mv = _make_mv(calibration_data={}, decile_analysis={})
     with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(mv)
@@ -268,18 +269,39 @@ def test_monitoring_drift_url_uses_actual_route():
 # ---------------------------------------------------------------------------
 
 
-def test_purpose_section_default_mode_emits_shadow_wording():
-    """Default settings (no env override) → shadow wording, **not blocked**."""
+def test_purpose_section_default_mode_emits_enforce_wording():
+    """Default settings (no env override) → enforce wording.
+
+    The deployed default was flipped from `shadow` to `enforce` in
+    `b4789f2 fix(config): strict gate-mode defaults`. The dossier must
+    reflect actual runtime behaviour, not a stale default."""
     from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
 
     with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
 
-    assert "shadow" in md.lower()
-    assert "not blocked" in md
-    # The old unconditional mandate must not appear in shadow mode.
+    assert "`enforce` mode" in md
+    assert "blocked by the overlay" in md
+    # The old unconditional mandate must not appear regardless of mode.
     assert "must be treated as advisory" not in md
+
+
+def test_purpose_section_shadow_mode_emits_observational_wording():
+    """Explicit `shadow` mode → observational wording, **not blocked**."""
+    from django.test import override_settings
+
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with (
+        override_settings(CREDIT_POLICY_OVERLAY_MODE="shadow"),
+        patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+    ):
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    assert "`shadow` (observational) mode" in md
+    assert "not blocked" in md
 
 
 def test_purpose_section_enforce_mode_emits_mandatory_referral():
@@ -430,7 +452,7 @@ def test_compliance_status_needs_review_when_psi_missing():
 def test_compliance_status_needs_review_when_calibration_missing():
     from apps.ml_engine.services.mrm_compliance import _compliance_status
 
-    mv = _make_compliant_mv(calibration_data={})
+    mv = _make_compliant_mv(calibration_data={}, decile_analysis={})
     status, reasons = _compliance_status(mv)
     assert status == "NEEDS REVIEW"
     assert any("calibration" in r for r in reasons)
@@ -474,6 +496,52 @@ def test_document_subtitle_drops_alignment_keeps_format_reference():
     assert "alignment" not in subtitle, f"Subtitle still implies alignment: {subtitle!r}"
     assert "APRA CPS 220 / SR 11-7" in subtitle
     assert "Format:" in subtitle
+
+
+# ---------------------------------------------------------------------------
+# Dossier honesty — mutable runtime state must not leak into the static
+# snapshot. (Codex 2026-05-14 round-2 finding 2.)
+# ---------------------------------------------------------------------------
+
+
+def test_header_does_not_render_mutable_active_flag():
+    """`Active: <bool>` is mutable runtime state — a static dossier can't
+    represent it accurately once a successor model is promoted on the same
+    segment. The header must NOT include it; current is_active is read
+    from the DB, not from frozen markdown.
+    """
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md_active = generate_dossier_markdown(_make_mv(is_active=True))
+        md_inactive = generate_dossier_markdown(_make_mv(is_active=False))
+
+    # Regression guard against both stale-state shapes.
+    assert "**Active:** True" not in md_active
+    assert "**Active:** False" not in md_inactive
+    # And the bare "Active:" label must be absent — it's the line we removed.
+    assert "- **Active:**" not in md_active
+    assert "- **Active:**" not in md_inactive
+
+
+def test_policy_section_does_not_hardcode_overlay_default():
+    """§9 used to claim `default is shadow` even after settings flipped to
+    `enforce`. The static dossier must not assert a default — the live mode
+    is correctly rendered in §2 from settings at generation time."""
+    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+
+    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        _cl.return_value = "## 11. Change log\n\n(stub)"
+        md = generate_dossier_markdown(_make_compliant_mv())
+
+    # The line cited by Codex: "default is `shadow`." (or any other mode).
+    assert "default is `shadow`" not in md
+    assert "default is `enforce`" not in md
+    assert "default is `off`" not in md
+    # The env-var name and valid values must remain so readers know where to look.
+    assert "`CREDIT_POLICY_OVERLAY_MODE`" in md
+    assert "(off / shadow / enforce)" in md
 
 
 # ---------------------------------------------------------------------------

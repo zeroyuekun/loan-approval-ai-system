@@ -78,7 +78,6 @@ def _header_section(mv) -> str:
         f"- **Training duration:** {training_meta.get('training_seconds', 'unknown')}s",
         f"- **Training samples:** {training_meta.get('n_training_samples', 'unknown')}",
         f"- **Class balance (positive rate):** {training_meta.get('positive_rate', 'unknown')}",
-        f"- **Active:** {mv.is_active}",
         f"- **Compliance status:** {status}",
     ]
     for reason in reasons:
@@ -336,7 +335,7 @@ def _policy_section(mv) -> str:
         "## 9. Policy overlay reference\n\n"
         + "\n".join(rows)
         + "\n\nCurrent overlay mode is read from `CREDIT_POLICY_OVERLAY_MODE` "
-        "(off / shadow / enforce); default is `shadow`."
+        "(off / shadow / enforce). See §2 for the mode this dossier was generated under."
     )
 
 
