@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from apps.ml_engine.services.plaid_patterns_service import (
+from apps.ml_engine.services.external.plaid_patterns import (
     PLAID_TO_AU_FEATURE_MAP,
     PlaidBehavioralPatterns,
     PlaidPatternsService,

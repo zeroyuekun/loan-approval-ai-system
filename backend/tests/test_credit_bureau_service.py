@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from apps.ml_engine.services.credit_bureau_service import (
+from apps.ml_engine.services.external.credit_bureau import (
     CREDIT_REPORT_BOUNDS,
     CreditBureauService,
     CreditReport,
@@ -376,7 +376,7 @@ class TestPullCreditReportFailures:
         assert result is None
 
     @patch.object(CreditBureauService, "_get_equifax_token", return_value="test-token")
-    @patch("apps.ml_engine.services.credit_bureau_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.credit_bureau.httpx.Client")
     def test_returns_none_when_equifax_api_raises(self, mock_client_cls, mock_token):
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -388,7 +388,7 @@ class TestPullCreditReportFailures:
         assert result is None
 
     @patch.object(CreditBureauService, "_get_experian_token", return_value="test-token")
-    @patch("apps.ml_engine.services.credit_bureau_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.credit_bureau.httpx.Client")
     def test_returns_none_when_experian_api_raises(self, mock_client_cls, mock_token):
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -508,7 +508,7 @@ class TestOAuth2TokenRetrieval:
     def setup_method(self):
         self.service = CreditBureauService()
 
-    @patch("apps.ml_engine.services.credit_bureau_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.credit_bureau.httpx.Client")
     def test_equifax_token_success(self, mock_client_cls):
         self.service.equifax_client_id = "test-id"
         self.service.equifax_client_secret = "test-secret"
@@ -527,7 +527,7 @@ class TestOAuth2TokenRetrieval:
         assert token == "equifax-token-123"
         mock_client.post.assert_called_once()
 
-    @patch("apps.ml_engine.services.credit_bureau_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.credit_bureau.httpx.Client")
     def test_experian_token_success(self, mock_client_cls):
         self.service.experian_client_id = "test-id"
         self.service.experian_client_secret = "test-secret"
@@ -557,7 +557,7 @@ class TestOAuth2TokenRetrieval:
         token = self.service._get_experian_token()
         assert token is None
 
-    @patch("apps.ml_engine.services.credit_bureau_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.credit_bureau.httpx.Client")
     def test_equifax_token_returns_none_on_http_error(self, mock_client_cls):
         self.service.equifax_client_id = "test-id"
         self.service.equifax_client_secret = "test-secret"
@@ -571,7 +571,7 @@ class TestOAuth2TokenRetrieval:
         token = self.service._get_equifax_token()
         assert token is None
 
-    @patch("apps.ml_engine.services.credit_bureau_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.credit_bureau.httpx.Client")
     def test_experian_token_returns_none_on_http_error(self, mock_client_cls):
         self.service.experian_client_id = "test-id"
         self.service.experian_client_secret = "test-secret"
@@ -637,7 +637,7 @@ class TestCreditReportFieldBounds:
 class TestPullCreditReportEndToEnd:
     """Test the full pull_credit_report flow with mocked HTTP."""
 
-    @patch("apps.ml_engine.services.credit_bureau_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.credit_bureau.httpx.Client")
     @patch.object(CreditBureauService, "_get_equifax_token", return_value="mock-token")
     def test_equifax_full_flow(self, mock_token, mock_client_cls):
         mock_response = MagicMock()
@@ -658,7 +658,7 @@ class TestPullCreditReportEndToEnd:
         assert report.provider == "equifax"
         assert report.raw_response == SAMPLE_EQUIFAX_RESPONSE
 
-    @patch("apps.ml_engine.services.credit_bureau_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.credit_bureau.httpx.Client")
     @patch.object(CreditBureauService, "_get_experian_token", return_value="mock-token")
     def test_experian_full_flow(self, mock_token, mock_client_cls):
         mock_response = MagicMock()

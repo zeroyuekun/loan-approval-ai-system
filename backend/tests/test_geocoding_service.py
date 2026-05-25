@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from apps.ml_engine.services.geocoding_service import (
+from apps.ml_engine.services.external.geocoding import (
     DEFAULT_RATE_BY_REMOTENESS,
     REMOTENESS_FALLBACK,
     GeocodingService,

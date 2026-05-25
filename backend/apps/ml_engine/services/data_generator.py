@@ -13,10 +13,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .benchmark_resolver import BenchmarkResolver
+from .external.benchmark_resolver import BenchmarkResolver
 from .feature_generator import BehavioralFeatureGenerator
 from .loan_performance_simulator import LoanPerformanceSimulator
-from .property_data_service import PropertyDataService
+from .external.property_data import PropertyDataService
 from .underwriting_engine import UnderwritingEngine
 
 # Columns emitted by DataGenerator that encode information only available
