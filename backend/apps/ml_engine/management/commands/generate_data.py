@@ -233,7 +233,7 @@ class Command(BaseCommand):
         benchmarks = None
         if use_live_data:
             self.stdout.write("Fetching live Australian benchmarks...")
-            from apps.ml_engine.services.real_world_benchmarks import RealWorldBenchmarks
+            from apps.ml_engine.services.metrics.real_world_benchmarks import RealWorldBenchmarks
 
             svc = RealWorldBenchmarks()
             benchmarks = svc.get_calibration_snapshot()

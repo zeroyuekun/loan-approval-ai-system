@@ -40,7 +40,7 @@ class LoanPerformanceSimulator:
         """
         if rng is None:
             rng = np.random.default_rng()
-        from .real_world_benchmarks import RealWorldBenchmarks
+        from .metrics.real_world_benchmarks import RealWorldBenchmarks
 
         reference_date = pd.Timestamp("2025-12-31")
         approved_mask = df["approved"] == 1
