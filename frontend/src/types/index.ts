@@ -478,6 +478,30 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
+export type StatusLevel = 'none' | 'moderate' | 'significant' | 'unknown'
+
+export interface StatusIndicator {
+  level: StatusLevel
+  detail: string
+}
+
+export interface PendingReviewStatus extends StatusIndicator {
+  count: number
+  oldest_age_hours: number | null
+  sla_breach: boolean
+}
+
+export interface WatchdogStatus extends StatusIndicator {
+  last_check?: string | null
+}
+
+export interface DashboardStatusStrip {
+  drift: StatusIndicator
+  fairness: StatusIndicator
+  pending_review: PendingReviewStatus
+  watchdog: WatchdogStatus
+}
+
 // Dashboard stats — response shape of GET /loans/dashboard-stats/.
 // Fields added in PR-1 of the dashboard persona refit are marked.
 export interface DashboardStats {
@@ -506,4 +530,5 @@ export interface DashboardStats {
     escalated: number
     success_rate: number
   }
+  status_strip: DashboardStatusStrip
 }
