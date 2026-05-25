@@ -50,7 +50,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('Human Review')).toBeInTheDocument()
     expect(screen.getByText('Customers')).toBeInTheDocument()
     expect(screen.getByText('My Profile')).toBeInTheDocument()
-    expect(screen.getByText('Model Metrics')).toBeInTheDocument()
+    expect(screen.getByText('Model Health')).toBeInTheDocument()
     expect(screen.getByText('Emails')).toBeInTheDocument()
     expect(screen.getByText('Audit Log')).toBeInTheDocument()
   })
@@ -64,7 +64,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('Dashboard')).toBeInTheDocument()
     expect(screen.getByText('Applications')).toBeInTheDocument()
     expect(screen.getByText('My Profile')).toBeInTheDocument()
-    expect(screen.getByText('Model Metrics')).toBeInTheDocument()
+    expect(screen.getByText('Model Health')).toBeInTheDocument()
     expect(screen.getByText('Emails')).toBeInTheDocument()
 
     expect(screen.queryByText('Human Review')).not.toBeInTheDocument()

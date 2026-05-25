@@ -34,7 +34,7 @@ SHAP runs on the active model for feature importances surfaced in the dashboard 
 **Costs:**
 - Two model artifacts to version, not one. Mitigated by `ModelVersion.is_active` flag.
 - XGBoost's dependency footprint (~30 MB per worker image) — acceptable given the single-image-per-queue deployment.
-- Tree ensembles are less calibrated out-of-the-box than logistic regression; isotonic calibration is applied post-hoc and monitored via calibration plots in `/dashboard/model-metrics`.
+- Tree ensembles are less calibrated out-of-the-box than logistic regression; isotonic calibration is applied post-hoc and monitored via calibration plots in `/dashboard/model-health` (Production Status tab).
 
 ## Alternatives considered
 

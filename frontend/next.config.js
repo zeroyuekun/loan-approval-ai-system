@@ -50,6 +50,20 @@ const nextConfig = {
       },
     ]
   },
+  async redirects() {
+    return [
+      {
+        source: '/dashboard/model-metrics',
+        destination: '/dashboard/model-health#model-detail',
+        permanent: true,
+      },
+      {
+        source: '/dashboard/model-card',
+        destination: '/dashboard/model-health#governance',
+        permanent: true,
+      },
+    ]
+  },
 }
 module.exports = process.env.NEXT_PUBLIC_SENTRY_DSN
   ? withSentryConfig(nextConfig, {
