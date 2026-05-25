@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from apps.ml_engine.services.segmentation import (
+from apps.ml_engine.services.scoring.segmentation import (
     SEGMENT_FILTERS,
     SEGMENT_HOME_INVESTOR,
     SEGMENT_HOME_OWNER_OCCUPIER,

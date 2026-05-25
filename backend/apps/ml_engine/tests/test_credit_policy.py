@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from apps.ml_engine.services import credit_policy as cp
+from apps.ml_engine.services.scoring import credit_policy as cp
 
 # ---------------------------------------------------------------------------
 # Hard-fail rule coverage (P01-P07)

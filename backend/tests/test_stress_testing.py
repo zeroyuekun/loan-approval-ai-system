@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 
 from apps.loans.models import LoanApplication, LoanDecision
-from apps.ml_engine.services.stress_testing import PortfolioStressTester
+from apps.ml_engine.services.scoring.stress_testing import PortfolioStressTester
 
 
 def _create_decision(app, decision="approved", confidence=0.85):

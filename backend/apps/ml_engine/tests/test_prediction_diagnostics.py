@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from apps.ml_engine.services.prediction_diagnostics import (
+from apps.ml_engine.services.scoring.prediction_diagnostics import (
     _shock_income_and_dti,
     check_feature_drift,
     run_stress_scenarios,

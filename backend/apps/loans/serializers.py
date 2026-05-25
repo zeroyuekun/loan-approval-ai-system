@@ -2,6 +2,10 @@ from rest_framework import serializers
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.serializers import UserSerializer
+from apps.ml_engine.services.scoring.reason_codes import (
+    generate_adverse_action_reasons,
+    generate_reapplication_guidance,
+)
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
 from .models import AuditLog, Complaint, DecisionReview, FraudCheck, LoanApplication, LoanDecision

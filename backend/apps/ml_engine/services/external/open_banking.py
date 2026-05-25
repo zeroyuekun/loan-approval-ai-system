@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from apps.ml_engine.services.predictor import FEATURE_BOUNDS
+from apps.ml_engine.services.scoring.predictor import FEATURE_BOUNDS
 
 logger = logging.getLogger(__name__)
 

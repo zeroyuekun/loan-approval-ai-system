@@ -307,7 +307,7 @@ def _fairness_section(mv) -> str:
 def _policy_section(mv) -> str:
     """§9 — Policy overlay reference (active P-codes at training time)."""
     try:
-        from apps.ml_engine.services.credit_policy import POLICY_RULES
+        from apps.ml_engine.services.scoring.credit_policy import POLICY_RULES
     except Exception:
         return "## 9. Policy overlay reference\n\nUnavailable — could not import credit_policy."
 

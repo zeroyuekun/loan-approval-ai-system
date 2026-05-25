@@ -56,7 +56,7 @@ class TestFeatureAlignment:
 
     def test_predictor_cats_match_trainer(self):
         """Predictor CATEGORICAL_COLS should match trainer CATEGORICAL_COLS."""
-        from apps.ml_engine.services.predictor import ModelPredictor
+        from apps.ml_engine.services.scoring.predictor import ModelPredictor
         from apps.ml_engine.services.trainer import ModelTrainer
 
         trainer_cats = set(ModelTrainer.CATEGORICAL_COLS)

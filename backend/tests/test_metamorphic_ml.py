@@ -16,7 +16,7 @@ from apps.ml_engine.services.feature_engineering import (
     compute_derived_features,
     impute_missing_values,
 )
-from apps.ml_engine.services.predictor import compute_risk_grade
+from apps.ml_engine.services.scoring.predictor import compute_risk_grade
 
 # ---------------------------------------------------------------------------
 # Helpers

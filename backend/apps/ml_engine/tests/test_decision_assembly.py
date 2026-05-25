@@ -21,7 +21,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from apps.ml_engine.services.decision_assembly import assemble_decision
+from apps.ml_engine.services.scoring.decision_assembly import assemble_decision
 
 
 def _mk_version(optimal_threshold=0.5, id_="mv-1"):
@@ -40,7 +40,7 @@ def _patch_pricing(*, pd_score_out=None, approved=True, segment_out="personal", 
         "segment": segment_out,
     }
     return patch(
-        "apps.ml_engine.services.decision_assembly.get_tier",
+        "apps.ml_engine.services.scoring.decision_assembly.get_tier",
         return_value=tier,
     )
 
@@ -80,7 +80,7 @@ class TestAssembleDecision:
 
     def test_missing_threshold_falls_back_to_half_with_warning(self):
         mv = _mk_version(optimal_threshold=None)
-        with _patch_pricing(), patch("apps.ml_engine.services.decision_assembly.logger") as log:
+        with _patch_pricing(), patch("apps.ml_engine.services.scoring.decision_assembly.logger") as log:
             result = assemble_decision(
                 probability_positive=0.7,
                 model_version=mv,
@@ -175,7 +175,7 @@ class TestAssembleDecision:
     def test_pricing_failure_returns_unavailable_payload_without_crashing(self):
         mv = _mk_version(optimal_threshold=0.5)
         with patch(
-            "apps.ml_engine.services.decision_assembly.get_tier",
+            "apps.ml_engine.services.scoring.decision_assembly.get_tier",
             side_effect=RuntimeError("pricing engine broken"),
         ):
             result = assemble_decision(

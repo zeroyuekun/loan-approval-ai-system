@@ -3,7 +3,7 @@ import inspect
 import numpy as np
 import pandas as pd
 
-from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 
 
 class TestCounterfactualEngine:
@@ -107,7 +107,7 @@ class TestCounterfactualEngine:
 
 def test_generate_signature_has_no_timeout_param():
     """D5 (v1.10.2): DiCE removal also drops the no-op timeout knob."""
-    from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+    from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 
     sig = inspect.signature(CounterfactualEngine.generate)
     assert "timeout_seconds" not in sig.parameters, (
@@ -117,7 +117,7 @@ def test_generate_signature_has_no_timeout_param():
 
 def test_no_dice_ml_in_module_source():
     """D5 (v1.10.2): the DiCE callpath was dead code; removal is irreversible."""
-    from apps.ml_engine.services import counterfactual_engine
+    from apps.ml_engine.services.scoring import counterfactual_engine
 
     src = inspect.getsource(counterfactual_engine)
     assert "dice_ml" not in src, "counterfactual_engine.py must not reference dice_ml after D5"

@@ -195,7 +195,7 @@ for mv in ModelVersion.objects.order_by('-created_at')[:5]:
 # Activate a previous version (ModelVersion.save() atomically deactivates others)
 docker exec loan-approval-ai-system-backend-1 python manage.py shell -c "
 from apps.ml_engine.models import ModelVersion
-from apps.ml_engine.services.predictor import clear_model_cache
+from apps.ml_engine.services.scoring.predictor import clear_model_cache
 old = ModelVersion.objects.get(version='VERSION_STRING_HERE')
 old.is_active = True
 old.save()

@@ -16,7 +16,7 @@ predictor wiring is covered in predictor smoke tests.
 
 from __future__ import annotations
 
-from apps.ml_engine.services import credit_policy as cp
+from apps.ml_engine.services.scoring import credit_policy as cp
 
 # ---------------------------------------------------------------------------
 # Rationale-by-code contract

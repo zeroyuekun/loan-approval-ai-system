@@ -206,7 +206,7 @@ def test_monotone_table_includes_positive_and_negative_features():
 
 
 def test_policy_section_enumerates_all_p_codes():
-    from apps.ml_engine.services.credit_policy import POLICY_RULES
+    from apps.ml_engine.services.scoring.credit_policy import POLICY_RULES
     from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:

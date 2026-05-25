@@ -7,7 +7,7 @@ from loan_amount / property_value / purpose after any upstream mutation
 
 from __future__ import annotations
 
-from apps.ml_engine.services.policy_recompute import recompute_lvr_driven_policy_vars
+from apps.ml_engine.services.scoring.policy_recompute import recompute_lvr_driven_policy_vars
 
 
 def test_low_lvr_charges_no_lmi():

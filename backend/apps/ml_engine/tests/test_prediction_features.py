@@ -14,7 +14,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from apps.ml_engine.services.prediction_features import (
+from apps.ml_engine.services.scoring.prediction_features import (
     build_prediction_features,
     derive_underwriter_features,
 )
@@ -184,7 +184,7 @@ class TestDeriveUnderwriterFeatures:
             "state": "NSW",
         }
         with patch(
-            "apps.ml_engine.services.prediction_features.UnderwritingEngine",
+            "apps.ml_engine.services.scoring.prediction_features.UnderwritingEngine",
             side_effect=RuntimeError("boom"),
         ):
             derive_underwriter_features(features)

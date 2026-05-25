@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from apps.ml_engine.models import ModelVersion
-from apps.ml_engine.services.predictor import clear_model_cache
+from apps.ml_engine.services.scoring.predictor import clear_model_cache
 from apps.ml_engine.services.trainer import ModelTrainer
 
 
