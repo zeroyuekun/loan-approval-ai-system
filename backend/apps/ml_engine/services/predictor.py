@@ -60,7 +60,7 @@ from apps.ml_engine.services.prediction_features import (
 from apps.ml_engine.services.prediction_features import (
     derive_underwriter_features as _derive_underwriter_features_helper,
 )
-from apps.ml_engine.services.shadow_scoring import (
+from apps.ml_engine.services.governance.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
 )
 from apps.ml_engine.services.shap_attribution import (

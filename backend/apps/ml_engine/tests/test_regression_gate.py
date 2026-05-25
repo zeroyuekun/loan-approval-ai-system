@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.ml_engine.services.regression_gate import (
+from apps.ml_engine.services.governance.regression_gate import (
     check_regression,
     load_golden,
 )
@@ -159,7 +159,7 @@ def test_non_numeric_metric_is_skipped():
 
 @pytest.mark.django_db(transaction=True)
 def test_active_model_against_golden_file_skip_if_none():
-    from apps.ml_engine.services.regression_gate import active_model_metrics
+    from apps.ml_engine.services.governance.regression_gate import active_model_metrics
 
     metrics = active_model_metrics()
     golden = load_golden()

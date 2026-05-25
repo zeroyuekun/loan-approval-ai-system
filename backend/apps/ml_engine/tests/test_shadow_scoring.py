@@ -25,7 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from apps.ml_engine.services.shadow_scoring import score_challengers_shadow
+from apps.ml_engine.services.governance.shadow_scoring import score_challengers_shadow
 
 
 def _mk_version(pk, version="v1.1.0", optimal_threshold=0.5):
@@ -47,10 +47,10 @@ def _patch_challengers(challenger_list):
     mock_qs.select_related.return_value = challenger_list
 
     with (
-        patch("apps.ml_engine.services.shadow_scoring.cache.get", return_value=None),
-        patch("apps.ml_engine.services.shadow_scoring.cache.set"),
+        patch("apps.ml_engine.services.governance.shadow_scoring.cache.get", return_value=None),
+        patch("apps.ml_engine.services.governance.shadow_scoring.cache.set"),
         patch(
-            "apps.ml_engine.services.shadow_scoring.ModelVersion.objects.filter",
+            "apps.ml_engine.services.governance.shadow_scoring.ModelVersion.objects.filter",
             return_value=mock_qs,
         ),
     ):
@@ -65,7 +65,7 @@ class TestScoreChallengersShadow:
 
         with (
             _patch_challengers([]),
-            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create") as create,
+            patch("apps.ml_engine.services.governance.shadow_scoring.PredictionLog.objects.create") as create,
         ):
             score_challengers_shadow(
                 application=app,
@@ -88,7 +88,7 @@ class TestScoreChallengersShadow:
 
         with (
             _patch_challengers([challenger]),
-            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create") as create,
+            patch("apps.ml_engine.services.governance.shadow_scoring.PredictionLog.objects.create") as create,
         ):
             score_challengers_shadow(
                 application=app,
@@ -116,7 +116,7 @@ class TestScoreChallengersShadow:
 
         with (
             _patch_challengers(challengers),
-            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create") as create,
+            patch("apps.ml_engine.services.governance.shadow_scoring.PredictionLog.objects.create") as create,
         ):
             score_challengers_shadow(
                 application=app,
@@ -147,7 +147,7 @@ class TestScoreChallengersShadow:
 
         with (
             _patch_challengers(challenger_with_champion),
-            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"),
+            patch("apps.ml_engine.services.governance.shadow_scoring.PredictionLog.objects.create"),
         ):
             score_challengers_shadow(
                 application=app,
@@ -172,7 +172,7 @@ class TestScoreChallengersShadow:
 
         with (
             _patch_challengers(challengers),
-            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create") as create,
+            patch("apps.ml_engine.services.governance.shadow_scoring.PredictionLog.objects.create") as create,
         ):
             score_challengers_shadow(
                 application=app,
@@ -197,7 +197,7 @@ class TestScoreChallengersShadow:
         with (
             _patch_challengers(challengers),
             patch(
-                "apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create",
+                "apps.ml_engine.services.governance.shadow_scoring.PredictionLog.objects.create",
                 side_effect=[RuntimeError("db write failed"), MagicMock()],
             ) as create,
         ):
@@ -218,10 +218,10 @@ class TestScoreChallengersShadow:
         champion = _mk_version(pk=10)
 
         with (
-            patch("apps.ml_engine.services.shadow_scoring.cache.get", return_value=None),
-            patch("apps.ml_engine.services.shadow_scoring.cache.set"),
+            patch("apps.ml_engine.services.governance.shadow_scoring.cache.get", return_value=None),
+            patch("apps.ml_engine.services.governance.shadow_scoring.cache.set"),
             patch(
-                "apps.ml_engine.services.shadow_scoring.ModelVersion.objects.filter",
+                "apps.ml_engine.services.governance.shadow_scoring.ModelVersion.objects.filter",
                 side_effect=RuntimeError("db down"),
             ),
         ):
@@ -251,7 +251,7 @@ class TestScoreChallengersShadow:
 
         with (
             _patch_challengers([challenger]),
-            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"),
+            patch("apps.ml_engine.services.governance.shadow_scoring.PredictionLog.objects.create"),
         ):
             score_challengers_shadow(
                 application=app,

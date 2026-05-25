@@ -15,7 +15,7 @@ import pytest
 from django.contrib.auth import get_user_model
 
 from apps.loans.models import LoanApplication, LoanDecision
-from apps.ml_engine.services.outcome_tracker import (
+from apps.ml_engine.services.governance.outcome_tracker import (
     _is_bad_outcome,
     compute_outcome_analysis,
     compute_vintage_analysis,

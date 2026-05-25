@@ -223,7 +223,7 @@ class ModelCardView(APIView):
     permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         try:
             generator = ModelCardGenerator()
