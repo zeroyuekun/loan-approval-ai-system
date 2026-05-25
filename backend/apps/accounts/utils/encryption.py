@@ -1,16 +1,21 @@
 """Field-level encryption utilities using Fernet symmetric encryption.
 
 Provides encrypt/decrypt helpers for PII fields stored at rest in the database.
-The encryption key is read from ``settings.FIELD_ENCRYPTION_KEY`` which may be a
-single Fernet key or a comma-separated list for key rotation (first key encrypts,
-all keys are tried for decryption).
+
+The encryption key is fetched via the ``KMSAdapter`` indirection
+(``apps.accounts.services.kms``). The default ``EnvKMS`` backend reads
+``settings.FIELD_ENCRYPTION_KEY`` (single key or comma-separated list for
+rotation) — preserving the pre-PR-1-security behaviour exactly. Setting
+``KMS_BACKEND=aws`` switches to envelope-encrypted DEK fetched from AWS
+KMS (see PR-1 of docs/superpowers/specs/2026-05-25-security-gap-closure-design.md).
 """
 
 import functools
 import logging
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
-from django.conf import settings
+
+from apps.accounts.services.kms import KMSError, get_kms_adapter
 
 logger = logging.getLogger("accounts.encryption")
 
@@ -19,18 +24,21 @@ logger = logging.getLogger("accounts.encryption")
 def get_fernet():
     """Return a Fernet (or MultiFernet) instance, cached as a singleton.
 
-    ``FIELD_ENCRYPTION_KEY`` can be a single key or a comma-separated list.
-    The first key is used for encryption; all keys are tried for decryption.
-    To rotate: generate a new key, prepend it to the comma-separated list,
-    then run ``python manage.py rotate_encryption_key`` to re-encrypt data.
+    The DEK is fetched via ``KMSAdapter.get_data_encryption_key()``:
+      - ``EnvKMS`` returns the raw ``FIELD_ENCRYPTION_KEY`` (single key
+        or comma-separated for rotation).
+      - ``AWSKmsAdapter`` returns a single DEK from AWS KMS.
+
+    For multi-key rotation in the env backend: prepend the new key to
+    ``FIELD_ENCRYPTION_KEY``, then run
+    ``python manage.py rotate_encryption_key`` to re-encrypt data.
     """
-    raw = getattr(settings, "FIELD_ENCRYPTION_KEY", "")
-    if not raw:
-        raise ValueError(
-            "FIELD_ENCRYPTION_KEY environment variable must be set. "
-            "Generate one with: python -c "
-            '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
-        )
+    try:
+        raw = get_kms_adapter().get_data_encryption_key()
+    except KMSError as exc:
+        # Preserve the original ValueError contract for callers (and for
+        # the existing tests that assert on this exception type).
+        raise ValueError(str(exc)) from exc
     keys = [k.strip() for k in raw.split(",") if k.strip()]
     fernets = [Fernet(k.encode() if isinstance(k, str) else k) for k in keys]
     if len(fernets) == 1:
