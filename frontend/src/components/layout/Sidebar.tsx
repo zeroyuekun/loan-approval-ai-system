@@ -13,7 +13,7 @@ const navItems = [
   { href: '/dashboard/human-review', label: 'Human Review', icon: ShieldAlert, staffOnly: true },
   { href: '/dashboard/customers', label: 'Customers', icon: Users, staffOnly: true },
   { href: '/dashboard/profile', label: 'My Profile', icon: UserCircle },
-  { href: '/dashboard/model-metrics', label: 'Model Metrics', icon: BarChart3 },
+  { href: '/dashboard/model-health', label: 'Model Health', icon: BarChart3 },
   { href: '/dashboard/emails', label: 'Emails', icon: Mail },
   { href: '/dashboard/audit', label: 'Audit Log', icon: ClipboardList, staffOnly: true },
 ]

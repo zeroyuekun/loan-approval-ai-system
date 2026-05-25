@@ -12,7 +12,7 @@ const pageTitles: Record<string, string> = {
   '/dashboard/human-review': 'Human Review',
   '/dashboard/customers': 'Customers',
   '/dashboard/profile': 'My Profile',
-  '/dashboard/model-metrics': 'Model Metrics',
+  '/dashboard/model-health': 'Model Health',
   '/dashboard/emails': 'Generated Emails',
 }
 
