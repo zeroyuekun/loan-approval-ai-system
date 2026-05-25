@@ -7,8 +7,8 @@ Ensures no train/serve skew — features generated must match features trained a
 class TestFeatureAlignment:
     def test_trainer_features_in_generated_data(self):
         """All trainer features should be producible by the data generator."""
-        from apps.ml_engine.services.data_generator import DataGenerator
-        from apps.ml_engine.services.trainer import ModelTrainer
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
+        from apps.ml_engine.services.training.trainer import ModelTrainer
 
         gen = DataGenerator()
         df = gen.generate(num_records=100)
@@ -57,7 +57,7 @@ class TestFeatureAlignment:
     def test_predictor_cats_match_trainer(self):
         """Predictor CATEGORICAL_COLS should match trainer CATEGORICAL_COLS."""
         from apps.ml_engine.services.scoring.predictor import ModelPredictor
-        from apps.ml_engine.services.trainer import ModelTrainer
+        from apps.ml_engine.services.training.trainer import ModelTrainer
 
         trainer_cats = set(ModelTrainer.CATEGORICAL_COLS)
         predictor_cats = set(ModelPredictor.CATEGORICAL_COLS)
@@ -67,7 +67,7 @@ class TestFeatureAlignment:
 
     def test_no_duplicate_features(self):
         """Trainer should not have duplicate feature names."""
-        from apps.ml_engine.services.trainer import ModelTrainer
+        from apps.ml_engine.services.training.trainer import ModelTrainer
 
         trainer = ModelTrainer()
         all_cols = trainer.NUMERIC_COLS + trainer.CATEGORICAL_COLS

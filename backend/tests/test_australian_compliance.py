@@ -7,7 +7,7 @@ class TestAPRAServiceabilityBuffer:
     """APRA mandates 3% interest rate buffer on all new housing loans."""
 
     def test_buffer_rate_is_3_percent(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         assert gen.ASSESSMENT_BUFFER == 0.03, f"APRA buffer should be 3%, got {gen.ASSESSMENT_BUFFER}"
@@ -28,7 +28,7 @@ class TestCCRCompliance:
     """Comprehensive Credit Reporting compliance (mandatory since 2018)."""
 
     def test_late_payment_window_is_24_months(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         df = gen.generate(num_records=1000)
@@ -36,7 +36,7 @@ class TestCCRCompliance:
             assert df["num_late_payments_24m"].max() <= 24, "Late payments cannot exceed 24-month CCR window"
 
     def test_arrears_categories_match_ccr(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         df = gen.generate(num_records=1000)
@@ -50,7 +50,7 @@ class TestBNPLNCCPCompliance:
     """BNPL under NCCP Act since June 2025."""
 
     def test_bnpl_has_credit_product_fields(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         df = gen.generate(num_records=1000)
@@ -75,7 +75,7 @@ class TestEquifaxScoreRange:
     """Equifax Australia score validation (0-1200 range)."""
 
     def test_score_range_0_to_1200(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         df = gen.generate(num_records=2000)
@@ -83,7 +83,7 @@ class TestEquifaxScoreRange:
         assert df["credit_score"].max() <= 1200
 
     def test_mean_score_near_national_average(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         df = gen.generate(num_records=3000)
@@ -95,13 +95,13 @@ class TestHEMBenchmarks:
     """Melbourne Institute Household Expenditure Measure."""
 
     def test_hem_table_structure(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         assert len(gen.HEM_TABLE) == 50, f"HEM table should have 50 entries, got {len(gen.HEM_TABLE)}"
 
     def test_hem_increases_with_dependants(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         for bracket in ["mid", "high"]:
@@ -111,7 +111,7 @@ class TestHEMBenchmarks:
                 assert hem_2 > hem_0
 
     def test_hem_couples_higher_than_singles(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         for bracket in ["mid", "high"]:
@@ -124,7 +124,7 @@ class TestStateHEMMultipliers:
     """Geographic cost-of-living multipliers."""
 
     def test_sydney_most_expensive(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         assert gen.STATE_HEM_MULTIPLIER["NSW"] == max(gen.STATE_HEM_MULTIPLIER.values()), (
@@ -132,7 +132,7 @@ class TestStateHEMMultipliers:
         )
 
     def test_tasmania_lowest(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         assert gen.STATE_HEM_MULTIPLIER["TAS"] == min(gen.STATE_HEM_MULTIPLIER.values()), (

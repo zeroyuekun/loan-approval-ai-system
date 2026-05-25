@@ -10,8 +10,8 @@ This test enforces the separation as a code-level invariant so the pattern
 cannot be reintroduced without a deliberate test change.
 """
 
-from apps.ml_engine.services.data_generator import POST_OUTCOME_FEATURES
-from apps.ml_engine.services.trainer import ModelTrainer
+from apps.ml_engine.services.datagen.data_generator import POST_OUTCOME_FEATURES
+from apps.ml_engine.services.training.trainer import ModelTrainer
 
 
 def test_training_features_exclude_post_outcome_columns():

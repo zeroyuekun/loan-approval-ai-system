@@ -11,7 +11,7 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from apps.ml_engine.services.feature_engineering import (
+from apps.ml_engine.services.training.feature_engineering import (
     DERIVED_FEATURE_NAMES,
     compute_derived_features,
     impute_missing_values,

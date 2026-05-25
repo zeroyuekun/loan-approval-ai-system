@@ -20,7 +20,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score, train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from .metrics import (
+from ..metrics import (
     MetricsService,
     brier_decomposition,
     ks_statistic,
@@ -578,7 +578,7 @@ class ModelTrainer:
         # Defence-in-depth drop of any post-outcome leakage column at the load
         # boundary — a single regression test cannot catch every way such a
         # column could sneak through IV selection or monotone-constraint edits.
-        from apps.ml_engine.services.data_generator import POST_OUTCOME_FEATURES
+        from apps.ml_engine.services.datagen.data_generator import POST_OUTCOME_FEATURES
 
         leaked = [c for c in POST_OUTCOME_FEATURES if c in df.columns]
         if leaked:
@@ -1166,7 +1166,7 @@ class ModelTrainer:
 
         # Vintage analysis (if temporal data present)
         if all(c in df_test_raw.columns for c in ["origination_quarter", "months_on_book"]):
-            from .metrics import VintageAnalyser
+            from ..metrics import VintageAnalyser
 
             test_with_temporal = df_test_raw.copy()
             test_with_temporal["default_flag"] = y_test

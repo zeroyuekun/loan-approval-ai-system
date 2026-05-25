@@ -13,13 +13,13 @@ import numpy as np
 import pandas as pd
 from prometheus_client import Counter, Histogram
 
-from apps.ml_engine.services.feature_prep import (
+from apps.ml_engine.services.training.feature_prep import (
     FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
 )
-from apps.ml_engine.services.feature_prep import (
+from apps.ml_engine.services.training.feature_prep import (
     safe_get_state as _safe_get_state_helper,
 )
-from apps.ml_engine.services.feature_prep import (
+from apps.ml_engine.services.training.feature_prep import (
     validate_input as _validate_input_helper,
 )
 from apps.ml_engine.services.governance.shadow_scoring import (
@@ -150,7 +150,7 @@ class ModelPredictor:
         self.categorical_cols = bundle.get("categorical_cols", self.CATEGORICAL_COLS)
         self.numeric_cols = bundle.get("numeric_cols", [])
         self.reference_distribution = bundle.get("reference_distribution", {})
-        from apps.ml_engine.services.feature_engineering import DEFAULT_IMPUTATION_VALUES
+        from apps.ml_engine.services.training.feature_engineering import DEFAULT_IMPUTATION_VALUES
 
         self.imputation_values = bundle.get("imputation_values", DEFAULT_IMPUTATION_VALUES)
         self.feature_bounds = bundle.get("feature_bounds", {})
@@ -183,7 +183,7 @@ class ModelPredictor:
         Delegates to the shared feature_engineering module (single source
         of truth) to eliminate training/serving skew.
         """
-        from apps.ml_engine.services.feature_engineering import compute_derived_features
+        from apps.ml_engine.services.training.feature_engineering import compute_derived_features
 
         return compute_derived_features(df)
 

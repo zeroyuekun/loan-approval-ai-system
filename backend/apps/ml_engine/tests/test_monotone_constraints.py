@@ -12,7 +12,7 @@ regression suite.
 
 import pytest
 
-from apps.ml_engine.services.monotone_constraints import (
+from apps.ml_engine.services.training.monotone_constraints import (
     MONOTONE_CONSTRAINTS,
     NEGATIVE,
     POSITIVE,

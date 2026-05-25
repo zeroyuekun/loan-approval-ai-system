@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from apps.ml_engine.services.feature_engineering import (
+from apps.ml_engine.services.training.feature_engineering import (
     DERIVED_FEATURE_NAMES,
     compute_derived_features,
     impute_missing_values,
@@ -188,7 +188,7 @@ class TestBatchConsistency:
     def test_batch_500_rows_consistent(self):
         """Generate 500 rows from DataGenerator, run compute_derived_features,
         and verify no NaN in derived output columns."""
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         df = gen.generate(num_records=500, random_seed=42)

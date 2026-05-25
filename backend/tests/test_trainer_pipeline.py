@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from apps.ml_engine.services.data_generator import DataGenerator
-from apps.ml_engine.services.trainer import ModelTrainer
+from apps.ml_engine.services.datagen.data_generator import DataGenerator
+from apps.ml_engine.services.training.trainer import ModelTrainer
 
 
 @pytest.fixture

@@ -12,7 +12,7 @@ import pandas as pd
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from apps.ml_engine.services.feature_engineering import (
+from apps.ml_engine.services.training.feature_engineering import (
     DEFAULT_IMPUTATION_VALUES,
     DERIVED_FEATURE_NAMES,
     compute_derived_features,
