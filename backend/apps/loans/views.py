@@ -200,6 +200,7 @@ class DashboardStatsView(APIView):
         from django.utils import timezone
 
         from apps.agents.models import AgentRun
+        from apps.loans.services.dashboard_status import compute_status_strip
         from apps.ml_engine.models import ModelVersion
 
         now = timezone.now()
@@ -315,6 +316,7 @@ class DashboardStatsView(APIView):
                 "escalated": pipeline_escalated,
                 "success_rate": round(pipeline_completed / pipeline_total * 100, 1) if pipeline_total > 0 else 0,
             },
+            "status_strip": compute_status_strip(),
         }
 
 

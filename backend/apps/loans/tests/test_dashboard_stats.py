@@ -163,3 +163,37 @@ class TestDashboardStatsExtensions:
         data = resp.json()
         assert data["llm_spend_today_usd"] == 0.0
         assert data["llm_spend_cap_usd"] == 5.0  # safe default
+
+
+class TestDashboardStatsStatusStrip:
+    """PR-2: the endpoint now also returns a status_strip with four sub-keys."""
+
+    @pytest.mark.django_db
+    @patch("apps.loans.views.ApiBudgetGuard")
+    @patch("apps.loans.services.dashboard_status.redis.from_url")
+    def test_response_includes_status_strip(
+        self, mock_from_url, mock_budget_class, api_client, officer_user
+    ):
+        # Wire mocks consistent with the PR-1 tests
+        mock_budget_class.return_value.get_daily_stats.return_value = {
+            "calls": 0, "tokens": 0, "cost_usd": 0.0,
+            "budget_limit_usd": 5.0, "call_limit": 500,
+            "circuit_breaker_open": False,
+        }
+        from unittest.mock import MagicMock as _MM
+        mock_r = _MM()
+        mock_r.hgetall.return_value = {b"status": b"healthy"}
+        mock_from_url.return_value = mock_r
+
+        resp = api_client.get(reverse("dashboard-stats"))
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert "status_strip" in data
+        strip = data["status_strip"]
+        assert set(strip.keys()) == {"drift", "fairness", "pending_review", "watchdog"}
+        # Sanity-check shape of each indicator
+        for key in ("drift", "fairness", "pending_review", "watchdog"):
+            assert "level" in strip[key]
+            assert "detail" in strip[key]
+            assert strip[key]["level"] in {"none", "moderate", "significant", "unknown"}
