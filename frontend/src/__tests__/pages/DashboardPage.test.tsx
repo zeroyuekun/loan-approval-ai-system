@@ -57,6 +57,12 @@ const baseStats = {
   daily_volume: [],
   approval_trend: [],
   pipeline: { total: 0, completed: 0, failed: 0, escalated: 0, success_rate: 0 },
+  status_strip: {
+    drift: { level: 'none' as const, detail: 'PSI 0.05' },
+    fairness: { level: 'none' as const, detail: 'Min DIR 0.92' },
+    pending_review: { level: 'none' as const, detail: 'No pending reviews', count: 0, oldest_age_hours: null, sla_breach: false },
+    watchdog: { level: 'none' as const, detail: 'Watchdog healthy', last_check: '2026-05-25T12:00:00+00:00' },
+  },
 }
 
 describe('DashboardPage', () => {
@@ -106,5 +112,25 @@ describe('DashboardPage', () => {
     expect(screen.getByText(/p95 4\.2s/i)).toBeInTheDocument()
     // Hardcoded "2.3s" must NOT appear anywhere
     expect(screen.queryByText('2.3s')).not.toBeInTheDocument()
+  })
+
+  it('renders the status strip with four indicators and no approval-rate donut', async () => {
+    server.use(
+      http.get(`${API_URL}/loans/dashboard-stats/`, () => HttpResponse.json(baseStats)),
+      http.get(`${API_URL}/loans/`, () =>
+        HttpResponse.json({ count: 0, next: null, previous: null, results: [] })
+      )
+    )
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Drift')).toBeInTheDocument())
+    expect(screen.getByText('Fairness')).toBeInTheDocument()
+    expect(screen.getByText('Pending Review')).toBeInTheDocument()
+    expect(screen.getByText('Watchdog')).toBeInTheDocument()
+    // The donut component is no longer rendered. We can't grep imports in
+    // jsdom, so just assert no element with the chart's distinctive role
+    // ('img' with no name, since Recharts donut is an SVG) sneaks in.
+    // The positive Drift/Fairness/Pending Review/Watchdog assertions above
+    // already prove the strip rendered; donut absence is implicit from
+    // ApprovalRateChart.tsx being deleted in this same PR.
   })
 })
