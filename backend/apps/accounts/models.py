@@ -64,6 +64,21 @@ class CustomUser(AbstractUser):
             self.locked_until = None
             self.save(update_fields=["failed_login_attempts", "locked_until"])
 
+    def has_confirmed_totp(self) -> bool:
+        """True if the user has at least one confirmed TOTP device.
+
+        Used by both the LoginView's 2FA gate (PR-4 of security
+        gap-closure) and the IsAdminOrOfficer permission when
+        ENFORCE_2FA_FOR_STAFF is on. Lazy-imports django_otp so the
+        model can be imported in environments where django_otp isn't
+        loaded yet (e.g., management commands during initial migration).
+        """
+        try:
+            from django_otp.plugins.otp_totp.models import TOTPDevice
+        except ImportError:
+            return False
+        return TOTPDevice.objects.filter(user=self, confirmed=True).exists()
+
 
 class EmploymentStatus(models.TextChoices):
     PAYG_PERMANENT = "payg_permanent", "PAYG – Permanent"

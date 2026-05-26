@@ -230,22 +230,87 @@ class LoginView(generics.GenericAPIView):
         user = serializer.validated_data["user"]
         user.reset_failed_logins()
 
+        # ------------------------------------------------------------------
+        # 2FA gate (PR-4 of security gap-closure cycle).
+        #
+        # - User has a confirmed TOTP device → require otp_token in the
+        #   request body. Missing → 200 with {"requires_2fa": True} so the
+        #   frontend can prompt for the code. Invalid → 400.
+        # - User is admin/officer without a confirmed TOTP device →
+        #   issue the JWT but flag requires_2fa_setup so the frontend
+        #   can nudge enrolment via /2fa/setup/.
+        # - Customer → no gate.
+        # - ALLOW_2FA_BYPASS env var skips the OTP check (break-glass).
+        #   Audit-logged whenever invoked.
+        # ------------------------------------------------------------------
+        bypass = getattr(django_settings, "ALLOW_2FA_BYPASS", False)
+        has_totp = user.has_confirmed_totp()
+
+        if has_totp and not bypass:
+            otp_token = (request.data.get("otp_token") or "").strip()
+            if not otp_token:
+                # Step 1 of two-step login: signal frontend to prompt
+                # for the OTP and resubmit. NO JWT issued yet.
+                AuditLog.objects.create(
+                    user=user,
+                    action="login_2fa_required",
+                    resource_type="CustomUser",
+                    resource_id=str(user.id),
+                    details={},
+                    ip_address=request.META.get("REMOTE_ADDR"),
+                )
+                return Response(
+                    {
+                        "requires_2fa": True,
+                        "detail": "Two-factor authentication code required.",
+                    }
+                )
+
+            from django_otp.plugins.otp_totp.models import TOTPDevice
+
+            device = TOTPDevice.objects.filter(user=user, confirmed=True).first()
+            if not device or not device.verify_token(otp_token):
+                user.record_failed_login()
+                AuditLog.objects.create(
+                    user=user,
+                    action="login_2fa_invalid",
+                    resource_type="CustomUser",
+                    resource_id=str(user.id),
+                    details={"failed_attempts": user.failed_login_attempts},
+                    ip_address=request.META.get("REMOTE_ADDR"),
+                )
+                return Response(
+                    {"detail": "Invalid two-factor authentication code."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         refresh = RefreshToken.for_user(user)
+
+        # Pick the audit action: success, success-via-bypass, or
+        # success-without-2fa-setup. Helps incident response trace
+        # which login flow each token came from.
+        if has_totp and bypass:
+            audit_action = "login_2fa_bypassed"
+        elif user.role in ("admin", "officer") and not has_totp:
+            audit_action = "login_success_no_2fa_setup"
+        else:
+            audit_action = "login_success"
 
         AuditLog.objects.create(
             user=user,
-            action="login_success",
+            action=audit_action,
             resource_type="CustomUser",
             resource_id=str(user.id),
             details={},
             ip_address=request.META.get("REMOTE_ADDR"),
         )
 
-        response = Response(
-            {
-                "user": UserSerializer(user).data,
-            }
-        )
+        body = {"user": UserSerializer(user).data}
+        if user.role in ("admin", "officer") and not has_totp:
+            # Frontend uses this flag to redirect to /2fa/setup/.
+            body["requires_2fa_setup"] = True
+
+        response = Response(body)
         _set_jwt_cookies(response, refresh.access_token, refresh)
         rotate_token(request)
         get_csrf_token(request)
