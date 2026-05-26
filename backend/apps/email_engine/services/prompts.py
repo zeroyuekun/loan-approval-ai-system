@@ -236,16 +236,9 @@ This communication is confidential and intended solely for the named recipient.
 (End of template. Reproduce this template EXACTLY for this applicant, substituting ONLY: the applicant's name, loan type derived from purpose, loan amount, loan term if available, documentation checklist items from the DOCUMENTATION section above, and any LOAN PRICING figures if provided. Every other word stays identical.)
 """
 
-DENIAL_EMAIL_PROMPT = """You are drafting a formal decline letter from AussieLoanAI, an Australian lender. Under the 2025 Banking Code of Practice (paragraph 81), you must tell the customer the general reason their loan was not approved. The email should be professional but genuinely empathetic and customer-service-friendly.
+DENIAL_EMAIL_INSTRUCTIONS = """You are drafting a formal decline letter from AussieLoanAI, an Australian lender. Under the 2025 Banking Code of Practice (paragraph 81), you must tell the customer the general reason their loan was not approved. The email should be professional but genuinely empathetic and customer-service-friendly.
 
-Application details:
-- Applicant Name: {applicant_name}
-- Loan Amount Requested: ${loan_amount:,.2f}
-- Loan Purpose: {purpose}
-- Principal Reasons for Decision: {reasons}
-
-=== BANKING RELATIONSHIP ===
-{banking_context}
+The applicant-specific details (name, loan amount, purpose, principal reasons for decision, banking relationship) are provided in the user message that follows these instructions. Use those values when generating the email — never invent your own.
 
 === EMAIL FORMAT AND STRUCTURE ===
 
@@ -439,4 +432,20 @@ Email: info@afca.org.au
 This communication is confidential and intended solely for the named recipient.
 
 (End of template. Reproduce this template EXACTLY for this applicant, substituting ONLY: the applicant's name, loan type derived from purpose, loan amount, reference number, the assessment factor bullets based on the denial reasons provided, the corresponding improvement step bullets, and the "We'd Still Like to Help" paragraph if a specific alternative applies. Every other word stays identical.)
+"""
+
+
+# Per-call dynamic data block for the denial email. Filled at call time
+# in email_generator.py and sent as the user message. The INSTRUCTIONS
+# constant above is sent as the system prompt with cache_control so
+# Anthropic can cache the ~4.5k-token instructions across calls — see
+# utils/api_helpers.py:build_cached_call_kwargs and prompt-caching docs.
+DENIAL_DATA_TEMPLATE = """=== APPLICATION DATA (use these specific values when generating the decline email) ===
+- Applicant Name: {applicant_name}
+- Loan Amount Requested: ${loan_amount:,.2f}
+- Loan Purpose: {purpose}
+- Principal Reasons for Decision: {reasons}
+
+=== BANKING RELATIONSHIP ===
+{banking_context}
 """

@@ -5,12 +5,13 @@ import time
 import anthropic
 import httpx
 
+from utils.api_helpers import build_cached_call_kwargs
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from .documentation import build_documentation_checklist
 from .guardrails import GuardrailChecker
 from .pricing import calculate_loan_pricing
-from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
+from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_DATA_TEMPLATE, DENIAL_EMAIL_INSTRUCTIONS
 
 _metrics_logger = logging.getLogger("email_engine.metrics")
 
@@ -268,7 +269,12 @@ class EmailGenerator:
                 decision_obj.feature_importances if decision_obj else None,
                 shap_values=decision_obj.shap_values if decision_obj else None,
             )
-            prompt = DENIAL_EMAIL_PROMPT.format(
+            # Denial path: instructions in cached system prompt
+            # (DENIAL_EMAIL_INSTRUCTIONS, ~4.5k tokens, identical every call →
+            # Anthropic prompt caching applies), dynamic data in user message.
+            # Approval still uses the old single-string format until its
+            # template is split the same way.
+            prompt = DENIAL_DATA_TEMPLATE.format(
                 applicant_name=applicant_name,
                 loan_amount=float(application.loan_amount),
                 purpose=application.get_purpose_display(),
@@ -332,6 +338,17 @@ class EmailGenerator:
             max_api_retries = 3
             response = None
             _model = "claude-sonnet-4-6"
+            # Construct call kwargs once. Denial path uses the cached
+            # system prompt + dynamic user message (build_cached_call_kwargs);
+            # approval path still uses the legacy single user message until
+            # its template is split the same way.
+            if decision == "approved":
+                api_kwargs = {"messages": [{"role": "user", "content": prompt}]}
+            else:
+                api_kwargs = build_cached_call_kwargs(
+                    system_text=DENIAL_EMAIL_INSTRUCTIONS,
+                    user_text=prompt,
+                )
             for api_attempt in range(max_api_retries):
                 try:
                     response = guarded_api_call(
@@ -339,9 +356,9 @@ class EmailGenerator:
                         model=_model,
                         max_tokens=token_limit,
                         temperature=getattr(django_settings, "AI_TEMPERATURE_DECISION_EMAIL", 0.0),
-                        messages=[{"role": "user", "content": prompt}],
                         tools=[EMAIL_SUBMIT_TOOL],
                         tool_choice={"type": "tool", "name": "submit_email"},
+                        **api_kwargs,
                     )
                     break  # Success — exit retry loop
                 except BudgetExhausted:
