@@ -577,6 +577,8 @@ class TestGenerate:
     @patch("apps.agents.services.marketing_agent.anthropic.Anthropic")
     @patch("apps.agents.services.marketing_agent.guarded_api_call")
     def test_injection_attempt_in_first_name_is_sanitized(self, mock_call, mock_anthropic_cls):
+        from utils.sanitization import STRUCTURAL_ISOLATION_NOTICE
+
         mock_anthropic_cls.return_value = MagicMock()
         mock_call.return_value = _make_mock_text_response(
             "Subject: Next steps for your AussieLoanAI loan application\n\nDear Jane,\n\nCall 1300 000 000."
@@ -588,8 +590,13 @@ class TestGenerate:
         )
         agent.generate(app, _sample_nbo_result())
         prompt_passed = mock_call.call_args.kwargs["messages"][0]["content"]
-        assert "ignore previous instructions" not in prompt_passed.lower()
-        assert "system prompt" not in prompt_passed.lower()
+        # Scope the check to the prompt BODY — the structural isolation
+        # notice (PR-3, security gap-closure) legitimately contains
+        # "Ignore previous instructions" as a defused example, so a
+        # whole-prompt grep would always false-positive after that PR.
+        body = prompt_passed[len(STRUCTURAL_ISOLATION_NOTICE):]
+        assert "ignore previous instructions" not in body.lower()
+        assert "system prompt" not in body.lower()
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch("apps.agents.services.marketing_agent.anthropic.Anthropic")

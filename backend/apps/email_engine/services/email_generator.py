@@ -5,7 +5,11 @@ import time
 import anthropic
 import httpx
 
-from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
+from utils.sanitization import (
+    sanitize_prompt_input as _sanitize_prompt_input,
+    wrap_applicant_input,
+    wrap_structured_block,
+)
 
 from .documentation import build_documentation_checklist
 from .guardrails import GuardrailChecker
@@ -245,8 +249,12 @@ class EmailGenerator:
                 f"our product pricing engine based on the applicant's credit profile."
             )
 
+            # PR-3 (security gap-closure): every user-controlled value
+            # flows into the prompt inside <applicant_input> tags so
+            # Claude treats it as data, not instructions. Pairs with
+            # the STRUCTURAL_ISOLATION_NOTICE at the top of the prompt.
             prompt = APPROVAL_EMAIL_PROMPT.format(
-                applicant_name=applicant_name,
+                applicant_name=wrap_applicant_input("applicant_name", applicant_name, max_length=200),
                 loan_amount=float(application.loan_amount),
                 purpose=application.get_purpose_display(),
                 confidence=confidence,
@@ -255,7 +263,7 @@ class EmailGenerator:
                 has_cosigner="Yes" if application.has_cosigner else "No",
                 has_hecs="Yes" if getattr(application, "has_hecs", False) else "No",
                 documentation_checklist=documentation_checklist,
-                banking_context=banking_context,
+                banking_context=wrap_structured_block("banking_context", banking_context),
             )
             # Append pricing context after the main prompt
             prompt += f"\n\n{pricing_context}"
@@ -269,11 +277,11 @@ class EmailGenerator:
                 shap_values=decision_obj.shap_values if decision_obj else None,
             )
             prompt = DENIAL_EMAIL_PROMPT.format(
-                applicant_name=applicant_name,
+                applicant_name=wrap_applicant_input("applicant_name", applicant_name, max_length=200),
                 loan_amount=float(application.loan_amount),
                 purpose=application.get_purpose_display(),
                 reasons=reasons,
-                banking_context=banking_context,
+                banking_context=wrap_structured_block("banking_context", banking_context),
             )
 
         # Add retry feedback if not first attempt.

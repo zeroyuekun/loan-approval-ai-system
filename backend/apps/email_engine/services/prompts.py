@@ -1,4 +1,7 @@
-APPROVAL_EMAIL_PROMPT = """You are drafting a formal loan approval email from AussieLoanAI, an Australian lender. This email should read like professional correspondence from a licensed Australian credit provider that is also genuinely warm and customer-service-friendly.
+from utils.sanitization import STRUCTURAL_ISOLATION_NOTICE
+
+APPROVAL_EMAIL_PROMPT = STRUCTURAL_ISOLATION_NOTICE + """
+You are drafting a formal loan approval email from AussieLoanAI, an Australian lender. This email should read like professional correspondence from a licensed Australian credit provider that is also genuinely warm and customer-service-friendly.
 
 Application details:
 - Applicant Name: {applicant_name}
@@ -236,7 +239,8 @@ This communication is confidential and intended solely for the named recipient.
 (End of template. Reproduce this template EXACTLY for this applicant, substituting ONLY: the applicant's name, loan type derived from purpose, loan amount, loan term if available, documentation checklist items from the DOCUMENTATION section above, and any LOAN PRICING figures if provided. Every other word stays identical.)
 """
 
-DENIAL_EMAIL_PROMPT = """You are drafting a formal decline letter from AussieLoanAI, an Australian lender. Under the 2025 Banking Code of Practice (paragraph 81), you must tell the customer the general reason their loan was not approved. The email should be professional but genuinely empathetic and customer-service-friendly.
+DENIAL_EMAIL_PROMPT = STRUCTURAL_ISOLATION_NOTICE + """
+You are drafting a formal decline letter from AussieLoanAI, an Australian lender. Under the 2025 Banking Code of Practice (paragraph 81), you must tell the customer the general reason their loan was not approved. The email should be professional but genuinely empathetic and customer-service-friendly.
 
 Application details:
 - Applicant Name: {applicant_name}

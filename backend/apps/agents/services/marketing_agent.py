@@ -8,6 +8,11 @@ import httpx
 
 from apps.agents.services.api_budget import BudgetExhausted, guarded_api_call
 from apps.email_engine.services.guardrails import GuardrailChecker
+from utils.sanitization import (
+    STRUCTURAL_ISOLATION_NOTICE,
+    wrap_applicant_input,
+    wrap_structured_block,
+)
 
 _INJECTION_BLOCKLIST = re.compile(
     r"(?:ignore\s+(?:previous|above|all)\s+instructions"
@@ -31,7 +36,8 @@ def _sanitize_prompt_input(value, max_length=500):
     return value[:max_length].strip()
 
 
-MARKETING_EMAIL_PROMPT = """You are filling in a templated follow-up email for AussieLoanAI. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline.
+MARKETING_EMAIL_PROMPT = STRUCTURAL_ISOLATION_NOTICE + """
+You are filling in a templated follow-up email for AussieLoanAI. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline.
 
 YOUR JOB: Fill in ONLY the bracketed placeholders below. Do NOT rewrite, rephrase, or rearrange the template. Every word outside a bracket must appear EXACTLY as written. If a section is wrapped in {{IF ...}} / {{END IF}}, include it only when the condition is true; otherwise omit that entire block (including its label).
 
@@ -157,9 +163,13 @@ class MarketingAgent:
         banking_context = self._get_banking_context(application)
         offers_detail = self._format_offers(nbo_result.get("offers", []))
 
+        # PR-3 (security gap-closure): wrap every user-controlled value
+        # in <applicant_input> tags so Claude treats it as data, not
+        # instructions. Pairs with the STRUCTURAL_ISOLATION_NOTICE at
+        # the top of MARKETING_EMAIL_PROMPT.
         prompt = MARKETING_EMAIL_PROMPT.format(
-            applicant_name=applicant_name,
-            applicant_first_name=applicant_first_name,
+            applicant_name=wrap_applicant_input("applicant_name", applicant_name, max_length=200),
+            applicant_first_name=wrap_applicant_input("applicant_first_name", applicant_first_name, max_length=200),
             loan_amount=float(application.loan_amount),
             purpose=application.get_purpose_display(),
             credit_score=application.credit_score,
@@ -167,7 +177,7 @@ class MarketingAgent:
             employment_type=application.get_employment_type_display(),
             employment_length=application.employment_length,
             denial_reasons=denial_reasons or "Not specified",
-            banking_context=banking_context,
+            banking_context=wrap_structured_block("banking_context", banking_context),
             offers_detail=offers_detail,
             retention_score=nbo_result.get("customer_retention_score", 0),
             loyalty_factors=", ".join(nbo_result.get("loyalty_factors", [])) or "N/A",
