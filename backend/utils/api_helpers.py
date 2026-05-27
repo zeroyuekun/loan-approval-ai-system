@@ -37,11 +37,20 @@ def build_cached_call_kwargs(
     """Build a kwargs dict for ``client.messages.create`` with the system
     block cached via Anthropic prompt caching (5-min ephemeral TTL).
 
-    The static instructions in ``system_text`` become the cache key.
-    ``user_text`` is the dynamic per-call payload (not cached). Any
-    additional keyword arguments — ``model``, ``max_tokens``,
-    ``temperature``, ``tools``, ``tool_choice``, etc. — pass through.
+    Cache key: the entire prompt prefix up to and including the
+    ``cache_control`` marker. That covers ``system_text`` PLUS any earlier
+    static blocks Anthropic processes before it — most notably the
+    ``tools`` list passed via ``**other_kwargs``. Mutating any of those
+    pieces (system text, tools schema, tool choice) invalidates the cache,
+    so keep them byte-identical across calls in the same 5-min window.
 
+    ``user_text`` is the dynamic per-call payload — it sits in the
+    ``messages`` array AFTER the cached prefix and is not part of the
+    cache key. Put applicant data, retry feedback, and anything
+    per-call here.
+
+    Any additional keyword arguments — ``model``, ``max_tokens``,
+    ``temperature``, ``tools``, ``tool_choice``, etc. — pass through.
     Returns a dict you can splat into ``client.messages.create(**kw)``
     or any wrapper (e.g. ``guarded_api_call(client, **kw)``).
     """

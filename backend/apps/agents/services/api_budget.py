@@ -46,10 +46,38 @@ MODEL_PRICING = {
 _DEFAULT_PRICING = {"input": 3.00, "output": 15.00}
 
 
-def estimate_cost_usd(input_tokens, output_tokens, model=""):
-    """Estimate cost in USD for a single API call."""
+# Anthropic prompt-caching multipliers, applied to the model's normal
+# input rate. Cache writes (cache_creation_input_tokens) cost 1.25× the
+# base input rate as a one-time write penalty; cache reads
+# (cache_read_input_tokens) cost 0.10× — the savings that make caching
+# worth it. Without these multipliers, every cached call silently
+# under-reports cost vs the actual Anthropic invoice.
+# Docs: https://docs.claude.com/en/docs/build-with-claude/prompt-caching
+CACHE_WRITE_MULTIPLIER = 1.25
+CACHE_READ_MULTIPLIER = 0.10
+
+
+def estimate_cost_usd(
+    input_tokens,
+    output_tokens,
+    model="",
+    cache_creation_input_tokens=0,
+    cache_read_input_tokens=0,
+):
+    """Estimate cost in USD for a single API call.
+
+    Splits input cost across three buckets per Anthropic's caching billing:
+    standard input (1×), cache writes (1.25×), cache reads (0.10×). Callers
+    that don't use prompt caching pass 0 for the cache fields and get the
+    same answer as before.
+    """
     pricing = MODEL_PRICING.get(model, _DEFAULT_PRICING)
-    cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+    cost = (
+        input_tokens * pricing["input"]
+        + cache_creation_input_tokens * pricing["input"] * CACHE_WRITE_MULTIPLIER
+        + cache_read_input_tokens * pricing["input"] * CACHE_READ_MULTIPLIER
+        + output_tokens * pricing["output"]
+    ) / 1_000_000
     return round(cost, 6)
 
 
@@ -156,8 +184,21 @@ class ApiBudgetGuard:
                 e,
             )
 
-    def record_call(self, input_tokens=0, output_tokens=0, model=""):
-        """Increment daily call counter, token usage, and dollar cost."""
+    def record_call(
+        self,
+        input_tokens=0,
+        output_tokens=0,
+        model="",
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+    ):
+        """Increment daily call counter, token usage, and dollar cost.
+
+        ``cache_creation_input_tokens`` and ``cache_read_input_tokens`` come
+        from ``response.usage`` when Anthropic prompt caching is active.
+        They are billed at 1.25× and 0.10× the model's input rate
+        respectively — see ``estimate_cost_usd``.
+        """
         try:
             r = self._get_redis()
             pipe = r.pipeline()
@@ -167,25 +208,53 @@ class ApiBudgetGuard:
             cost_key = self._daily_key("cost_cents")
 
             # Calculate cost in cents for integer-safe Redis storage
-            cost_usd = estimate_cost_usd(input_tokens, output_tokens, model)
+            cost_usd = estimate_cost_usd(
+                input_tokens,
+                output_tokens,
+                model,
+                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+            )
             cost_cents = max(1, int(cost_usd * 100))  # minimum 1 cent per call
+
+            # Total wire-tokens covers all three input buckets plus output —
+            # the daily "tokens" stat should reflect the real volume Anthropic
+            # processed, not just the un-cached portion.
+            total_wire_tokens = (
+                input_tokens
+                + output_tokens
+                + cache_creation_input_tokens
+                + cache_read_input_tokens
+            )
 
             pipe.incr(calls_key)
             pipe.expire(calls_key, self.KEY_TTL)
-            pipe.incrby(tokens_key, input_tokens + output_tokens)
+            pipe.incrby(tokens_key, total_wire_tokens)
             pipe.expire(tokens_key, self.KEY_TTL)
             pipe.incrby(cost_key, cost_cents)
             pipe.expire(cost_key, self.KEY_TTL)
 
             pipe.execute()
 
-            logger.info(
-                "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f",
-                input_tokens,
-                output_tokens,
-                model or "unknown",
-                cost_usd,
-            )
+            if cache_creation_input_tokens or cache_read_input_tokens:
+                logger.info(
+                    "API call recorded: %d in + %d out + %d cache_create + %d cache_read tokens, "
+                    "model=%s, cost=$%.4f",
+                    input_tokens,
+                    output_tokens,
+                    cache_creation_input_tokens,
+                    cache_read_input_tokens,
+                    model or "unknown",
+                    cost_usd,
+                )
+            else:
+                logger.info(
+                    "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f",
+                    input_tokens,
+                    output_tokens,
+                    model or "unknown",
+                    cost_usd,
+                )
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             logger.warning("Failed to record API call (Redis): %s", e)
 
@@ -318,11 +387,25 @@ def guarded_api_call(client, **kwargs):
         budget.record_failure()
         raise
 
-    # Track cost from actual usage
+    # Track cost from actual usage. Anthropic splits input across three
+    # buckets when prompt caching is active — record all three so the
+    # daily budget matches the real invoice (not the un-cached portion).
     usage = getattr(response, "usage", None)
     input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
     output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
-    budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens, model=model)
+    cache_creation_input_tokens = (
+        getattr(usage, "cache_creation_input_tokens", 0) if usage else 0
+    ) or 0
+    cache_read_input_tokens = (
+        getattr(usage, "cache_read_input_tokens", 0) if usage else 0
+    ) or 0
+    budget.record_call(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        model=model,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+    )
     budget.record_success()
 
     # Log API call for PII cross-border audit (Privacy Act APP 8)

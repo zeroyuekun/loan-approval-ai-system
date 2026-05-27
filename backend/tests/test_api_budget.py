@@ -51,6 +51,140 @@ def test_record_call_increments():
     pipe.execute.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# Prompt-caching cost math — cache writes (1.25×) and reads (0.10×)
+# ---------------------------------------------------------------------------
+
+
+def test_estimate_cost_no_caching_unchanged():
+    """Without cache fields, cost math matches the pre-caching behavior."""
+    from apps.agents.services.api_budget import estimate_cost_usd
+
+    # claude-sonnet-4-6: $3/M input, $15/M output
+    # 1000 in + 500 out = 1000*3/1M + 500*15/1M = $0.003 + $0.0075 = $0.0105
+    cost = estimate_cost_usd(
+        input_tokens=1000, output_tokens=500, model="claude-sonnet-4-6"
+    )
+    assert cost == round(0.0105, 6)
+
+
+def test_estimate_cost_cache_write_uses_1_25x_multiplier():
+    """cache_creation_input_tokens cost 1.25× the model's normal input
+    rate — the one-time write penalty. A 1000-token write on Sonnet
+    should cost $3 * 1000 * 1.25 / 1M = $0.00375."""
+    from apps.agents.services.api_budget import estimate_cost_usd
+
+    cost = estimate_cost_usd(
+        input_tokens=0,
+        output_tokens=0,
+        model="claude-sonnet-4-6",
+        cache_creation_input_tokens=1000,
+    )
+    expected = round(1000 * 3.00 * 1.25 / 1_000_000, 6)
+    assert cost == expected
+    assert cost > 0.0  # sanity: actually charges something
+
+
+def test_estimate_cost_cache_read_uses_0_10x_multiplier():
+    """cache_read_input_tokens cost 0.10× the model's normal input
+    rate — the cache-hit savings. A 1000-token read on Sonnet should
+    cost $3 * 1000 * 0.10 / 1M = $0.0003."""
+    from apps.agents.services.api_budget import estimate_cost_usd
+
+    cost = estimate_cost_usd(
+        input_tokens=0,
+        output_tokens=0,
+        model="claude-sonnet-4-6",
+        cache_read_input_tokens=1000,
+    )
+    expected = round(1000 * 3.00 * 0.10 / 1_000_000, 6)
+    assert cost == expected
+
+
+def test_estimate_cost_combined_buckets():
+    """Realistic denial-email shape on a cache hit:
+    - 4000 cached system tokens read at 0.10×
+    -  500 dynamic user tokens at 1.00× (standard input)
+    -  800 output tokens at output rate
+    All three should add into the final cost."""
+    from apps.agents.services.api_budget import estimate_cost_usd
+
+    cost = estimate_cost_usd(
+        input_tokens=500,
+        output_tokens=800,
+        model="claude-sonnet-4-6",
+        cache_read_input_tokens=4000,
+    )
+    # $3 * 500 / 1M + $3 * 4000 * 0.10 / 1M + $15 * 800 / 1M
+    # = 0.0015 + 0.0012 + 0.012 = 0.0147
+    expected = round(
+        (500 * 3.00 + 4000 * 3.00 * 0.10 + 800 * 15.00) / 1_000_000, 6
+    )
+    assert cost == expected
+
+
+def test_record_call_passes_cache_tokens_to_cost_math(monkeypatch):
+    """record_call must hand cache tokens to estimate_cost_usd so the
+    daily Redis budget reflects real Anthropic billing, not the
+    un-cached portion only."""
+    from apps.agents.services import api_budget
+
+    received = {}
+
+    def fake_estimate(input_tokens, output_tokens, model="", **kw):
+        received["args"] = (input_tokens, output_tokens, model)
+        received["kw"] = kw
+        return 0.001  # any positive cost
+
+    monkeypatch.setattr(api_budget, "estimate_cost_usd", fake_estimate)
+
+    r = MagicMock()
+    pipe = MagicMock()
+    r.pipeline.return_value = pipe
+    _guard(r).record_call(
+        input_tokens=500,
+        output_tokens=200,
+        model="claude-sonnet-4-6",
+        cache_creation_input_tokens=4000,
+        cache_read_input_tokens=0,
+    )
+
+    assert received["args"] == (500, 200, "claude-sonnet-4-6")
+    assert received["kw"]["cache_creation_input_tokens"] == 4000
+    assert received["kw"]["cache_read_input_tokens"] == 0
+
+
+def test_record_call_total_tokens_includes_cache(monkeypatch):
+    """The daily `tokens` Redis counter must include cache_create + cache_read
+    so the dashboard reflects total wire activity, not just the un-cached portion."""
+    from apps.agents.services import api_budget
+
+    monkeypatch.setattr(
+        api_budget, "estimate_cost_usd", lambda *a, **kw: 0.001
+    )
+
+    r = MagicMock()
+    pipe = MagicMock()
+    r.pipeline.return_value = pipe
+    _guard(r).record_call(
+        input_tokens=500,
+        output_tokens=200,
+        model="claude-sonnet-4-6",
+        cache_creation_input_tokens=4000,
+        cache_read_input_tokens=100,
+    )
+
+    # The tokens key should have been incremented by 500 + 200 + 4000 + 100
+    incrby_calls = pipe.incrby.call_args_list
+    tokens_increments = [
+        call.args[1] for call in incrby_calls if "tokens" in str(call.args[0])
+    ]
+    assert 4800 in tokens_increments, (
+        f"expected total tokens increment of 4800 (500+200+4000+100), "
+        f"got {tokens_increments}"
+    )
+
+
 @override_settings(AI_CIRCUIT_BREAKER_THRESHOLD=3, AI_CIRCUIT_BREAKER_COOLDOWN=600)
 def test_failures_trip_breaker():
     """After threshold consecutive failures, circuit breaker key is set."""

@@ -83,19 +83,46 @@ def test_helper_passes_through_extra_kwargs():
 # ---------------------------------------------------------------------------
 
 
-def test_denial_instructions_meets_sonnet_cache_minimum():
-    """Anthropic prompt caching needs ≥1024 tokens for Sonnet to
-    actually cache; below that the cache_control directive is a no-op.
-    Rough char heuristic: 4 chars/token for English. We check 4096 chars
-    as a conservative floor (1024 tokens). The real template is ~17k
-    chars; this guards against future shrinking that would silently
-    disable caching."""
+# Anthropic prompt-caching minimums by model family (in tokens). The
+# cache_control directive is silently a no-op below these thresholds, so
+# the prompt must clear the floor for the active model.
+# Docs: https://docs.claude.com/en/docs/build-with-claude/prompt-caching
+_CACHE_MIN_TOKENS_BY_MODEL = {
+    "claude-opus-4-7": 1024,
+    "claude-opus-4-6": 1024,
+    "claude-sonnet-4-6": 1024,
+    "claude-sonnet-4-20250514": 1024,
+    "claude-haiku-4-5-20251001": 2048,  # Haiku family needs 2× the tokens
+    "claude-haiku-4-20250514": 2048,
+}
+
+# The email generator currently hardcodes this model at
+# email_generator.py:_model (inside .generate). If you swap it, update
+# this constant — the floor changes by family, and the test below catches
+# the case where someone moves to Haiku but the prompt stays the same
+# length and caching silently no-ops.
+_ACTIVE_EMAIL_MODEL = "claude-sonnet-4-6"
+
+
+def test_denial_instructions_meets_active_model_cache_minimum():
+    """The cache_control directive on DENIAL_EMAIL_INSTRUCTIONS only
+    actually caches if the block clears the active model's token floor.
+    We use a conservative 4-char/token heuristic — real English averages
+    closer to 3.5, so this floor is on the safe side. The real template
+    is ~17k chars; this guards against (a) future shrinking that drops
+    below the Sonnet floor, and (b) a model swap to Haiku that silently
+    raises the floor without anyone noticing the regression."""
     from apps.email_engine.services.prompts import DENIAL_EMAIL_INSTRUCTIONS
 
-    assert len(DENIAL_EMAIL_INSTRUCTIONS) >= 4096, (
+    min_tokens = _CACHE_MIN_TOKENS_BY_MODEL[_ACTIVE_EMAIL_MODEL]
+    floor_chars = min_tokens * 4  # 4 chars/token conservative heuristic
+
+    assert len(DENIAL_EMAIL_INSTRUCTIONS) >= floor_chars, (
         f"DENIAL_EMAIL_INSTRUCTIONS is {len(DENIAL_EMAIL_INSTRUCTIONS)} chars "
-        f"(~{len(DENIAL_EMAIL_INSTRUCTIONS) // 4} tokens) — below the Sonnet "
-        "cache-eligibility minimum of ~1024 tokens. Cache_control will be a no-op."
+        f"(~{len(DENIAL_EMAIL_INSTRUCTIONS) // 4} tokens) — below the "
+        f"{_ACTIVE_EMAIL_MODEL} cache-eligibility minimum of ~{min_tokens} "
+        f"tokens ({floor_chars} chars at 4 char/token). cache_control will be "
+        "a silent no-op until the prompt grows back above the floor."
     )
 
 
@@ -290,3 +317,108 @@ def test_approval_path_unchanged_no_system_block(
         "single user-message format until its template is split"
     )
     assert "messages" in kwargs
+
+
+# ---------------------------------------------------------------------------
+# Cache stability — system block must be byte-identical across calls
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_application(**overrides):
+    """Build a denial-path-friendly mock application with overridable fields."""
+    app = MagicMock()
+    app.applicant.first_name = overrides.get("first_name", "Test")
+    app.applicant.last_name = overrides.get("last_name", "Applicant")
+    app.applicant.username = overrides.get("username", "testuser")
+    app.loan_amount = overrides.get("loan_amount", 50000)
+    app.credit_score = overrides.get("credit_score", 720)
+    app.loan_term_months = overrides.get("loan_term_months", 60)
+    app.annual_income = overrides.get("annual_income", 95000)
+    app.debt_to_income = overrides.get("debt_to_income", 2.0)
+    app.employment_length = overrides.get("employment_length", 5)
+    app.purpose = overrides.get("purpose", "personal")
+    app.get_purpose_display.return_value = overrides.get("purpose_display", "Personal")
+    app.get_employment_type_display.return_value = overrides.get(
+        "employment_type_display", "PAYG Permanent"
+    )
+    app.get_applicant_type_display.return_value = overrides.get(
+        "applicant_type_display", "Single"
+    )
+    app.has_cosigner = overrides.get("has_cosigner", False)
+    app.has_hecs = overrides.get("has_hecs", False)
+    app.applicant.profile = None
+    app.decision = None
+    return app
+
+
+@patch("apps.agents.services.api_budget.ApiBudgetGuard")
+@patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
+def test_denial_system_block_byte_identical_across_calls(
+    mock_anthropic_cls,
+    mock_budget_cls,
+    captured_api_call,
+    monkeypatch,
+):
+    """Prompt caching only hits if the cached prefix is byte-identical
+    across calls. This test makes two denial-path calls with completely
+    different applicant data and asserts the ``system`` block text is
+    the same both times — while the ``user`` message (where the dynamic
+    data lives) differs. A failure here means something is leaking
+    per-call state (timestamp, applicant data, env var, app version)
+    into the cached block, which silently defeats the cache."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    mock_budget = MagicMock()
+    mock_budget.check_budget.return_value = None
+    mock_budget_cls.return_value = mock_budget
+    mock_anthropic_cls.return_value = MagicMock()
+
+    from apps.email_engine.services.email_generator import EmailGenerator
+
+    gen = EmailGenerator()
+    gen._api_available = lambda: True
+
+    # First call — applicant A
+    app_a = _make_mock_application(
+        first_name="Alice",
+        last_name="Anderson",
+        loan_amount=50000,
+        purpose_display="Personal",
+    )
+    gen.generate(application=app_a, decision="denied", confidence=0.45)
+    first_kwargs = captured_api_call.call_args.kwargs
+    first_system_text = first_kwargs["system"][0]["text"]
+    first_user_content = first_kwargs["messages"][0]["content"]
+
+    # Second call — applicant B (completely different data)
+    captured_api_call.reset_mock()
+    app_b = _make_mock_application(
+        first_name="Bob",
+        last_name="Brown",
+        loan_amount=125000,
+        purpose_display="Vehicle",
+        employment_type_display="Contract",
+        applicant_type_display="Joint",
+        has_cosigner=True,
+        has_hecs=True,
+    )
+    gen.generate(application=app_b, decision="denied", confidence=0.30)
+    second_kwargs = captured_api_call.call_args.kwargs
+    second_system_text = second_kwargs["system"][0]["text"]
+    second_user_content = second_kwargs["messages"][0]["content"]
+
+    # The whole point of caching: system block IDENTICAL → cache hits
+    assert first_system_text == second_system_text, (
+        "system block drifted between calls — would defeat prompt caching. "
+        "Check for per-call state (timestamps, applicant data, version "
+        "stamps) leaking into DENIAL_EMAIL_INSTRUCTIONS."
+    )
+    # Positive control — confirm the test isn't trivially passing because
+    # both calls hit the same fixture. The user messages MUST differ since
+    # they carry the per-applicant data.
+    assert first_user_content != second_user_content, (
+        "user message content was identical for two different applicants — "
+        "the dynamic data isn't actually flowing through, so the byte-identical "
+        "system check above tells us nothing"
+    )
+    assert "Alice" in first_user_content
+    assert "Bob" in second_user_content

@@ -14,6 +14,7 @@ from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_DATA_TEMPLATE, DENIAL_EMAIL_INSTRUCTIONS
 
 _metrics_logger = logging.getLogger("email_engine.metrics")
+_generator_logger = logging.getLogger("email_engine.generator")
 
 
 def _record_email_metric(decision: str, source: str, passed_guardrails: bool) -> None:
@@ -29,6 +30,31 @@ def _record_email_metric(decision: str, source: str, passed_guardrails: bool) ->
         ).inc()
     except Exception as exc:  # noqa: BLE001 — metric emission is best-effort
         _metrics_logger.debug("email_generation_total emission failed: %s", exc)
+
+
+def _record_token_usage_metric(
+    decision: str,
+    input_tokens: int,
+    cache_creation_input_tokens: int,
+    cache_read_input_tokens: int,
+) -> None:
+    """Emit `email_llm_input_tokens_total` so dashboards can see cache
+    hit ratio in production. Best-effort — never breaks the email path."""
+    try:
+        from apps.email_engine.metrics import email_llm_input_tokens_total
+
+        decision_label = decision or "unknown"
+        for token_type, count in (
+            ("standard", input_tokens),
+            ("cache_create", cache_creation_input_tokens),
+            ("cache_read", cache_read_input_tokens),
+        ):
+            if count > 0:
+                email_llm_input_tokens_total.labels(
+                    decision=decision_label, type=token_type
+                ).inc(count)
+    except Exception as exc:  # noqa: BLE001 — metric emission is best-effort
+        _metrics_logger.debug("email_llm_input_tokens_total emission failed: %s", exc)
 
 
 EMAIL_SUBMIT_TOOL = {
@@ -331,6 +357,8 @@ class EmailGenerator:
 
         input_tokens = 0
         output_tokens = 0
+        cache_creation_input_tokens = 0
+        cache_read_input_tokens = 0
         try:
             # Retry with exponential backoff on rate limit (429) errors.
             # The org-level limit is 30k input tokens/min — with prompts
@@ -366,9 +394,7 @@ class EmailGenerator:
                 except anthropic.RateLimitError:
                     if api_attempt < max_api_retries - 1:
                         wait = 2**api_attempt * 30  # 30s, 60s, 120s
-                        import logging
-
-                        logging.getLogger(__name__).warning(
+                        _generator_logger.warning(
                             "Rate limited (429), retrying in %ds (attempt %d/%d)",
                             wait,
                             api_attempt + 1,
@@ -378,11 +404,22 @@ class EmailGenerator:
                     else:
                         raise  # Final attempt — propagate to outer handler
 
-            # Read actual token usage from the response
+            # Read actual token usage from the response. Anthropic splits
+            # input across three buckets when prompt caching is active:
+            # `input_tokens` (standard, 1×), `cache_creation_input_tokens`
+            # (1.25× one-time write penalty), `cache_read_input_tokens`
+            # (0.10× cache hit savings). The `or 0` guards against the SDK
+            # returning None on calls that didn't touch the cache.
             usage = getattr(response, "usage", None)
             if usage:
-                input_tokens = getattr(usage, "input_tokens", 0)
-                output_tokens = getattr(usage, "output_tokens", 0)
+                input_tokens = getattr(usage, "input_tokens", 0) or 0
+                output_tokens = getattr(usage, "output_tokens", 0) or 0
+                cache_creation_input_tokens = (
+                    getattr(usage, "cache_creation_input_tokens", 0) or 0
+                )
+                cache_read_input_tokens = (
+                    getattr(usage, "cache_read_input_tokens", 0) or 0
+                )
         except BudgetExhausted:
             return self._generate_fallback(application, decision, context, start_time)
         # Failure accounting (record_failure, circuit-breaker tripping) happens
@@ -425,6 +462,12 @@ class EmailGenerator:
             )
 
         _record_email_metric(decision=decision, source="claude_api", passed_guardrails=all_passed)
+        _record_token_usage_metric(
+            decision=decision,
+            input_tokens=input_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
+            cache_read_input_tokens=cache_read_input_tokens,
+        )
 
         return {
             "subject": subject,
@@ -438,19 +481,17 @@ class EmailGenerator:
             "template_fallback": False,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cache_creation_input_tokens": cache_creation_input_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
         }
 
     def _parse_tool_response(self, response):
         """Extract subject and body from tool_use structured response."""
-        import logging
-
-        logger = logging.getLogger("email_engine.generator")
-
         # Detect truncation: stop_reason == 'max_tokens' means the response
         # was cut off and the tool_use JSON is likely incomplete/empty.
         stop_reason = getattr(response, "stop_reason", None)
         if stop_reason == "max_tokens":
-            logger.warning(
+            _generator_logger.warning(
                 "Claude response truncated (stop_reason=max_tokens) — max_tokens too low for this email template"
             )
 
@@ -462,12 +503,12 @@ class EmailGenerator:
                 return subject, body
             # Tool block found but body is empty — likely truncated
             if subject and not body:
-                logger.warning(
+                _generator_logger.warning(
                     "Tool response has subject but empty body (stop_reason=%s) — falling back to text parse",
                     stop_reason,
                 )
         except (StopIteration, AttributeError) as exc:
-            logger.debug(
+            _generator_logger.debug(
                 "tool_block_missing_falling_back_to_text",
                 extra={"error": type(exc).__name__, "stop_reason": stop_reason},
             )
@@ -507,11 +548,8 @@ class EmailGenerator:
         Sends a minimal 1-token request. Returns False on billing, auth,
         or connection errors so the caller can fall back to templates.
         """
-        import logging
-
-        logger = logging.getLogger("email_engine.generator")
         if self.client is None:
-            logger.info("No API client configured — using template fallback")
+            _generator_logger.info("No API client configured — using template fallback")
             return False
         try:
             self.client.messages.create(
@@ -521,15 +559,15 @@ class EmailGenerator:
             )
             return True
         except anthropic.AuthenticationError:
-            logger.warning("Claude API auth failed — using template fallback")
+            _generator_logger.warning("Claude API auth failed — using template fallback")
             return False
         except anthropic.BadRequestError as e:
             if "credit" in str(e).lower() or "balance" in str(e).lower():
-                logger.warning("Claude API credit insufficient — using template fallback")
+                _generator_logger.warning("Claude API credit insufficient — using template fallback")
                 return False
             return True  # other bad request errors may be prompt-specific
         except (anthropic.APIConnectionError, anthropic.APITimeoutError):
-            logger.warning("Claude API unreachable — using template fallback")
+            _generator_logger.warning("Claude API unreachable — using template fallback")
             return False
         except Exception:
             return True  # let the main flow handle unexpected errors
@@ -626,4 +664,6 @@ class EmailGenerator:
             "template_fallback": True,
             "input_tokens": 0,
             "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
         }
