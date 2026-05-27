@@ -24,7 +24,6 @@ import pytest
 
 from utils.api_helpers import build_cached_call_kwargs
 
-
 # ---------------------------------------------------------------------------
 # Helper shape
 # ---------------------------------------------------------------------------
@@ -132,11 +131,11 @@ def test_denial_instructions_has_no_format_placeholders():
     accidentally hitting the wrong constant would either KeyError or
     silently substitute, and the cache key would shift per call.
     The dynamic data lives in DENIAL_DATA_TEMPLATE instead."""
-    from apps.email_engine.services.prompts import DENIAL_EMAIL_INSTRUCTIONS
-
     # No bare {placeholder} patterns. We allow {{ }} literal braces
     # (none present today, but defensive in case future edits add them).
     import re
+
+    from apps.email_engine.services.prompts import DENIAL_EMAIL_INSTRUCTIONS
 
     placeholders = re.findall(r"(?<!\{)\{[a-z_]+[^{}]*\}(?!\})", DENIAL_EMAIL_INSTRUCTIONS)
     assert placeholders == [], (
