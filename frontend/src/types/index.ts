@@ -206,6 +206,25 @@ export interface LoanApplication {
   decision?: LoanDecision;
 }
 
+export interface AdmDisclosure {
+  mode: 'solely_automated' | 'assisted' | 'human'
+  summary: string
+  info_used: string[]
+  human_review_right: boolean
+  review_request_path: string
+}
+
+export interface DecisionReview {
+  id: string
+  application: string
+  reason: string
+  status: 'requested' | 'under_review' | 'upheld' | 'overturned' | 'withdrawn'
+  resolution_note: string
+  outcome_decision: string
+  requested_at: string
+  resolved_at: string | null
+}
+
 export interface LoanDecision {
   id: string;
   decision: 'approved' | 'denied';
@@ -228,6 +247,7 @@ export interface LoanDecision {
     estimated_review_months: number;
     message: string;
   };
+  adm_disclosure?: AdmDisclosure;
 }
 
 export interface ModelMetrics {
