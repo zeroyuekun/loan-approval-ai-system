@@ -4,7 +4,7 @@ from apps.accounts.models import CustomerProfile
 from apps.accounts.serializers import UserSerializer
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
-from .models import AuditLog, Complaint, FraudCheck, LoanApplication, LoanDecision
+from .models import AuditLog, Complaint, DecisionReview, FraudCheck, LoanApplication, LoanDecision
 
 
 class LoanDecisionSerializer(serializers.ModelSerializer):
@@ -350,4 +350,48 @@ class ComplaintSerializer(serializers.ModelSerializer):
             ip_address=request.META.get("REMOTE_ADDR"),
         )
 
+        return instance
+
+
+class DecisionReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DecisionReview
+        fields = (
+            "id", "application", "reason", "status", "resolution_note",
+            "outcome_decision", "requested_at", "resolved_at",
+        )
+        read_only_fields = (
+            "id", "status", "resolution_note", "outcome_decision", "requested_at", "resolved_at",
+        )
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        user = request.user
+        application = attrs["application"]
+        if application.applicant_id != user.id:
+            raise serializers.ValidationError("You can only request a review of your own application.")
+        if application.status != "denied":
+            raise serializers.ValidationError("Reviews can only be requested on declined applications.")
+        from .models import DecisionReview as _DR
+        open_states = (_DR.Status.REQUESTED, _DR.Status.UNDER_REVIEW)
+        if application.decision_reviews.filter(status__in=open_states).exists():
+            raise serializers.ValidationError("A review is already in progress for this application.")
+        return attrs
+
+    def create(self, validated_data):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        request = self.context["request"]
+        validated_data["requested_by"] = request.user
+        validated_data["sla_deadline"] = timezone.now() + timedelta(days=21)
+        instance = super().create(validated_data)
+        AuditLog.objects.create(
+            user=request.user,
+            action="decision_review_requested",
+            resource_type="DecisionReview",
+            resource_id=str(instance.id),
+            details={"application_id": str(instance.application_id)},
+            ip_address=request.META.get("REMOTE_ADDR"),
+        )
         return instance

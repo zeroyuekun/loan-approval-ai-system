@@ -138,6 +138,8 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "20/min",
         "user": "60/min",
+        "complaint_filing": "10/hour",
+        "decision_review_filing": "10/hour",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
@@ -265,6 +267,11 @@ ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
 # D7 — MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
 MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").lower() == "true"
+
+# Decision review (human contestability of automated decisions).
+# Set DECISION_REVIEW_ENABLED=false to disable the filing endpoint instantly
+# without removing the API surface (returns 503).
+DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"

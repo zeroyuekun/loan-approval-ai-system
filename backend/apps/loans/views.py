@@ -1,8 +1,10 @@
 import logging
 
+from django.conf import settings
 from django.core.cache import cache as django_cache
 from django.db import models, transaction
 from rest_framework import permissions, viewsets
+from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
@@ -13,15 +15,17 @@ from apps.accounts.models import CustomerProfile
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 
 from .filters import AuditLogFilter, LoanApplicationFilter
-from .models import AuditLog, Complaint, LoanApplication
+from .models import AuditLog, Complaint, DecisionReview, LoanApplication
 from .serializers import (
     AuditLogSerializer,
     ComplaintSerializer,
     CustomerLoanApplicationSerializer,
+    DecisionReviewSerializer,
     LoanApplicationCreateSerializer,
     LoanApplicationCustomerUpdateSerializer,
     LoanApplicationSerializer,
 )
+from .services.decision_review import apply_review_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +309,52 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return [ComplaintFilingThrottle()]
         return super().get_throttles()
+
+
+class DecisionReviewFilingThrottle(UserRateThrottle):
+    scope = "decision_review_filing"
+    rate = "10/hour"
+
+
+class DecisionReviewViewSet(viewsets.ModelViewSet):
+    """Customers file/view their own decision reviews; staff view all + resolve."""
+
+    serializer_class = DecisionReviewSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = DecisionReview.objects.select_related("application", "requested_by")
+        if user.role in ("admin", "officer"):
+            return qs.all()
+        return qs.filter(requested_by=user)
+
+    def get_throttles(self):
+        if self.action == "create":
+            return [DecisionReviewFilingThrottle()]
+        return super().get_throttles()
+
+    def create(self, request, *args, **kwargs):
+        # Feature flag: filing can be disabled instantly without removing the surface.
+        if not getattr(settings, "DECISION_REVIEW_ENABLED", True):
+            return Response(
+                {"detail": "Decision review requests are not currently available."}, status=503
+            )
+        return super().create(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsAdminOrOfficer])
+    def resolve(self, request, pk=None):
+        review = self.get_object()
+        outcome = request.data.get("outcome")
+        note = request.data.get("note", "")
+        if outcome not in ("upheld", "overturned"):
+            return Response({"detail": "outcome must be 'upheld' or 'overturned'"}, status=400)
+        try:
+            apply_review_outcome(review, officer=request.user, outcome=outcome, note=note)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=409)
+        return Response(DecisionReviewSerializer(review, context={"request": request}).data)
 
 
 class ReferralListView(APIView):
