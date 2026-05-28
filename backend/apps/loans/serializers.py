@@ -2,10 +2,6 @@ from rest_framework import serializers
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.serializers import UserSerializer
-from apps.ml_engine.services.reason_codes import (
-    generate_adverse_action_reasons,
-    generate_reapplication_guidance,
-)
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
 from .models import AuditLog, Complaint, FraudCheck, LoanApplication, LoanDecision
@@ -47,6 +43,7 @@ class CustomerLoanDecisionSerializer(serializers.ModelSerializer):
     denial_reasons = serializers.SerializerMethodField()
     reapplication_guidance = serializers.SerializerMethodField()
     counterfactuals = serializers.SerializerMethodField()
+    adm_disclosure = serializers.SerializerMethodField()
 
     class Meta:
         model = LoanDecision
@@ -57,21 +54,30 @@ class CustomerLoanDecisionSerializer(serializers.ModelSerializer):
             "denial_reasons",
             "reapplication_guidance",
             "counterfactuals",
+            "adm_disclosure",
         )
 
+    def _payload(self, obj):
+        # Memoize per-instance so the four method fields share one assembly.
+        cached = getattr(obj, "_explanation_payload", None)
+        if cached is None:
+            from apps.ml_engine.services.decision_explanation import build_explanation_from_decision
+
+            cached = build_explanation_from_decision(obj)
+            obj._explanation_payload = cached
+        return cached
+
     def get_denial_reasons(self, obj):
-        return generate_adverse_action_reasons(obj.shap_values or {}, obj.decision)
+        return self._payload(obj)["denial_reasons"]
 
     def get_counterfactuals(self, obj):
-        if obj.decision == "denied":
-            return obj.counterfactual_results or []
-        return []
+        return self._payload(obj)["counterfactuals"]
 
     def get_reapplication_guidance(self, obj):
-        if obj.decision != "denied":
-            return None
-        reasons = self.get_denial_reasons(obj)
-        return generate_reapplication_guidance(obj.counterfactual_results or [], reasons)
+        return self._payload(obj)["reapplication_guidance"]
+
+    def get_adm_disclosure(self, obj):
+        return self._payload(obj)["adm_disclosure"]
 
 
 class FraudCheckSerializer(serializers.ModelSerializer):
