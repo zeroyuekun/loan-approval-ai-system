@@ -346,6 +346,8 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
         review = self.get_object()
         outcome = request.data.get("outcome")
         note = request.data.get("note", "")
+        if len(note) > 4000:
+            return Response({"detail": "note must be 4000 characters or fewer"}, status=400)
         if outcome not in ("upheld", "overturned"):
             return Response({"detail": "outcome must be 'upheld' or 'overturned'"}, status=400)
         try:

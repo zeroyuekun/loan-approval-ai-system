@@ -354,6 +354,8 @@ class ComplaintSerializer(serializers.ModelSerializer):
 
 
 class DecisionReviewSerializer(serializers.ModelSerializer):
+    reason = serializers.CharField(max_length=4000)
+
     class Meta:
         model = DecisionReview
         fields = (

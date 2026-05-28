@@ -91,3 +91,42 @@ def test_filing_disabled_when_flag_off(django_user_model):
     client.force_authenticate(cust)
     r = client.post("/api/v1/loans/decision-reviews/", {"application": str(app.id), "reason": "x"}, format="json")
     assert r.status_code == 503
+
+
+def test_cannot_file_on_another_customers_app(django_user_model):
+    cust_b, app_b = _denied_app(django_user_model)
+    cust_a = django_user_model.objects.create_user(username="other", password="x", role="customer", email="o@x.com")
+    client = APIClient()
+    client.force_authenticate(cust_a)
+    r = client.post(
+        "/api/v1/loans/decision-reviews/",
+        {"application": str(app_b.id), "reason": "not mine"},
+        format="json",
+    )
+    assert r.status_code == 400
+
+
+def test_reason_too_long_rejected(django_user_model):
+    cust, app = _denied_app(django_user_model)
+    client = APIClient()
+    client.force_authenticate(cust)
+    r = client.post(
+        "/api/v1/loans/decision-reviews/",
+        {"application": str(app.id), "reason": "x" * 5000},
+        format="json",
+    )
+    assert r.status_code == 400
+
+
+def test_resolve_note_too_long_rejected(django_user_model):
+    cust, app = _denied_app(django_user_model)
+    officer = django_user_model.objects.create_user(username="off2", password="x", role="officer")
+    review = DecisionReview.objects.create(application=app, requested_by=cust, reason="please review")
+    client = APIClient()
+    client.force_authenticate(officer)
+    r = client.post(
+        f"/api/v1/loans/decision-reviews/{review.id}/resolve/",
+        {"outcome": "upheld", "note": "y" * 5000},
+        format="json",
+    )
+    assert r.status_code == 400
