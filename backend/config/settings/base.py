@@ -138,8 +138,6 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "20/min",
         "user": "60/min",
-        "complaint_filing": "10/hour",
-        "decision_review_filing": "10/hour",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
