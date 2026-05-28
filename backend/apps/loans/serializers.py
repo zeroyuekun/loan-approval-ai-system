@@ -357,11 +357,22 @@ class DecisionReviewSerializer(serializers.ModelSerializer):
     class Meta:
         model = DecisionReview
         fields = (
-            "id", "application", "reason", "status", "resolution_note",
-            "outcome_decision", "requested_at", "resolved_at",
+            "id",
+            "application",
+            "reason",
+            "status",
+            "resolution_note",
+            "outcome_decision",
+            "requested_at",
+            "resolved_at",
         )
         read_only_fields = (
-            "id", "status", "resolution_note", "outcome_decision", "requested_at", "resolved_at",
+            "id",
+            "status",
+            "resolution_note",
+            "outcome_decision",
+            "requested_at",
+            "resolved_at",
         )
 
     def validate(self, attrs):
@@ -373,6 +384,7 @@ class DecisionReviewSerializer(serializers.ModelSerializer):
         if application.status != "denied":
             raise serializers.ValidationError("Reviews can only be requested on declined applications.")
         from .models import DecisionReview as _DR
+
         open_states = (_DR.Status.REQUESTED, _DR.Status.UNDER_REVIEW)
         if application.decision_reviews.filter(status__in=open_states).exists():
             raise serializers.ValidationError("A review is already in progress for this application.")
@@ -380,6 +392,7 @@ class DecisionReviewSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         from datetime import timedelta
+
         from django.utils import timezone
 
         request = self.context["request"]

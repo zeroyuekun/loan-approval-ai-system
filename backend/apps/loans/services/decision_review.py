@@ -56,14 +56,18 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
         else:
             locked.status = DecisionReview.Status.OVERTURNED
             locked.outcome_decision = "approved"
-            locked.save(update_fields=[
-                "assigned_officer", "resolution_note", "resolved_at", "status", "outcome_decision",
-            ])
+            locked.save(
+                update_fields=[
+                    "assigned_officer",
+                    "resolution_note",
+                    "resolved_at",
+                    "status",
+                    "outcome_decision",
+                ]
+            )
             application = LoanApplication.objects.select_for_update().get(pk=locked.application_id)
             application.decision.decision = "approved"
-            application.decision.reasoning = (
-                f"Officer override via decision review {locked.id}: {note}".strip()
-            )
+            application.decision.reasoning = f"Officer override via decision review {locked.id}: {note}".strip()
             application.decision.save(update_fields=["decision", "reasoning"])
             # denied -> processing -> approved (validated transitions, each audited)
             application.transition_to("processing", user=officer, details={"source": "decision_review_overturn"})

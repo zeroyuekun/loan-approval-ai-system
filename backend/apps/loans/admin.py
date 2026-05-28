@@ -146,8 +146,7 @@ class DecisionReviewAdmin(admin.ModelAdmin):
         done = 0
         for review in queryset:
             try:
-                apply_review_outcome(review, officer=request.user, outcome="upheld",
-                                     note="Resolved via Django admin")
+                apply_review_outcome(review, officer=request.user, outcome="upheld", note="Resolved via Django admin")
                 done += 1
             except ValueError as exc:
                 self.message_user(request, f"{review.id}: {exc}", level=messages.WARNING)
@@ -158,10 +157,10 @@ class DecisionReviewAdmin(admin.ModelAdmin):
         done = 0
         for review in queryset:
             try:
-                apply_review_outcome(review, officer=request.user, outcome="overturned",
-                                     note="Overturned via Django admin")
+                apply_review_outcome(
+                    review, officer=request.user, outcome="overturned", note="Overturned via Django admin"
+                )
                 done += 1
             except ValueError as exc:
                 self.message_user(request, f"{review.id}: {exc}", level=messages.WARNING)
-        self.message_user(request, f"{done} decision(s) overturned + approval email queued.",
-                          level=messages.SUCCESS)
+        self.message_user(request, f"{done} decision(s) overturned + approval email queued.", level=messages.SUCCESS)

@@ -547,18 +547,17 @@ class DecisionReview(models.Model):
         WITHDRAWN = "withdrawn", "Withdrawn by applicant"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    application = models.ForeignKey(
-        LoanApplication, on_delete=models.CASCADE, related_name="decision_reviews"
-    )
+    application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="decision_reviews")
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="decision_reviews"
     )
     reason = models.TextField(help_text="Why the applicant believes the decision is wrong")
-    status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.REQUESTED, db_index=True
-    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.REQUESTED, db_index=True)
     assigned_officer = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="assigned_decision_reviews",
     )
     resolution_note = models.TextField(blank=True)

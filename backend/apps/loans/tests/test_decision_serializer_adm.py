@@ -1,6 +1,7 @@
 import pytest
-from apps.loans.serializers import CustomerLoanDecisionSerializer
+
 from apps.loans.models import LoanApplication, LoanDecision
+from apps.loans.serializers import CustomerLoanDecisionSerializer
 
 pytestmark = pytest.mark.django_db
 
@@ -8,13 +9,22 @@ pytestmark = pytest.mark.django_db
 def _denied_decision(django_user_model):
     user = django_user_model.objects.create_user(username="cust1", password="x", role="customer")
     app = LoanApplication.objects.create(
-        applicant=user, annual_income=50000, credit_score=500, loan_amount=30000,
-        debt_to_income=5, employment_length=1, purpose="personal", home_ownership="rent",
+        applicant=user,
+        annual_income=50000,
+        credit_score=500,
+        loan_amount=30000,
+        debt_to_income=5,
+        employment_length=1,
+        purpose="personal",
+        home_ownership="rent",
         status="denied",
     )
     return LoanDecision.objects.create(
-        application=app, decision="denied", confidence=0.9,
-        shap_values={"credit_score": -0.5}, feature_importances={"credit_score": 0.5},
+        application=app,
+        decision="denied",
+        confidence=0.9,
+        shap_values={"credit_score": -0.5},
+        feature_importances={"credit_score": 0.5},
         counterfactual_results=[{"changes": {"loan_amount": 10000}, "statement": "Reduce your loan amount"}],
     )
 

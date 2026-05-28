@@ -30,9 +30,7 @@ def build_denial_reason_summary(shap_values: dict, feature_importances: dict) ->
     if feature_importances:
         from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
 
-        drivers = ranked_denial_drivers(
-            shap_values=shap_values or {}, feature_importances=feature_importances, max_n=3
-        )
+        drivers = ranked_denial_drivers(shap_values=shap_values or {}, feature_importances=feature_importances, max_n=3)
         return ", ".join(name.replace("_", " ") for name, _ in drivers)
     return ""
 

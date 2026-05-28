@@ -338,9 +338,7 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         # Feature flag: filing can be disabled instantly without removing the surface.
         if not getattr(settings, "DECISION_REVIEW_ENABLED", True):
-            return Response(
-                {"detail": "Decision review requests are not currently available."}, status=503
-            )
+            return Response({"detail": "Decision review requests are not currently available."}, status=503)
         return super().create(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsAdminOrOfficer])

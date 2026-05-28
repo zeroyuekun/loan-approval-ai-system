@@ -1,4 +1,4 @@
-from apps.ml_engine.services.adm_disclosure import resolve_adm_disclosure, ADM_REGISTER
+from apps.ml_engine.services.adm_disclosure import ADM_REGISTER, resolve_adm_disclosure
 
 
 def test_solely_automated_decline_has_human_review_right():

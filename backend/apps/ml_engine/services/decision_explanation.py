@@ -18,9 +18,7 @@ from apps.ml_engine.services.reason_codes import (
 )
 
 
-def ranked_denial_drivers(
-    *, shap_values: dict, feature_importances: dict, max_n: int = 4
-) -> list[tuple[str, float]]:
+def ranked_denial_drivers(*, shap_values: dict, feature_importances: dict, max_n: int = 4) -> list[tuple[str, float]]:
     """Canonical ordered list of (feature, magnitude) that drove a denial.
 
     Prefers per-applicant negative SHAP (most-negative first). Falls back to
@@ -63,9 +61,7 @@ def build_explanation_payload(
         "denial_reasons": denial_reasons,
         "counterfactuals": counterfactuals,
         "reapplication_guidance": reapplication_guidance,
-        "adm_disclosure": resolve_adm_disclosure(
-            decision=decision, requires_human_review=requires_human_review
-        ),
+        "adm_disclosure": resolve_adm_disclosure(decision=decision, requires_human_review=requires_human_review),
     }
 
 

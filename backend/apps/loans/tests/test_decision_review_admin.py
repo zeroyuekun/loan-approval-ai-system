@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.admin.sites import site
+
 from apps.loans.models import DecisionReview
 
 pytestmark = pytest.mark.django_db

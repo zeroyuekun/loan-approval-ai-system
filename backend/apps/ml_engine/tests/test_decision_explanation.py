@@ -1,6 +1,6 @@
 from apps.ml_engine.services.decision_explanation import (
-    ranked_denial_drivers,
     build_explanation_payload,
+    ranked_denial_drivers,
 )
 
 
@@ -34,7 +34,10 @@ def test_build_payload_denied_has_reasons_counterfactuals_and_adm():
 
 def test_build_payload_approved_omits_denial_fields():
     payload = build_explanation_payload(
-        decision="approved", shap_values={}, feature_importances={}, counterfactual_results=[],
+        decision="approved",
+        shap_values={},
+        feature_importances={},
+        counterfactual_results=[],
         requires_human_review=False,
     )
     assert payload["denial_reasons"] == []
