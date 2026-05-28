@@ -295,6 +295,8 @@ export default function CustomerApplicationStatusPage() {
           counterfactuals={application.decision.counterfactuals || []}
           reapplicationGuidance={application.decision.reapplication_guidance || null}
           creditScore={application.credit_score}
+          applicationId={application.id}
+          admDisclosure={application.decision.adm_disclosure || null}
         />
       )}
 
