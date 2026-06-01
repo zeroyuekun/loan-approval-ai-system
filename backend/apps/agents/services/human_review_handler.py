@@ -237,6 +237,12 @@ class HumanReviewHandler:
                 decision,
                 details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
             )
+            # H2: record that a human was involved, so the ADM disclosure can
+            # truthfully report "assisted" after status moves off 'review'.
+            loan_decision = application.decision
+            if loan_decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
+                loan_decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+                loan_decision.save(update_fields=["human_involvement"])
         self.tracker.finalize_run(agent_run, steps, start_time)
 
         # Emit time-to-resolution for the bias review queue (docs/slo.md).
