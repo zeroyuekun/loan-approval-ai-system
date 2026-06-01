@@ -4,15 +4,23 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('loans', '0024_decisionreview'),
+        ("loans", "0024_decisionreview"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='loandecision',
-            name='human_involvement',
-            field=models.CharField(choices=[('none', 'Solely automated'), ('assisted', 'Automated assessment, human review'), ('overridden', 'Human officer override')], default='none', help_text='Whether a human was involved in this decision (Privacy Act ADM disclosure, APP 1.7-1.9)', max_length=20),
+            model_name="loandecision",
+            name="human_involvement",
+            field=models.CharField(
+                choices=[
+                    ("none", "Solely automated"),
+                    ("assisted", "Automated assessment, human review"),
+                    ("overridden", "Human officer override"),
+                ],
+                default="none",
+                help_text="Whether a human was involved in this decision (Privacy Act ADM disclosure, APP 1.7-1.9)",
+                max_length=20,
+            ),
         ),
     ]

@@ -119,9 +119,7 @@ def test_successful_call_keeps_call_and_reconciles_cost(settings):
     from apps.agents.services.api_budget import estimate_cost_usd
 
     expected_cents = max(1, int(estimate_cost_usd(10000, 2000, "claude-sonnet-4-6") * 100))
-    guard.record_call(
-        input_tokens=10000, output_tokens=2000, model="claude-sonnet-4-6", reserved_cents=reserved
-    )
+    guard.record_call(input_tokens=10000, output_tokens=2000, model="claude-sonnet-4-6", reserved_cents=reserved)
 
     # Call stays counted (the call happened); cost reconciled to the real value.
     assert int(r.get(calls_key)) == 1

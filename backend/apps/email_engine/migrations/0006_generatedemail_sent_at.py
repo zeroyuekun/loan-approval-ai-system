@@ -4,15 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('email_engine', '0005_update_default_to_sonnet_4_6'),
+        ("email_engine", "0005_update_default_to_sonnet_4_6"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='generatedemail',
-            name='sent_at',
-            field=models.DateTimeField(blank=True, db_index=True, help_text='Set when the SMTP send succeeded; gates against duplicate sends on task redelivery.', null=True),
+            model_name="generatedemail",
+            name="sent_at",
+            field=models.DateTimeField(
+                blank=True,
+                db_index=True,
+                help_text="Set when the SMTP send succeeded; gates against duplicate sends on task redelivery.",
+                null=True,
+            ),
         ),
     ]

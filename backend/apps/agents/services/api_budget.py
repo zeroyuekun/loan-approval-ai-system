@@ -326,8 +326,7 @@ class ApiBudgetGuard:
             pipe.execute()
 
             logger.info(
-                "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f "
-                "(reserved=%dc, delta=%dc, released=%s)",
+                "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f (reserved=%dc, delta=%dc, released=%s)",
                 input_tokens,
                 output_tokens,
                 model or "unknown",
