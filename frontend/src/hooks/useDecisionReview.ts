@@ -23,9 +23,10 @@ export function useDecisionReview(applicationId: string) {
     queryFn: async () => {
       const { data } = await api.get<{ results: DecisionReview[] } | DecisionReview[]>(
         '/loans/decision-reviews/',
+        { params: { application: applicationId } },
       )
       const list = Array.isArray(data) ? data : (data.results ?? [])
-      return list.find((r) => r.application === applicationId) ?? null
+      return list.find((r) => r.application === applicationId) ?? list[0] ?? null
     },
   })
 }

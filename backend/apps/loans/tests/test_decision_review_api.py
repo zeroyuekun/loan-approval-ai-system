@@ -118,6 +118,32 @@ def test_reason_too_long_rejected(django_user_model):
     assert r.status_code == 400
 
 
+def test_list_filtered_by_application(django_user_model):
+    cust, app = _denied_app(django_user_model)
+    # A second denied app + review for the same customer.
+    app2 = LoanApplication.objects.create(
+        applicant=cust,
+        annual_income=60000,
+        credit_score=480,
+        loan_amount=20000,
+        debt_to_income=4,
+        employment_length=2,
+        purpose="personal",
+        home_ownership="rent",
+        status="denied",
+    )
+    LoanDecision.objects.create(application=app2, decision="denied", confidence=0.8)
+    r1 = DecisionReview.objects.create(application=app, requested_by=cust, reason="a")
+    DecisionReview.objects.create(application=app2, requested_by=cust, reason="b")
+    client = APIClient()
+    client.force_authenticate(cust)
+    resp = client.get(f"/api/v1/loans/decision-reviews/?application={app.id}")
+    assert resp.status_code == 200
+    results = resp.data["results"] if isinstance(resp.data, dict) and "results" in resp.data else resp.data
+    ids = {row["id"] for row in results}
+    assert ids == {str(r1.id)}
+
+
 def test_resolve_response_body_shows_resolved_status(django_user_model, monkeypatch):
     import apps.loans.services.decision_review as svc
 

@@ -326,9 +326,12 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = DecisionReview.objects.select_related("application", "requested_by")
-        if user.role in ("admin", "officer"):
-            return qs.all()
-        return qs.filter(requested_by=user)
+        if user.role not in ("admin", "officer"):
+            qs = qs.filter(requested_by=user)
+        application_id = self.request.query_params.get("application")
+        if application_id:
+            qs = qs.filter(application_id=application_id)
+        return qs
 
     def get_throttles(self):
         if self.action == "create":
