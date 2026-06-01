@@ -28,6 +28,21 @@ from django.utils import timezone
 
 logger = logging.getLogger("watchdog")
 
+# L24: only terminate connections wedged in a transaction (the real leak
+# signal), scoped to THIS app via application_name so a pooler's healthy plain
+# `idle` connections — or another service's — are never killed. The `%s`
+# placeholders are bound positionally to [app_name, max_idle_minutes].
+IDLE_IN_TX_TERMINATE_SQL = """
+SELECT pid, usename, application_name,
+       extract(epoch from (now() - state_change))::int as idle_seconds
+FROM pg_stat_activity
+WHERE datname = current_database()
+  AND pid != pg_backend_pid()
+  AND state IN ('idle in transaction', 'idle in transaction (aborted)')
+  AND application_name = %s
+  AND state_change < now() - interval '%s minutes'
+"""
+
 
 class Command(BaseCommand):
     help = "Run the self-healing watchdog service"
@@ -63,6 +78,10 @@ class Command(BaseCommand):
         interval = max(options["interval"], 5)
         self.max_idle_minutes = max(options["max_idle_conn_minutes"], 1)
         self.max_failures = max(options["max_consecutive_failures"], 1)
+        # Scope the idle-in-transaction reaper to this app's connections only.
+        # Must match DATABASES["default"]["OPTIONS"]["application_name"] (base.py),
+        # or the watchdog would match zero rows and silently stop reaping leaks.
+        self.app_name = getattr(settings, "DB_APPLICATION_NAME", "loan_approval")
         self.consecutive_failures = 0
         self._running = True
         self._celery_app = Celery("config")
@@ -274,32 +293,30 @@ class Command(BaseCommand):
                 total = 0
                 for state, count, max_idle in stats:
                     total += count
-                    if state == "idle" and max_idle and max_idle > self.max_idle_minutes * 60:
+                    # Only the idle-in-transaction states are leak signals worth
+                    # logging — plain `idle` is the normal pooled resting state.
+                    if (
+                        state in ("idle in transaction", "idle in transaction (aborted)")
+                        and max_idle
+                        and max_idle > self.max_idle_minutes * 60
+                    ):
                         logger.info(
-                            "DB connections: %d %s (longest idle: %ds)",
+                            "DB connections: %d %s (longest idle-in-transaction: %ds)",
                             count,
                             state,
                             max_idle,
                         )
 
-                # Terminate connections idle longer than threshold
+                # Terminate only idle-in-transaction connections owned by this app.
                 cursor.execute(
-                    """
-                    SELECT pid, usename, application_name,
-                           extract(epoch from (now() - state_change))::int as idle_seconds
-                    FROM pg_stat_activity
-                    WHERE datname = current_database()
-                      AND pid != pg_backend_pid()
-                      AND state = 'idle'
-                      AND state_change < now() - interval '%s minutes'
-                    """,
-                    [self.max_idle_minutes],
+                    IDLE_IN_TX_TERMINATE_SQL,
+                    [self.app_name, self.max_idle_minutes],
                 )
                 idle_connections = cursor.fetchall()
 
                 for pid, user, app_name, idle_secs in idle_connections:
                     logger.info(
-                        "Terminating idle DB connection: pid=%s user=%s app=%s idle=%ds",
+                        "Terminating idle-in-transaction DB connection: pid=%s user=%s app=%s idle=%ds",
                         pid,
                         user,
                         app_name,
@@ -308,7 +325,7 @@ class Command(BaseCommand):
                     cursor.execute("SELECT pg_terminate_backend(%s)", [pid])
 
                 if idle_connections:
-                    logger.info("Terminated %d idle DB connections", len(idle_connections))
+                    logger.info("Terminated %d idle-in-transaction DB connections", len(idle_connections))
 
                 # Log pool stats
                 cursor.execute("""

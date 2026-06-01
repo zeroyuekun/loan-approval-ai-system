@@ -88,6 +88,12 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+# Tag this app's PostgreSQL connections so the watchdog's idle-in-transaction
+# reaper (L24) can scope pg_terminate_backend to ONLY this app's wedged
+# transactions and never touch a pooler's healthy idle connections. The
+# watchdog reads the same DB_APPLICATION_NAME setting — keep them in sync.
+DB_APPLICATION_NAME = os.environ.get("DB_APPLICATION_NAME", "loan_approval")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -98,6 +104,9 @@ DATABASES = {
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
         "CONN_MAX_AGE": 600,
         "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": {
+            "application_name": DB_APPLICATION_NAME,
+        },
     }
 }
 
