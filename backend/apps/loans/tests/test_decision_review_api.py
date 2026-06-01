@@ -118,6 +118,41 @@ def test_reason_too_long_rejected(django_user_model):
     assert r.status_code == 400
 
 
+def test_resolve_response_body_shows_resolved_status(django_user_model, monkeypatch):
+    import apps.loans.services.decision_review as svc
+
+    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
+    cust, app = _denied_app(django_user_model)
+    officer = django_user_model.objects.create_user(username="obody", password="x", role="officer")
+    review = DecisionReview.objects.create(application=app, requested_by=cust, reason="x")
+    client = APIClient()
+    client.force_authenticate(officer)
+    r = client.post(
+        f"/api/v1/loans/decision-reviews/{review.id}/resolve/",
+        {"outcome": "overturned", "note": "approve now"},
+        format="json",
+    )
+    assert r.status_code == 200
+    assert r.data["status"] == "overturned"
+    assert r.data["outcome_decision"] == "approved"
+    assert r.data["resolution_note"] == "approve now"
+
+
+def test_resolve_uphold_response_body_shows_upheld(django_user_model):
+    cust, app = _denied_app(django_user_model)
+    officer = django_user_model.objects.create_user(username="oup", password="x", role="officer")
+    review = DecisionReview.objects.create(application=app, requested_by=cust, reason="x")
+    client = APIClient()
+    client.force_authenticate(officer)
+    r = client.post(
+        f"/api/v1/loans/decision-reviews/{review.id}/resolve/",
+        {"outcome": "upheld", "note": "stands"},
+        format="json",
+    )
+    assert r.status_code == 200
+    assert r.data["status"] == "upheld"
+
+
 def test_resolve_overturn_on_non_denied_returns_409(django_user_model, monkeypatch):
     import apps.loans.services.decision_review as svc
 
