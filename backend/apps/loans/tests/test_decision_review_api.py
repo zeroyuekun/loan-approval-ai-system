@@ -118,6 +118,25 @@ def test_reason_too_long_rejected(django_user_model):
     assert r.status_code == 400
 
 
+def test_resolve_overturn_on_non_denied_returns_409(django_user_model, monkeypatch):
+    import apps.loans.services.decision_review as svc
+
+    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
+    cust, app = _denied_app(django_user_model)
+    officer = django_user_model.objects.create_user(username="o409", password="x", role="officer")
+    review = DecisionReview.objects.create(application=app, requested_by=cust, reason="x")
+    # Move the app off 'denied' after the review exists.
+    app.transition_to("processing", details={"source": "test"})
+    client = APIClient()
+    client.force_authenticate(officer)
+    r = client.post(
+        f"/api/v1/loans/decision-reviews/{review.id}/resolve/",
+        {"outcome": "overturned", "note": "late"},
+        format="json",
+    )
+    assert r.status_code == 409
+
+
 def test_resolve_note_too_long_rejected(django_user_model):
     cust, app = _denied_app(django_user_model)
     officer = django_user_model.objects.create_user(username="off2", password="x", role="officer")

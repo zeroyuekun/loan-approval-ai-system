@@ -351,10 +351,10 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
         if outcome not in ("upheld", "overturned"):
             return Response({"detail": "outcome must be 'upheld' or 'overturned'"}, status=400)
         try:
-            apply_review_outcome(review, officer=request.user, outcome=outcome, note=note)
-        except ValueError as exc:
+            updated = apply_review_outcome(review, officer=request.user, outcome=outcome, note=note)
+        except (ValueError, LoanApplication.InvalidStateTransition) as exc:
             return Response({"detail": str(exc)}, status=409)
-        return Response(DecisionReviewSerializer(review, context={"request": request}).data)
+        return Response(DecisionReviewSerializer(updated, context={"request": request}).data)
 
 
 class ReferralListView(APIView):
