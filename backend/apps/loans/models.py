@@ -418,6 +418,18 @@ class LoanDecision(models.Model):
         help_text="ML model version that produced this decision",
     )
     reasoning = models.TextField(blank=True)
+
+    class HumanInvolvement(models.TextChoices):
+        NONE = "none", "Solely automated"
+        ASSISTED = "assisted", "Automated assessment, human review"
+        OVERRIDDEN = "overridden", "Human officer override"
+
+    human_involvement = models.CharField(
+        max_length=20,
+        choices=HumanInvolvement.choices,
+        default=HumanInvolvement.NONE,
+        help_text="Whether a human was involved in this decision (Privacy Act ADM disclosure, APP 1.7-1.9)",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
