@@ -280,6 +280,14 @@ MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").
 # without removing the API surface (returns 503).
 DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# L29 — maker/checker gate on high-value officer overturns. Default "off"
+# (no behaviour change). "2fa" requires the acting officer to hold a verified
+# TOTP device before overturning a denial >= DECISION_OVERTURN_THRESHOLD;
+# "second_approver" blocks such overturns at the API pending dual approval.
+# Unknown values collapse to "off" (see overturn_policy.normalize_overturn_mode).
+DECISION_OVERTURN_GATE_MODE = os.environ.get("DECISION_OVERTURN_GATE_MODE", "off")
+DECISION_OVERTURN_THRESHOLD = float(os.environ.get("DECISION_OVERTURN_THRESHOLD", "100000"))
+
 # Standalone single-application prediction endpoint (/ml/predict/<id>/).
 # The agent orchestrator is the production decision path; the standalone task
 # does NOT create an escalated AgentRun, so a borderline/drift/policy-refer

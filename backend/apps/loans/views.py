@@ -353,6 +353,25 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
             return Response({"detail": "note must be 4000 characters or fewer"}, status=400)
         if outcome not in ("upheld", "overturned"):
             return Response({"detail": "outcome must be 'upheld' or 'overturned'"}, status=400)
+
+        # L29 (OPTIONAL): maker/checker gate on high-value overturns. Default
+        # mode is "off" — no behaviour change until an operator opts in.
+        if outcome == "overturned":
+            from django_otp.plugins.otp_totp.models import TOTPDevice
+
+            from apps.loans.services.overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+
+            mode = normalize_overturn_mode(getattr(settings, "DECISION_OVERTURN_GATE_MODE", "off"))
+            has_2fa = TOTPDevice.objects.filter(user=request.user, confirmed=True).exists()
+            gate = evaluate_overturn_gate(
+                amount=float(review.application.loan_amount or 0),
+                threshold=getattr(settings, "DECISION_OVERTURN_THRESHOLD", 100000.0),
+                mode=mode,
+                officer_has_2fa=has_2fa,
+            )
+            if not gate["allowed"]:
+                return Response({"detail": gate["reason"]}, status=403)
+
         try:
             updated = apply_review_outcome(review, officer=request.user, outcome=outcome, note=note)
         except (ValueError, LoanApplication.InvalidStateTransition) as exc:
