@@ -53,6 +53,42 @@ def estimate_cost_usd(input_tokens, output_tokens, model=""):
     return round(cost, 6)
 
 
+# Conservative floor reserved per call when token counts are unknown up front.
+_RESERVE_FLOOR_CENTS = 5
+
+
+def _estimate_reserve_cents(model, max_tokens=None):
+    """Worst-case cents to reserve before a call whose real token usage is unknown.
+
+    Assumes a large-ish prompt (8k input) producing up to ``max_tokens`` output.
+    Never returns below ``_RESERVE_FLOOR_CENTS``.
+    """
+    cost_usd = estimate_cost_usd(8000, max_tokens or 2048, model)
+    return max(_RESERVE_FLOOR_CENTS, int(cost_usd * 100))
+
+
+# Atomic check-and-reserve executed server-side so check+increment is a single
+# round-trip (concurrent workers serialise on the counter, killing the M5 TOCTOU
+# race). KEYS[1]=cost_cents key, KEYS[2]=calls key.
+# ARGV[1]=cost_cents to add, ARGV[2]=calls to add, ARGV[3]=budget_limit_cents,
+# ARGV[4]=call_limit, ARGV[5]=ttl. Returns {ok, new_cost_cents, new_calls}.
+_RESERVE_LUA = """
+local cost = tonumber(redis.call('GET', KEYS[1]) or '0')
+local calls = tonumber(redis.call('GET', KEYS[2]) or '0')
+if (cost + tonumber(ARGV[1])) > tonumber(ARGV[3]) then
+    return {0, cost, calls}
+end
+if (calls + tonumber(ARGV[2])) > tonumber(ARGV[4]) then
+    return {0, cost, calls}
+end
+local newcost = redis.call('INCRBY', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[5])
+local newcalls = redis.call('INCRBY', KEYS[2], ARGV[2])
+redis.call('EXPIRE', KEYS[2], ARGV[5])
+return {1, newcost, newcalls}
+"""
+
+
 class BudgetExhausted(Exception):
     """Raised when the daily API budget is exhausted."""
 
@@ -96,7 +132,15 @@ class ApiBudgetGuard:
         return f"ai_budget:{date.today().isoformat()}:{suffix}"
 
     def check_budget(self):
-        """Raise BudgetExhausted if daily limit reached, CircuitOpen if breaker tripped."""
+        """Raise BudgetExhausted if daily limit reached, CircuitOpen if breaker tripped.
+
+        Advisory pre-flight only. It reads-then-decides, so under concurrency it can
+        let several callers past the cap simultaneously. Callers (EmailGenerator,
+        marketing_agent, next_best_offer) use it as a cheap "should I even try the API
+        or go straight to a template" hint. The AUTHORITATIVE gate is
+        ``reserve_budget`` inside ``guarded_api_call``, which reserves atomically before
+        the API round-trip (M5).
+        """
         global _REDIS_FALLBACK_CALLS
         try:
             r = self._get_redis()
@@ -156,8 +200,79 @@ class ApiBudgetGuard:
                 e,
             )
 
-    def record_call(self, input_tokens=0, output_tokens=0, model=""):
-        """Increment daily call counter, token usage, and dollar cost."""
+    def reserve_budget(self, estimated_cost_cents=_RESERVE_FLOOR_CENTS, estimated_calls=1):
+        """Atomically reserve budget BEFORE the API call (authoritative M5 gate).
+
+        Performs check+increment of the cost and call counters in a single Redis
+        round-trip via a Lua script, so N concurrent workers serialise on the
+        counter and the $5/day cap can no longer be overshot. Raises
+        ``BudgetExhausted`` if the reservation would breach the dollar or call cap
+        (the counter is NOT incremented in that case — no leak). Returns the cents
+        actually reserved so ``record_call`` can reconcile to the true cost.
+
+        On a Redis outage it falls back to the same per-process cap that
+        ``check_budget`` uses and returns 0 (reserved nothing; record_call records
+        the real cost).
+        """
+        estimated_cost_cents = max(_RESERVE_FLOOR_CENTS, int(estimated_cost_cents))
+        budget_limit = getattr(settings, "AI_DAILY_BUDGET_LIMIT_USD", 5.0)
+        budget_limit_cents = int(budget_limit * 100)
+        call_limit = getattr(settings, "AI_DAILY_CALL_LIMIT", 500)
+        global _REDIS_FALLBACK_CALLS
+        try:
+            r = self._get_redis()
+            cb_key = "ai_budget:circuit_breaker"
+            if r.exists(cb_key):
+                ttl = r.ttl(cb_key)
+                raise CircuitOpen(f"Circuit breaker open — {ttl}s remaining. Too many consecutive API failures.")
+
+            script = r.register_script(_RESERVE_LUA)
+            ok, _new_cost, _new_calls = script(
+                keys=[self._daily_key("cost_cents"), self._daily_key("calls")],
+                args=[estimated_cost_cents, estimated_calls, budget_limit_cents, call_limit, self.KEY_TTL],
+            )
+            if not int(ok):
+                raise BudgetExhausted(
+                    f"Daily budget/call cap would be exceeded (reserve {estimated_cost_cents}c, "
+                    f"limit ${budget_limit:.2f}). Pipeline will use template fallback. Resets at midnight UTC."
+                )
+
+            # Healthy Redis — reset the process-local fallback counter (F-04).
+            with _REDIS_FALLBACK_LOCK:
+                _REDIS_FALLBACK_CALLS = 0
+            return estimated_cost_cents
+        except (BudgetExhausted, CircuitOpen):
+            raise
+        except (redis.RedisError, ConnectionError, TimeoutError) as e:
+            # Redis unavailable: reuse the per-process fallback cap so a brief
+            # blip doesn't brick the worker but a sustained outage can't run up
+            # the bill. Reserve nothing — record_call records the actual cost.
+            with _REDIS_FALLBACK_LOCK:
+                _REDIS_FALLBACK_CALLS += 1
+                current = _REDIS_FALLBACK_CALLS
+            if current > _REDIS_FALLBACK_LIMIT:
+                raise BudgetExhausted(
+                    f"Redis unavailable and per-process fallback limit reached "
+                    f"({current}/{_REDIS_FALLBACK_LIMIT}). Reason: {e}"
+                ) from e
+            logger.warning(
+                "Budget reserve failed (Redis unavailable, %d/%d): %s",
+                current,
+                _REDIS_FALLBACK_LIMIT,
+                e,
+            )
+            return 0
+
+    def record_call(self, input_tokens=0, output_tokens=0, model="", reserved_cents=0):
+        """Record actual usage, reconciling any prior reservation to the true cost.
+
+        When ``reserved_cents`` > 0 the call already reserved cost + 1 call inside
+        ``reserve_budget``; here we only INCRBY the delta ``actual - reserved`` (which
+        may be negative → a DECRBY) so the counter settles at the true cost without
+        double-counting and without dropping below the real spend. When
+        ``reserved_cents`` == 0 (the Redis-down fallback path) we increment the call
+        counter and full cost here as before.
+        """
         try:
             r = self._get_redis()
             pipe = r.pipeline()
@@ -170,21 +285,34 @@ class ApiBudgetGuard:
             cost_usd = estimate_cost_usd(input_tokens, output_tokens, model)
             cost_cents = max(1, int(cost_usd * 100))  # minimum 1 cent per call
 
-            pipe.incr(calls_key)
-            pipe.expire(calls_key, self.KEY_TTL)
+            reserved = int(reserved_cents)
+            if reserved == 0:
+                # Fallback path: the call was never reserved (Redis was down at
+                # reserve time, or a legacy caller). Count the call + full cost.
+                pipe.incr(calls_key)
+                pipe.expire(calls_key, self.KEY_TTL)
+                cost_delta = cost_cents
+            else:
+                # Reconcile the reservation to the real cost. The call was already
+                # counted inside reserve_budget, so do NOT increment calls again.
+                cost_delta = cost_cents - reserved
+
             pipe.incrby(tokens_key, input_tokens + output_tokens)
             pipe.expire(tokens_key, self.KEY_TTL)
-            pipe.incrby(cost_key, cost_cents)
+            if cost_delta != 0:
+                pipe.incrby(cost_key, cost_delta)
             pipe.expire(cost_key, self.KEY_TTL)
 
             pipe.execute()
 
             logger.info(
-                "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f",
+                "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f (reserved=%dc, delta=%dc)",
                 input_tokens,
                 output_tokens,
                 model or "unknown",
                 cost_usd,
+                reserved,
+                cost_delta,
             )
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             logger.warning("Failed to record API call (Redis): %s", e)
@@ -310,19 +438,25 @@ def guarded_api_call(client, **kwargs):
 
     model = kwargs.get("model", "")
     budget = ApiBudgetGuard()
-    budget.check_budget()
+    # Authoritative atomic gate (M5): reserve a conservative worst-case before the
+    # call so concurrent workers cannot collectively overshoot the daily cap.
+    reserved = budget.reserve_budget(
+        estimated_cost_cents=_estimate_reserve_cents(model, kwargs.get("max_tokens")),
+    )
 
     try:
         response = client.messages.create(**kwargs)
     except Exception:
         budget.record_failure()
+        # Release the reservation — the call never produced billable tokens.
+        budget.record_call(input_tokens=0, output_tokens=0, model=model, reserved_cents=reserved)
         raise
 
-    # Track cost from actual usage
+    # Track cost from actual usage, reconciling the reservation to the true cost.
     usage = getattr(response, "usage", None)
     input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
     output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
-    budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens, model=model)
+    budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens, model=model, reserved_cents=reserved)
     budget.record_success()
 
     # Log API call for PII cross-border audit (Privacy Act APP 8)
