@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
 import { formatCurrency, formatDate, formatPurpose, getDisplayStatus } from '@/lib/utils'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
+import { DecisionReviewStatus } from '@/components/applications/DecisionReviewStatus'
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,
@@ -298,6 +299,14 @@ export default function CustomerApplicationStatusPage() {
           applicationId={application.id}
           admDisclosure={application.decision.adm_disclosure || null}
         />
+      )}
+
+      {/* Human-review status is reachable on every post-decision screen, not just
+          the denial panel — an overturned review flips the app to 'approved' and
+          the denial panel unmounts (audit M9). The denial panel still owns the
+          mount on the 'denied' screen. */}
+      {(application.status === 'approved' || application.status === 'review') && (
+        <DecisionReviewStatus applicationId={application.id} />
       )}
 
       {/* Application Summary */}
