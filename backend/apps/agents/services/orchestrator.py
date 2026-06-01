@@ -103,6 +103,38 @@ class PipelineOrchestrator:
             return []
 
     # ------------------------------------------------------------------
+    # Idempotent status restore (L16)
+    # ------------------------------------------------------------------
+
+    def restore_status_from_decision(self, application_id):
+        """Idempotent: if a completed run left the app at 'pending', restore it
+        to its decided status via the audited state machine. No-op otherwise.
+
+        ALLOWED_TRANSITIONS does not permit pending->approved directly, so the
+        restore replays the legitimate pipeline path pending->processing->
+        <decision>; each hop produces a status_transition AuditLog. This
+        replaces the old save(update_fields=["status"]) that bypassed both
+        validation and auditing.
+        """
+        with transaction.atomic():
+            # Lock by pk — never via a nullable join (FOR UPDATE caveat).
+            app = LoanApplication.objects.select_for_update().get(pk=application_id)
+            if app.status != LoanApplication.Status.PENDING:
+                return
+            decision = LoanDecision.objects.filter(application_id=application_id).first()
+            if not decision:
+                return
+            target = decision.decision  # 'approved' or 'denied'
+            allowed = LoanApplication.ALLOWED_TRANSITIONS.get(app.status, [])
+            if target not in allowed:
+                # pending->approved is not a direct edge; replay via processing.
+                app.transition_to(
+                    LoanApplication.Status.PROCESSING,
+                    details={"source": "idempotent_restore"},
+                )
+            app.transition_to(target, details={"source": "idempotent_restore"})
+
+    # ------------------------------------------------------------------
     # Main orchestration
     # ------------------------------------------------------------------
 

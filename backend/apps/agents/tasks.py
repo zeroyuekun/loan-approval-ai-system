@@ -85,20 +85,11 @@ def orchestrate_pipeline_task(self, application_id, force=False):
             status=AgentRun.Status.COMPLETED,
         ).exists()
         if existing:
-            # Restore application status from its decision if it was reset to pending
-            from apps.loans.models import LoanApplication, LoanDecision
-
+            # A completed run owns this application — delegate the idempotent,
+            # audited status restore to the orchestrator service (L16). The
+            # task stays a thin dispatcher.
             try:
-                app = LoanApplication.objects.get(pk=application_id)
-                if app.status == LoanApplication.Status.PENDING:
-                    decision = LoanDecision.objects.filter(application_id=application_id).first()
-                    if decision:
-                        new_status = decision.decision  # 'approved' or 'denied'
-                        app.status = new_status
-                        app.save(update_fields=["status"])
-                        logger.info(
-                            "Application %s: restored status to %s from completed run", application_id, new_status
-                        )
+                PipelineOrchestrator().restore_status_from_decision(application_id)
             except Exception as e:
                 logger.warning("Application %s: failed to restore status: %s", application_id, e)
             return {"status": "already_completed", "application_id": str(application_id)}
