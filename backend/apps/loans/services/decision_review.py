@@ -66,10 +66,14 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
                 ]
             )
             application = LoanApplication.objects.select_for_update().get(pk=locked.application_id)
-            application.decision.decision = "approved"
-            application.decision.reasoning = f"Officer override via decision review {locked.id}: {note}".strip()
-            application.decision.human_involvement = LoanDecision.HumanInvolvement.OVERRIDDEN
-            application.decision.save(update_fields=["decision", "reasoning", "human_involvement"])
+            # Lock the LoanDecision row directly by FK — not via the nullable
+            # OneToOne join, which Postgres refuses to FOR UPDATE — so any
+            # concurrent writer to human_involvement serialises behind us.
+            decision = LoanDecision.objects.select_for_update().get(application_id=locked.application_id)
+            decision.decision = "approved"
+            decision.reasoning = f"Officer override via decision review {locked.id}: {note}".strip()
+            decision.human_involvement = LoanDecision.HumanInvolvement.OVERRIDDEN
+            decision.save(update_fields=["decision", "reasoning", "human_involvement"])
             # denied -> processing -> approved (validated transitions, each audited)
             application.transition_to("processing", user=officer, details={"source": "decision_review_overturn"})
             application.transition_to("approved", user=officer, details={"source": "decision_review_overturn"})
