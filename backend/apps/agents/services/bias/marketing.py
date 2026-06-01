@@ -6,6 +6,7 @@ from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..deterministic_prescreen import DeterministicBiasPreScreen
 from .helpers import _call_with_retry, _format_flag_detail, _make_anthropic_client
+from .thresholds import is_severe
 from .tools import MARKETING_BIAS_TOOL, MARKETING_REVIEW_TOOL
 
 logger = logging.getLogger("agents.bias_detector")
@@ -74,7 +75,7 @@ class MarketingBiasDetector:
             }
 
         # ── Severe violation ──
-        if det_score > mkt_review:
+        if is_severe(det_score, mkt_review):
             logger.warning("Marketing bias pre-screen: severe violation, score=%d — blocking", det_score)
             return {
                 "score": det_score,
