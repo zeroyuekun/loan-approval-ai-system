@@ -44,7 +44,7 @@ The compliance layer — APRA serviceability buffers, NCCP Act responsible lendi
 flowchart TD
     A[Application submitted] --> B[1. XGBoost scores it]
     B --> B1[probability + SHAP]
-    B1 --> C[2. Claude writes the email]
+    B1 --> C[2. Claude writes the decision email<br/>denials also carry a deterministic NBO teaser]
     C --> D[3. Guardrails — 15 deterministic checks]
     D --> E[4. Bias pre-screen regex<br/>score 0–100]
     E -- "score ≤ 30" --> F[Send the email]
@@ -52,9 +52,9 @@ flowchart TD
     G -- "composite ≤ 30" --> F
     G -- "composite ≥ 60" --> H[Human review queue]
     E -- "score ≥ 60 (severe)" --> H
-    F --> I[5. Email sends]
+    F --> I[5. Decision email sends]
     I --> J{Denied?}
-    J -- yes --> K[6. NBO — alternative offers]
+    J -- yes --> K[6. NBO — full offer set as a<br/>separate marketing follow-up email]
     J -- no --> L[7. Frontend polls status]
     K --> L
 
@@ -67,6 +67,8 @@ flowchart TD
 ```
 
 Failed steps put the application into "review" with a log of where it broke. Stuck pipelines auto-recover after 5 minutes. Borderline scores, severe drift, or a policy "refer" rule route an application to human review **before** any decision email is sent — an automated message never goes out on a case that needs an officer.
+
+On a denial, alternatives reach the customer through two emails. The **decision email** itself carries one deterministic alternative-offer teaser (the best-scoring product and its headline figure, validated by the same hallucinated-number guardrail as the rest of the letter), so there is a concrete next step immediately. The **full personalised offer set** then ships as a **separate marketing follow-up email** (step 6) with its own bias and senior-review gate, keeping the regulated decision letter concise.
 
 ## Decision transparency & contestability
 
