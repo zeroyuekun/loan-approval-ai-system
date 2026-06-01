@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.11.0 (in progress) — Decision Transparency & Contestability + ADM Correctness
+
+Adds Privacy Act automated-decision-making (ADM) transparency and a customer contestability path, then hardens the decision pipeline so human involvement is actually honoured and disclosed honestly. In progress on branch `feat/decision-transparency-contestability` — backend complete and green; UI surfacing and the remaining hardening are tracked across follow-up phases.
+
+### Decision transparency & contestability
+
+- **`DecisionReview` model + API.** A customer can request a human review of a declined *automated* decision; an officer can uphold or overturn (override → approve). Concurrency-safe (`select_for_update` + terminal-state guard), fully audit-logged, gated by `DECISION_REVIEW_ENABLED`, orthogonal to the bias-only escalation queue.
+- **ADM disclosure register** (`ml_engine/services/adm_disclosure.py`). Per-decision disclosure of *solely automated* / *assisted* / *human*, the information used, and the right to a human review — surfaced in the customer decision payload, the denial panel, and `/rights`.
+- **Unified `DecisionExplanation` assembler.** One source of truth for denial-reason ranking, shared by the serializer and the human-review handler.
+
+### ADM transparency correctness (audit remediation — 3 HIGH findings)
+
+- **Honour `requires_human_review` (H1).** The orchestrator now escalates borderline / severe-drift / policy-"refer" predictions to the human-review queue *before* generating or sending any decision email, instead of silently auto-deciding and emailing. (The standalone prediction task already honoured the flag; the primary orchestrated pipeline did not.)
+- **Persisted human-involvement (H2).** New `LoanDecision.human_involvement` field (`none` / `assisted` / `overridden`, migration `0025`), stamped `assisted` when a reviewer resolves an escalation. The ADM disclosure now reads this *persisted* fact rather than the transient `application.status`, which had already moved on by the time the customer viewed the decision.
+- **Honest disclosure on officer overturn (H3).** An officer overturn stamps `overridden`, so the disclosure reads *"Reviewed and decided by a lending officer"* (mode `human`) instead of falsely reporting *"solely automated"*. New `human_override` register entry; defensive row-lock on the overturned `LoanDecision`.
+
+### Tests
+
+New field test, ADM-mode + explanation unit tests, and DB-integration tests for the escalation-resolve (`assisted`), officer-overturn (`overridden` → `human`), and orchestrator-escalation (no decision email on `requires_human_review`) paths. Suite at this milestone: backend **1646 passed / 34 skipped**, frontend **325 passed**.
+
+### In progress (remaining phases)
+
+UI surfacing of the corrected disclosure on overturned (now-approved) applications; resolve-endpoint 409 + fresh-response fix; the `run_prediction_task` (`/ml/predict`) escalation path; bias-layer fail-safe + documented 3-layer flow on decision emails; reliability hardening (atomic spend cap, duplicate-email guard); and the next-best-offer denial-email enhancement.
+
 ## v1.10.6 — Renderer XSS Hardening + External Benchmark + Realism Audit (2026-04-20)
 
 Four atomic PRs closing the last of the v1.10.3 senior-review deferred items and re-landing the two previously-stale concept PRs as fresh atomic changes. No data migrations, no model retraining, no API surface changes.

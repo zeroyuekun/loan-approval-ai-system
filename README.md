@@ -14,8 +14,9 @@ Full-stack loan approval system for Australian lending. XGBoost scores applicant
 - **3-layer bias detection** — regex pre-screen → Claude review → human escalation, scored 0–100 per generated email
 - **15 deterministic guardrails** on every Claude message (prohibited language, hallucinated dollar amounts, aggressive tone, regulatory-element presence, and more)
 - **$5/day Claude spend cap** with template-first generation — production cost control built in, not an afterthought
+- **Decision transparency & contestability** — every applicant is told how their decision was made (solely automated, assisted, or human-decided) and can request a human review; borderline, drift, and policy-"refer" cases escalate to an officer before any automated email is sent
 
-The compliance layer — APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure — is where most of the work went.
+The compliance layer — APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure, Privacy Act automated-decision (ADM) transparency — is where most of the work went.
 
 <details>
 <summary><strong>Screenshots</strong> (click to expand)</summary>
@@ -65,7 +66,17 @@ flowchart TD
     class F,L ok
 ```
 
-Failed steps put the application into "review" with a log of where it broke. Stuck pipelines auto-recover after 5 minutes.
+Failed steps put the application into "review" with a log of where it broke. Stuck pipelines auto-recover after 5 minutes. Borderline scores, severe drift, or a policy "refer" rule route an application to human review **before** any decision email is sent — an automated message never goes out on a case that needs an officer.
+
+## Decision transparency & contestability
+
+Australia's Privacy Act automated-decision-making (ADM) reforms (APP 1.7–1.9) require lenders to disclose when a decision is made by automated means. Every decision carries an honest ADM disclosure:
+
+- **Solely automated** — the model decided, no human involved.
+- **Assisted** — the model assessed and a lending officer reviewed it.
+- **Human** — a lending officer made or overrode the decision.
+
+Applicants can **request a human review** of a declined automated decision; an officer can uphold or overturn it (override → approve), with every transition audit-logged. The disclosure is derived from a *persisted* record of human involvement, so an escalated-then-resolved or officer-overturned decision is never mislabelled "solely automated" — even after the application reaches its final state.
 
 ## Stack
 
