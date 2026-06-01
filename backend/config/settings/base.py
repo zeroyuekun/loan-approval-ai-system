@@ -348,6 +348,19 @@ MARKETING_BIAS_THRESHOLD_PASS = 50  # 0-50: compliant marketing email
 MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior AI review
 # 71+: blocked entirely — marketing to vulnerable declined customers requires zero bias risk
 
+# Bias-check failure policy (M7/M10/L21). When the bias check cannot RUN
+# (detector construction, pre-screen crash, or an unexpected error — NOT a
+# Claude LLM outage, which already falls back to the deterministic score),
+# the pipeline applies this policy. Mirrors the warn/block/off pattern of the
+# ML gate modes.
+#   "block" (default): FAIL-SAFE — withhold the decision email, roll the
+#       application back to PENDING for retry, mark the AgentRun failed, and
+#       emit the bias_check_unavailable_total alert. Never auto-ships a
+#       decision with bias detection effectively off.
+#   "warn": log + emit the alert metric but proceed fail-open (legacy score=25).
+#   "off": explicit escape hatch — legacy fail-open with no special handling.
+BIAS_FAILURE_MODE = os.environ.get("BIAS_FAILURE_MODE", "block").lower()
+
 # API Documentation (drf-spectacular)
 SPECTACULAR_SETTINGS = {
     "TITLE": "AussieLoanAI API",

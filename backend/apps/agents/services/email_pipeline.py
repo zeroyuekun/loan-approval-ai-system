@@ -4,6 +4,7 @@ from django.conf import settings
 from django.db import transaction
 
 from apps.agents.exceptions import LLMServiceError
+from apps.agents.metrics import bias_check_unavailable_total
 from apps.agents.models import BiasReport
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.persistence import EmailPersistenceService
@@ -150,23 +151,17 @@ class EmailPipelineService:
         except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error("Application %s: bias check failed: %s", application_id, e)
             step = self.tracker.fail_step(step, str(e), failure_category="transient")
-            bias_result = {
-                "score": 25,
-                "flagged": False,
-                "requires_human_review": False,
-                "categories": [],
-                "analysis": f"Bias check infrastructure error: {e}",
-            }
+            held = self._handle_bias_unavailable(application, agent_run, steps, step, waterfall, e)
+            if held is not None:
+                return held
+            bias_result = self._legacy_failopen_bias_result(e)
         except Exception as e:
             logger.critical("Application %s: UNEXPECTED failure at bias_check: %s", application_id, e, exc_info=True)
             step = self.tracker.fail_step(step, str(e), failure_category=None)
-            bias_result = {
-                "score": 25,
-                "flagged": False,
-                "requires_human_review": False,
-                "categories": [],
-                "analysis": f"Bias check infrastructure error: {e}",
-            }
+            held = self._handle_bias_unavailable(application, agent_run, steps, step, waterfall, e)
+            if held is not None:
+                return held
+            bias_result = self._legacy_failopen_bias_result(e)
 
         steps.append(step)
 
@@ -304,3 +299,75 @@ class EmailPipelineService:
             steps.append(step)
 
         return steps, email_result, generated_email, bias_result, False
+
+    @staticmethod
+    def _legacy_failopen_bias_result(exc):
+        """Legacy fail-OPEN substitute (only used in BIAS_FAILURE_MODE in {warn, off})."""
+        return {
+            "score": 25,
+            "flagged": False,
+            "requires_human_review": False,
+            "categories": [],
+            "analysis": f"Bias check infrastructure error: {exc}",
+        }
+
+    def _handle_bias_unavailable(self, application, agent_run, steps, step, waterfall, exc):
+        """Apply the BIAS_FAILURE_MODE policy when the bias check could not run.
+
+        Returns the orchestrator tuple to HOLD the pipeline (block mode), or
+        None to proceed fail-open (warn/off modes). Never auto-ships a decision
+        with bias detection effectively off.
+        """
+        mode = getattr(settings, "BIAS_FAILURE_MODE", "block").lower()
+        if mode not in ("block", "warn", "off"):
+            logger.warning("Unknown BIAS_FAILURE_MODE=%r — defaulting to 'block'", mode)
+            mode = "block"
+
+        bias_check_unavailable_total.labels(mode=mode).inc()
+
+        if mode != "block":
+            # warn/off: alert recorded above; proceed with legacy fail-open.
+            return None
+
+        # block: FAIL-SAFE — withhold the email, roll back to PENDING for retry,
+        # mark the run failed. Do NOT enter the bias human-review queue (an infra
+        # failure is not a bias finding) and do NOT auto-apply the decision.
+        waterfall.append(
+            StepTracker.waterfall_entry(
+                "final_decision",
+                "fail",
+                "BIAS_CHECK_UNAVAILABLE",
+                f"Bias check could not run ({exc}) — email withheld, application held for retry "
+                "(BIAS_FAILURE_MODE=block)",
+            )
+        )
+        StepTracker.save_waterfall(application, waterfall)
+
+        hold = self.tracker.start_step("email_delivery")
+        hold = self.tracker.complete_step(
+            hold,
+            result_summary={
+                "sent": False,
+                "reason": "Bias check unavailable — fail-safe withhold (BIAS_FAILURE_MODE=block)",
+            },
+        )
+        steps.append(step)
+        steps.append(hold)
+
+        with transaction.atomic():
+            application.refresh_from_db()
+            if application.status == LoanApplication.Status.PROCESSING:
+                application.transition_to(
+                    LoanApplication.Status.PENDING,
+                    details={"source": "email_pipeline_bias_unavailable"},
+                )
+        agent_run.status = "failed"
+        agent_run.failure_category = "transient"
+        agent_run.error = f"Bias check unavailable — decision withheld (fail-safe): {exc}"
+        logger.critical(
+            "Application %s: bias check unavailable — fail-safe HOLD (email withheld, status->pending)",
+            application.pk,
+        )
+        # escalated=True signals the orchestrator to finalize-and-return without
+        # generating/sending a decision email or applying the decision.
+        return steps, None, None, None, True
