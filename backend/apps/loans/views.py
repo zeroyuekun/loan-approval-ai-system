@@ -411,7 +411,11 @@ class ReferralListView(APIView):
         if status_filter and hasattr(qs, "filter"):
             qs = qs.filter(referral_status=status_filter)
 
-        limit = min(int(request.query_params.get("limit", 100)), 500)
+        try:
+            limit = int(request.query_params.get("limit", 100))
+        except (ValueError, TypeError):
+            limit = 100
+        limit = max(1, min(limit, 500))
         results = []
         for app in list(qs)[:limit]:
             results.append(
