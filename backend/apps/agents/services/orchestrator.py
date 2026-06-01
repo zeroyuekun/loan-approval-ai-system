@@ -413,6 +413,44 @@ class PipelineOrchestrator:
                 step = self._fail_step(step, str(e))
             steps.append(step)
 
+        # H1: borderline / severe-drift / policy-"refer" predictions must be
+        # decided by a human. Escalate BEFORE the email pipeline so no
+        # automated decision email is generated or sent for these cases.
+        if prediction_result.get("requires_human_review"):
+            waterfall.append(
+                self._waterfall_entry(
+                    "final_decision",
+                    "fail",
+                    "ESCALATED_HUMAN_REVIEW",
+                    "Prediction flagged for human review (borderline / drift / policy refer) — "
+                    "escalated before any automated decision was issued",
+                )
+            )
+            self._save_waterfall(application, waterfall)
+
+            step = self._start_step("human_review_required")
+            step = self._complete_step(
+                step,
+                result_summary={
+                    "review_category": "requires_human_review",
+                    "reason": "borderline / drift / policy refer",
+                },
+            )
+            steps.append(step)
+
+            with transaction.atomic():
+                application.refresh_from_db()
+                application.transition_to(
+                    LoanApplication.Status.REVIEW,
+                    details={"source": "orchestrator_requires_human_review"},
+                )
+            agent_run.status = "escalated"
+            self._finalize_run(agent_run, steps, start_time)
+            logger.info(
+                "Application %s: escalated to human review (requires_human_review)", application_id
+            )
+            return agent_run
+
         # Steps 2-4: Email generation, bias check, delivery (delegated)
         steps, email_result, generated_email, bias_result, escalated = self._email_pipeline.run(
             application,
