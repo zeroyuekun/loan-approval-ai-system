@@ -197,7 +197,12 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             "categories": result.get("categories", []),
             "analysis": result.get("analysis", ""),
             "flagged": final_score > bias_threshold_pass,
-            "requires_human_review": bias_threshold_pass < final_score <= bias_threshold_review,
+            # L18: requires_human_review must be monotonic with `flagged` — any
+            # flagged report needs review. Previously this used an upper bound
+            # (<= review_threshold), so a high composite (e.g. 71) could be
+            # flagged=True / requires_human_review=False, which the human-review
+            # queue and admin filter mis-handle.
+            "requires_human_review": final_score > bias_threshold_pass,
         }
 
     def _format_prescreen_results(self, prescreen):
