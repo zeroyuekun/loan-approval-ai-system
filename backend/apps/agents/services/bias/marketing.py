@@ -180,7 +180,10 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
             "categories": result.get("categories", []),
             "analysis": result.get("analysis", ""),
             "flagged": final_score > mkt_pass,
-            "requires_human_review": mkt_pass < final_score <= mkt_review,
+            # Monotonic with `flagged` (L18): any flagged marketing email needs
+            # review — a high LLM-weighted composite (> mkt_review) must not
+            # silently report requires_human_review=False on the BiasReport.
+            "requires_human_review": final_score > mkt_pass,
         }
 
     def _format_prescreen_results(self, prescreen):
