@@ -600,11 +600,17 @@ class RecommendationEngine:
         if max_amount < 3000:
             return None
 
-        # Pick the longest term that keeps it reasonable
-        term = 60
-        for t in sorted(catalog["terms"], reverse=True):
-            rep = _monthly_repayment(max_amount, rate, t)
-            if rep > 0:
+        # Affordability constraint: choose the SHORTEST term whose repayment
+        # fits within 15% of gross monthly income (pay it off faster when
+        # affordable). Fall back to the longest available term — which has the
+        # smallest repayment — when no shorter term fits the cap.
+        monthly_income = s.annual_income / 12
+        target_repayment = monthly_income * 0.15
+
+        terms = catalog["terms"]  # [12, 24, 36, 60]
+        term = max(terms)  # longest = most affordable fallback
+        for t in sorted(terms):
+            if _monthly_repayment(max_amount, rate, t) <= target_repayment:
                 term = t
                 break
 
