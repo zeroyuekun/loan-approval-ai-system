@@ -55,3 +55,20 @@ def test_double_resolve_raises(django_user_model):
     apply_review_outcome(review, officer=officer, outcome="upheld", note="x")
     with pytest.raises(ValueError):
         apply_review_outcome(review, officer=officer, outcome="overturned", note="y")
+
+
+def test_overturn_on_non_denied_app_raises_valueerror(django_user_model):
+    app, officer, review = _denied_with_review(django_user_model)
+    # Simulate a concurrent force re-run that moved the app off 'denied'.
+    app.transition_to("processing", details={"source": "test_force_rerun"})
+    app.refresh_from_db()
+    assert app.status == "processing"
+    with pytest.raises(ValueError):
+        apply_review_outcome(review, officer=officer, outcome="overturned", note="late")
+
+
+def test_overturn_missing_decision_raises_valueerror(django_user_model):
+    app, officer, review = _denied_with_review(django_user_model)
+    app.decision.delete()  # LoanDecision gone -> RelatedObjectDoesNotExist path
+    with pytest.raises(ValueError):
+        apply_review_outcome(review, officer=officer, outcome="overturned", note="x")

@@ -54,6 +54,14 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
             locked.save(update_fields=["assigned_officer", "resolution_note", "resolved_at", "status"])
             application = locked.application
         else:
+            application = LoanApplication.objects.select_for_update().get(pk=locked.application_id)
+            # Re-assert overturn-eligibility under the lock: a force re-run or a
+            # concurrent overturn may have moved the app off 'denied' between
+            # filing and resolution. transition_to would otherwise raise
+            # InvalidStateTransition (NOT a ValueError) -> uncaught 500.
+            if application.status != "denied":
+                raise ValueError("Application is no longer in a declined state")
+
             locked.status = DecisionReview.Status.OVERTURNED
             locked.outcome_decision = "approved"
             locked.save(
@@ -65,18 +73,23 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
                     "outcome_decision",
                 ]
             )
-            application = LoanApplication.objects.select_for_update().get(pk=locked.application_id)
             # Lock the LoanDecision row directly by FK — not via the nullable
             # OneToOne join, which Postgres refuses to FOR UPDATE — so any
             # concurrent writer to human_involvement serialises behind us.
-            decision = LoanDecision.objects.select_for_update().get(application_id=locked.application_id)
+            try:
+                decision = LoanDecision.objects.select_for_update().get(application_id=locked.application_id)
+            except LoanDecision.DoesNotExist as exc:
+                raise ValueError("No decision record exists for this application") from exc
             decision.decision = "approved"
             decision.reasoning = f"Officer override via decision review {locked.id}: {note}".strip()
             decision.human_involvement = LoanDecision.HumanInvolvement.OVERRIDDEN
             decision.save(update_fields=["decision", "reasoning", "human_involvement"])
-            # denied -> processing -> approved (validated transitions, each audited)
-            application.transition_to("processing", user=officer, details={"source": "decision_review_overturn"})
-            application.transition_to("approved", user=officer, details={"source": "decision_review_overturn"})
+            try:
+                # denied -> processing -> approved (validated transitions, each audited)
+                application.transition_to("processing", user=officer, details={"source": "decision_review_overturn"})
+                application.transition_to("approved", user=officer, details={"source": "decision_review_overturn"})
+            except LoanApplication.InvalidStateTransition as exc:
+                raise ValueError(str(exc)) from exc
 
         AuditLog.objects.create(
             user=officer,
