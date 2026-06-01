@@ -22,6 +22,12 @@ def _no_throttle(self, request, view):
 
 @override_settings(
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+    # The standalone predict endpoint (POST /ml/predict/<id>/) is gated OFF by
+    # default in production because it escalates to 'review' without creating a
+    # resumable, escalated AgentRun (an ADM-disclosure gap). The orchestrator is
+    # the production path. These e2e tests legitimately exercise the standalone
+    # endpoint, so they opt in to the enabled behaviour here.
+    ML_STANDALONE_PREDICT_ENABLED=True,
 )
 @patch("apps.accounts.views.RegisterRateThrottle.allow_request", _no_throttle)
 @patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)

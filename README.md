@@ -191,7 +191,7 @@ Auth: `POST /api/v1/auth/{register,login,refresh,logout}/`, `GET /api/v1/auth/me
 
 Loans: `GET /api/v1/loans/`, `POST /api/v1/loans/`, `GET /api/v1/loans/{id}/`
 
-ML: `POST /api/v1/ml/predict/{id}/`, `GET /api/v1/ml/models/active/metrics/`
+ML: `POST /api/v1/ml/predict/{id}/` (disabled by default — gated behind `ML_STANDALONE_PREDICT_ENABLED`; the agent orchestrator pipeline is the production decision path), `GET /api/v1/ml/models/active/metrics/`
 
 Emails: `POST /api/v1/emails/generate/{id}/`, `GET /api/v1/emails/{id}/`
 
