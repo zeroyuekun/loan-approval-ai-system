@@ -325,41 +325,22 @@ class EmailGenerator:
 
         input_tokens = 0
         output_tokens = 0
+        _model = "claude-sonnet-4-6"
         try:
-            # Retry with exponential backoff on rate limit (429) errors.
-            # The org-level limit is 30k input tokens/min — with prompts
-            # ~5k tokens each, rapid sequential calls will hit this.
-            max_api_retries = 3
-            response = None
-            _model = "claude-sonnet-4-6"
-            for api_attempt in range(max_api_retries):
-                try:
-                    response = guarded_api_call(
-                        self.client,
-                        model=_model,
-                        max_tokens=token_limit,
-                        temperature=getattr(django_settings, "AI_TEMPERATURE_DECISION_EMAIL", 0.0),
-                        messages=[{"role": "user", "content": prompt}],
-                        tools=[EMAIL_SUBMIT_TOOL],
-                        tool_choice={"type": "tool", "name": "submit_email"},
-                    )
-                    break  # Success — exit retry loop
-                except BudgetExhausted:
-                    return self._generate_fallback(application, decision, context, start_time)
-                except anthropic.RateLimitError:
-                    if api_attempt < max_api_retries - 1:
-                        wait = 2**api_attempt * 30  # 30s, 60s, 120s
-                        import logging
-
-                        logging.getLogger(__name__).warning(
-                            "Rate limited (429), retrying in %ds (attempt %d/%d)",
-                            wait,
-                            api_attempt + 1,
-                            max_api_retries,
-                        )
-                        time.sleep(wait)
-                    else:
-                        raise  # Final attempt — propagate to outer handler
+            # A single guarded API call. Backoff on rate limits no longer happens
+            # here with time.sleep (which blocked the worker inside a hard
+            # time_limit, risking SIGKILL + duplicate sends). Instead a 429 is
+            # surfaced as a typed RateLimited signal so the Celery task can
+            # self.retry(countdown=...) and free the worker (M6/L25).
+            response = guarded_api_call(
+                self.client,
+                model=_model,
+                max_tokens=token_limit,
+                temperature=getattr(django_settings, "AI_TEMPERATURE_DECISION_EMAIL", 0.0),
+                messages=[{"role": "user", "content": prompt}],
+                tools=[EMAIL_SUBMIT_TOOL],
+                tool_choice={"type": "tool", "name": "submit_email"},
+            )
 
             # Read actual token usage from the response
             usage = getattr(response, "usage", None)
@@ -368,8 +349,12 @@ class EmailGenerator:
                 output_tokens = getattr(usage, "output_tokens", 0)
         except BudgetExhausted:
             return self._generate_fallback(application, decision, context, start_time)
+        except anthropic.RateLimitError as exc:
+            from .exceptions import RateLimited
+
+            raise RateLimited(retry_after=30) from exc
         # Failure accounting (record_failure, circuit-breaker tripping) happens
-        # inside guarded_api_call. Any exception here propagates to the caller.
+        # inside guarded_api_call. Any other exception here propagates to the caller.
 
         # Extract structured output from tool_use response
         subject, body = self._parse_tool_response(response)
