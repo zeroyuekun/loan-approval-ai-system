@@ -493,6 +493,327 @@ class DataGenerator:
         uniform_samples = stats.norm.cdf(mvn_samples)
         return {name: uniform_samples[:, i] for i, name in enumerate(self.COPULA_FEATURES)}
 
+    # ------------------------------------------------------------------
+    # generate() phase helpers (M2 decomposition).
+    #
+    # These are verbatim extractions of post-DataFrame-assembly phases.
+    # They are called at the SAME point in sequence as the inlined code,
+    # threading the same `rng`, so the draw order — and thus every
+    # downstream value — is byte-for-byte identical. The determinism
+    # snapshot test (tests/test_data_generator_generate_decomp.py) guards
+    # this invariant.
+    # ------------------------------------------------------------------
+
+    def _synthesize_bureau_features(self, n, credit_norm, age_proxy, annual_income, has_bankruptcy, rng):
+        """Synthesize credit-bureau features (enquiries, arrears, defaults,
+        history, open accounts, BNPL, cash advances). Returns a dict of arrays."""
+        enquiry_lambda = np.where(credit_norm > 0.7, 0.8, np.where(credit_norm > 0.4, 1.5, 3.5))
+        num_credit_enquiries_6m = rng.poisson(enquiry_lambda)
+
+        arrears_u = rng.random(n)
+        worst_arrears_months = np.where(
+            credit_norm > 0.7,
+            np.where(arrears_u < 0.97, 0, np.where(arrears_u < 0.99, 1, np.where(arrears_u < 0.998, 2, 3))),
+            np.where(
+                credit_norm > 0.4,
+                np.where(arrears_u < 0.88, 0, np.where(arrears_u < 0.96, 1, np.where(arrears_u < 0.99, 2, 3))),
+                np.where(arrears_u < 0.70, 0, np.where(arrears_u < 0.85, 1, np.where(arrears_u < 0.95, 2, 3))),
+            ),
+        )
+
+        default_u = rng.random(n)
+        num_defaults_5yr = np.where(
+            credit_norm > 0.6,
+            0,
+            np.where(default_u < 0.90, 0, np.where(default_u < 0.97, 1, np.where(default_u < 0.99, 2, 3))),
+        )
+        num_defaults_5yr[has_bankruptcy == 1] = np.clip(num_defaults_5yr[has_bankruptcy == 1] + 1, 1, 5)
+
+        credit_history_months = np.clip(((age_proxy - 18) * 12 * rng.uniform(0.3, 0.9, size=n)).astype(int), 0, 480)
+
+        total_open_accounts = np.clip(
+            rng.poisson(np.where(annual_income > 100000, 5.0, np.where(annual_income > 60000, 3.5, 2.0))), 0, 15
+        )
+
+        bnpl_base_prob = np.where(
+            age_proxy < 30, 0.55, np.where(age_proxy < 40, 0.35, np.where(age_proxy < 50, 0.15, 0.05))
+        )
+        has_bnpl = rng.random(n) < bnpl_base_prob
+        num_bnpl_accounts = np.where(has_bnpl, rng.choice([1, 2, 3, 4], size=n, p=[0.45, 0.30, 0.15, 0.10]), 0)
+
+        cash_advance_count_12m = np.where(
+            credit_norm > 0.6,
+            0,
+            np.where(rng.random(n) < 0.15, rng.choice([1, 2, 3, 4, 5], size=n, p=[0.50, 0.25, 0.15, 0.07, 0.03]), 0),
+        )
+        return {
+            "num_credit_enquiries_6m": num_credit_enquiries_6m,
+            "worst_arrears_months": worst_arrears_months,
+            "num_defaults_5yr": num_defaults_5yr,
+            "credit_history_months": credit_history_months,
+            "total_open_accounts": total_open_accounts,
+            "num_bnpl_accounts": num_bnpl_accounts,
+            "cash_advance_count_12m": cash_advance_count_12m,
+        }
+
+    def _synthesize_ccr_features(self, n, credit_norm, annual_income, num_defaults_5yr, rng):
+        """Synthesize Comprehensive Credit Reporting features (late payments,
+        worst-late buckets, limits, utilization, hardship, default recency,
+        provider count). Returns a dict of arrays."""
+        late_pay_lambda = np.where(credit_norm > 0.7, 0.2, np.where(credit_norm > 0.4, 1.5, 4.0))
+        ccr_num_late_payments_24m = np.clip(rng.poisson(late_pay_lambda), 0, 20)
+
+        worst_late_buckets = [0, 14, 30, 60, 90]
+        worst_late_probs_good = [0.85, 0.08, 0.04, 0.02, 0.01]
+        worst_late_probs_bad = [0.20, 0.15, 0.25, 0.20, 0.20]
+        worst_late_probs = np.where(
+            credit_norm[:, None] > 0.6,
+            np.tile(worst_late_probs_good, (n, 1)),
+            np.tile(worst_late_probs_bad, (n, 1)),
+        )
+        ccr_worst_late_payment_days = np.array([rng.choice(worst_late_buckets, p=p) for p in worst_late_probs])
+
+        ccr_total_credit_limit = np.clip(
+            rng.lognormal(mean=np.log(annual_income * 0.3), sigma=0.5, size=n), 1000, 500000
+        ).round(2)
+
+        ccr_credit_utilization_pct = np.clip(rng.beta(2, 5, size=n) + (1 - credit_norm) * 0.3, 0.0, 1.0).round(3)
+
+        hardship_prob = np.where(credit_norm > 0.6, 0.02, np.where(credit_norm > 0.3, 0.08, 0.18))
+        ccr_num_hardship_flags = np.where(
+            rng.random(n) < hardship_prob, rng.choice([1, 2, 3], size=n, p=[0.7, 0.2, 0.1]), 0
+        )
+
+        has_default = num_defaults_5yr > 0
+        ccr_months_since_last_default = np.where(
+            has_default, np.clip(rng.exponential(24, size=n).astype(int), 1, 60), np.nan
+        ).astype(float)
+
+        ccr_num_credit_providers = np.clip(rng.poisson(np.where(credit_norm > 0.5, 3, 2), size=n), 1, 15)
+        return {
+            "ccr_num_late_payments_24m": ccr_num_late_payments_24m,
+            "ccr_worst_late_payment_days": ccr_worst_late_payment_days,
+            "ccr_total_credit_limit": ccr_total_credit_limit,
+            "ccr_credit_utilization_pct": ccr_credit_utilization_pct,
+            "ccr_num_hardship_flags": ccr_num_hardship_flags,
+            "ccr_months_since_last_default": ccr_months_since_last_default,
+            "ccr_num_credit_providers": ccr_num_credit_providers,
+        }
+
+    def _apply_measurement_noise(self, df, n, rng, existing_dti, annual_income):
+        """Add realistic measurement noise to declared figures (banks observe
+        noisy applicant inputs, not the latent truth)."""
+        income_noise = rng.normal(1.0, 0.08, size=n)
+        df["annual_income"] = np.clip((df["annual_income"] * income_noise).round(2), 30000, 600000)
+
+        expense_noise = rng.normal(0.70, 0.15, size=n)
+        df["monthly_expenses"] = np.clip((df["monthly_expenses"] * expense_noise).round(2), 800, 10000)
+
+        credit_score_drift = rng.integers(-40, 41, size=n)
+        df["credit_score"] = np.clip(df["credit_score"] + credit_score_drift, 300, 1200)
+        df.loc[df["purpose"] == "home", "credit_score"] = df.loc[df["purpose"] == "home", "credit_score"].clip(
+            lower=700
+        )
+        df.loc[df["purpose"] != "home", "credit_score"] = df.loc[df["purpose"] != "home", "credit_score"].clip(
+            lower=650
+        )
+
+        if "hecs_debt_balance" in df.columns:
+            hecs_noise = rng.normal(1.0, 0.10, size=n)
+            df["hecs_debt_balance"] = np.where(
+                df["hecs_debt_balance"] > 0,
+                np.clip((df["hecs_debt_balance"] * hecs_noise).round(0), 5000, 120000),
+                0.0,
+            )
+
+        if "monthly_rent" in df.columns:
+            rent_noise = rng.normal(1.0, 0.05, size=n)
+            df["monthly_rent"] = np.where(
+                df["monthly_rent"] > 0,
+                np.clip((df["monthly_rent"] * rent_noise).round(0), 800, 6000),
+                0.0,
+            )
+
+        df["debt_to_income"] = (
+            df["loan_amount"] / df["annual_income"] + existing_dti * (annual_income / df["annual_income"])
+        ).round(2)
+        return df
+
+    def _recompute_underwriter_policy_features(self, df):
+        """Recompute HEM/LVR/LMI-derived policy features post-noise so training
+        features match what the predictor derives at serving (no train/serve
+        skew). See docs/experiments/synthetic_data_realism_audit.md items 2 & 3."""
+        _hem_declared = np.array(
+            [
+                self._underwriting.get_hem(at, dep, inc, st)
+                for at, dep, inc, st in zip(
+                    df["applicant_type"].values,
+                    df["number_of_dependants"].values,
+                    df["annual_income"].values,
+                    df["state"].values,
+                    strict=False,
+                )
+            ]
+        ).round(2)
+        df["hem_benchmark"] = _hem_declared
+        df["hem_gap"] = (df["monthly_expenses"] - df["hem_benchmark"]).round(2)
+        _is_home_lmi = df["purpose"].isin(["home", "investment"]).to_numpy()
+        _pv = df["property_value"].to_numpy()
+        _la = df["loan_amount"].to_numpy(dtype=float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            _lvr = np.divide(_la, _pv, out=np.zeros_like(_la, dtype=float), where=_pv > 0)
+        _lvr = np.where(_pv > 0, _lvr, 0.0)
+        _lmi_rate = np.where(_lvr > 0.90, 0.03, np.where(_lvr > 0.85, 0.02, np.where(_lvr > 0.80, 0.01, 0.0)))
+        df["lmi_premium"] = (_la * _lmi_rate * _is_home_lmi.astype(int)).round(2)
+        df["effective_loan_amount"] = (_la + df["lmi_premium"].to_numpy()).round(2)
+        return df
+
+    def _inject_missing_data(self, df, n, rng):
+        """Inject MCAR/MNAR missingness mirroring real bureau/applicant gaps."""
+        expense_missing = rng.random(n) < 0.11
+        df.loc[expense_missing, "monthly_expenses"] = np.nan
+
+        cc_missing = rng.random(n) < 0.08
+        df.loc[cc_missing, "existing_credit_card_limit"] = np.nan
+
+        home_mask = df["purpose"] == "home"
+        pv_missing = home_mask & (rng.random(n) < 0.05)
+        df.loc[pv_missing, "property_value"] = np.nan
+        df.loc[pv_missing, "deposit_amount"] = np.nan
+
+        non_existing = df["is_existing_customer"] == 0
+        bureau_cols = [
+            "num_credit_enquiries_6m",
+            "worst_arrears_months",
+            "num_defaults_5yr",
+            "credit_history_months",
+            "total_open_accounts",
+            "num_bnpl_accounts",
+        ]
+        for col in bureau_cols:
+            miss_rate = rng.uniform(0.08, 0.12)
+            bureau_missing = non_existing & (rng.random(n) < miss_rate)
+            df.loc[bureau_missing, col] = np.nan
+
+        thin_file = df["credit_history_months"].notna() & (df["credit_history_months"] < 36)
+        for col in bureau_cols:
+            thin_miss = thin_file & (rng.random(n) < 0.25)
+            df.loc[thin_miss, col] = np.nan
+
+        if "hecs_debt_balance" in df.columns:
+            hecs_missing = (df["hecs_debt_balance"] > 0) & (rng.random(n) < 0.06)
+            df.loc[hecs_missing, "hecs_debt_balance"] = np.nan
+
+        if "monthly_rent" in df.columns:
+            rent_missing = (df["monthly_rent"] > 0) & (rng.random(n) < 0.07)
+            df.loc[rent_missing, "monthly_rent"] = np.nan
+
+        if "cash_advance_count_12m" in df.columns:
+            cash_adv_missing = rng.random(n) < 0.10
+            df.loc[cash_adv_missing, "cash_advance_count_12m"] = np.nan
+
+        if "gambling_spend_ratio" in df.columns:
+            gambling_missing = rng.random(n) < 0.12
+            df.loc[gambling_missing, "gambling_spend_ratio"] = np.nan
+
+        # MNAR
+        credit_norm_mnar = np.clip((df["credit_score"] - 300) / 900, 0, 1)
+        mnar_prob = 0.08 * (1 - credit_norm_mnar)
+        mnar_expense = (~expense_missing) & (rng.random(n) < mnar_prob)
+        df.loc[mnar_expense, "monthly_expenses"] = np.nan
+        mnar_cc = (~cc_missing) & (rng.random(n) < mnar_prob)
+        df.loc[mnar_cc, "existing_credit_card_limit"] = np.nan
+        return df
+
+    def _inject_label_noise(self, df, n, rng, label_noise_rate):
+        """Flip a default-probability-weighted fraction of approvals to denied
+        to model imperfect human labelling."""
+        approved_mask = df["approved"] == 1
+        n_approved = approved_mask.sum()
+        if n_approved > 0:
+            approved_dp = df.loc[approved_mask, "default_probability"].values
+            flip_weights = approved_dp / max(approved_dp.mean(), 1e-6) * label_noise_rate
+            flip_weights = np.clip(flip_weights, 0.0, 0.25)
+            flip_mask = rng.random(n_approved) < flip_weights
+            flip_indices = df.index[approved_mask][flip_mask]
+            df.loc[flip_indices, "approved"] = 0
+            df.loc[flip_indices, "approval_type"] = "denied"
+            df.loc[flip_indices, "conditions"] = df.loc[flip_indices, "conditions"].apply(lambda _: [])
+            df.loc[flip_indices, "n_conditions"] = 0
+        return df
+
+    def _simulate_ex_post_outcomes(self, df, rng):
+        """Simulate ex-post loan outcomes (arrears/default/prepaid/performing)
+        and months-to-outcome for approved loans."""
+        approved_mask = df["approved"] == 1
+
+        base_pd = np.full(len(df), 0.015)
+
+        base_pd = np.where(df["credit_score"] < 650, base_pd * 3.0, base_pd)
+        base_pd = np.where(df["credit_score"] > 850, base_pd * 0.4, base_pd)
+        base_pd = np.where(df["num_defaults_5yr"] > 0, base_pd * 2.5, base_pd)
+        if "stress_index" in df.columns:
+            base_pd = np.where(df["stress_index"] > 60, base_pd * 2.5, base_pd)
+        if "overdraft_frequency_90d" in df.columns:
+            base_pd = np.where(df["overdraft_frequency_90d"] > 5, base_pd * 2.0, base_pd)
+        if "gambling_transaction_flag" in df.columns:
+            base_pd = np.where(df["gambling_transaction_flag"], base_pd * 1.8, base_pd)
+        if "worst_late_payment_days" in df.columns:
+            base_pd = np.where(df["worst_late_payment_days"] >= 60, base_pd * 2.0, base_pd)
+        if "bnpl_late_payments_12m" in df.columns:
+            base_pd = np.where(df["bnpl_late_payments_12m"] > 2, base_pd * 1.5, base_pd)
+        if "savings_to_loan_ratio" in df.columns:
+            base_pd = np.where(df["savings_to_loan_ratio"] > 0.3, base_pd * 0.6, base_pd)
+        if "debt_service_coverage" in df.columns:
+            base_pd = np.where(df["debt_service_coverage"] > 2.0, base_pd * 0.5, base_pd)
+
+        if "quarter" in df.columns:
+            base_pd = np.where(df["quarter"] == 1, base_pd * 1.3, base_pd)
+            base_pd = np.where(df["quarter"] == 3, base_pd * 1.15, base_pd)
+            base_pd = np.where(df["quarter"] == 4, base_pd * 0.95, base_pd)
+
+        base_pd = np.clip(base_pd, 0.001, 0.50)
+
+        outcome_roll = rng.random(len(df))
+        prepaid_threshold = 0.035
+
+        outcomes = np.where(
+            ~approved_mask,
+            None,
+            np.where(
+                outcome_roll < base_pd * 0.3,
+                "arrears_90",
+                np.where(
+                    outcome_roll < base_pd * 0.6,
+                    "arrears_60",
+                    np.where(
+                        outcome_roll < base_pd,
+                        "arrears_30",
+                        np.where(outcome_roll < base_pd + prepaid_threshold, "prepaid", "performing"),
+                    ),
+                ),
+            ),
+        )
+        default_roll = rng.random(len(df))
+        outcomes = np.where((outcomes == "arrears_90") & (default_roll < 0.5), "default", outcomes)
+
+        df["actual_outcome"] = outcomes
+
+        df["months_to_outcome"] = np.where(
+            approved_mask & df["actual_outcome"].isin(["default", "arrears_90"]),
+            np.clip(rng.lognormal(mean=np.log(18), sigma=0.5, size=len(df)).astype(int), 3, 36),
+            np.where(
+                approved_mask & df["actual_outcome"].isin(["arrears_30", "arrears_60"]),
+                np.clip(rng.lognormal(mean=np.log(12), sigma=0.6, size=len(df)).astype(int), 1, 36),
+                np.where(
+                    approved_mask & (df["actual_outcome"] == "prepaid"),
+                    np.clip(rng.poisson(4, len(df)), 1, 12),
+                    np.where(approved_mask, 12, np.nan),
+                ),
+            ),
+        )
+        return df
+
     def generate(self, num_records=50000, random_seed=42, label_noise_rate=0.05):
         """Generate synthetic loan data with Australian-realistic distributions.
 
@@ -832,46 +1153,14 @@ class DataGenerator:
         # BUREAU FEATURES
         # =============================================================
         credit_norm = (credit_score - 300) / 900
-
-        enquiry_lambda = np.where(credit_norm > 0.7, 0.8, np.where(credit_norm > 0.4, 1.5, 3.5))
-        num_credit_enquiries_6m = rng.poisson(enquiry_lambda)
-
-        arrears_u = rng.random(n)
-        worst_arrears_months = np.where(
-            credit_norm > 0.7,
-            np.where(arrears_u < 0.97, 0, np.where(arrears_u < 0.99, 1, np.where(arrears_u < 0.998, 2, 3))),
-            np.where(
-                credit_norm > 0.4,
-                np.where(arrears_u < 0.88, 0, np.where(arrears_u < 0.96, 1, np.where(arrears_u < 0.99, 2, 3))),
-                np.where(arrears_u < 0.70, 0, np.where(arrears_u < 0.85, 1, np.where(arrears_u < 0.95, 2, 3))),
-            ),
-        )
-
-        default_u = rng.random(n)
-        num_defaults_5yr = np.where(
-            credit_norm > 0.6,
-            0,
-            np.where(default_u < 0.90, 0, np.where(default_u < 0.97, 1, np.where(default_u < 0.99, 2, 3))),
-        )
-        num_defaults_5yr[has_bankruptcy == 1] = np.clip(num_defaults_5yr[has_bankruptcy == 1] + 1, 1, 5)
-
-        credit_history_months = np.clip(((age_proxy - 18) * 12 * rng.uniform(0.3, 0.9, size=n)).astype(int), 0, 480)
-
-        total_open_accounts = np.clip(
-            rng.poisson(np.where(annual_income > 100000, 5.0, np.where(annual_income > 60000, 3.5, 2.0))), 0, 15
-        )
-
-        bnpl_base_prob = np.where(
-            age_proxy < 30, 0.55, np.where(age_proxy < 40, 0.35, np.where(age_proxy < 50, 0.15, 0.05))
-        )
-        has_bnpl = rng.random(n) < bnpl_base_prob
-        num_bnpl_accounts = np.where(has_bnpl, rng.choice([1, 2, 3, 4], size=n, p=[0.45, 0.30, 0.15, 0.10]), 0)
-
-        cash_advance_count_12m = np.where(
-            credit_norm > 0.6,
-            0,
-            np.where(rng.random(n) < 0.15, rng.choice([1, 2, 3, 4, 5], size=n, p=[0.50, 0.25, 0.15, 0.07, 0.03]), 0),
-        )
+        _bureau = self._synthesize_bureau_features(n, credit_norm, age_proxy, annual_income, has_bankruptcy, rng)
+        num_credit_enquiries_6m = _bureau["num_credit_enquiries_6m"]
+        worst_arrears_months = _bureau["worst_arrears_months"]
+        num_defaults_5yr = _bureau["num_defaults_5yr"]
+        credit_history_months = _bureau["credit_history_months"]
+        total_open_accounts = _bureau["total_open_accounts"]
+        num_bnpl_accounts = _bureau["num_bnpl_accounts"]
+        cash_advance_count_12m = _bureau["cash_advance_count_12m"]
 
         # =============================================================
         # BEHAVIOURAL SCORE
@@ -982,36 +1271,14 @@ class DataGenerator:
         # =============================================================
         # CCR features
         # =============================================================
-        late_pay_lambda = np.where(credit_norm > 0.7, 0.2, np.where(credit_norm > 0.4, 1.5, 4.0))
-        ccr_num_late_payments_24m = np.clip(rng.poisson(late_pay_lambda), 0, 20)
-
-        worst_late_buckets = [0, 14, 30, 60, 90]
-        worst_late_probs_good = [0.85, 0.08, 0.04, 0.02, 0.01]
-        worst_late_probs_bad = [0.20, 0.15, 0.25, 0.20, 0.20]
-        worst_late_probs = np.where(
-            credit_norm[:, None] > 0.6,
-            np.tile(worst_late_probs_good, (n, 1)),
-            np.tile(worst_late_probs_bad, (n, 1)),
-        )
-        ccr_worst_late_payment_days = np.array([rng.choice(worst_late_buckets, p=p) for p in worst_late_probs])
-
-        ccr_total_credit_limit = np.clip(
-            rng.lognormal(mean=np.log(annual_income * 0.3), sigma=0.5, size=n), 1000, 500000
-        ).round(2)
-
-        ccr_credit_utilization_pct = np.clip(rng.beta(2, 5, size=n) + (1 - credit_norm) * 0.3, 0.0, 1.0).round(3)
-
-        hardship_prob = np.where(credit_norm > 0.6, 0.02, np.where(credit_norm > 0.3, 0.08, 0.18))
-        ccr_num_hardship_flags = np.where(
-            rng.random(n) < hardship_prob, rng.choice([1, 2, 3], size=n, p=[0.7, 0.2, 0.1]), 0
-        )
-
-        has_default = num_defaults_5yr > 0
-        ccr_months_since_last_default = np.where(
-            has_default, np.clip(rng.exponential(24, size=n).astype(int), 1, 60), np.nan
-        ).astype(float)
-
-        ccr_num_credit_providers = np.clip(rng.poisson(np.where(credit_norm > 0.5, 3, 2), size=n), 1, 15)
+        _ccr = self._synthesize_ccr_features(n, credit_norm, annual_income, num_defaults_5yr, rng)
+        ccr_num_late_payments_24m = _ccr["ccr_num_late_payments_24m"]
+        ccr_worst_late_payment_days = _ccr["ccr_worst_late_payment_days"]
+        ccr_total_credit_limit = _ccr["ccr_total_credit_limit"]
+        ccr_credit_utilization_pct = _ccr["ccr_credit_utilization_pct"]
+        ccr_num_hardship_flags = _ccr["ccr_num_hardship_flags"]
+        ccr_months_since_last_default = _ccr["ccr_months_since_last_default"]
+        ccr_num_credit_providers = _ccr["ccr_num_credit_providers"]
 
         # =============================================================
         # BNPL-specific features
@@ -1319,145 +1586,19 @@ class DataGenerator:
         # =========================================================
         # MEASUREMENT NOISE
         # =========================================================
-        income_noise = rng.normal(1.0, 0.08, size=n)
-        df["annual_income"] = np.clip((df["annual_income"] * income_noise).round(2), 30000, 600000)
+        df = self._apply_measurement_noise(df, n, rng, existing_dti, annual_income)
 
-        expense_noise = rng.normal(0.70, 0.15, size=n)
-        df["monthly_expenses"] = np.clip((df["monthly_expenses"] * expense_noise).round(2), 800, 10000)
-
-        credit_score_drift = rng.integers(-40, 41, size=n)
-        df["credit_score"] = np.clip(df["credit_score"] + credit_score_drift, 300, 1200)
-        df.loc[df["purpose"] == "home", "credit_score"] = df.loc[df["purpose"] == "home", "credit_score"].clip(
-            lower=700
-        )
-        df.loc[df["purpose"] != "home", "credit_score"] = df.loc[df["purpose"] != "home", "credit_score"].clip(
-            lower=650
-        )
-
-        if "hecs_debt_balance" in df.columns:
-            hecs_noise = rng.normal(1.0, 0.10, size=n)
-            df["hecs_debt_balance"] = np.where(
-                df["hecs_debt_balance"] > 0,
-                np.clip((df["hecs_debt_balance"] * hecs_noise).round(0), 5000, 120000),
-                0.0,
-            )
-
-        if "monthly_rent" in df.columns:
-            rent_noise = rng.normal(1.0, 0.05, size=n)
-            df["monthly_rent"] = np.where(
-                df["monthly_rent"] > 0,
-                np.clip((df["monthly_rent"] * rent_noise).round(0), 800, 6000),
-                0.0,
-            )
-
-        df["debt_to_income"] = (
-            df["loan_amount"] / df["annual_income"] + existing_dti * (annual_income / df["annual_income"])
-        ).round(2)
-
-        # =========================================================
-        # UNDERWRITER POLICY FEATURES (computed post-noise)
-        #
-        # These mirror what the predictor derives at inference from declared
-        # values on the application, so training features match serving
-        # features (no train/serve skew). See
-        # docs/experiments/synthetic_data_realism_audit.md items 2 & 3.
-        # =========================================================
-        _hem_declared = np.array(
-            [
-                self._underwriting.get_hem(at, dep, inc, st)
-                for at, dep, inc, st in zip(
-                    df["applicant_type"].values,
-                    df["number_of_dependants"].values,
-                    df["annual_income"].values,
-                    df["state"].values,
-                    strict=False,
-                )
-            ]
-        ).round(2)
-        df["hem_benchmark"] = _hem_declared
-        df["hem_gap"] = (df["monthly_expenses"] - df["hem_benchmark"]).round(2)
-        _is_home_lmi = df["purpose"].isin(["home", "investment"]).to_numpy()
-        _pv = df["property_value"].to_numpy()
-        _la = df["loan_amount"].to_numpy(dtype=float)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            _lvr = np.divide(_la, _pv, out=np.zeros_like(_la, dtype=float), where=_pv > 0)
-        _lvr = np.where(_pv > 0, _lvr, 0.0)
-        _lmi_rate = np.where(_lvr > 0.90, 0.03, np.where(_lvr > 0.85, 0.02, np.where(_lvr > 0.80, 0.01, 0.0)))
-        df["lmi_premium"] = (_la * _lmi_rate * _is_home_lmi.astype(int)).round(2)
-        df["effective_loan_amount"] = (_la + df["lmi_premium"].to_numpy()).round(2)
+        df = self._recompute_underwriter_policy_features(df)
 
         # =========================================================
         # MISSING DATA
         # =========================================================
-        expense_missing = rng.random(n) < 0.11
-        df.loc[expense_missing, "monthly_expenses"] = np.nan
-
-        cc_missing = rng.random(n) < 0.08
-        df.loc[cc_missing, "existing_credit_card_limit"] = np.nan
-
-        home_mask = df["purpose"] == "home"
-        pv_missing = home_mask & (rng.random(n) < 0.05)
-        df.loc[pv_missing, "property_value"] = np.nan
-        df.loc[pv_missing, "deposit_amount"] = np.nan
-
-        non_existing = df["is_existing_customer"] == 0
-        bureau_cols = [
-            "num_credit_enquiries_6m",
-            "worst_arrears_months",
-            "num_defaults_5yr",
-            "credit_history_months",
-            "total_open_accounts",
-            "num_bnpl_accounts",
-        ]
-        for col in bureau_cols:
-            miss_rate = rng.uniform(0.08, 0.12)
-            bureau_missing = non_existing & (rng.random(n) < miss_rate)
-            df.loc[bureau_missing, col] = np.nan
-
-        thin_file = df["credit_history_months"].notna() & (df["credit_history_months"] < 36)
-        for col in bureau_cols:
-            thin_miss = thin_file & (rng.random(n) < 0.25)
-            df.loc[thin_miss, col] = np.nan
-
-        if "hecs_debt_balance" in df.columns:
-            hecs_missing = (df["hecs_debt_balance"] > 0) & (rng.random(n) < 0.06)
-            df.loc[hecs_missing, "hecs_debt_balance"] = np.nan
-
-        if "monthly_rent" in df.columns:
-            rent_missing = (df["monthly_rent"] > 0) & (rng.random(n) < 0.07)
-            df.loc[rent_missing, "monthly_rent"] = np.nan
-
-        if "cash_advance_count_12m" in df.columns:
-            cash_adv_missing = rng.random(n) < 0.10
-            df.loc[cash_adv_missing, "cash_advance_count_12m"] = np.nan
-
-        if "gambling_spend_ratio" in df.columns:
-            gambling_missing = rng.random(n) < 0.12
-            df.loc[gambling_missing, "gambling_spend_ratio"] = np.nan
-
-        # MNAR
-        credit_norm_mnar = np.clip((df["credit_score"] - 300) / 900, 0, 1)
-        mnar_prob = 0.08 * (1 - credit_norm_mnar)
-        mnar_expense = (~expense_missing) & (rng.random(n) < mnar_prob)
-        df.loc[mnar_expense, "monthly_expenses"] = np.nan
-        mnar_cc = (~cc_missing) & (rng.random(n) < mnar_prob)
-        df.loc[mnar_cc, "existing_credit_card_limit"] = np.nan
+        df = self._inject_missing_data(df, n, rng)
 
         # =========================================================
         # LABEL NOISE
         # =========================================================
-        approved_mask = df["approved"] == 1
-        n_approved = approved_mask.sum()
-        if n_approved > 0:
-            approved_dp = df.loc[approved_mask, "default_probability"].values
-            flip_weights = approved_dp / max(approved_dp.mean(), 1e-6) * label_noise_rate
-            flip_weights = np.clip(flip_weights, 0.0, 0.25)
-            flip_mask = rng.random(n_approved) < flip_weights
-            flip_indices = df.index[approved_mask][flip_mask]
-            df.loc[flip_indices, "approved"] = 0
-            df.loc[flip_indices, "approval_type"] = "denied"
-            df.loc[flip_indices, "conditions"] = df.loc[flip_indices, "conditions"].apply(lambda _: [])
-            df.loc[flip_indices, "n_conditions"] = 0
+        df = self._inject_label_noise(df, n, rng, label_noise_rate)
 
         # =========================================================
         # REJECT INFERENCE (parcelling method)
@@ -1478,73 +1619,7 @@ class DataGenerator:
             self.reject_inference_labels.loc[denied_mask] = would_have_repaid
 
         # === Outcome Simulation ===
-        approved_mask = df["approved"] == 1
-
-        base_pd = np.full(len(df), 0.015)
-
-        base_pd = np.where(df["credit_score"] < 650, base_pd * 3.0, base_pd)
-        base_pd = np.where(df["credit_score"] > 850, base_pd * 0.4, base_pd)
-        base_pd = np.where(df["num_defaults_5yr"] > 0, base_pd * 2.5, base_pd)
-        if "stress_index" in df.columns:
-            base_pd = np.where(df["stress_index"] > 60, base_pd * 2.5, base_pd)
-        if "overdraft_frequency_90d" in df.columns:
-            base_pd = np.where(df["overdraft_frequency_90d"] > 5, base_pd * 2.0, base_pd)
-        if "gambling_transaction_flag" in df.columns:
-            base_pd = np.where(df["gambling_transaction_flag"], base_pd * 1.8, base_pd)
-        if "worst_late_payment_days" in df.columns:
-            base_pd = np.where(df["worst_late_payment_days"] >= 60, base_pd * 2.0, base_pd)
-        if "bnpl_late_payments_12m" in df.columns:
-            base_pd = np.where(df["bnpl_late_payments_12m"] > 2, base_pd * 1.5, base_pd)
-        if "savings_to_loan_ratio" in df.columns:
-            base_pd = np.where(df["savings_to_loan_ratio"] > 0.3, base_pd * 0.6, base_pd)
-        if "debt_service_coverage" in df.columns:
-            base_pd = np.where(df["debt_service_coverage"] > 2.0, base_pd * 0.5, base_pd)
-
-        if "quarter" in df.columns:
-            base_pd = np.where(df["quarter"] == 1, base_pd * 1.3, base_pd)
-            base_pd = np.where(df["quarter"] == 3, base_pd * 1.15, base_pd)
-            base_pd = np.where(df["quarter"] == 4, base_pd * 0.95, base_pd)
-
-        base_pd = np.clip(base_pd, 0.001, 0.50)
-
-        outcome_roll = rng.random(len(df))
-        prepaid_threshold = 0.035
-
-        outcomes = np.where(
-            ~approved_mask,
-            None,
-            np.where(
-                outcome_roll < base_pd * 0.3,
-                "arrears_90",
-                np.where(
-                    outcome_roll < base_pd * 0.6,
-                    "arrears_60",
-                    np.where(
-                        outcome_roll < base_pd,
-                        "arrears_30",
-                        np.where(outcome_roll < base_pd + prepaid_threshold, "prepaid", "performing"),
-                    ),
-                ),
-            ),
-        )
-        default_roll = rng.random(len(df))
-        outcomes = np.where((outcomes == "arrears_90") & (default_roll < 0.5), "default", outcomes)
-
-        df["actual_outcome"] = outcomes
-
-        df["months_to_outcome"] = np.where(
-            approved_mask & df["actual_outcome"].isin(["default", "arrears_90"]),
-            np.clip(rng.lognormal(mean=np.log(18), sigma=0.5, size=len(df)).astype(int), 3, 36),
-            np.where(
-                approved_mask & df["actual_outcome"].isin(["arrears_30", "arrears_60"]),
-                np.clip(rng.lognormal(mean=np.log(12), sigma=0.6, size=len(df)).astype(int), 1, 36),
-                np.where(
-                    approved_mask & (df["actual_outcome"] == "prepaid"),
-                    np.clip(rng.poisson(4, len(df)), 1, 12),
-                    np.where(approved_mask, 12, np.nan),
-                ),
-            ),
-        )
+        df = self._simulate_ex_post_outcomes(df, rng)
 
         df = self._simulate_loan_performance(df)
 
