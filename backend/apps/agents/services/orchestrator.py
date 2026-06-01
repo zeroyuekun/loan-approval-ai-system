@@ -10,7 +10,6 @@ from apps.agents.models import AgentRun
 from apps.loans.models import FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
-from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
 from apps.ml_engine.services.predictor import ModelPredictor
 from apps.ml_engine.services.segmentation import derive_segment
 
@@ -94,16 +93,10 @@ class PipelineOrchestrator:
                 logger.warning("Counterfactual step: no _features_df in prediction result")
                 return []
 
-            engine = CounterfactualEngine(
-                model=predictor.model,
-                feature_cols=predictor.feature_cols,
-                training_data=features_df,
-                threshold=predictor.model_version.optimal_threshold or 0.5,
-                # Pass the predictor's transform so candidate raw-feature
-                # values are scored through the same engineered + one-hot
-                # pipeline the live model expects.
-                transform_fn=predictor._transform,
-            )
+            # Use the public predictor seam so candidate raw-feature values
+            # are scored through the same engineered + one-hot pipeline the
+            # live model expects, without reaching into predictor internals.
+            engine = predictor.build_counterfactual_engine(features_df, original_loan_amount)
             return engine.generate(features_df, original_loan_amount)
         except Exception as e:
             logger.warning("Counterfactual generation failed in orchestrator: %s", e)
@@ -446,9 +439,7 @@ class PipelineOrchestrator:
                 )
             agent_run.status = "escalated"
             self._finalize_run(agent_run, steps, start_time)
-            logger.info(
-                "Application %s: escalated to human review (requires_human_review)", application_id
-            )
+            logger.info("Application %s: escalated to human review (requires_human_review)", application_id)
             return agent_run
 
         # Steps 2-4: Email generation, bias check, delivery (delegated)
