@@ -1,9 +1,15 @@
-"""Single source of truth for the customer-facing decision explanation.
+"""Single source of truth for the STRUCTURED customer-facing decision explanation.
 
-Consolidates the previously-duplicated denial-reason ranking that lived in
-`loans.serializers.CustomerLoanDecisionSerializer`, `agents...human_review_handler`,
-and (prose-only) `email_generator._format_denial_reasons`. This module owns the
-ranking; renderers (structured reason codes for the UI, ADM disclosure) consume it.
+Consolidates the denial-reason ranking for the structured surfaces — the
+`loans.serializers.CustomerLoanDecisionSerializer` (UI reason codes) and the
+`agents...human_review_handler` — which both consume this module's
+`ranked_denial_drivers`. The ADM disclosure is also resolved here.
+
+NOTE: the email prose path (`email_generator._format_denial_reasons`) is
+INTENTIONALLY SEPARATE — it maps features to plain-language sentences via its
+own `DENIAL_REASON_MAP` for a Claude prompt under email guardrails, and is not
+routed through this module. The two orderings coincide today but are decoupled
+by design; this module does NOT own the email ranking.
 
 Pure functions — no Django model writes — so they unit-test without a DB and can
 run against either a saved `LoanDecision` or a live `prediction_result` dict.
