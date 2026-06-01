@@ -274,6 +274,7 @@ class EmailGenerator:
                 purpose=application.get_purpose_display(),
                 reasons=reasons,
                 banking_context=banking_context,
+                alternative_offer="",
             )
 
         # Add retry feedback if not first attempt.

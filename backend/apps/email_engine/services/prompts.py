@@ -338,6 +338,8 @@ Denial letters are the most psychologically sensitive communication a bank sends
 
 9. "We'd Still Like to Help:" section label on its own line, then a blank line, then 1\u20132 sentences offering to explore alternative products or a revised amount. Use first person ("I'd be happy to talk through your options"). Do NOT preface this with a summary of the customer's banking history or payment behaviour — just make the offer directly. Follow with a blank line.
 
+9a. ALTERNATIVE OFFER (only if provided below): If an alternative-offer block is supplied in the "ALTERNATIVE OFFER BLOCK" section below, include it verbatim immediately after the "We'd Still Like to Help" paragraph, on its own lines. It names a specific product and figure our engine has already calculated. Do NOT alter the product name or the figure. Do NOT add apology, sympathy, or emotion language around it. If that block is empty, omit it entirely and change nothing else.
+
 10. CLOSING (2\u20133 sentences, flowing together with no blank line between them):
    - First sentence: Offer direct contact: 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or reply to the email. Do NOT apologise or mention disappointment.
    - Second sentence (on the NEXT LINE, no blank line): Close with this exact line (substituting the customer's first name): "Thanks for coming to us, [First Name]. We'd love to help you find the right option when you're ready." Do NOT rephrase or reword this line.
@@ -378,6 +380,9 @@ These are the most frequent reasons denial emails fail quality checks:
 12. CONTEXTUAL DIGNITY: Describe the SITUATION, never label the PERSON. NEVER: "You have no job" / "You cannot afford this" / "Your poor credit" / "You are a high risk". INSTEAD: "Your employment status at the time of application" / "The requested amount exceeded our serviceability thresholds" / "Your credit profile at the time of assessment" / "The risk profile of this application".
 13. PSYCHOLOGICAL FRAMING: Never use "the bank has determined", "per our policy", "our systems indicate" (institutional coldness). Never use "this decision is final", "there is nothing more we can do" (finality). Always leave the door open. Close with specific warmth, not generic "we wish you well."
 14. CASUAL CONTRACTIONS: Avoid "can't", "won't", "shouldn't", "couldn't" in formal decline letters. Use "cannot", "will not", "should not". Warm contractions like "don't hesitate", "we'd", "isn't" are fine.
+
+=== ALTERNATIVE OFFER BLOCK (insert verbatim into "We'd Still Like to Help" if non-empty) ===
+{alternative_offer}
 
 === TEMPLATE (USE AS-IS) ===
 This is your TEMPLATE. Copy it VERBATIM. Only substitute the bracketed placeholders and customer-specific details (name, loan type, loan amount, reference number, denial reasons, and improvement steps that correspond to those reasons). Every sentence, paragraph, and section that is not a placeholder or reason-specific must appear EXACTLY as written below — same wording, same order, same punctuation. Do NOT rephrase, reword, add, or remove any generic text.

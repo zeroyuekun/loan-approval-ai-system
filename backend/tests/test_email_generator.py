@@ -255,3 +255,30 @@ class TestEmailGenerator:
         # The generator should raise on first failure; it falls back after 3 consecutive
         with pytest.raises(Exception):
             gen.generate(app, "approved", confidence=0.92)
+
+
+def test_denial_prompt_has_alternative_offer_placeholder():
+    """DENIAL_EMAIL_PROMPT must accept an {alternative_offer} substitution and
+    must NOT introduce apology/emotion language in its static text."""
+    from apps.email_engine.services.prompts import DENIAL_EMAIL_PROMPT
+
+    assert "{alternative_offer}" in DENIAL_EMAIL_PROMPT
+    # Formatting with all known keys (incl. empty offer) must not raise.
+    rendered = DENIAL_EMAIL_PROMPT.format(
+        applicant_name="Jane",
+        loan_amount=20000.0,
+        purpose="Personal Loan",
+        reasons="credit_score",
+        banking_context="No banking relationship data available",
+        alternative_offer="",
+    )
+    assert "{alternative_offer}" not in rendered
+    # Locked rule: no apology/regret tokens in the verbatim TEMPLATE the model
+    # copies into the customer-facing email. (The prompt's *instructions* legitimately
+    # contain "Do NOT apologise or mention disappointment" and reference that Big-4
+    # banks use "We regret to inform you" — those forbid apology language rather
+    # than emit it, so the check targets the output template, not the guidance.)
+    template_marker = "=== TEMPLATE (USE AS-IS) ==="
+    template_block = DENIAL_EMAIL_PROMPT[DENIAL_EMAIL_PROMPT.index(template_marker) :].lower()
+    for banned in ("we apologise", "we are sorry", "we regret", "disappointment"):
+        assert banned not in template_block
