@@ -263,15 +263,27 @@ class ApiBudgetGuard:
             )
             return 0
 
-    def record_call(self, input_tokens=0, output_tokens=0, model="", reserved_cents=0):
+    def record_call(self, input_tokens=0, output_tokens=0, model="", reserved_cents=0, released=False):
         """Record actual usage, reconciling any prior reservation to the true cost.
 
-        When ``reserved_cents`` > 0 the call already reserved cost + 1 call inside
-        ``reserve_budget``; here we only INCRBY the delta ``actual - reserved`` (which
-        may be negative → a DECRBY) so the counter settles at the true cost without
-        double-counting and without dropping below the real spend. When
-        ``reserved_cents`` == 0 (the Redis-down fallback path) we increment the call
-        counter and full cost here as before.
+        Three paths, keyed off ``reserved_cents`` and ``released``:
+
+        * **Failure release** (``reserved_cents`` > 0 and ``released`` is True): the
+          guarded call reserved budget but the API call failed and produced no
+          billable tokens. FULLY release the reservation — no ``max(1, …)`` floor,
+          so the cost counter returns to its pre-reserve value (``cost_delta`` is
+          ``-reserved`` when actual cost is 0) — AND decrement the calls counter by
+          1, since ``reserve_budget`` had incremented it for a call that never
+          completed.
+
+        * **Successful reconcile** (``reserved_cents`` > 0 and ``released`` is
+          False): the call succeeded. The call was already counted inside
+          ``reserve_budget`` so keep the call counted; only INCRBY the delta
+          ``actual - reserved`` (may be a DECRBY) so cost settles at the true value.
+
+        * **Unreserved fallback** (``reserved_cents`` == 0): the call was never
+          reserved (Redis was down at reserve time, or a legacy caller). Count the
+          call + full cost, keeping the ``max(1, …)`` minimum-cent floor.
         """
         try:
             r = self._get_redis()
@@ -281,21 +293,29 @@ class ApiBudgetGuard:
             tokens_key = self._daily_key("tokens")
             cost_key = self._daily_key("cost_cents")
 
-            # Calculate cost in cents for integer-safe Redis storage
-            cost_usd = estimate_cost_usd(input_tokens, output_tokens, model)
-            cost_cents = max(1, int(cost_usd * 100))  # minimum 1 cent per call
-
             reserved = int(reserved_cents)
-            if reserved == 0:
-                # Fallback path: the call was never reserved (Redis was down at
-                # reserve time, or a legacy caller). Count the call + full cost.
+            cost_usd = estimate_cost_usd(input_tokens, output_tokens, model)
+
+            if reserved > 0 and released:
+                # Failure release: undo the reservation in full. No cent floor —
+                # the call produced no billable cost — and give back the call slot
+                # that reserve_budget consumed.
+                actual_cents = int(cost_usd * 100)
+                cost_delta = actual_cents - reserved
+                pipe.decr(calls_key)
+                pipe.expire(calls_key, self.KEY_TTL)
+            elif reserved > 0:
+                # Successful reconcile to the real cost. The call was already
+                # counted inside reserve_budget, so do NOT touch calls again.
+                cost_cents = max(1, int(cost_usd * 100))  # minimum 1 cent per real call
+                cost_delta = cost_cents - reserved
+            else:
+                # Fallback path: the call was never reserved. Count the call +
+                # full cost with the minimum-cent floor.
+                cost_cents = max(1, int(cost_usd * 100))  # minimum 1 cent per call
                 pipe.incr(calls_key)
                 pipe.expire(calls_key, self.KEY_TTL)
                 cost_delta = cost_cents
-            else:
-                # Reconcile the reservation to the real cost. The call was already
-                # counted inside reserve_budget, so do NOT increment calls again.
-                cost_delta = cost_cents - reserved
 
             pipe.incrby(tokens_key, input_tokens + output_tokens)
             pipe.expire(tokens_key, self.KEY_TTL)
@@ -306,13 +326,15 @@ class ApiBudgetGuard:
             pipe.execute()
 
             logger.info(
-                "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f (reserved=%dc, delta=%dc)",
+                "API call recorded: %d in + %d out tokens, model=%s, cost=$%.4f "
+                "(reserved=%dc, delta=%dc, released=%s)",
                 input_tokens,
                 output_tokens,
                 model or "unknown",
                 cost_usd,
                 reserved,
                 cost_delta,
+                released,
             )
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             logger.warning("Failed to record API call (Redis): %s", e)
@@ -448,8 +470,9 @@ def guarded_api_call(client, **kwargs):
         response = client.messages.create(**kwargs)
     except Exception:
         budget.record_failure()
-        # Release the reservation — the call never produced billable tokens.
-        budget.record_call(input_tokens=0, output_tokens=0, model=model, reserved_cents=reserved)
+        # Release the reservation in full — the call never produced billable
+        # tokens, so give back BOTH the reserved cost and the call slot.
+        budget.record_call(input_tokens=0, output_tokens=0, model=model, reserved_cents=reserved, released=True)
         raise
 
     # Track cost from actual usage, reconciling the reservation to the true cost.
