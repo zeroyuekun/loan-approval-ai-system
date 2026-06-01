@@ -41,6 +41,7 @@ def build_explanation_payload(
     feature_importances: dict | None,
     counterfactual_results: list | None,
     requires_human_review: bool,
+    human_involvement: str = "none",
 ) -> dict:
     """Build the customer-facing decision payload (the UI/serializer contract)."""
     shap_values = shap_values or {}
@@ -61,17 +62,28 @@ def build_explanation_payload(
         "denial_reasons": denial_reasons,
         "counterfactuals": counterfactuals,
         "reapplication_guidance": reapplication_guidance,
-        "adm_disclosure": resolve_adm_disclosure(decision=decision, requires_human_review=requires_human_review),
+        "adm_disclosure": resolve_adm_disclosure(
+            decision=decision,
+            requires_human_review=requires_human_review,
+            human_involvement=human_involvement,
+        ),
     }
 
 
 def build_explanation_from_decision(loan_decision) -> dict:
-    """Convenience wrapper for a saved `LoanDecision` instance."""
-    requires_human_review = getattr(loan_decision.application, "status", "") == "review"
+    """Convenience wrapper for a saved `LoanDecision` instance.
+
+    Human involvement is read from the persisted `human_involvement` field
+    (set at escalation-resolve / officer-override time) — NOT inferred from
+    the transient `application.status`, which has already moved on by the
+    time the customer views the decision.
+    """
+    involvement = getattr(loan_decision, "human_involvement", "none")
     return build_explanation_payload(
         decision=loan_decision.decision,
         shap_values=loan_decision.shap_values or {},
         feature_importances=loan_decision.feature_importances or {},
         counterfactual_results=loan_decision.counterfactual_results or [],
-        requires_human_review=requires_human_review,
+        requires_human_review=(involvement != "none"),
+        human_involvement=involvement,
     )

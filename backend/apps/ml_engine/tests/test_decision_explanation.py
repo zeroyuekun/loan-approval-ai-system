@@ -44,3 +44,15 @@ def test_build_payload_approved_omits_denial_fields():
     assert payload["counterfactuals"] == []
     assert payload["reapplication_guidance"] is None
     assert payload["adm_disclosure"]["mode"] == "solely_automated"
+
+
+def test_build_payload_overridden_is_human_mode():
+    payload = build_explanation_payload(
+        decision="approved",
+        shap_values={},
+        feature_importances={},
+        counterfactual_results=[],
+        requires_human_review=False,
+        human_involvement="overridden",
+    )
+    assert payload["adm_disclosure"]["mode"] == "human"
