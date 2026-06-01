@@ -11,6 +11,7 @@ from apps.email_engine.services.persistence import EmailPersistenceService
 from apps.loans.models import LoanApplication
 
 from .bias_detector import BiasDetector
+from .recommendation_engine import RecommendationEngine
 from .step_tracker import StepTracker
 
 logger = logging.getLogger("agents.orchestrator")
@@ -50,6 +51,17 @@ class EmailPipelineService:
                 cf_statements = [cf["statement"] for cf in cf_results if isinstance(cf, dict) and cf.get("statement")]
                 if cf_statements:
                     profile_context = {**(profile_context or {}), "counterfactual_statements": cf_statements}
+
+            # Deterministic alternative-offer teaser for the denial email.
+            # RecommendationEngine makes NO API call, so this adds no cost and
+            # must never block the decision email — degrade to no teaser on error.
+            try:
+                nbo = RecommendationEngine().recommend(application, denial_reasons="")
+                offers = nbo.get("offers") or []
+                if offers:
+                    profile_context = {**(profile_context or {}), "nbo_offer": offers[0]}
+            except Exception as exc:  # noqa: BLE001 — teaser is best-effort
+                logger.warning("Application %s: NBO teaser unavailable: %s", application_id, exc)
 
         # Step 2: Generate Email
         step = self.tracker.start_step("email_generation")
