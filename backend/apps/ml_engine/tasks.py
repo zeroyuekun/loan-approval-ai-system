@@ -269,8 +269,12 @@ def run_prediction_task(self, application_id):
         },
     )
 
-    # Update application status — flag borderline cases for human review
-    if result.get("requires_human_review"):
+    # Flag borderline cases for human review ONLY when the standalone path is
+    # explicitly enabled. The standalone task creates no escalated AgentRun, so
+    # a 'review' transition here would be unresumable and would leave the ADM
+    # disclosure stale (Phase-1 Issue 1). Default: apply the raw decision.
+    standalone_enabled = getattr(settings, "ML_STANDALONE_PREDICT_ENABLED", False)
+    if standalone_enabled and result.get("requires_human_review"):
         application.transition_to("review")
     else:
         application.transition_to(result["prediction"])

@@ -25,6 +25,14 @@ class PredictView(APIView):
         """Trigger ML prediction for a loan application."""
         check_loan_access(request, loan_id)
 
+        from django.conf import settings
+
+        if not getattr(settings, "ML_STANDALONE_PREDICT_ENABLED", False):
+            return Response(
+                {"detail": "Standalone prediction is disabled; use the agent orchestrator."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
         task = run_prediction_task.delay(str(loan_id))
 
         AuditLog.objects.create(

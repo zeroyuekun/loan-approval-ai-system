@@ -271,6 +271,18 @@ MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").
 # without removing the API surface (returns 503).
 DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# Standalone single-application prediction endpoint (/ml/predict/<id>/).
+# The agent orchestrator is the production decision path; the standalone task
+# does NOT create an escalated AgentRun, so a borderline/drift/policy-refer
+# prediction would park the application in 'review' with no resumable run and a
+# stale ADM disclosure. Default OFF; flip on only for ad-hoc scoring that does
+# not rely on the human-review queue. (Phase-1 holistic Issue 1.)
+ML_STANDALONE_PREDICT_ENABLED = os.environ.get("ML_STANDALONE_PREDICT_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
