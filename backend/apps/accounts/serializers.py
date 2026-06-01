@@ -5,6 +5,8 @@ from decimal import Decimal, InvalidOperation
 from django.contrib.auth import authenticate
 from rest_framework import serializers
 
+from utils.sanitization import sanitize_prompt_input
+
 from .models import CustomerProfile, CustomUser
 
 
@@ -50,9 +52,26 @@ class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=12)
     password2 = serializers.CharField(write_only=True, min_length=12)
 
+    # Names flow into LLM prompts (marketing follow-ups), so they are
+    # attacker-controlled prompt input. Reject injection-y / structural content
+    # at registration (L26). Allows letters, digits, spaces, and a few common
+    # name punctuation marks ('.-) up to 100 chars.
+    _NAME_RE = re.compile(r"^[\w .'\-]{0,100}$", re.UNICODE)
+
     class Meta:
         model = CustomUser
         fields = ("username", "email", "password", "password2", "first_name", "last_name")
+
+    def _validate_name(self, value, field):
+        if value and (sanitize_prompt_input(value, max_length=100) != value.strip() or not self._NAME_RE.match(value)):
+            raise serializers.ValidationError(f"{field} contains characters that are not allowed.")
+        return value
+
+    def validate_first_name(self, value):
+        return self._validate_name(value, "first_name")
+
+    def validate_last_name(self, value):
+        return self._validate_name(value, "last_name")
 
     def validate(self, data):
         if data["password"] != data["password2"]:
