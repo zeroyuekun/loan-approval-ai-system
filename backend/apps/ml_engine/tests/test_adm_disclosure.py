@@ -17,3 +17,19 @@ def test_escalated_decision_is_assisted():
 
 def test_register_modes_are_known():
     assert {e["mode"] for e in ADM_REGISTER.values()} <= {"solely_automated", "assisted", "human"}
+
+
+def test_officer_override_is_human_mode():
+    d = resolve_adm_disclosure(decision="approved", human_involvement="overridden")
+    assert d["mode"] == "human"
+    assert "officer" in d["summary"].lower()
+    assert d["human_review_right"] is True
+
+
+def test_assisted_via_involvement_flag():
+    d = resolve_adm_disclosure(decision="denied", human_involvement="assisted")
+    assert d["mode"] == "assisted"
+
+
+def test_register_includes_human_override_with_human_mode():
+    assert ADM_REGISTER["human_override"]["mode"] == "human"

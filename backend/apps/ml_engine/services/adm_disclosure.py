@@ -41,17 +41,30 @@ ADM_REGISTER: dict[str, dict] = {
         "info_used": _INFO_USED,
         "human_review_right": True,
     },
+    "human_override": {
+        "mode": "human",
+        "summary": "Reviewed and decided by a lending officer.",
+        "info_used": _INFO_USED,
+        "human_review_right": True,
+    },
 }
 
 
-def resolve_adm_disclosure(*, decision: str, requires_human_review: bool) -> dict:
+def resolve_adm_disclosure(
+    *, decision: str, requires_human_review: bool = False, human_involvement: str = "none"
+) -> dict:
     """Return the ADM disclosure block for a single decision.
 
-    `requires_human_review` reflects whether the decision was escalated to a
-    human (borderline / drift / bias) — those are "assisted", everything else
-    is "solely_automated".
+    `human_involvement` (persisted on LoanDecision) is authoritative:
+    - "overridden" -> a lending officer overrode the model ("human")
+    - "assisted"   -> model assessed + human reviewed ("assisted")
+    - "none"       -> solely automated
+    `requires_human_review` is the legacy live-prediction signal kept for
+    backward compatibility; it maps to "assisted".
     """
-    if requires_human_review:
+    if human_involvement == "overridden":
+        entry = ADM_REGISTER["human_override"]
+    elif human_involvement == "assisted" or requires_human_review:
         entry = ADM_REGISTER["escalated_review"]
     elif decision == "approved":
         entry = ADM_REGISTER["automated_approve"]
