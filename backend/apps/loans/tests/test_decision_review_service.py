@@ -72,3 +72,24 @@ def test_overturn_missing_decision_raises_valueerror(django_user_model):
     app.decision.delete()  # LoanDecision gone -> RelatedObjectDoesNotExist path
     with pytest.raises(ValueError):
         apply_review_outcome(review, officer=officer, outcome="overturned", note="x")
+
+
+def test_withdraw_marks_review_and_keeps_app_status(django_user_model):
+    from apps.loans.services.decision_review import withdraw_review
+
+    app, officer, review = _denied_with_review(django_user_model)  # status UNDER_REVIEW
+    withdraw_review(review, user=review.requested_by)
+    review.refresh_from_db()
+    app.refresh_from_db()
+    assert review.status == DecisionReview.Status.WITHDRAWN
+    assert app.status == "denied"  # withdraw does not change the loan decision
+    assert AuditLog.objects.filter(action="decision_review_withdrawn", resource_id=str(review.id)).exists()
+
+
+def test_withdraw_already_resolved_raises(django_user_model):
+    from apps.loans.services.decision_review import apply_review_outcome, withdraw_review
+
+    app, officer, review = _denied_with_review(django_user_model)
+    apply_review_outcome(review, officer=officer, outcome="upheld", note="stands")
+    with pytest.raises(ValueError):
+        withdraw_review(review, user=review.requested_by)

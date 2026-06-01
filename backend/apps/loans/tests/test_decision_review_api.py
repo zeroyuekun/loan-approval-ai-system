@@ -198,6 +198,27 @@ def test_resolve_overturn_on_non_denied_returns_409(django_user_model, monkeypat
     assert r.status_code == 409
 
 
+def test_owner_can_withdraw_via_api(django_user_model):
+    cust, app = _denied_app(django_user_model)
+    review = DecisionReview.objects.create(application=app, requested_by=cust, reason="oops")
+    client = APIClient()
+    client.force_authenticate(cust)
+    r = client.post(f"/api/v1/loans/decision-reviews/{review.id}/withdraw/", {}, format="json")
+    assert r.status_code == 200
+    assert r.data["status"] == "withdrawn"
+
+
+def test_non_owner_cannot_withdraw(django_user_model):
+    cust, app = _denied_app(django_user_model)
+    other = django_user_model.objects.create_user(username="x2", password="x", role="customer", email="x2@x.com")
+    review = DecisionReview.objects.create(application=app, requested_by=cust, reason="oops")
+    client = APIClient()
+    client.force_authenticate(other)
+    r = client.post(f"/api/v1/loans/decision-reviews/{review.id}/withdraw/", {}, format="json")
+    # get_object() queryset scopes to requested_by for customers -> 404 (not found in their qs)
+    assert r.status_code == 404
+
+
 def test_resolve_note_too_long_rejected(django_user_model):
     cust, app = _denied_app(django_user_model)
     officer = django_user_model.objects.create_user(username="off2", password="x", role="officer")

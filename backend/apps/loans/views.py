@@ -359,6 +359,17 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=409)
         return Response(DecisionReviewSerializer(updated, context={"request": request}).data)
 
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def withdraw(self, request, pk=None):
+        from apps.loans.services.decision_review import withdraw_review
+
+        review = self.get_object()
+        try:
+            updated = withdraw_review(review, user=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=409)
+        return Response(DecisionReviewSerializer(updated, context={"request": request}).data)
+
 
 class ReferralListView(APIView):
     """Admin-only list of LoanApplications in a non-NONE referral state.

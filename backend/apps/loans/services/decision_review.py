@@ -103,3 +103,29 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
         _send_approval_email(application)
 
     return locked
+
+
+def withdraw_review(review: DecisionReview, *, user) -> DecisionReview:
+    """Customer-initiated withdrawal of a review they filed in error.
+
+    Only the original requester can withdraw, and only from a non-terminal
+    state. Audited; does NOT change the loan decision (the original denial
+    stands). Mirrors the locking discipline of apply_review_outcome.
+    """
+    with transaction.atomic():
+        locked = DecisionReview.objects.select_for_update().get(pk=review.pk)
+        if locked.requested_by_id != user.id:
+            raise ValueError("Only the requester can withdraw this review")
+        if locked.status in _TERMINAL:
+            raise ValueError(f"DecisionReview already resolved ({locked.status})")
+        locked.status = DecisionReview.Status.WITHDRAWN
+        locked.resolved_at = timezone.now()
+        locked.save(update_fields=["status", "resolved_at"])
+        AuditLog.objects.create(
+            user=user,
+            action="decision_review_withdrawn",
+            resource_type="DecisionReview",
+            resource_id=str(locked.id),
+            details={"application_id": str(locked.application_id)},
+        )
+    return locked
