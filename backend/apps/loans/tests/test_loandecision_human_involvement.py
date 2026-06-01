@@ -126,3 +126,70 @@ def test_resume_stamps_human_involvement_assisted(_resume_setup):
     application.refresh_from_db()
     assert application.status == "approved"
     assert application.decision.human_involvement == "assisted"
+
+
+@pytest.mark.django_db
+def test_overturn_stamps_human_involvement_overridden(django_user_model):
+    """When a lending officer OVERTURNS a denial (officer override -> approved),
+    the persisted LoanDecision is stamped human_involvement='overridden' (H3) so
+    the ADM disclosure truthfully reports mode 'human' ('Reviewed and decided by
+    a lending officer.') rather than 'solely automated'."""
+    from apps.loans.models import DecisionReview, LoanApplication, LoanDecision
+    from apps.loans.services.decision_review import apply_review_outcome
+    from apps.ml_engine.services.decision_explanation import build_explanation_from_decision
+
+    customer = django_user_model.objects.create_user(
+        username="h3_customer",
+        email="h3_customer@test.com",
+        password="testpass123",
+        role="customer",
+        first_name="H3",
+        last_name="Customer",
+    )
+    officer = django_user_model.objects.create_user(
+        username="h3_officer",
+        email="h3_officer@test.com",
+        password="testpass123",
+        role="officer",
+        first_name="H3",
+        last_name="Officer",
+    )
+
+    app = LoanApplication.objects.create(
+        applicant=customer,
+        annual_income=Decimal("50000.00"),
+        credit_score=500,
+        loan_amount=Decimal("30000.00"),
+        loan_term_months=36,
+        debt_to_income=Decimal("5.00"),
+        employment_length=1,
+        purpose="personal",
+        home_ownership="rent",
+        has_cosigner=False,
+        status="denied",
+    )
+
+    decision = LoanDecision.objects.create(application=app, decision="denied", confidence=0.9)
+    assert decision.human_involvement == LoanDecision.HumanInvolvement.NONE
+
+    review = DecisionReview.objects.create(
+        application=app,
+        requested_by=customer,
+        reason="disagree with the automated denial",
+        status=DecisionReview.Status.UNDER_REVIEW,
+    )
+
+    # The overturn path generates + sends an approval email after the transaction
+    # (best-effort, external). Mock it — the behaviour under test is the stamp +
+    # disclosure, not email delivery.
+    with patch("apps.loans.services.decision_review._send_approval_email"):
+        apply_review_outcome(review, officer=officer, outcome="overturned", note="approved on appeal")
+
+    app.refresh_from_db()
+    assert app.status == "approved"
+    assert app.decision.decision == "approved"
+    assert app.decision.human_involvement == "overridden"
+
+    # End-to-end: the persisted stamp flows through to the ADM disclosure mode.
+    explanation = build_explanation_from_decision(app.decision)
+    assert explanation["adm_disclosure"]["mode"] == "human"
