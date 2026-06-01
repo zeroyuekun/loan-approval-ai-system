@@ -47,11 +47,11 @@ flowchart TD
     B1 --> C[2. Claude writes the email]
     C --> D[3. Guardrails — 15 deterministic checks]
     D --> E[4. Bias pre-screen regex<br/>score 0–100]
-    E -- "score ≤ 60" --> F[Send the email]
-    E -- "60–80" --> G[Claude reviews flags]
-    G -- "confidence &lt; 0.70" --> H[Human review]
-    G -- "confidence ≥ 0.70" --> F
-    E -- "score &gt; 80" --> H
+    E -- "score ≤ 30" --> F[Send the email]
+    E -- "31–59 (moderate)" --> G[Junior LLM classifies flags]
+    G -- "composite ≤ 30" --> F
+    G -- "composite ≥ 60" --> H[Human review queue]
+    E -- "score ≥ 60 (severe)" --> H
     F --> I[5. Email sends]
     I --> J{Denied?}
     J -- yes --> K[6. NBO — alternative offers]
@@ -140,7 +140,7 @@ workflows/          # markdown SOPs for each pipeline stage
 |----------|-----|
 | Gaussian copula synthetic data calibrated to ATO/ABS/APRA stats | [001](backend/docs/adr/001-synthetic-data-with-copula.md) |
 | XGBoost with monotonic constraints for regulatory consistency | [002](backend/docs/adr/002-xgboost-with-monotonic-constraints.md) |
-| Three-layer bias detection (regex -> LLM -> human escalation) | [003](backend/docs/adr/003-hybrid-bias-detection.md) |
+| Bias detection: deterministic regex -> junior LLM (moderate flags) -> human escalation; senior Opus review on marketing emails | [003](backend/docs/adr/003-hybrid-bias-detection.md) |
 | Temporal validation strategy with out-of-time splits | [004](backend/docs/adr/004-temporal-validation-strategy.md) |
 | Django over FastAPI | [005](backend/docs/adr/005-django-over-fastapi.md) |
 | Template-first email with $5/day Claude budget cap | [006](backend/docs/adr/006-template-first-email-with-cost-cap.md) |
@@ -171,7 +171,7 @@ Every email Claude generates goes through 10 checks before sending:
 9. Double sign-off detection
 10. Sentence rhythm uniformity (flags suspiciously even sentence lengths)
 
-Three regeneration attempts, then human review.
+Up to three regeneration attempts; if guardrails still fail, the decision email is withheld (not sent) and the run is flagged for operations. The human-review queue is reserved for bias escalations.
 
 ### Retraining the model
 
