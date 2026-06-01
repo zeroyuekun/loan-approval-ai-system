@@ -44,7 +44,6 @@ def _prediction_requires_review():
 @CACHE_OVERRIDE
 @pytest.mark.django_db
 def test_requires_human_review_escalates_before_emailing(django_user_model):
-    from apps.agents.models import AgentRun
     from apps.email_engine.models import GeneratedEmail
     from apps.loans.models import LoanApplication
 
