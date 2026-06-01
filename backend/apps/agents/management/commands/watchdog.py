@@ -243,7 +243,9 @@ class Command(BaseCommand):
                 application_id = args[0]
                 from apps.agents.tasks import _cleanup_stuck_application
 
-                _cleanup_stuck_application(application_id)
+                # Clear the dedup lock too — the revoked task's lock would
+                # otherwise starve a legitimate retry (L22).
+                _cleanup_stuck_application(application_id, clear_lock=True)
                 logger.info("Cleaned up application %s after stuck task revocation", application_id)
         except Exception as e:
             logger.error("Failed to clean up after stuck task: %s", e)

@@ -10,22 +10,53 @@ logger = logging.getLogger("agents.tasks")
 _DEDUP_LOCK_TTL = 600
 
 
-def _cleanup_stuck_application(application_id):
-    """Reset application status if it's stuck at 'processing' after a task failure."""
+def _cleanup_stuck_application(application_id, clear_lock=False):
+    """Reset a stuck-'processing' application to REVIEW under a row lock.
+
+    No-ops if a newer AgentRun is already COMPLETED for the application
+    (another actor owns the work), so the watchdog, the orchestrator
+    stale-reset, and Celery autoretry cannot fight over the same state (L22).
+
+    When ``clear_lock`` is True the Redis dedup lock is released too — used by
+    the watchdog's revoke path so a legitimate retry isn't starved behind a
+    still-held lock.
+    """
     try:
-        from apps.agents.models import AgentRun  # noqa: F401 — local import for Celery
-        from apps.loans.models import LoanApplication  # noqa: F401 — local import for Celery
+        from apps.agents.models import AgentRun
+        from apps.loans.models import LoanApplication
 
         with transaction.atomic():
-            LoanApplication.objects.filter(
-                pk=application_id,
-                status=LoanApplication.Status.PROCESSING,
-            ).update(status=LoanApplication.Status.REVIEW)
+            # Lock by pk — never via a nullable profile join (FOR UPDATE caveat).
+            app = (
+                LoanApplication.objects.select_for_update()
+                .filter(pk=application_id, status=LoanApplication.Status.PROCESSING)
+                .first()
+            )
+            if app is None:
+                return  # not stuck, or already moved on
+
+            # Another actor owns the work — do not stomp it.
+            if AgentRun.objects.filter(
+                application_id=application_id,
+                status=AgentRun.Status.COMPLETED,
+            ).exists():
+                logger.info("Application %s: cleanup skipped, a completed run owns it", application_id)
+                return
 
             AgentRun.objects.filter(
                 application_id=application_id,
-                status__in=("pending", "running"),
+                status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
             ).update(status=AgentRun.Status.FAILED, error="Task failed unexpectedly — application reset to review")
+
+            # processing -> review is in ALLOWED_TRANSITIONS; route through the
+            # state machine so the reset produces a status_transition AuditLog.
+            app.transition_to(
+                LoanApplication.Status.REVIEW,
+                details={"source": "stuck_cleanup"},
+            )
+
+        if clear_lock:
+            cache.delete(f"orchestrate_lock:{application_id}")
 
         logger.warning("Application %s: cleaned up stuck processing status", application_id)
     except Exception as e:
