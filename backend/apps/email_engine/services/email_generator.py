@@ -164,6 +164,31 @@ class EmailGenerator:
             reasons.append(readable)
         return "; ".join(reasons)
 
+    def _render_nbo_block(self, nbo_offer):
+        """Render a neutral, factual alternative-offer teaser for denial emails.
+
+        No apology/emotion language (locked project rule). Returns "" when no
+        usable offer is supplied so the prompt is unchanged.
+        """
+        if not nbo_offer:
+            return ""
+        name = nbo_offer.get("name") or nbo_offer.get("type")
+        amount = nbo_offer.get("amount")
+        if not name or amount is None:
+            return ""
+        rate = nbo_offer.get("estimated_rate")
+        monthly = nbo_offer.get("monthly_repayment")
+        headline = f"${float(amount):,.0f}"
+        if rate:
+            headline += f" at {float(rate):.2f}% p.a."
+        if monthly:
+            headline += f", around ${float(monthly):,.0f}/month"
+        return (
+            "A specific option you may qualify for now:\n"
+            f"  •  {name}: {headline}\n"
+            "You can discuss this option using the contact details below."
+        )
+
     def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
         """Generate an approval/denial email for the given loan application."""
         # Reset retry state only on the first attempt (not recursive retries)
@@ -268,14 +293,26 @@ class EmailGenerator:
                 decision_obj.feature_importances if decision_obj else None,
                 shap_values=decision_obj.shap_values if decision_obj else None,
             )
+            nbo_offer = (profile_context or {}).get("nbo_offer")
+            alternative_offer = self._render_nbo_block(nbo_offer)
             prompt = DENIAL_EMAIL_PROMPT.format(
                 applicant_name=applicant_name,
                 loan_amount=float(application.loan_amount),
                 purpose=application.get_purpose_display(),
                 reasons=reasons,
                 banking_context=banking_context,
-                alternative_offer="",
+                alternative_offer=alternative_offer,
             )
+            # Whitelist the teaser figures so the hallucinated-numbers guardrail
+            # (engine.py:61) recognises them on the decision email.
+            if nbo_offer:
+                nbo_amounts = []
+                for key in ("amount", "monthly_repayment", "fortnightly_repayment"):
+                    val = nbo_offer.get(key)
+                    if val:
+                        nbo_amounts.append(float(val))
+                if nbo_amounts:
+                    context["nbo_amounts"] = nbo_amounts
 
         # Add retry feedback if not first attempt.
         # The feedback is structured to tell Claude exactly what failed,
