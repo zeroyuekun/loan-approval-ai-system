@@ -54,7 +54,13 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
             locked.save(update_fields=["assigned_officer", "resolution_note", "resolved_at", "status"])
             application = locked.application
         else:
-            application = LoanApplication.objects.select_for_update().get(pk=locked.application_id)
+            try:
+                application = LoanApplication.objects.select_for_update().get(pk=locked.application_id)
+            except LoanApplication.DoesNotExist as exc:
+                # App soft-deleted (retention/erasure) between filing and
+                # resolution: SoftDeleteManager hides it -> raise the ValueError
+                # the view/admin already map to a clean 409, not an uncaught 500.
+                raise ValueError("Application no longer exists") from exc
             # Re-assert overturn-eligibility under the lock: a force re-run or a
             # concurrent overturn may have moved the app off 'denied' between
             # filing and resolution. transition_to would otherwise raise

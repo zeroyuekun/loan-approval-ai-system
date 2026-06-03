@@ -10,6 +10,7 @@ After 7 years, PII is de-identified while preserving aggregated analytics.
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.accounts.models import CustomerProfile, CustomUser
@@ -31,12 +32,15 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Retention cutoff: {cutoff.date()}")
 
-        # Find users with no activity since cutoff
-        stale_users = CustomUser.objects.filter(
-            last_login__lt=cutoff,
-            role="customer",
-        ).exclude(
-            loan_applications__created_at__gte=cutoff,
+        # Find users with no activity since cutoff. API-registered users
+        # authenticate via JWT and never hit Django's login(), so last_login
+        # stays NULL forever — keying staleness on last_login alone would retain
+        # their PII indefinitely. Treat a NULL last_login as eligible once the
+        # account itself (created_at) predates the cutoff.
+        stale_users = (
+            CustomUser.objects.filter(role="customer")
+            .filter(Q(last_login__lt=cutoff) | Q(last_login__isnull=True, created_at__lt=cutoff))
+            .exclude(loan_applications__created_at__gte=cutoff)
         )
 
         count = stale_users.count()
