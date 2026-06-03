@@ -79,3 +79,44 @@ class TestEmailPipelineNboInjection:
                 svc.run(application, MagicMock(), {}, {"probability": 0.3}, "denied", [], [])
 
         assert captured["profile_context"]["nbo_offer"]["name"] == "Secured Personal Loan"
+
+    @patch("apps.email_engine.services.sender.send_decision_email")
+    @patch("apps.agents.services.email_pipeline.EmailGenerator")
+    @patch("apps.agents.services.email_pipeline.EmailPersistenceService")
+    @patch("apps.agents.services.email_pipeline.RecommendationEngine")
+    def test_successful_send_stamps_sent_at(self, mock_engine_cls, mock_persist, mock_gen_cls, mock_send):
+        """A successful orchestrator delivery must stamp GeneratedEmail.sent_at so
+        the standalone task's redelivery path never treats it as unsent and
+        re-sends it (double-send guard)."""
+        _, fake_generate = _capture_generate_kwargs()
+        mock_gen_cls.return_value.generate.side_effect = fake_generate
+        gen_email = MagicMock()
+        gen_email.sent_at = None
+        mock_persist.save_generated_email.return_value = gen_email
+        mock_send.return_value = {"sent": True}
+        mock_engine_cls.return_value.recommend.return_value = {"offers": []}
+
+        application = MagicMock()
+        application.pk = 1
+        application.applicant.email = "customer@example.com"
+        application.loan_amount = Decimal("20000")
+        application.get_purpose_display.return_value = "Personal Loan"
+
+        svc = EmailPipelineService(StepTracker())
+        patch_cf = patch.object(LoanDecision.objects, "get", side_effect=LoanDecision.DoesNotExist)
+        with patch_cf, patch("apps.agents.services.email_pipeline.BiasDetector") as mock_bias:
+            mock_bias.return_value.analyze.return_value = {
+                "score": 0,
+                "flagged": False,
+                "requires_human_review": False,
+                "categories": [],
+                "analysis": "",
+                "deterministic_score": 0,
+                "llm_raw_score": None,
+                "score_source": "x",
+            }
+            with patch("apps.agents.models.BiasReport.objects.create"):
+                svc.run(application, MagicMock(), {}, {"probability": 0.9}, "approved", [], [])
+
+        mock_send.assert_called_once()
+        gen_email.save.assert_any_call(update_fields=["sent_at"])

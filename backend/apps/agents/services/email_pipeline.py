@@ -2,6 +2,7 @@ import logging
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 
 from apps.agents.exceptions import LLMServiceError
 from apps.agents.metrics import bias_check_unavailable_total
@@ -283,6 +284,12 @@ class EmailPipelineService:
                         email_type="approval" if decision == "approved" else "denial",
                     )
                     if send_result["sent"]:
+                        # Stamp sent_at so it is an authoritative system-wide
+                        # "delivered" marker. Without this, orchestrator-delivered
+                        # emails stay sent_at=None and the standalone task's
+                        # redelivery path would treat them as unsent and re-send.
+                        generated_email.sent_at = timezone.now()
+                        generated_email.save(update_fields=["sent_at"])
                         step = self.tracker.complete_step(
                             step,
                             result_summary={

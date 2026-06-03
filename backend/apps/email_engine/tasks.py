@@ -64,6 +64,18 @@ def generate_email_task(self, application_id, decision):
                 decision,
                 delivered,
             )
+            AuditLog.objects.create(
+                action="email_sent" if delivered else "email_generated",
+                resource_type="GeneratedEmail",
+                resource_id=str(existing.id),
+                details={
+                    "decision": decision,
+                    "passed_guardrails": existing.passed_guardrails,
+                    "attempt_number": existing.attempt_number,
+                    "email_sent": delivered,
+                    "redelivery": True,
+                },
+            )
             return {
                 "email_id": str(existing.id),
                 "subject": existing.subject,
