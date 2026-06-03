@@ -40,7 +40,7 @@ Final suite: backend **1743 passed / 34 skipped / 0 failed**, frontend **327 pas
 - **`BIAS_FAILURE_MODE` defaults to `block`** — an intended behaviour change. A bias-detection infra outage now withholds the email rather than shipping it; set `BIAS_FAILURE_MODE=off` to restore the legacy fail-open.
 - **Celery `broker_transport_options` fail-fast flags are global** — run a healthy-broker worker-connect smoke (`docker compose up`, confirm workers connect) before deploying.
 - **`POST /ml/predict/{id}/` is disabled by default** — enable via `ML_STANDALONE_PREDICT_ENABLED=true` if a non-orchestrator caller needs it (and make it AgentRun/ADM-consistent first).
-- No `APP_VERSION` bump yet (unreleased); bump at release time.
+- Released 2026-06-03: PR #207 merged to master (merge commit `eb21013`); `APP_VERSION` bumped to `1.11.0` and tagged `v1.11.0`. This release also bundles the post-milestone hardening landed on the same branch — a 17-finding senior audit + Python/npm CVE bumps, a 7-area pre-merge review (1 HIGH + 4 mediums fixed, all with regression tests), and metric-drift/k8s-probe doc fixes — bringing the suite to backend **1752 passed / 34 skipped**, frontend **327 passed**.
 
 ## v1.10.6 — Renderer XSS Hardening + External Benchmark + Realism Audit (2026-04-20)
 
