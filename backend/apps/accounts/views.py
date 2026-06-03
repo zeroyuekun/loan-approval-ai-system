@@ -196,9 +196,15 @@ class LoginView(generics.GenericAPIView):
         username = request.data.get("username", "")
         user_obj = None
         if username:
-            try:
-                user_obj = CustomUser.objects.get(username=username)
-            except CustomUser.DoesNotExist:
+            # Resolve the acting user the SAME way LoginSerializer does (it
+            # accepts an email in this field). Resolving only by username here
+            # would let an attacker bypass the lockout + failed-attempt audit
+            # entirely by submitting the email instead of the username.
+            if "@" in username:
+                user_obj = CustomUser.objects.filter(email=username).first()
+            else:
+                user_obj = CustomUser.objects.filter(username=username).first()
+            if user_obj is None:
                 # Perform a dummy password check to equalise timing
                 check_password(request.data.get("password", ""), self._DUMMY_HASH)
 
