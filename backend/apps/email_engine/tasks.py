@@ -34,6 +34,44 @@ def generate_email_task(self, application_id, decision):
         GeneratedEmail.objects.filter(application_id=application_id, decision=decision).order_by("-created_at").first()
     )
     if existing:
+        if existing.passed_guardrails and existing.sent_at is None:
+            # Generated but never delivered (transient SMTP failure, or a worker
+            # killed after persist-before-send). Attempt delivery now using the
+            # stored subject/body instead of returning 'done' — the row-locked
+            # send below is idempotent, so this cannot double-send even under a
+            # redelivery race. (M6)
+            application = LoanApplication.objects.select_related("applicant", "decision").get(pk=application_id)
+            delivered = False
+            if application.applicant.email:
+                with transaction.atomic():
+                    locked = GeneratedEmail.objects.select_for_update().get(pk=existing.pk)
+                    if locked.sent_at is None:
+                        from apps.email_engine.services.sender import send_decision_email
+
+                        send_result = send_decision_email(
+                            recipient_email=application.applicant.email,
+                            subject=locked.subject,
+                            body=locked.body,
+                            email_type="approval" if decision == "approved" else "denial",
+                        )
+                        if send_result.get("sent"):
+                            locked.sent_at = timezone.now()
+                            locked.save(update_fields=["sent_at"])
+                    delivered = locked.sent_at is not None
+            logger.info(
+                "Redelivery for application %s (%s): generated-but-unsent email send attempted (delivered=%s)",
+                application_id,
+                decision,
+                delivered,
+            )
+            return {
+                "email_id": str(existing.id),
+                "subject": existing.subject,
+                "passed_guardrails": existing.passed_guardrails,
+                "attempt_number": existing.attempt_number,
+                "email_sent": delivered,
+            }
+
         logger.info("Email already exists for application %s (%s), skipping generation", application_id, decision)
         return {
             "email_id": str(existing.id),

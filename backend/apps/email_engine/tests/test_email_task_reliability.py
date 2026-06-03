@@ -190,3 +190,39 @@ def test_send_occurs_once_when_not_yet_sent(monkeypatch, sample_application):
     assert result["email_sent"] is True
     email = GeneratedEmail.objects.get(pk=result["email_id"])
     assert email.sent_at is not None
+
+
+@pytest.mark.django_db
+def test_redelivery_sends_generated_but_unsent_email(monkeypatch, sample_application):
+    """A passing-but-unsent email (sent_at is None) must be delivered on a later
+    task run, exactly once, without re-generating (regression: the idempotency
+    guard treated 'a row exists' as 'work done' and never retried the send)."""
+    from apps.email_engine import tasks as email_tasks
+
+    GeneratedEmail.objects.create(
+        application=sample_application,
+        decision="denied",
+        subject="Your application",
+        body="Body text",
+        prompt_used="p",
+        passed_guardrails=True,
+        sent_at=None,  # generated but never delivered
+    )
+
+    from unittest.mock import MagicMock
+
+    send_mock = MagicMock(return_value={"sent": True})
+    monkeypatch.setattr("apps.email_engine.services.sender.send_decision_email", send_mock)
+
+    # Generation must NOT run again — an email already exists; only the send.
+    def _must_not_generate(self, *a, **kw):
+        raise AssertionError("generate() must not run when an email already exists")
+
+    monkeypatch.setattr("apps.email_engine.services.email_generator.EmailGenerator.generate", _must_not_generate)
+
+    result = email_tasks.generate_email_task(str(sample_application.id), "denied")
+
+    assert send_mock.call_count == 1  # delivered exactly once
+    assert result["email_sent"] is True
+    email = GeneratedEmail.objects.get(application=sample_application, decision="denied")
+    assert email.sent_at is not None  # marker persisted
