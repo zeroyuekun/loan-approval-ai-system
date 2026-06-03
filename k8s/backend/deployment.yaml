@@ -54,7 +54,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /api/v1/health/deep/
+              path: /api/v1/health/
               port: 8000
             periodSeconds: 10
             failureThreshold: 3
