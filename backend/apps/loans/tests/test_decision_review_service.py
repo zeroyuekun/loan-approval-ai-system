@@ -37,6 +37,16 @@ def test_uphold_marks_review_and_keeps_denied(django_user_model):
     assert AuditLog.objects.filter(action="decision_review_resolved", resource_id=str(review.id)).exists()
 
 
+def test_uphold_stamps_human_involvement_assisted(django_user_model):
+    """An upheld review is a human-reviewed event: the decision must be stamped
+    ASSISTED so the ADM disclosure stops reporting 'solely automated' (the
+    disclosure derives its mode from this persisted fact)."""
+    app, officer, review = _denied_with_review(django_user_model)
+    apply_review_outcome(review, officer=officer, outcome="upheld", note="confirmed")
+    decision = LoanDecision.objects.get(application=app)
+    assert decision.human_involvement == LoanDecision.HumanInvolvement.ASSISTED
+
+
 def test_overturn_approves_and_audits(django_user_model, monkeypatch):
     import apps.loans.services.decision_review as svc
 

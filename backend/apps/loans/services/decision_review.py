@@ -53,6 +53,17 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
             locked.status = DecisionReview.Status.UPHELD
             locked.save(update_fields=["assigned_officer", "resolution_note", "resolved_at", "status"])
             application = locked.application
+            # A human officer reviewed and CONFIRMED the decision: record the human
+            # touch so the ADM disclosure stops reporting 'solely automated' (the
+            # symmetric counterpart to the OVERRIDDEN stamp on the overturn path).
+            # Promote NONE -> ASSISTED only; never downgrade an existing stamp.
+            try:
+                decision = LoanDecision.objects.select_for_update().get(application_id=locked.application_id)
+            except LoanDecision.DoesNotExist:
+                decision = None
+            if decision is not None and decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
+                decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+                decision.save(update_fields=["human_involvement"])
         else:
             try:
                 application = LoanApplication.objects.select_for_update().get(pk=locked.application_id)
