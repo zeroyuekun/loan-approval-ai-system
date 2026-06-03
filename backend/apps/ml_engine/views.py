@@ -263,7 +263,11 @@ class ModelActivateView(APIView):
             return Response({"error": "Model not found"}, status=status.HTTP_404_NOT_FOUND)
 
         with transaction.atomic():
-            ModelVersion.objects.filter(is_active=True).update(
+            # Scope deactivation to THIS model's segment, matching the trainer
+            # (tasks.py) and ModelVersion.clean(). A blanket deactivation would
+            # silently retire other segments' active champions (e.g. activating a
+            # personal-loan model would knock out the home-loan champion).
+            ModelVersion.objects.filter(is_active=True, segment=version.segment).update(
                 is_active=False,
                 traffic_percentage=0,
             )
