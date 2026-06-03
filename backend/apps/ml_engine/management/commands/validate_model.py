@@ -173,6 +173,9 @@ class Command(BaseCommand):
         findings = "\n".join(findings_parts)
 
         # Create the report
+        from dateutil.relativedelta import relativedelta
+
+        next_validation_due = date.today() + relativedelta(months=6)
         report = ModelValidationReport.objects.create(
             model_version=champion,
             validator_name=validator_name,
@@ -189,11 +192,7 @@ class Command(BaseCommand):
             challenger_comparison=comparison,
             holdout_metrics=champion_metrics,
             fairness_review=fairness,
-            next_validation_due=date(
-                date.today().year + (1 if date.today().month <= 6 else 0),
-                date.today().month + 6 if date.today().month <= 6 else date.today().month - 6,
-                1,
-            ),
+            next_validation_due=next_validation_due,
         )
 
         self.stdout.write(
@@ -208,7 +207,6 @@ class Command(BaseCommand):
 
     def _evaluate_model(self, model_version, df):
         """Evaluate a model version on holdout data and return metrics."""
-        import joblib
         from sklearn.metrics import (
             accuracy_score,
             brier_score_loss,
@@ -218,17 +216,18 @@ class Command(BaseCommand):
             roc_auc_score,
         )
 
-        model = joblib.load(model_version.file_path)
+        from apps.ml_engine.services.predictor import ModelPredictor
 
-        # Get feature columns (exclude target and non-feature columns)
-        exclude_cols = {"approved", "applicant_name", "id", "application_id"}
-        feature_cols = [c for c in df.columns if c not in exclude_cols]
-
-        X = df[feature_cols].select_dtypes(include=[np.number])
+        # Score through the model's OWN preprocessing pipeline (feature
+        # engineering + one-hot + scaling) aligned to the trained feature_cols.
+        # Feeding the raw CSV's numeric columns would mismatch the trained
+        # feature vector and either crash (feature_names mismatch) or produce
+        # meaningless SR 11-7 validation metrics.
+        predictor = ModelPredictor(model_version=model_version)
+        X = predictor.transform(df)[predictor.feature_cols]
         y = df["approved"].values
 
-        # Predict
-        probabilities = model.predict_proba(X)[:, 1]
+        probabilities = predictor.model.predict_proba(X)[:, 1]
         threshold = model_version.optimal_threshold or 0.5
         predictions = (probabilities >= threshold).astype(int)
 
@@ -245,15 +244,13 @@ class Command(BaseCommand):
 
     def _evaluate_fairness(self, model_version, df):
         """Run disparate impact analysis on protected attributes."""
-        import joblib
+        from apps.ml_engine.services.predictor import ModelPredictor
 
-        model = joblib.load(model_version.file_path)
-        exclude_cols = {"approved", "applicant_name", "id", "application_id"}
-        feature_cols = [c for c in df.columns if c not in exclude_cols]
-        X = df[feature_cols].select_dtypes(include=[np.number])
+        predictor = ModelPredictor(model_version=model_version)
+        X = predictor.transform(df)[predictor.feature_cols]
 
         threshold = model_version.optimal_threshold or 0.5
-        probabilities = model.predict_proba(X)[:, 1]
+        probabilities = predictor.model.predict_proba(X)[:, 1]
         predictions = (probabilities >= threshold).astype(int)
 
         fairness = {}
