@@ -12,7 +12,7 @@ Full-stack loan approval system for Australian lending. XGBoost scores applicant
 **What makes it different:**
 
 - **3-layer bias detection** — regex pre-screen → Claude review → human escalation, scored 0–100 per generated email
-- **15 deterministic guardrails** on every Claude message (prohibited language, hallucinated dollar amounts, aggressive tone, regulatory-element presence, and more)
+- **18 deterministic guardrails** on every Claude-generated decision email (19 on a marketing email; prohibited language, hallucinated dollar amounts, aggressive tone, regulatory-element presence, and more)
 - **$5/day Claude spend cap** with template-first generation — production cost control built in, not an afterthought
 - **Decision transparency & contestability** — every applicant is told how their decision was made (solely automated, assisted, or human-decided) and can request a human review; borderline, drift, and policy-"refer" cases escalate to an officer before any automated email is sent
 
@@ -45,7 +45,7 @@ flowchart TD
     A[Application submitted] --> B[1. XGBoost scores it]
     B --> B1[probability + SHAP]
     B1 --> C[2. Claude writes the decision email<br/>denials also carry a deterministic NBO teaser]
-    C --> D[3. Guardrails — 15 deterministic checks]
+    C --> D[3. Guardrails — 18 deterministic checks]
     D --> E[4. Bias pre-screen regex<br/>score 0–100]
     E -- "score ≤ 30" --> F[Send the email]
     E -- "31–59 (moderate)" --> G[Junior LLM classifies flags]
@@ -152,7 +152,7 @@ workflows/          # markdown SOPs for each pipeline stage
 <details>
 <summary><strong>ML model details</strong> (click to expand)</summary>
 
-XGBoost trained on synthetic Australian lending data. 71 raw applicant input fields (48 numeric + categoricals) with 31 engineered interactions, Optuna Bayesian hyperparameter optimisation, isotonic probability calibration, 21 monotonic constraints (higher income -> lower risk, etc.).
+XGBoost trained on synthetic Australian lending data. 71 raw applicant input fields (48 numeric + categoricals) with 31 engineered interactions, Optuna Bayesian hyperparameter optimisation, isotonic probability calibration, 75 monotonic constraints (higher income -> lower risk, etc.).
 
 The synthetic data is calibrated against ATO, ABS, APRA, and Equifax published statistics. It includes latent variables the model can't see (documentation quality, savings patterns, employer stability), underwriter disagreement noise, and measurement error — so the model hits realistic metrics (test AUC 0.88 per the active `ModelVersion`; reproducible benchmark on a 2,000-record subset is 0.85 with default hyperparameters — see `docs/experiments/benchmark.md`) rather than the 0.99 you get with clean synthetic labels.
 
@@ -160,7 +160,7 @@ Other ML features: IV-based feature selection, PSI/CSI drift monitoring, reject 
 
 ## Email guardrails
 
-Every email Claude generates goes through 10 checks before sending:
+Every Claude-generated decision email passes 18 deterministic checks before sending (a marketing email runs 19; a pre-vetted template runs a 4-check core). They include:
 
 1. Prohibited language (discrimination acts)
 2. Hallucinated dollar amounts (validated against application data)
@@ -228,7 +228,7 @@ A separate `watchdog` service runs in the core stack at all times. It polls ever
 
 ## Testing
 
-~1000 tests across 66 files. 60% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
+1,750+ backend tests and 327 frontend tests. 63% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
 
 <details>
 <summary><strong>Verifying the build</strong> (click to expand)</summary>
@@ -287,7 +287,7 @@ docker compose exec backend python manage.py prune_model_artifacts            # 
 - **Synthetic training data.** The data generator is calibrated against ATO, ABS, APRA, and Equifax published statistics, runs labels through a 1000-line rules-based underwriting engine, and adds a separate loan-performance simulator. It does not capture real-world feedback loops, fraud patterns, broker channel effects, or lender-specific heuristics. A production rollout would retrain on real historical data.
 - **Reported AUC is on the synthetic pipeline.** XGBoost achieves 0.88 AUC on the synthetic holdout of the active `ModelVersion` (see `backend/docs/MODEL_CARD.md`). The TSTR validator estimates real-world AUC around 0.82 with moderate confidence. Walk-forward temporal CV AUC is reported in `training_metadata.temporal_cv_auc_mean` so the drift gap against random CV is visible.
 - **XGBoost lift over a simple scorecard is a measured number.** Every training run fits a logistic-regression baseline on `credit_score, annual_income, loan_amount, debt_to_income` and records `training_metadata.baseline_auc` + `xgb_lift_over_baseline` on the model card.
-- **Email generation is template-first.** Claude is used for creative variations only, with a $5/day spend cap on the Anthropic API. The guardrail layer runs 15 deterministic checks on every LLM-generated message before it ships.
+- **Email generation is template-first.** Claude is used for creative variations only, with a $5/day spend cap on the Anthropic API. The guardrail layer runs 18 deterministic checks on every LLM-generated decision email before it ships.
 - **Compliance framing is implemented, not audited.** APRA CPG 235, NCCP Act responsible lending, Banking Code disclosure, and adverse-action language are baked into the data model, email templates, and fairness gates. None of this has been independently reviewed by a compliance professional.
 - **Reliability is prototype-grade.** Eight core services ship with healthchecks, the watchdog auto-recovers stuck pipelines, and the monitoring stack exposes Prometheus metrics + Grafana dashboards. No paging, no multi-region failover, no SLO enforcement. Good enough for a demo, not a fintech launch.
 
