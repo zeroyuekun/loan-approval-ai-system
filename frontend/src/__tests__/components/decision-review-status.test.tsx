@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
+import { DecisionReviewStatus } from '@/components/applications/DecisionReviewStatus'
 
 vi.mock('@/hooks/useDecisionReview', () => ({
   useDecisionReview: () => ({ data: null }),
@@ -33,8 +34,10 @@ describe('DenialExplanationPanel ADM + review', () => {
     expect(screen.getByRole('button', { name: /request a human review/i })).toBeInTheDocument()
   })
 
-  it('shows status text when a review already exists', () => {
-    // override the mock for this case is unnecessary; add a second component test only if simple.
-    expect(true).toBe(true)
+  it('DecisionReviewStatus renders no request form on approved/review screens (allowRequest=false, no prior review)', () => {
+    // The backend only accepts reviews on declined applications, so the
+    // approved/review screens must not offer a form that 400s on submit.
+    render(<DecisionReviewStatus applicationId="app-1" allowRequest={false} />)
+    expect(screen.queryByRole('button', { name: /request a human review/i })).not.toBeInTheDocument()
   })
 })

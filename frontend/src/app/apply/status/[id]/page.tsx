@@ -306,7 +306,7 @@ export default function CustomerApplicationStatusPage() {
           the denial panel unmounts (audit M9). The denial panel still owns the
           mount on the 'denied' screen. */}
       {(application.status === 'approved' || application.status === 'review') && (
-        <DecisionReviewStatus applicationId={application.id} />
+        <DecisionReviewStatus applicationId={application.id} allowRequest={false} />
       )}
 
       {/* Application Summary */}

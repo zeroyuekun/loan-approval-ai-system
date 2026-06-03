@@ -14,7 +14,16 @@ const STATUS_LABEL: Record<string, string> = {
   withdrawn: 'Withdrawn',
 }
 
-export function DecisionReviewStatus({ applicationId }: { applicationId: string }) {
+export function DecisionReviewStatus({
+  applicationId,
+  allowRequest = true,
+}: {
+  applicationId: string
+  /** Whether requesting a NEW review is valid here. The backend only accepts
+   *  reviews on declined applications, so the approved/review screens pass false
+   *  to avoid offering a form that 400s. Defaults true (the denial panel). */
+  allowRequest?: boolean
+}) {
   const { data: review } = useDecisionReview(applicationId)
   const requestReview = useRequestDecisionReview()
   const [reason, setReason] = useState('')
@@ -39,6 +48,13 @@ export function DecisionReviewStatus({ applicationId }: { applicationId: string 
         </CardContent>
       </Card>
     )
+  }
+
+  // No existing review: only offer the request form where contestation is valid
+  // (the denied screen). On approved/review screens a new review is rejected by
+  // the backend (must be 'denied'), so render nothing rather than a form that 400s.
+  if (!allowRequest) {
+    return null
   }
 
   return (
