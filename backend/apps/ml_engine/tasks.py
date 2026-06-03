@@ -370,7 +370,10 @@ def compute_weekly_drift_report(self):
     # Compute prediction distribution stats
     mean_prob = float(np.mean(probabilities))
     std_prob = float(np.std(probabilities))
-    approval_rate = float(np.mean(probabilities >= 0.5))
+    # Approval rate from the ACTUAL recorded decisions (which already encode
+    # group-adjusted thresholds + pricing-overlay denials), not a flat 0.5 cut
+    # on raw probabilities — matches the on-demand approval-rate computation.
+    approval_rate = predictions.filter(prediction="approved").count() / num_predictions
 
     # Compute PSI against training reference distribution
     training_meta = active_version.training_metadata or {}
@@ -383,9 +386,8 @@ def compute_weekly_drift_report(self):
         ref_array = np.array(reference_probs, dtype=float)
         psi_score = _compute_psi(ref_array, probabilities)
 
-        # Per-feature PSI is computed by compute_batch_drift_report (drift_monitor.py)
-        # which loads the full model bundle with reference distributions.
-        # This weekly task only computes probability-level PSI.
+        # Per-feature PSI is surfaced via the on-demand /drift/ endpoint
+        # (compute_on_demand_feature_psi); this weekly task tracks score-level PSI.
 
     # Determine alert level
     if psi_score is not None and psi_score >= 0.25:
