@@ -19,7 +19,6 @@ Usage:
 import logging
 from datetime import date
 
-import numpy as np
 import pandas as pd
 from django.core.management.base import BaseCommand, CommandError
 
