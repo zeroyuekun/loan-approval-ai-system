@@ -10,7 +10,6 @@ from apps.agents.models import AgentRun
 from apps.loans.models import FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
-from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
 from apps.ml_engine.services.predictor import ModelPredictor
 from apps.ml_engine.services.segmentation import derive_segment
 
@@ -94,20 +93,46 @@ class PipelineOrchestrator:
                 logger.warning("Counterfactual step: no _features_df in prediction result")
                 return []
 
-            engine = CounterfactualEngine(
-                model=predictor.model,
-                feature_cols=predictor.feature_cols,
-                training_data=features_df,
-                threshold=predictor.model_version.optimal_threshold or 0.5,
-                # Pass the predictor's transform so candidate raw-feature
-                # values are scored through the same engineered + one-hot
-                # pipeline the live model expects.
-                transform_fn=predictor._transform,
-            )
+            # Use the public predictor seam so candidate raw-feature values
+            # are scored through the same engineered + one-hot pipeline the
+            # live model expects, without reaching into predictor internals.
+            engine = predictor.build_counterfactual_engine(features_df, original_loan_amount)
             return engine.generate(features_df, original_loan_amount)
         except Exception as e:
             logger.warning("Counterfactual generation failed in orchestrator: %s", e)
             return []
+
+    # ------------------------------------------------------------------
+    # Idempotent status restore (L16)
+    # ------------------------------------------------------------------
+
+    def restore_status_from_decision(self, application_id):
+        """Idempotent: if a completed run left the app at 'pending', restore it
+        to its decided status via the audited state machine. No-op otherwise.
+
+        ALLOWED_TRANSITIONS does not permit pending->approved directly, so the
+        restore replays the legitimate pipeline path pending->processing->
+        <decision>; each hop produces a status_transition AuditLog. This
+        replaces the old save(update_fields=["status"]) that bypassed both
+        validation and auditing.
+        """
+        with transaction.atomic():
+            # Lock by pk — never via a nullable join (FOR UPDATE caveat).
+            app = LoanApplication.objects.select_for_update().get(pk=application_id)
+            if app.status != LoanApplication.Status.PENDING:
+                return
+            decision = LoanDecision.objects.filter(application_id=application_id).first()
+            if not decision:
+                return
+            target = decision.decision  # 'approved' or 'denied'
+            allowed = LoanApplication.ALLOWED_TRANSITIONS.get(app.status, [])
+            if target not in allowed:
+                # pending->approved is not a direct edge; replay via processing.
+                app.transition_to(
+                    LoanApplication.Status.PROCESSING,
+                    details={"source": "idempotent_restore"},
+                )
+            app.transition_to(target, details={"source": "idempotent_restore"})
 
     # ------------------------------------------------------------------
     # Main orchestration
@@ -412,6 +437,42 @@ class PipelineOrchestrator:
                 )
                 step = self._fail_step(step, str(e))
             steps.append(step)
+
+        # H1: borderline / severe-drift / policy-"refer" predictions must be
+        # decided by a human. Escalate BEFORE the email pipeline so no
+        # automated decision email is generated or sent for these cases.
+        if prediction_result.get("requires_human_review"):
+            waterfall.append(
+                self._waterfall_entry(
+                    "final_decision",
+                    "fail",
+                    "ESCALATED_HUMAN_REVIEW",
+                    "Prediction flagged for human review (borderline / drift / policy refer) — "
+                    "escalated before any automated decision was issued",
+                )
+            )
+            self._save_waterfall(application, waterfall)
+
+            step = self._start_step("human_review_required")
+            step = self._complete_step(
+                step,
+                result_summary={
+                    "review_category": "requires_human_review",
+                    "reason": "borderline / drift / policy refer",
+                },
+            )
+            steps.append(step)
+
+            with transaction.atomic():
+                application.refresh_from_db()
+                application.transition_to(
+                    LoanApplication.Status.REVIEW,
+                    details={"source": "orchestrator_requires_human_review"},
+                )
+            agent_run.status = "escalated"
+            self._finalize_run(agent_run, steps, start_time)
+            logger.info("Application %s: escalated to human review (requires_human_review)", application_id)
+            return agent_run
 
         # Steps 2-4: Email generation, bias check, delivery (delegated)
         steps, email_result, generated_email, bias_result, escalated = self._email_pipeline.run(

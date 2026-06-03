@@ -16,6 +16,25 @@ from .step_tracker import StepTracker
 logger = logging.getLogger("agents.orchestrator")
 
 
+def build_denial_reason_summary(shap_values: dict, feature_importances: dict) -> str:
+    """Human-readable denial-reason summary for the marketing/NBO step.
+
+    Uses the shared DecisionExplanation ranking + reason codes instead of the
+    old ad-hoc `"feature: 0.123"` float dump.
+    """
+    from apps.ml_engine.services.reason_codes import generate_adverse_action_reasons
+
+    reasons = generate_adverse_action_reasons(shap_values or {}, "denied")
+    if reasons:
+        return "; ".join(r["reason"] for r in reasons)
+    if feature_importances:
+        from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
+
+        drivers = ranked_denial_drivers(shap_values=shap_values or {}, feature_importances=feature_importances, max_n=3)
+        return ", ".join(name.replace("_", " ") for name, _ in drivers)
+    return ""
+
+
 class HumanReviewHandler:
     """Handles resuming the pipeline after human review."""
 
@@ -186,13 +205,12 @@ class HumanReviewHandler:
                 steps.append(step)
 
         elif decision == "denied":
-            # Extract denial reasons from stored feature importances
             denial_reasons = ""
             try:
-                fi = application.decision.feature_importances
-                if fi:
-                    top_factors = sorted(fi.items(), key=lambda x: x[1], reverse=True)[:3]
-                    denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
+                denial_reasons = build_denial_reason_summary(
+                    application.decision.shap_values,
+                    application.decision.feature_importances,
+                )
             except (LoanDecision.DoesNotExist, AttributeError) as exc:
                 logger.debug(
                     "denial_feature_importances_missing",
@@ -219,6 +237,12 @@ class HumanReviewHandler:
                 decision,
                 details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
             )
+            # H2: record that a human was involved, so the ADM disclosure can
+            # truthfully report "assisted" after status moves off 'review'.
+            loan_decision = application.decision
+            if loan_decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
+                loan_decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+                loan_decision.save(update_fields=["human_involvement"])
         self.tracker.finalize_run(agent_run, steps, start_time)
 
         # Emit time-to-resolution for the bias review queue (docs/slo.md).

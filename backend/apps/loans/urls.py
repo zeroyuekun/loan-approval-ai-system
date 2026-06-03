@@ -6,6 +6,7 @@ from . import views
 router = DefaultRouter()
 router.register(r"audit-logs", views.AuditLogViewSet, basename="auditlog")
 router.register(r"complaints", views.ComplaintViewSet, basename="complaint")
+router.register(r"decision-reviews", views.DecisionReviewViewSet, basename="decision-review")
 router.register(r"", views.LoanApplicationViewSet, basename="loan-application")
 
 urlpatterns = [

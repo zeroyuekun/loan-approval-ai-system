@@ -5,6 +5,7 @@ from django.conf import settings
 from apps.agents.exceptions import LLMServiceError
 from apps.agents.models import BiasReport, MarketingEmail, NextBestOffer
 
+from .bias.thresholds import is_severe
 from .bias_detector import MarketingBiasDetector, MarketingEmailReviewer
 from .marketing_agent import MarketingAgent
 from .next_best_offer import NextBestOfferGenerator
@@ -300,7 +301,7 @@ class MarketingPipelineService:
         marketing_bias_score = marketing_bias_result.get("score", 100)
 
         # Inclusive bound: a score equal to the review threshold must block.
-        if marketing_bias_score >= bias_threshold_review:
+        if is_severe(marketing_bias_score, bias_threshold_review):
             logger.warning(
                 "Application %s: marketing email blocked — bias score %s >= review threshold %s",
                 application.pk,

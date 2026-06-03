@@ -65,6 +65,20 @@ app.conf.accept_content = ["json"]
 # ML worker processes importing large libs).
 app.conf.worker_max_tasks_per_child = 1000
 
+# Surface broker enqueue failures instead of silently dropping (L23).
+# For the Redis transport, fail fast on publish-time connection errors so
+# .delay() raises and the outbox loop keeps the durable row rather than
+# deleting it on a phantom "success". (AMQP would instead use confirm_publish.)
+# NOTE: these flags are GLOBAL across all queues, not just the outbox path —
+# they change startup/retry behaviour everywhere, so a healthy-broker smoke
+# (docker compose up; confirm workers connect) is required before merge.
+app.conf.broker_transport_options = {
+    "socket_timeout": 5,
+    "socket_connect_timeout": 5,
+    "retry_on_timeout": False,
+}
+app.conf.broker_connection_retry_on_startup = False
+
 app.conf.task_routes = {
     "apps.ml_engine.tasks.*": {"queue": "ml"},
     "apps.email_engine.tasks.*": {"queue": "email"},

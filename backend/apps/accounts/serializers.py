@@ -5,6 +5,8 @@ from decimal import Decimal, InvalidOperation
 from django.contrib.auth import authenticate
 from rest_framework import serializers
 
+from utils.sanitization import sanitize_prompt_input
+
 from .models import CustomerProfile, CustomUser
 
 
@@ -46,7 +48,28 @@ class EncryptedDecimalField(serializers.DecimalField):
         return super().to_representation(value)
 
 
-class RegisterSerializer(serializers.ModelSerializer):
+class NameValidationMixin:
+    """Shared first/last-name validation. Names flow into LLM prompts (marketing
+    follow-ups), so they are attacker-controlled prompt input — reject injection-y
+    / structural content (L26): letters, digits, spaces and a few name punctuation
+    marks ('.-) up to 100 chars. Applied on BOTH registration and profile update so
+    the guard cannot be bypassed via PATCH /profile/."""
+
+    _NAME_RE = re.compile(r"^[\w .'\-]{0,100}$", re.UNICODE)
+
+    def _validate_name(self, value, field):
+        if value and (sanitize_prompt_input(value, max_length=100) != value.strip() or not self._NAME_RE.match(value)):
+            raise serializers.ValidationError(f"{field} contains characters that are not allowed.")
+        return value
+
+    def validate_first_name(self, value):
+        return self._validate_name(value, "first_name")
+
+    def validate_last_name(self, value):
+        return self._validate_name(value, "last_name")
+
+
+class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=12)
     password2 = serializers.CharField(write_only=True, min_length=12)
 
@@ -97,7 +120,7 @@ class LoginSerializer(serializers.Serializer):
         return data
 
 
-class UserSerializer(serializers.ModelSerializer):
+class UserSerializer(NameValidationMixin, serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = ("id", "username", "email", "role", "first_name", "last_name", "created_at")

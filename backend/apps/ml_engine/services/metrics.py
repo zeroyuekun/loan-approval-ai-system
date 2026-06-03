@@ -24,6 +24,8 @@ from sklearn.metrics import (
     roc_curve,
 )
 
+from apps.ml_engine.services import drift_monitor
+
 
 class MetricsService:
     """Helpers for computing classification metrics."""
@@ -238,8 +240,11 @@ class MetricsService:
         actual_pct = actual_pct / actual_pct.sum()
 
         # PSI = sum((actual% - expected%) * ln(actual% / expected%))
+        # Route the scalar through the canonical primitive so every PSI
+        # consumer reports the same number (single source of truth, M1).
+        # The per-bin breakdown below is presentation-only.
         psi_components = (actual_pct - expected_pct) * np.log(actual_pct / expected_pct)
-        psi_value = float(np.sum(psi_components))
+        psi_value = drift_monitor.compute_psi(expected, actual, bins=n_bins)
 
         if psi_value < 0.10:
             status = "stable"
@@ -897,29 +902,18 @@ def psi(expected_dist, actual_dist, bins: int = 10) -> float:
     PSI < 0.10: stable, 0.10-0.25: moderate shift, > 0.25: significant.
     Matches the compute_psi implementation above but returns a bare float
     so gate logic can `psi(...) <= 0.25` without indexing a dict.
-    """
-    import numpy as _np
 
-    expected = _np.asarray(expected_dist, dtype=float)
-    actual = _np.asarray(actual_dist, dtype=float)
-    expected = expected[_np.isfinite(expected)]
-    actual = actual[_np.isfinite(actual)]
+    Thin wrapper over the canonical ``drift_monitor.compute_psi`` primitive
+    (single source of truth, M1). The small-sample guard is preserved so the
+    gate-logic contract (under-`bins` samples → 0.0) is unchanged.
+    """
+    expected = np.asarray(expected_dist, dtype=float)
+    actual = np.asarray(actual_dist, dtype=float)
+    expected = expected[np.isfinite(expected)]
+    actual = actual[np.isfinite(actual)]
     if len(expected) < bins or len(actual) < bins:
         return 0.0
-
-    edges = _np.unique(_np.percentile(expected, _np.linspace(0, 100, bins + 1)))
-    if len(edges) < 3:
-        return 0.0
-
-    eps = 1e-4
-    exp_counts = _np.histogram(expected, bins=edges)[0]
-    act_counts = _np.histogram(actual, bins=edges)[0]
-    exp_pct = (exp_counts + eps) / (len(expected) + eps * len(exp_counts))
-    act_pct = (act_counts + eps) / (len(actual) + eps * len(act_counts))
-    exp_pct = exp_pct / exp_pct.sum()
-    act_pct = act_pct / act_pct.sum()
-
-    return float(_np.sum((act_pct - exp_pct) * _np.log(act_pct / exp_pct)))
+    return drift_monitor.compute_psi(expected, actual, bins=bins)
 
 
 def psi_by_feature(X_ref, X_cur, feature_cols, bins: int = 10) -> dict:

@@ -2,13 +2,9 @@ from rest_framework import serializers
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.serializers import UserSerializer
-from apps.ml_engine.services.reason_codes import (
-    generate_adverse_action_reasons,
-    generate_reapplication_guidance,
-)
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
-from .models import AuditLog, Complaint, FraudCheck, LoanApplication, LoanDecision
+from .models import AuditLog, Complaint, DecisionReview, FraudCheck, LoanApplication, LoanDecision
 
 
 class LoanDecisionSerializer(serializers.ModelSerializer):
@@ -47,6 +43,7 @@ class CustomerLoanDecisionSerializer(serializers.ModelSerializer):
     denial_reasons = serializers.SerializerMethodField()
     reapplication_guidance = serializers.SerializerMethodField()
     counterfactuals = serializers.SerializerMethodField()
+    adm_disclosure = serializers.SerializerMethodField()
 
     class Meta:
         model = LoanDecision
@@ -57,21 +54,30 @@ class CustomerLoanDecisionSerializer(serializers.ModelSerializer):
             "denial_reasons",
             "reapplication_guidance",
             "counterfactuals",
+            "adm_disclosure",
         )
 
+    def _payload(self, obj):
+        # Memoize per-instance so the four method fields share one assembly.
+        cached = getattr(obj, "_explanation_payload", None)
+        if cached is None:
+            from apps.ml_engine.services.decision_explanation import build_explanation_from_decision
+
+            cached = build_explanation_from_decision(obj)
+            obj._explanation_payload = cached
+        return cached
+
     def get_denial_reasons(self, obj):
-        return generate_adverse_action_reasons(obj.shap_values or {}, obj.decision)
+        return self._payload(obj)["denial_reasons"]
 
     def get_counterfactuals(self, obj):
-        if obj.decision == "denied":
-            return obj.counterfactual_results or []
-        return []
+        return self._payload(obj)["counterfactuals"]
 
     def get_reapplication_guidance(self, obj):
-        if obj.decision != "denied":
-            return None
-        reasons = self.get_denial_reasons(obj)
-        return generate_reapplication_guidance(obj.counterfactual_results or [], reasons)
+        return self._payload(obj)["reapplication_guidance"]
+
+    def get_adm_disclosure(self, obj):
+        return self._payload(obj)["adm_disclosure"]
 
 
 class FraudCheckSerializer(serializers.ModelSerializer):
@@ -344,4 +350,63 @@ class ComplaintSerializer(serializers.ModelSerializer):
             ip_address=request.META.get("REMOTE_ADDR"),
         )
 
+        return instance
+
+
+class DecisionReviewSerializer(serializers.ModelSerializer):
+    reason = serializers.CharField(max_length=4000)
+
+    class Meta:
+        model = DecisionReview
+        fields = (
+            "id",
+            "application",
+            "reason",
+            "status",
+            "resolution_note",
+            "outcome_decision",
+            "requested_at",
+            "resolved_at",
+        )
+        read_only_fields = (
+            "id",
+            "status",
+            "resolution_note",
+            "outcome_decision",
+            "requested_at",
+            "resolved_at",
+        )
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        user = request.user
+        application = attrs["application"]
+        if application.applicant_id != user.id:
+            raise serializers.ValidationError("You can only request a review of your own application.")
+        if application.status != "denied":
+            raise serializers.ValidationError("Reviews can only be requested on declined applications.")
+        from .models import DecisionReview as _DR
+
+        open_states = (_DR.Status.REQUESTED, _DR.Status.UNDER_REVIEW)
+        if application.decision_reviews.filter(status__in=open_states).exists():
+            raise serializers.ValidationError("A review is already in progress for this application.")
+        return attrs
+
+    def create(self, validated_data):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        request = self.context["request"]
+        validated_data["requested_by"] = request.user
+        validated_data["sla_deadline"] = timezone.now() + timedelta(days=21)
+        instance = super().create(validated_data)
+        AuditLog.objects.create(
+            user=request.user,
+            action="decision_review_requested",
+            resource_type="DecisionReview",
+            resource_id=str(instance.id),
+            details={"application_id": str(instance.application_id)},
+            ip_address=request.META.get("REMOTE_ADDR"),
+        )
         return instance

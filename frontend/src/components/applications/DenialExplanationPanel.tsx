@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { XCircle, RefreshCw, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
+import type { AdmDisclosure } from '@/types'
+import { DecisionReviewStatus } from './DecisionReviewStatus'
 
 interface DenialExplanationPanelProps {
   denialReasons: Array<{ code: string; reason: string; feature: string }>
@@ -14,6 +16,8 @@ interface DenialExplanationPanelProps {
     message: string
   } | null
   creditScore: number | null
+  applicationId?: string
+  admDisclosure?: AdmDisclosure | null
 }
 
 function getEquifaxBand(score: number): string {
@@ -29,6 +33,8 @@ export function DenialExplanationPanel({
   counterfactuals,
   reapplicationGuidance,
   creditScore,
+  applicationId,
+  admDisclosure,
 }: DenialExplanationPanelProps) {
   if (!denialReasons || denialReasons.length === 0) return null
 
@@ -62,6 +68,13 @@ export function DenialExplanationPanel({
               <span className="font-medium">{getEquifaxBand(creditScore)}</span>
               <span className="text-muted-foreground"> (Equifax AU band)</span>
             </div>
+          )}
+
+          {admDisclosure && (
+            <p className="text-xs text-muted-foreground">
+              {admDisclosure.summary}{' '}
+              {admDisclosure.human_review_right && 'You have the right to request a human review.'}
+            </p>
           )}
         </CardContent>
       </Card>
@@ -124,6 +137,8 @@ export function DenialExplanationPanel({
           </div>
         </CardContent>
       </Card>
+
+      {applicationId && <DecisionReviewStatus applicationId={applicationId} />}
     </div>
   )
 }

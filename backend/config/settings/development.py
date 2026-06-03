@@ -19,6 +19,11 @@ if os.environ.get("POSTGRES_HOST"):
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
             "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            # Tag connections so the watchdog idle-in-transaction reaper (L24)
+            # can scope its kill to this app. Keep in sync with DB_APPLICATION_NAME.
+            "OPTIONS": {
+                "application_name": DB_APPLICATION_NAME,  # noqa: F405 — from base via star-import
+            },
         }
     }
 else:

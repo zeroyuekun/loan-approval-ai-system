@@ -19,7 +19,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from apps.ml_engine.services import drift_monitor
 from apps.ml_engine.services.metrics import (
+    MetricsService,
     brier_decomposition,
     ks_statistic,
     psi,
@@ -90,6 +92,23 @@ def test_psi_by_feature_skips_missing_cols():
     assert "a" in out
     assert "b" not in out
     assert "missing_everywhere" not in out
+
+
+def test_metricsservice_psi_matches_canonical():
+    """M1: MetricsService.compute_psi routes its scalar through the canonical
+    drift_monitor primitive, so the numbers agree (single source of truth)."""
+    rng = np.random.default_rng(3)
+    a = rng.normal(0, 1, 2000)
+    b = rng.normal(0.4, 1, 2000)
+    assert MetricsService().compute_psi(a, b)["psi"] == pytest.approx(drift_monitor.compute_psi(a, b), abs=1e-4)
+
+
+def test_module_psi_matches_canonical():
+    """M1: module-level psi() is a thin wrapper over the canonical primitive."""
+    rng = np.random.default_rng(5)
+    a = rng.normal(0, 1, 2000)
+    b = rng.normal(0.6, 1, 2000)
+    assert psi(a, b) == pytest.approx(drift_monitor.compute_psi(a, b), abs=1e-9)
 
 
 # ===========================================================================

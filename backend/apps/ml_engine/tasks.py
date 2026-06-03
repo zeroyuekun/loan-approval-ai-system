@@ -269,8 +269,12 @@ def run_prediction_task(self, application_id):
         },
     )
 
-    # Update application status — flag borderline cases for human review
-    if result.get("requires_human_review"):
+    # Flag borderline cases for human review ONLY when the standalone path is
+    # explicitly enabled. The standalone task creates no escalated AgentRun, so
+    # a 'review' transition here would be unresumable and would leave the ADM
+    # disclosure stale (Phase-1 Issue 1). Default: apply the raw decision.
+    standalone_enabled = getattr(settings, "ML_STANDALONE_PREDICT_ENABLED", False)
+    if standalone_enabled and result.get("requires_human_review"):
         application.transition_to("review")
     else:
         application.transition_to(result["prediction"])
@@ -366,7 +370,10 @@ def compute_weekly_drift_report(self):
     # Compute prediction distribution stats
     mean_prob = float(np.mean(probabilities))
     std_prob = float(np.std(probabilities))
-    approval_rate = float(np.mean(probabilities >= 0.5))
+    # Approval rate from the ACTUAL recorded decisions (which already encode
+    # group-adjusted thresholds + pricing-overlay denials), not a flat 0.5 cut
+    # on raw probabilities — matches the on-demand approval-rate computation.
+    approval_rate = predictions.filter(prediction="approved").count() / num_predictions
 
     # Compute PSI against training reference distribution
     training_meta = active_version.training_metadata or {}
@@ -379,9 +386,8 @@ def compute_weekly_drift_report(self):
         ref_array = np.array(reference_probs, dtype=float)
         psi_score = _compute_psi(ref_array, probabilities)
 
-        # Per-feature PSI is computed by compute_batch_drift_report (drift_monitor.py)
-        # which loads the full model bundle with reference distributions.
-        # This weekly task only computes probability-level PSI.
+        # Per-feature PSI is surfaced via the on-demand /drift/ endpoint
+        # (compute_on_demand_feature_psi); this weekly task tracks score-level PSI.
 
     # Determine alert level
     if psi_score is not None and psi_score >= 0.25:

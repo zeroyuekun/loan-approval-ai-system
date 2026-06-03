@@ -1,5 +1,47 @@
 # Changelog
 
+## v1.11.0 — Decision Transparency, Contestability & Audit Remediation
+
+Adds Privacy Act automated-decision-making (ADM) transparency + a customer contestability path, then works a verified senior-audit backlog (3 HIGH / 9 MEDIUM / 21 LOW, every finding adversarially re-verified) across six phases. On branch `feat/decision-transparency-contestability` (PR #207). Backend + frontend green end-to-end; pending merge.
+
+### Phase 1 — ADM transparency correctness (3 HIGH)
+
+- **Honour `requires_human_review` (H1).** The orchestrator escalates borderline / severe-drift / policy-"refer" predictions to the human-review queue *before* generating or sending any decision email, instead of silently auto-deciding and emailing.
+- **Persisted human-involvement (H2).** New `LoanDecision.human_involvement` field (`none`/`assisted`/`overridden`, migration `0025`), stamped `assisted` when a reviewer resolves an escalation. ADM disclosure reads this *persisted* fact, not the transient `application.status`.
+- **Honest disclosure on officer overturn (H3).** An overturn stamps `overridden` → disclosure reads *"Reviewed and decided by a lending officer"* (mode `human`), never falsely *"solely automated"*. New `human_override` register entry; defensive row-lock on the overturned `LoanDecision`.
+
+### Phase 2 — Contestability feature finish
+
+- **`DecisionReview` model + API** (built earlier in this branch): request human review of a declined automated decision; officer uphold/overturn, concurrency-safe, audit-logged, gated by `DECISION_REVIEW_ENABLED`. Plus the **ADM disclosure register** and the unified **`DecisionExplanation` assembler** (single source for denial-reason ranking).
+- `DecisionReview.resolve` now returns **409 (not 500)** on an ineligible state and serializes the **resolved** object (fresh status), not the stale pre-resolution one (M3/L30/M8). Server-side `?application=` filter so the customer UI resolves the right review regardless of pagination (L32). Overturned/withdrawn status is now reachable in the customer UI (L31/M9). Audited **customer withdraw** action realises the `WITHDRAWN` state (L33). The legacy `POST /ml/predict/{id}/` is **disabled by default** behind `ML_STANDALONE_PREDICT_ENABLED` (closes an ADM-disclosure gap on a path with no AgentRun lifecycle).
+
+### Phase 3 — Bias & escalation safety
+
+- Bias-detection **infrastructure failure now fails *safe*** (`BIAS_FAILURE_MODE`, default `block`): the email is withheld, the run marked failed, a `bias_check_unavailable_total` metric emitted, and the app rolled back to `pending` — instead of silently shipping with a hardcoded passing score (M7/M10/L21). Inclusive `>=` bias boundary shared across decision + marketing gates (M4); `requires_human_review` is monotonic with `flagged` (L18). README/ADR corrected to describe the *real* flow (senior Opus review runs on marketing emails only; no per-decision-email Claude call added — cost-conscious).
+
+### Phase 4 — Reliability hardening
+
+- `$5/day` Claude spend cap is now an **atomic Lua reserve** (no check-then-act TOCTOU overshoot under concurrency; reservation fully released on failed calls) (M5). Decision-email task: blocking in-task sleeps replaced with Celery-native retry + `soft_time_limit`, and **idempotent send** gated on a new `GeneratedEmail.sent_at` marker under `select_for_update` (no duplicate emails under at-least-once redelivery) (M6/L25, migration `email_engine 0006`). Locked owner-checked stuck-state cleanup (L22); outbox row deleted only after the app leaves `PENDING` + fail-fast broker options (L23); watchdog reaps only `idle in transaction` connections, scoped by `application_name` (L24).
+
+### Phase 5 — Next-best-offer in the denial email
+
+- The denial email now carries a **concise, guardrail-validated alternative-offer teaser** (best recommendation-engine offer + headline figure), with the fuller personalised offer set still shipping as a separate marketing follow-up — a deliberate two-email design. The hallucinated-number guardrail validates the new figure (no new check; existing whitelist extended). NBO bug-fixes: unsecured-personal term selection applies a real affordability constraint instead of always 60 months (L19); offer reasoning is **bound to offers by product id**, not positional index, so figures can never attach to the wrong product (L20). No apology language (locked rule preserved).
+
+### Phase 6 — Architecture & security polish
+
+- **One canonical PSI primitive** (`drift_monitor.compute_on_demand_feature_psi`); the view + `MetricsService`/module `psi()` delegate to it (M1). God-method decompositions of `DataGenerator.generate()` and `UnderwritingEngine.compute_approval()` — verbatim, RNG-order-preserving, guarded by determinism snapshots so synthetic data is byte-identical (M2/L15). `agents` endpoints use proper DRF serializers (OpenAPI schema restored; list endpoint no longer re-renders marketing HTML per row) (L13/L14). Orchestrator uses a public predictor seam instead of a private method (L17); task status-restore goes through the audited state machine (L16). Security hardening: marketing agent + senior bias reviewers use the shared prompt-injection sanitizer with `<user_content>` fencing + never-follow guards, registration validates name content (L26/L27); `ReferralListView` clamps a bad `limit` (no 500) (L28). Optional officer-overturn maker/checker gate (`DECISION_OVERTURN_GATE_MODE`, default `off` — a no-op until enabled) (L29).
+
+### Tests & migrations
+
+Final suite: backend **1743 passed / 34 skipped / 0 failed**, frontend **327 passed**. Migrations: `loans 0025` (`human_involvement`), `email_engine 0006` (`sent_at`).
+
+### Operational notes for merge
+
+- **`BIAS_FAILURE_MODE` defaults to `block`** — an intended behaviour change. A bias-detection infra outage now withholds the email rather than shipping it; set `BIAS_FAILURE_MODE=off` to restore the legacy fail-open.
+- **Celery `broker_transport_options` fail-fast flags are global** — run a healthy-broker worker-connect smoke (`docker compose up`, confirm workers connect) before deploying.
+- **`POST /ml/predict/{id}/` is disabled by default** — enable via `ML_STANDALONE_PREDICT_ENABLED=true` if a non-orchestrator caller needs it (and make it AgentRun/ADM-consistent first).
+- No `APP_VERSION` bump yet (unreleased); bump at release time.
+
 ## v1.10.6 — Renderer XSS Hardening + External Benchmark + Realism Audit (2026-04-20)
 
 Four atomic PRs closing the last of the v1.10.3 senior-review deferred items and re-landing the two previously-stale concept PRs as fresh atomic changes. No data migrations, no model retraining, no API surface changes.
