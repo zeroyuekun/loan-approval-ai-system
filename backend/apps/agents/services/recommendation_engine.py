@@ -600,12 +600,15 @@ class RecommendationEngine:
         if max_amount < 3000:
             return None
 
-        # Affordability constraint: choose the SHORTEST term whose repayment
-        # fits within 15% of gross monthly income (pay it off faster when
-        # affordable). Fall back to the longest available term — which has the
-        # smallest repayment — when no shorter term fits the cap.
+        # Affordability constraint: choose the SHORTEST term whose repayment fits
+        # the cap (pay it off faster when affordable). Fall back to the longest
+        # available term — smallest repayment — when no shorter term fits.
+        # The cap is the customer's demonstrated serviceable surplus (the SAME
+        # basis that sized max_amount), not just 15% of gross — teasing a shorter
+        # term whose repayment exceeds their surplus is an NCCP serviceability
+        # smell. 15%-of-gross is kept as an additional ceiling.
         monthly_income = s.annual_income / 12
-        target_repayment = monthly_income * 0.15
+        target_repayment = min(monthly_income * 0.15, s.monthly_surplus)
 
         terms = catalog["terms"]  # [12, 24, 36, 60]
         term = max(terms)  # longest = most affordable fallback
