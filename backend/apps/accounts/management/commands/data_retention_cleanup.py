@@ -55,8 +55,6 @@ class Command(BaseCommand):
         # De-identify PII in profiles (preserve aggregated data)
         profiles = CustomerProfile.objects.filter(user__in=stale_users)
         deidentified = 0
-        user_ids = list(stale_users.values_list("pk", flat=True))
-
         with transaction.atomic():
             for profile in profiles.iterator(chunk_size=100):
                 profile.phone = ""

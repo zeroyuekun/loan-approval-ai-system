@@ -239,9 +239,9 @@ def test_denial_template_has_no_apology_language(monkeypatch, sample_application
 def test_send_latest_email_view_double_send_guard(monkeypatch, sample_application):
     """Second POST to SendLatestEmailView must be a no-op — sent_at must not be
     set twice and send_decision_email must only be called once."""
-    from django.utils import timezone
-    from rest_framework.test import APIClient
     from unittest.mock import MagicMock
+
+    from rest_framework.test import APIClient
 
     from apps.email_engine.models import GeneratedEmail
 

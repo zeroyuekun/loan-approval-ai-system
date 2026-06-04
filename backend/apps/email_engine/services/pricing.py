@@ -210,7 +210,6 @@ def calculate_loan_pricing(application):
     # Apply employment adjustment
     emp_adj = EMPLOYMENT_ADJUSTMENTS.get(employment_type, 0.0)
     fixed_rate = round(base_fixed + emp_adj, 2)
-    variable_rate = round(base_variable + emp_adj, 2)
 
     # Use fixed rate as the primary rate for the email
     primary_rate = fixed_rate

@@ -58,7 +58,7 @@ export default function AuditPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [actionFilter, setActionFilter] = useState('')
   const [resourceTypeFilter, setResourceTypeFilter] = useState('')
-  const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [expandedRow, setExpandedRow] = useState<number | null>(null)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -173,7 +173,7 @@ export default function AuditPage() {
                             </Badge>
                           </td>
                           <td className="py-3 pr-4">{entry.resource_type}</td>
-                          <td className="py-3 pr-4 font-mono text-xs max-w-[200px] truncate" title={entry.resource_id}>
+                          <td className="py-3 pr-4 font-mono text-xs max-w-[200px] truncate" title={entry.resource_id ?? undefined}>
                             {entry.resource_id}
                           </td>
                           <td className="py-3">{entry.ip_address ?? '-'}</td>
