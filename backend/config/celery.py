@@ -77,7 +77,12 @@ app.conf.broker_transport_options = {
     "socket_connect_timeout": 5,
     "retry_on_timeout": False,
 }
-app.conf.broker_connection_retry_on_startup = False
+# Retry broker connection on startup so workers survive a brief Redis restart
+# or a race during docker compose bring-up (H27). Set CELERY_RETRY_ON_STARTUP=false
+# to disable in environments where a clean fail-fast is preferred.
+app.conf.broker_connection_retry_on_startup = (
+    os.environ.get("CELERY_RETRY_ON_STARTUP", "true").lower() != "false"
+)
 
 app.conf.task_routes = {
     "apps.ml_engine.tasks.*": {"queue": "ml"},
