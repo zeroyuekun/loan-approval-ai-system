@@ -265,12 +265,11 @@ services:
       backend:
         condition: service_healthy
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
-      WATCHPACK_POLLING: "true"
       # Cap Node heap below the container mem_limit so a runaway
-      # Next.js dev-server watch cycle exits gracefully instead of
-      # being killed with code 243. See docs/runbooks/frontend-exit-243.md.
+      # Next.js process exits gracefully instead of being killed with code 243.
+      # See docs/runbooks/frontend-exit-243.md.
       NODE_OPTIONS: "--max-old-space-size=768"
     mem_limit: 1g
     volumes:

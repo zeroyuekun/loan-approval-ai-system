@@ -1,0 +1,14 @@
+# docker-compose.override.yml — local development overrides
+#
+# This file is automatically merged by `docker compose up` when present.
+# It restores the dev-mode settings that docker-compose.yml intentionally
+# sets to production values so the base file is deploy-safe.
+#
+# DO NOT commit secrets or credentials here.
+
+services:
+  frontend:
+    environment:
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"
+    command: sh -c "npm ci && npm run dev"
