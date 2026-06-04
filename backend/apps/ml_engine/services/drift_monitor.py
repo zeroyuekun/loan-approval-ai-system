@@ -46,17 +46,19 @@ def compute_psi(expected, actual, bins=10):
     if len(breakpoints) < 2:
         return 0.0
 
-    # Count proportions in each bin
-    eps = 1e-4  # Avoid log(0)
+    # Count proportions in each bin (canonical PSI — no re-normalisation)
+    eps = 1e-8  # Avoid log(0); small enough not to distort near-identical distributions
     expected_counts = np.histogram(expected, bins=breakpoints)[0]
     actual_counts = np.histogram(actual, bins=breakpoints)[0]
 
-    expected_pct = expected_counts / len(expected) + eps
-    actual_pct = actual_counts / len(actual) + eps
+    expected_pct = expected_counts / len(expected)
+    actual_pct = actual_counts / len(actual)
 
-    # Normalize
-    expected_pct = expected_pct / expected_pct.sum()
-    actual_pct = actual_pct / actual_pct.sum()
+    # Replace zeros only (avoid log(0)); do NOT re-normalise after substitution
+    # so that the sum of percentages is preserved and PSI stays at 0.0 for
+    # identical distributions.
+    expected_pct = np.where(expected_pct == 0, eps, expected_pct)
+    actual_pct = np.where(actual_pct == 0, eps, actual_pct)
 
     psi = np.sum((actual_pct - expected_pct) * np.log(actual_pct / expected_pct))
 
