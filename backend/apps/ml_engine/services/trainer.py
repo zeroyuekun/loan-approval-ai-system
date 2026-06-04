@@ -1101,9 +1101,12 @@ class ModelTrainer:
 
         # WOE/IV analysis on RAW (unscaled) data so bin edges are in
         # interpretable units (credit_score 650-750, not z-scores).
+        # Use _original_numeric_cols (pre-IV-selection) so WOE is computed on
+        # all candidate features — not just the subset that survived IV pruning.
+        _woe_cols = getattr(self, "_original_numeric_cols", None) or list(self.NUMERIC_COLS)
         try:
             woe_iv = self.metrics_service.compute_all_woe_iv(
-                df_test_raw[self.NUMERIC_COLS], y_test, self.NUMERIC_COLS, n_bins=10
+                df_test_raw[_woe_cols], y_test, _woe_cols, n_bins=10
             )
             metrics["woe_iv"] = {
                 col: {"iv": v["iv"], "interpretation": v["iv_interpretation"]}
@@ -1117,11 +1120,11 @@ class ModelTrainer:
         # WOE logistic regression scorecard on RAW data with out-of-sample AUC.
         try:
             _, _, scorecard = self.metrics_service.build_woe_scorecard(
-                df_train_raw[self.NUMERIC_COLS],
+                df_train_raw[_woe_cols],
                 y_train,
-                self.NUMERIC_COLS,
+                _woe_cols,
                 n_bins=10,
-                X_test=df_test_raw[self.NUMERIC_COLS],
+                X_test=df_test_raw[_woe_cols],
                 y_test=y_test,
             )
             if scorecard:
