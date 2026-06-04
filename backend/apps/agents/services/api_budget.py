@@ -302,8 +302,12 @@ class ApiBudgetGuard:
                 # that reserve_budget consumed.
                 actual_cents = int(cost_usd * 100)
                 cost_delta = actual_cents - reserved
-                pipe.decr(calls_key)
-                pipe.expire(calls_key, self.KEY_TTL)
+                # Safe DECR: only decrement when the key exists so an expired
+                # calls_key is not initialised to -1 (M21).  Check outside the
+                # pipeline (EXISTS is cheap) then DECR + EXPIRE inside it.
+                if r.exists(calls_key):
+                    pipe.decr(calls_key)
+                    pipe.expire(calls_key, self.KEY_TTL)
             elif reserved > 0:
                 # Successful reconcile to the real cost. The call was already
                 # counted inside reserve_budget, so do NOT touch calls again.
