@@ -62,8 +62,11 @@ app.conf.result_serializer = "json"
 app.conf.accept_content = ["json"]
 
 # Worker restart every N tasks to mitigate memory leaks (common with
-# ML worker processes importing large libs).
-app.conf.worker_max_tasks_per_child = 1000
+# ML worker processes importing large libs). Env-var override available for
+# tuning without a redeploy; production.py no longer duplicates this value.
+app.conf.worker_max_tasks_per_child = int(
+    os.environ.get("CELERY_WORKER_MAX_TASKS_PER_CHILD", "1000")
+)
 
 # Surface broker enqueue failures instead of silently dropping (L23).
 # For the Redis transport, fail fast on publish-time connection errors so

@@ -43,7 +43,8 @@ CSRF_COOKIE_HTTPONLY = False
 # Celery task limits
 CELERY_TASK_TIME_LIMIT = 600
 CELERY_TASK_SOFT_TIME_LIMIT = 540
-CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+# worker_max_tasks_per_child is set canonically in celery.py with env-var override;
+# remove duplicate here to avoid the Django CELERY_* setting shadowing it.
 CELERY_RESULT_EXPIRES = 3600
 
 # Enforce Content Security Policy in production (base.py has REPORT_ONLY=True for dev)
