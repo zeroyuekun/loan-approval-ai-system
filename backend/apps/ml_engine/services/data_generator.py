@@ -471,8 +471,8 @@ class DataGenerator:
     def _calibrate_default_probability(self, df, rng):
         return self._underwriting.calibrate_default_probability(df, rng, self._benchmark.resolve_default_base_rate)
 
-    def _simulate_loan_performance(self, df):
-        return self._performance.simulate_loan_performance(df)
+    def _simulate_loan_performance(self, df, rng=None):
+        return self._performance.simulate_loan_performance(df, rng=rng)
 
     def _generate_copula_samples(self, n, rng):
         """Generate correlated uniform samples using a Gaussian copula.
@@ -660,7 +660,9 @@ class DataGenerator:
         sub-population mixture model for realistic applicant segmentation.
         """
         rng = np.random.default_rng(random_seed)
-        np.random.seed(random_seed)  # also seed legacy RNG for _simulate_loan_performance
+        # Do NOT call np.random.seed() — it mutates the global legacy RNG which is
+        # non-reproducible in a multi-tenant Celery environment (M13 fix).
+        # _simulate_loan_performance now receives the per-instance Generator.
         n = num_records
         self.reject_inference_labels = None  # populated at end of generate()
         self._macro_cache = {}  # reset per-generate to ensure reproducibility
@@ -1460,7 +1462,7 @@ class DataGenerator:
         # === Outcome Simulation ===
         df = _phases.simulate_ex_post_outcomes(df, rng)
 
-        df = self._simulate_loan_performance(df)
+        df = self._simulate_loan_performance(df, rng=rng)
 
         return df
 
