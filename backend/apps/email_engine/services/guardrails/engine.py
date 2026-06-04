@@ -4,9 +4,12 @@ Pattern tables live in `.patterns`. Class-attr aliases below re-export every
 name so `self.PATTERN` and `GuardrailChecker.PATTERN` both keep working.
 """
 
+import logging
 import re
 
 from . import patterns
+
+logger = logging.getLogger("email_engine.guardrails")
 
 
 class GuardrailChecker:
@@ -861,6 +864,18 @@ class GuardrailChecker:
 
         for r in results:
             r["quality_score"] = quality_score
+
+        # Log high-weight guardrail violations so operators can monitor rates
+        # without resorting to DB queries.
+        email_id = context.get("email_id")
+        for result in results:
+            if result.get("passed") is False and result.get("weight", 0) >= 8:
+                logger.warning(
+                    "Guardrail check failed: check=%s email_id=%s details=%s",
+                    result.get("check_name"),
+                    email_id,
+                    result.get("details", ""),
+                )
 
         return results
 
