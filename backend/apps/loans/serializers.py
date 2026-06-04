@@ -225,7 +225,7 @@ class LoanApplicationCreateSerializer(serializers.ModelSerializer):
             "consumer_requirements",
             "financial_situation_notes",
         )
-        read_only_fields = ("id",)
+        read_only_fields = ("id", "applicant")
 
     def validate(self, data):
         user = self.context["request"].user
