@@ -369,6 +369,18 @@ class GuardrailChecker:
             if not has_afca:
                 missing.append("AFCA dispute resolution reference")
 
+        if not (email_type == "marketing" or decision in ("approved", "denied")):
+            # Unknown decision type — surface this as a failed check so the
+            # caller can see it rather than silently receiving a vacuous pass.
+            return {
+                "check_name": "Required Elements",
+                "passed": False,
+                "details": (
+                    f"Unknown decision type {decision!r} — required elements check could not run. "
+                    "Expected 'approved', 'denied', or email_type='marketing'."
+                ),
+            }
+
         passed = len(missing) == 0
         details = f"Missing required elements: {', '.join(missing)}" if not passed else "All required elements present"
 
