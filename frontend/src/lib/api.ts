@@ -109,10 +109,11 @@ api.interceptors.response.use(
       try {
         // Deduplicate: if a refresh is already in flight, reuse the same promise
         if (!refreshPromise) {
-          refreshPromise = (async () => {
-            // Cookie-based refresh — server reads refresh_token from HttpOnly cookie
-            await axios.post(`${API_URL}/auth/refresh/`, {}, { withCredentials: true })
-          })()
+          // Cookie-based refresh — server reads refresh_token from HttpOnly cookie.
+          // No inner try/catch: failures must propagate as rejections so that
+          // parallel waiters see a rejection (not undefined) and do NOT retry
+          // their original requests into a second 401 loop.
+          refreshPromise = axios.post(`${API_URL}/auth/refresh/`, {}, { withCredentials: true }).then(() => undefined)
         }
         await refreshPromise
         return api(originalRequest)
