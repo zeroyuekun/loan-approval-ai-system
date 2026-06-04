@@ -1281,7 +1281,22 @@ class ModelTrainer:
             if sample_weights is not None:
                 cv_fit_params["sample_weight"] = sample_weights
 
-            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
+            # `params=` kwarg for cross_val_score was added in scikit-learn 1.4.
+            # On older environments every Optuna trial silently crashes without it.
+            import sklearn as _sklearn
+
+            if cv_fit_params and _sklearn.__version__ >= "1.4":
+                scores = cross_val_score(
+                    model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params
+                )
+            else:
+                # sklearn <1.4: pass sample_weight via fit_params (deprecated in 1.4)
+                if cv_fit_params:
+                    scores = cross_val_score(
+                        model, X_train, y_train, cv=cv, scoring="roc_auc", fit_params=cv_fit_params
+                    )
+                else:
+                    scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc")
             return scores.mean()
 
         study = optuna.create_study(
