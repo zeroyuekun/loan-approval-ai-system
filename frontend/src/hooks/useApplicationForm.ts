@@ -130,6 +130,9 @@ export function useApplicationForm(onSuccessPath?: string) {
       router.push(`${basePath}/${result.id}`)
     } catch (error) {
       console.error('Failed to create application:', error)
+    } finally {
+      // Always reset the guard — catches both catch-path and any throw inside
+      // router.push() after a successful mutation (e.g. navigation error).
       submittingRef.current = false
     }
   }
