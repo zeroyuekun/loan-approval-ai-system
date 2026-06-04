@@ -101,6 +101,8 @@ const mockLoanApplication = {
   applicant_type: 'single' as const,
   status: 'pending' as const,
   notes: '',
+  conditions: [],
+  conditions_met: false,
   created_at: '2024-06-01T00:00:00Z',
   updated_at: '2024-06-01T00:00:00Z',
 }
