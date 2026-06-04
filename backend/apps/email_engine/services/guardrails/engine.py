@@ -4,9 +4,12 @@ Pattern tables live in `.patterns`. Class-attr aliases below re-export every
 name so `self.PATTERN` and `GuardrailChecker.PATTERN` both keep working.
 """
 
+import logging
 import re
 
 from . import patterns
+
+logger = logging.getLogger("email_engine.guardrails")
 
 
 class GuardrailChecker:
@@ -368,6 +371,18 @@ class GuardrailChecker:
             )
             if not has_afca:
                 missing.append("AFCA dispute resolution reference")
+
+        if not (email_type == "marketing" or decision in ("approved", "denied")):
+            # Unknown decision type — surface this as a failed check so the
+            # caller can see it rather than silently receiving a vacuous pass.
+            return {
+                "check_name": "Required Elements",
+                "passed": False,
+                "details": (
+                    f"Unknown decision type {decision!r} — required elements check could not run. "
+                    "Expected 'approved', 'denied', or email_type='marketing'."
+                ),
+            }
 
         passed = len(missing) == 0
         details = f"Missing required elements: {', '.join(missing)}" if not passed else "All required elements present"
@@ -794,9 +809,13 @@ class GuardrailChecker:
         # Template mode: skip LLM-specific checks since static templates are
         # pre-vetted and contain known-good regulatory text (e.g. $150,000
         # comparison rate benchmark) that would trip the hallucination detector.
+        # Regulatory compliance checks (check_required_elements) MUST still run
+        # — they verify AFCA reference, credit report notice, and cooling-off
+        # period which are statutory requirements regardless of email source.
         if template_mode:
             checks = [
                 (self.check_prohibited_language, (email_text,), 15),
+                (self.check_required_elements, (email_text, decision, email_type), 10),
                 (self.check_tone, (email_text,), 8),
                 (self.check_contextual_dignity, (email_text,), 8),
                 (self.check_sign_off_structure, (email_text,), 2),
@@ -845,6 +864,18 @@ class GuardrailChecker:
 
         for r in results:
             r["quality_score"] = quality_score
+
+        # Log high-weight guardrail violations so operators can monitor rates
+        # without resorting to DB queries.
+        email_id = context.get("email_id")
+        for result in results:
+            if result.get("passed") is False and result.get("weight", 0) >= 8:
+                logger.warning(
+                    "Guardrail check failed: check=%s email_id=%s details=%s",
+                    result.get("check_name"),
+                    email_id,
+                    result.get("details", ""),
+                )
 
         return results
 

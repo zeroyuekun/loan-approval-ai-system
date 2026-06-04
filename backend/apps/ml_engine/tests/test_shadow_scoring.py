@@ -19,6 +19,7 @@ test_prediction_diagnostics.py) so the suite stays runnable without Docker.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -31,18 +32,29 @@ def _mk_version(pk, version="v1.1.0", optimal_threshold=0.5):
     return SimpleNamespace(pk=pk, version=version, optimal_threshold=optimal_threshold)
 
 
-def _patch_challengers(challenger_list, exclude_return=None):
-    """Make `ModelVersion.objects.filter(...).exclude(...)` return `challenger_list`.
+@contextmanager
+def _patch_challengers(challenger_list):
+    """Patch the cache and ORM so _get_challenger_models returns `challenger_list`.
 
-    The challenger set is evaluated via slicing (`challengers[:max]`), so the
-    mock has to support `__getitem__` — we return a plain list.
+    The H8 caching layer checks cache.get first.  We force a cache miss so the
+    ORM path is exercised; the ORM returns the full challenger_list (champion
+    exclusion now happens in Python inside _get_challenger_models).
+
+    The result is evaluated via slicing (`challengers[:max]`), so returning a
+    plain list is correct.
     """
     mock_qs = MagicMock()
-    mock_qs.exclude.return_value = exclude_return if exclude_return is not None else challenger_list
-    return patch(
-        "apps.ml_engine.services.shadow_scoring.ModelVersion.objects.filter",
-        return_value=mock_qs,
-    )
+    mock_qs.select_related.return_value = challenger_list
+
+    with (
+        patch("apps.ml_engine.services.shadow_scoring.cache.get", return_value=None),
+        patch("apps.ml_engine.services.shadow_scoring.cache.set"),
+        patch(
+            "apps.ml_engine.services.shadow_scoring.ModelVersion.objects.filter",
+            return_value=mock_qs,
+        ),
+    ):
+        yield mock_qs
 
 
 class TestScoreChallengersShadow:
@@ -120,21 +132,23 @@ class TestScoreChallengersShadow:
         assert create.call_count == 2
 
     def test_excludes_champion_by_pk(self):
-        """We don't re-test the ORM here — but we DO verify `.exclude(pk=champion.pk)`
-        is invoked by the helper, which is the mechanism the query relies on.
+        """Champion is excluded from the challenger set.
+
+        Since H8 introduced caching, the champion exclusion now happens in
+        Python (inside _get_challenger_models) rather than via ORM .exclude().
+        We verify the *behaviour*: scoring is never invoked for the champion.
         """
         app = SimpleNamespace(pk=1)
         champion = _mk_version(pk=10)
+        # Include the champion pk in the list returned by the ORM/cache.
+        # After Python-side exclusion, the scorer must NOT be called for it.
+        challenger_with_champion = [_mk_version(pk=10), _mk_version(pk=11)]
+        scorer = MagicMock(return_value=(0.5, "approved"))
 
-        # Build a filter mock whose .exclude is inspectable.
-        mock_qs = MagicMock()
-        mock_qs.exclude.return_value = []
-        scorer = MagicMock()
-
-        with patch(
-            "apps.ml_engine.services.shadow_scoring.ModelVersion.objects.filter",
-            return_value=mock_qs,
-        ) as filter_mock:
+        with (
+            _patch_challengers(challenger_with_champion),
+            patch("apps.ml_engine.services.shadow_scoring.PredictionLog.objects.create"),
+        ):
             score_challengers_shadow(
                 application=app,
                 champion_version=champion,
@@ -144,12 +158,10 @@ class TestScoreChallengersShadow:
                 score_fn=scorer,
             )
 
-        filter_mock.assert_called_once_with(
-            is_active=False,
-            traffic_percentage__gt=0,
-            traffic_percentage__lt=100,
-        )
-        mock_qs.exclude.assert_called_once_with(pk=10)
+        # Only challenger pk=11 should be scored — pk=10 (champion) is excluded.
+        assert scorer.call_count == 1
+        scored_version = scorer.call_args[0][0]
+        assert scored_version.pk == 11
 
     def test_per_challenger_exception_does_not_stop_others(self):
         app = SimpleNamespace(pk=1)
@@ -205,9 +217,13 @@ class TestScoreChallengersShadow:
         app = SimpleNamespace(pk=1)
         champion = _mk_version(pk=10)
 
-        with patch(
-            "apps.ml_engine.services.shadow_scoring.ModelVersion.objects.filter",
-            side_effect=RuntimeError("db down"),
+        with (
+            patch("apps.ml_engine.services.shadow_scoring.cache.get", return_value=None),
+            patch("apps.ml_engine.services.shadow_scoring.cache.set"),
+            patch(
+                "apps.ml_engine.services.shadow_scoring.ModelVersion.objects.filter",
+                side_effect=RuntimeError("db down"),
+            ),
         ):
             # Must not raise.
             score_challengers_shadow(

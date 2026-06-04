@@ -163,10 +163,15 @@ class ModelDriftView(APIView):
     def get(self, request):
         """Compute PSI for recent applications vs training distribution."""
         from apps.ml_engine.services.drift_monitor import compute_on_demand_feature_psi
-        from apps.ml_engine.services.predictor import ModelPredictor
+        from apps.ml_engine.services.model_selector import select_model_version
+        from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
 
+        # Resolve the active ModelVersion directly — avoids constructing a full
+        # ModelPredictor (which joblib.load-s the model bundle) only to throw
+        # the model object away before compute_on_demand_feature_psi builds its
+        # own ModelPredictor internally.  One joblib.load per drift check.
         try:
-            predictor = ModelPredictor()
+            model_version = select_model_version(segment=SEGMENT_UNIFIED)
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
 
@@ -175,7 +180,7 @@ class ModelDriftView(APIView):
         except (ValueError, TypeError):
             return Response({"error": "days must be an integer"}, status=400)
 
-        result = compute_on_demand_feature_psi(predictor.model_version, days=days)
+        result = compute_on_demand_feature_psi(model_version, days=days)
 
         if result.get("error") == "no_reference_distribution":
             return Response(

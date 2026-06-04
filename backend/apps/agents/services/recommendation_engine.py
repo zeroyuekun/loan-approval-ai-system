@@ -591,6 +591,9 @@ class RecommendationEngine:
 
         rate = _get_rate_for_tier(catalog["rate_tiers"], s.credit_score)
 
+        # Initial max_amount sizing uses 60 months (longest term) to find the
+        # upper bound. After selecting the actual term below we re-size so the
+        # quoted amount is correct for the chosen repayment horizon (M19).
         max_amount = min(
             _max_serviceable_amount(s.monthly_surplus, rate, 60),
             catalog["max_amount"],
@@ -616,6 +619,17 @@ class RecommendationEngine:
             if _monthly_repayment(max_amount, rate, t) <= target_repayment:
                 term = t
                 break
+
+        # Re-size max_amount using the ACTUAL selected term, not the 60-month
+        # ceiling used for initial sizing above (M19 — previously hardcoded 60).
+        max_amount = min(
+            _max_serviceable_amount(s.monthly_surplus, rate, term),
+            catalog["max_amount"],
+        )
+        max_amount = math.floor(max_amount / 1000) * 1000
+
+        if max_amount < 3000:
+            return None
 
         repayment = _monthly_repayment(max_amount, rate, term)
         fortnightly = repayment / 2

@@ -20,7 +20,6 @@ import time
 
 import httpx
 import redis
-from celery import Celery
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection
@@ -84,8 +83,12 @@ class Command(BaseCommand):
         self.app_name = getattr(settings, "DB_APPLICATION_NAME", "loan_approval")
         self.consecutive_failures = 0
         self._running = True
-        self._celery_app = Celery("config")
-        self._celery_app.config_from_object("django.conf:settings", namespace="CELERY")
+        # Use the project's shared Celery app (M20) instead of creating an
+        # independent instance — avoids double-loading config and ensures
+        # broker/transport settings are identical to the workers.
+        from config.celery import app as celery_app
+
+        self._celery_app = celery_app
 
         signal.signal(signal.SIGTERM, self._shutdown)
         signal.signal(signal.SIGINT, self._shutdown)

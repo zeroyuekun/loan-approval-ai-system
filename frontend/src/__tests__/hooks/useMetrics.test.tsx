@@ -23,16 +23,19 @@ const mockMetrics = {
   algorithm: 'xgboost',
   version: '1.0.0',
   is_active: true,
-  auc: 0.87,
-  gini: 0.74,
+  auc_roc: 0.87,
+  gini_coefficient: 0.74,
   ks_statistic: 0.62,
   accuracy: 0.85,
-  precision_val: 0.83,
+  precision: 0.83,
   recall: 0.80,
   f1_score: 0.81,
   brier_score: 0.12,
   ece: 0.05,
+  confusion_matrix: {},
   feature_importances: { credit_score: 0.25, annual_income: 0.20 },
+  roc_curve_data: {},
+  training_params: {},
   created_at: '2026-03-27T10:00:00Z',
 }
 
@@ -56,7 +59,7 @@ describe('useModelMetrics', () => {
       expect(result.current.data).toBeDefined()
     })
     expect(result.current.data?.algorithm).toBe('xgboost')
-    expect(result.current.data?.auc).toBe(0.87)
+    expect(result.current.data?.auc_roc).toBe(0.87)
   })
 
   it('returns null when no model exists (404)', async () => {

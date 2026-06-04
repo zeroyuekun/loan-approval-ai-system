@@ -188,16 +188,15 @@ class BatchOrchestrateView(APIView):
         recheck = request.query_params.get("recheck", "").lower() == "true"
 
         if recheck:
-            reviewable_qs = (
-                LoanApplication.objects.filter(
-                    status__in=[
-                        LoanApplication.Status.REVIEW,
-                        LoanApplication.Status.PROCESSING,
-                    ]
-                )
-                .exclude(status=LoanApplication.Status.PROCESSING)
-                .order_by("created_at")
-            )
+            # Query applications in REVIEW status that are eligible for re-processing.
+            # Previous code used filter(status__in=[REVIEW, PROCESSING]).exclude(PROCESSING)
+            # which is logically identical to filter(status=REVIEW) — the PROCESSING
+            # inclusion was immediately negated by the .exclude() call.
+            # Stuck-PROCESSING recovery is out of scope here; that belongs in a
+            # dedicated dead-letter / recovery task.
+            reviewable_qs = LoanApplication.objects.filter(
+                status=LoanApplication.Status.REVIEW,
+            ).order_by("created_at")
             total_eligible = reviewable_qs.count()
             candidates = reviewable_qs[:BATCH_ORCHESTRATE_MAX]
             pending_ids = []

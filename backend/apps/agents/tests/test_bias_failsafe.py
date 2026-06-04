@@ -72,10 +72,10 @@ class BiasFailSafeTestCase(TestCase):
     def setUp(self):
         from django.conf import settings as dj
 
-        from apps.accounts.models import _get_fernet
+        from apps.accounts.utils.encryption import clear_fernet_cache
         from apps.ml_engine.models import ModelVersion
 
-        _get_fernet.cache_clear()
+        clear_fernet_cache()
         self.user = CustomUser.objects.create_user(
             username="failsafe",
             password="TestPass123!",
@@ -163,3 +163,95 @@ class BiasFailSafeTestCase(TestCase):
         send.assert_called_once()
         assert app.status == "approved"
         assert run.status == "completed"
+
+    @override_settings(BIAS_FAILURE_MODE="block")
+    def test_budget_exhausted_triggers_failsafe(self):
+        """BudgetExhausted inside _call_with_retry must activate the block-mode
+        fail-safe — C8 regression guard.
+
+        The test patches guarded_api_call at the helpers module so the
+        BudgetExhausted propagation path through _call_with_retry → BiasDetector
+        → email_pipeline._handle_bias_unavailable is exercised end-to-end,
+        rather than short-circuiting at the BiasDetector.analyze boundary.
+
+        To reach the LLM call the deterministic prescreener must return a
+        "moderate" finding (score between BIAS_THRESHOLD_PASS and
+        BIAS_THRESHOLD_REVIEW).  We mock DeterministicBiasPreScreen to return
+        such a result so the test is independent of keyword lists.
+        """
+        from apps.agents.services.api_budget import BudgetExhausted
+        from apps.email_engine.models import GeneratedEmail
+
+        app = _app(self.user)
+        mock_pred = MagicMock()
+        mock_pred.predict.return_value = _pred("approved", 0.85)
+        mock_gen = MagicMock()
+        mock_gen.generate.return_value = _email(passed=True)
+        mock_fraud = MagicMock()
+        mock_fraud.run_checks.return_value = {
+            "passed": True,
+            "risk_score": 0.1,
+            "checks": [],
+            "flagged_reasons": [],
+        }
+
+        ge = GeneratedEmail.objects.create(
+            application=app,
+            decision="approved",
+            subject="T",
+            body="B",
+            prompt_used="p",
+            passed_guardrails=True,
+        )
+
+        # Moderate prescreen result: score between PASS (30) and REVIEW (60)
+        # thresholds so the code proceeds to the LLM call.
+        moderate_prescreen = {
+            "all_clean": False,
+            "deterministic_score": 45,
+            "findings": [{"check_name": "tone", "details": "slightly informal"}],
+        }
+
+        with (
+            patch("apps.agents.services.orchestrator.ModelPredictor", return_value=mock_pred),
+            patch("apps.agents.services.email_pipeline.EmailGenerator", return_value=mock_gen),
+            patch("apps.agents.services.email_pipeline.EmailPersistenceService") as mp,
+            patch("apps.agents.services.orchestrator.FraudDetectionService", return_value=mock_fraud),
+            patch("apps.agents.services.orchestrator.FraudCheck"),
+            patch("apps.agents.services.orchestrator.PredictionLog"),
+            patch("apps.email_engine.services.sender.send_decision_email", return_value={"sent": True}) as send,
+            patch.object(
+                self.orch.__class__,
+                "_run_nbo_and_marketing_pipeline",
+                side_effect=lambda a, ar, s, dr, pc: s,
+            ),
+            # Patch the deterministic prescreener to return a moderate result
+            # so BiasDetector.analyze proceeds to the LLM call.
+            patch(
+                "apps.agents.services.bias.core.DeterministicBiasPreScreen.prescreen_decision_email",
+                return_value=moderate_prescreen,
+            ),
+            # Patch guarded_api_call — the innermost integration point — to raise
+            # BudgetExhausted, exercising the re-raise in _call_with_retry.
+            patch(
+                "apps.agents.services.bias.helpers.guarded_api_call",
+                side_effect=BudgetExhausted("daily budget exhausted"),
+            ),
+        ):
+            mp.save_generated_email.return_value = ge
+            mp.save_guardrail_logs.return_value = None
+            run = self.orch.orchestrate(app.pk)
+
+        app.refresh_from_db()
+        run.refresh_from_db()
+        # BudgetExhausted must NOT silently pass — fail-safe must activate.
+        send.assert_not_called()
+        assert app.status == "pending", (
+            f"Expected app.status='pending' after BudgetExhausted fail-safe, got {app.status!r}"
+        )
+        assert run.status == "failed", (
+            f"Expected run.status='failed' after BudgetExhausted fail-safe, got {run.status!r}"
+        )
+        assert "bias" in run.error.lower(), (
+            f"Expected 'bias' in run.error for BudgetExhausted fail-safe, got: {run.error!r}"
+        )

@@ -192,6 +192,98 @@ def test_send_occurs_once_when_not_yet_sent(monkeypatch, sample_application):
     assert email.sent_at is not None
 
 
+# ---------------------------------------------------------------------------
+# M17 — Template fallback, no-apology regression, and double-send guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_template_fallback_when_api_unavailable(monkeypatch, sample_application):
+    """When _api_available returns False, generate() must use the template path
+    (template_fallback=True) rather than calling the Claude API."""
+    from apps.email_engine.services.email_generator import EmailGenerator
+
+    gen = EmailGenerator()
+    # Force the API-available probe to return False without touching the network.
+    monkeypatch.setattr(gen, "_api_available", lambda: False)
+
+    result = gen.generate(sample_application, "denied")
+
+    assert result["template_fallback"] is True, "Expected template_fallback=True when API unavailable"
+    assert result["subject"], "Template fallback must produce a non-empty subject"
+    assert result["body"], "Template fallback must produce a non-empty body"
+    assert result["prompt_used"] == "[TEMPLATE FALLBACK — Claude API unavailable]"
+
+
+@pytest.mark.django_db
+def test_denial_template_has_no_apology_language(monkeypatch, sample_application):
+    """Denial template emails must not contain apology/disappointment language.
+
+    Regression guard for the CLAUDE.md rule: never add 'sorry', 'apologise',
+    or 'disappointment' to denial email templates.
+    """
+    from apps.email_engine.services.email_generator import EmailGenerator
+
+    gen = EmailGenerator()
+    monkeypatch.setattr(gen, "_api_available", lambda: False)
+
+    result = gen.generate(sample_application, "denied")
+    body = result["body"].lower()
+
+    assert "sorry" not in body, "Denial email must not contain 'sorry'"
+    assert "apologis" not in body, "Denial email must not contain 'apologis' (apologise/apologising)"
+    assert "disappointment" not in body, "Denial email must not contain 'disappointment'"
+
+
+@pytest.mark.django_db
+def test_send_latest_email_view_double_send_guard(monkeypatch, sample_application):
+    """Second POST to SendLatestEmailView must be a no-op — sent_at must not be
+    set twice and send_decision_email must only be called once."""
+    from unittest.mock import MagicMock
+
+    from rest_framework.test import APIClient
+
+    from apps.email_engine.models import GeneratedEmail
+
+    send_mock = MagicMock(return_value={"sent": True})
+    monkeypatch.setattr("apps.email_engine.services.sender.send_decision_email", send_mock)
+
+    email = GeneratedEmail.objects.create(
+        application=sample_application,
+        decision="denied",
+        subject="Your Loan Decision",
+        body="Body text",
+        prompt_used="p",
+        passed_guardrails=True,
+        sent_at=None,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=sample_application.applicant)
+
+    url = f"/api/v1/emails/send/{sample_application.id}/"
+
+    # First request: should send and set sent_at
+    resp1 = client.post(url)
+    assert resp1.status_code == 200
+    assert resp1.data.get("sent") is True
+    assert send_mock.call_count == 1
+
+    # Second request: sent_at is already set — must be a no-op
+    resp2 = client.post(url)
+    assert resp2.status_code == 200
+    # No additional send call
+    assert send_mock.call_count == 1, "send_decision_email must not be called a second time"
+
+    # Verify sent_at is set only once (unchanged after second request)
+    email.refresh_from_db()
+    assert email.sent_at is not None
+    first_sent_at = email.sent_at
+
+    email.refresh_from_db()
+    assert email.sent_at == first_sent_at, "sent_at must not change after second POST"
+
+
 @pytest.mark.django_db
 def test_redelivery_sends_generated_but_unsent_email(monkeypatch, sample_application):
     """A passing-but-unsent email (sent_at is None) must be delivered on a later

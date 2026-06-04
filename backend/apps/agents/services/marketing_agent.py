@@ -293,10 +293,6 @@ class MarketingAgent:
         from apps.email_engine.services.guardrails import GuardrailChecker
 
         first_name = application.applicant.first_name or application.applicant.username
-        (
-            f"{application.applicant.first_name} {application.applicant.last_name}".strip()
-            or application.applicant.username
-        )
         purpose = application.get_purpose_display().lower()
 
         # Build offer details from NBO result

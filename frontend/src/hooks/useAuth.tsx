@@ -24,8 +24,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data } = await authApi.getProfile()
       setUser(data)
-      // Store non-sensitive user metadata for UI rendering (not tokens)
-      sessionStorage.setItem('user', JSON.stringify(data))
+      // Store only non-PII fields needed for instant UI render (role + username).
+      // id and email are intentionally excluded to minimise same-tab JS exposure.
+      const safeUser = { role: data.role, username: data.username }
+      sessionStorage.setItem('user', JSON.stringify(safeUser))
       setRoleCookie(data.role)
       return true
     } catch {
@@ -55,8 +57,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Ensure we have a CSRF token before the login POST
     await authApi.getCsrfToken()
     const { data } = await authApi.login({ username, password })
-    // Server sets HttpOnly cookies — we only store user metadata
-    sessionStorage.setItem('user', JSON.stringify(data.user))
+    // Server sets HttpOnly cookies — store only non-PII metadata for instant render
+    const safeUser = { role: data.user.role, username: data.user.username }
+    sessionStorage.setItem('user', JSON.stringify(safeUser))
     setUser(data.user)
     setRoleCookie(data.user.role)
     setIsLoading(false)

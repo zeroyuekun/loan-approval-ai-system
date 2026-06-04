@@ -109,10 +109,11 @@ api.interceptors.response.use(
       try {
         // Deduplicate: if a refresh is already in flight, reuse the same promise
         if (!refreshPromise) {
-          refreshPromise = (async () => {
-            // Cookie-based refresh — server reads refresh_token from HttpOnly cookie
-            await axios.post(`${API_URL}/auth/refresh/`, {}, { withCredentials: true })
-          })()
+          // Cookie-based refresh — server reads refresh_token from HttpOnly cookie.
+          // No inner try/catch: failures must propagate as rejections so that
+          // parallel waiters see a rejection (not undefined) and do NOT retry
+          // their original requests into a second 401 loop.
+          refreshPromise = axios.post(`${API_URL}/auth/refresh/`, {}, { withCredentials: true }).then(() => undefined)
         }
         await refreshPromise
         return api(originalRequest)
@@ -191,12 +192,11 @@ export const emailApi = {
 // Agents
 export const agentsApi = {
   orchestrate: (loanId: string) => api.post(`/agents/orchestrate/${loanId}/`, null, { timeout: 60000 }),
-  forceRerun: (loanId: string, reason: string) =>
-    api.post(
-      `/agents/orchestrate/${loanId}/?force=true&reason=${encodeURIComponent(reason)}`,
-      null,
-      { timeout: 60000 },
-    ),
+  forceRerun: (loanId: string, reason?: string) =>
+    api.post(`/agents/orchestrate/${loanId}/`, null, {
+      timeout: 60000,
+      params: { force: true, ...(reason && { reason }) },
+    }),
   orchestrateAll: (recheck?: boolean) => api.post(`/agents/orchestrate-all/${recheck ? '?recheck=true' : ''}`, null, { timeout: 60000 }),
   getRuns: (params?: PaginationParams) => api.get('/agents/runs/', { params }),
   getRun: (loanId: string) => api.get(`/agents/runs/${loanId}/`),

@@ -178,23 +178,33 @@ def compute_guardrail_analytics():
     week_start = (now - timedelta(days=7)).date()
     week_end = now.date()
 
-    # Get all guardrail logs from the past week
-    logs = GuardrailLog.objects.filter(
-        created_at__date__gte=week_start,
-        created_at__date__lt=week_end,
-    ).values("check_name", "passed")
+    # Aggregate guardrail results at the DB level — avoids loading all rows into
+    # Python memory (M15).
+    from django.db.models import Count, Q
 
-    # Aggregate by check_name
-    from collections import defaultdict
+    analytics_qs = (
+        GuardrailLog.objects.filter(
+            created_at__date__gte=week_start,
+            created_at__date__lt=week_end,
+        )
+        .values("check_name")
+        .annotate(
+            total=Count("id"),
+            passed=Count("id", filter=Q(passed=True)),
+            failed=Count("id", filter=Q(passed=False)),
+        )
+        .order_by("check_name")
+    )
 
-    stats = defaultdict(lambda: {"total": 0, "passed": 0, "failed": 0})
-    for log in logs:
-        name = log["check_name"]
-        stats[name]["total"] += 1
-        if log["passed"]:
-            stats[name]["passed"] += 1
-        else:
-            stats[name]["failed"] += 1
+    # Build stats dict from aggregated queryset for downstream compatibility
+    stats = {
+        row["check_name"]: {
+            "total": row["total"],
+            "passed": row["passed"],
+            "failed": row["failed"],
+        }
+        for row in analytics_qs
+    }
 
     # Compute retry rate (emails with attempt_number > 1)
     total_emails = GeneratedEmail.objects.filter(

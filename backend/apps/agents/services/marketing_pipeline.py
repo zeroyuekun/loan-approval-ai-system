@@ -183,41 +183,62 @@ class MarketingPipelineService:
                     try:
                         from apps.email_engine.services.sender import send_decision_email
 
-                        recipient = application.applicant.email
-                        if recipient:
-                            send_result = send_decision_email(
-                                recipient,
-                                email_result_marketing["subject"],
-                                email_result_marketing["body"],
-                                email_type="marketing",
-                            )
-                            if send_result["sent"]:
-                                from django.utils import timezone as tz
+                        # Check marketing consent before sending
+                        try:
+                            profile = application.applicant.customerprofile
+                        except Exception:
+                            profile = None
 
-                                marketing_email_obj.sent = True
-                                marketing_email_obj.sent_at = tz.now()
-                                marketing_email_obj.save(update_fields=["sent", "sent_at"])
-                                step = self.tracker.complete_step(
-                                    step,
-                                    result_summary={
-                                        "sent": True,
-                                        "recipient": recipient,
-                                    },
-                                )
-                            else:
-                                marketing_email_obj.delivery_error = send_result.get("error", "Send failed")
-                                marketing_email_obj.save(update_fields=["delivery_error"])
-                                step = self.tracker.fail_step(step, send_result.get("error", "Send failed"))
-                        else:
-                            marketing_email_obj.blocked_reason = "no_recipient_email"
+                        if not profile or not profile.marketing_consent:
+                            logger.info(
+                                "Marketing email blocked: customer %s has not given marketing consent",
+                                application.applicant_id,
+                            )
+                            marketing_email_obj.blocked_reason = "no_marketing_consent"
                             marketing_email_obj.save(update_fields=["blocked_reason"])
                             step = self.tracker.complete_step(
                                 step,
                                 result_summary={
                                     "sent": False,
-                                    "reason": "No recipient email",
+                                    "reason": "No marketing consent",
                                 },
                             )
+                        else:
+                            recipient = application.applicant.email
+                            if recipient:
+                                send_result = send_decision_email(
+                                    recipient,
+                                    email_result_marketing["subject"],
+                                    email_result_marketing["body"],
+                                    email_type="marketing",
+                                )
+                                if send_result["sent"]:
+                                    from django.utils import timezone as tz
+
+                                    marketing_email_obj.sent = True
+                                    marketing_email_obj.sent_at = tz.now()
+                                    marketing_email_obj.save(update_fields=["sent", "sent_at"])
+                                    step = self.tracker.complete_step(
+                                        step,
+                                        result_summary={
+                                            "sent": True,
+                                            "recipient": recipient,
+                                        },
+                                    )
+                                else:
+                                    marketing_email_obj.delivery_error = send_result.get("error", "Send failed")
+                                    marketing_email_obj.save(update_fields=["delivery_error"])
+                                    step = self.tracker.fail_step(step, send_result.get("error", "Send failed"))
+                            else:
+                                marketing_email_obj.blocked_reason = "no_recipient_email"
+                                marketing_email_obj.save(update_fields=["blocked_reason"])
+                                step = self.tracker.complete_step(
+                                    step,
+                                    result_summary={
+                                        "sent": False,
+                                        "reason": "No recipient email",
+                                    },
+                                )
                     except (ConnectionError, TimeoutError, OSError) as e:
                         logger.error("Application %s: marketing email delivery failed: %s", application.pk, e)
                         marketing_email_obj.delivery_error = str(e)
