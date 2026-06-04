@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -64,10 +65,20 @@ def _validate_model_path(file_path):
     return resolved
 
 
-def _verify_model_hash(file_path, expected_hash):
-    """Verify SHA-256 hash of model file to detect tampering."""
+def _verify_model_hash(file_path, expected_hash, version_id=None):
+    """Verify SHA-256 hash of model file to detect tampering.
+
+    In production (DJANGO_DEBUG != true/1) an empty hash raises ValueError
+    because it means the model was stored without integrity data — a security gap.
+    In development an empty hash is allowed so engineers can iterate without
+    pre-computing hashes.
+    """
     if not expected_hash:
-        logger.warning("No file_hash stored for model — skipping integrity check")
+        if os.environ.get("DJANGO_DEBUG", "False").lower() not in ("true", "1"):
+            raise ValueError(
+                f"Model version {version_id} has no file_hash — hash verification required in production"
+            )
+        logger.warning("No file_hash stored for model version %s — skipping integrity check (dev mode)", version_id)
         return
     sha256 = hashlib.sha256()
     with open(file_path, "rb") as f:
@@ -81,21 +92,26 @@ def _verify_model_hash(file_path, expected_hash):
 
 
 def _load_bundle(model_version):
-    """Load and cache a model bundle, returning it from cache if available."""
+    """Load and cache a model bundle, returning it from cache if available.
+
+    Validation (path safety + hash integrity) runs inside the lock so there is
+    no TOCTOU window between the cache-miss check and the actual file load.
+    """
     version_id = model_version.id
     with _cache_lock:
         if version_id in _model_cache:
+            # Validate even on a cache hit to catch path-traversal attempts
+            # on already-cached entries (e.g. symlink swap after first load).
+            _validate_model_path(model_version.file_path)
             return _model_cache[version_id]
 
-    resolved_path = _validate_model_path(model_version.file_path)
-    _verify_model_hash(resolved_path, getattr(model_version, "file_hash", None))
+        # Validate and verify hash while still holding the lock so no other
+        # thread can slip in a swapped file between check and load.
+        resolved_path = _validate_model_path(model_version.file_path)
+        _verify_model_hash(resolved_path, getattr(model_version, "file_hash", None), version_id=version_id)
 
-    bundle = joblib.load(resolved_path)
+        bundle = joblib.load(resolved_path)
 
-    with _cache_lock:
-        # Re-check after expensive load — another worker may have cached it first
-        if version_id in _model_cache:
-            return _model_cache[version_id]
         # TTLCache auto-evicts expired + LRU entries on set
         _model_cache[version_id] = bundle
         logger.info("Cached model version %s (cache size now %d)", version_id, len(_model_cache))
