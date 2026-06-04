@@ -69,7 +69,6 @@ Australian Financial Complaints Authority (AFCA) | www.afca.org.au | 1800 931 67
 
     email = GeneratedEmail.objects.create(
         application=application,
-        notification_type="received",
         decision="pending",
         subject=subject,
         body=body,
