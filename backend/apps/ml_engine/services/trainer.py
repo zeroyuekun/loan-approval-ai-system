@@ -1051,6 +1051,20 @@ class ModelTrainer:
         for col in ["employment_type", "applicant_type", "state"]:
             if col in df.columns:
                 test_indices = test_original_indices
+                # Guard against index mismatch: segment filtering or other
+                # DataFrame operations may have removed rows from df after the
+                # test split, leaving some test_original_indices absent.  Using
+                # df.loc[missing_idx] would silently return NaN-filled rows and
+                # corrupt the fairness statistics.
+                missing_idx = set(test_indices) - set(df.index)
+                if missing_idx:
+                    logger.warning(
+                        "Fairness metrics: %d test indices not in df after segment "
+                        "filter — skipping '%s' fairness segment",
+                        len(missing_idx),
+                        col,
+                    )
+                    continue
                 original_vals = df.loc[test_indices, col] if col in df.columns else pd.Series()
                 if len(original_vals) > 0:
                     fairness_result = self.metrics_service.compute_fairness_metrics(
