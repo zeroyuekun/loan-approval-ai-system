@@ -806,9 +806,13 @@ class GuardrailChecker:
         # Template mode: skip LLM-specific checks since static templates are
         # pre-vetted and contain known-good regulatory text (e.g. $150,000
         # comparison rate benchmark) that would trip the hallucination detector.
+        # Regulatory compliance checks (check_required_elements) MUST still run
+        # — they verify AFCA reference, credit report notice, and cooling-off
+        # period which are statutory requirements regardless of email source.
         if template_mode:
             checks = [
                 (self.check_prohibited_language, (email_text,), 15),
+                (self.check_required_elements, (email_text, decision, email_type), 10),
                 (self.check_tone, (email_text,), 8),
                 (self.check_contextual_dignity, (email_text,), 8),
                 (self.check_sign_off_structure, (email_text,), 2),
