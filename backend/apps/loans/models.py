@@ -340,6 +340,7 @@ class LoanApplication(SoftDeleteModel):
         "review": ["approved", "denied", "processing", "pending"],  # pending = regenerate, processing = retry
         "approved": ["processing"],  # allow pipeline re-run
         "denied": ["processing"],  # allow pipeline re-run
+        "queue_failed": ["pending"],  # allow retry after queue dispatch failure
     }
 
     class InvalidStateTransition(Exception):
