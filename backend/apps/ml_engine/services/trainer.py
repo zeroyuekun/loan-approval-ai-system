@@ -237,8 +237,18 @@ class ModelTrainer:
         self._reference_distribution = None  # saved for PSI drift detection
         self._imputation_values = {}  # stored in model bundle for predictor alignment
 
-    def add_derived_features(self, df):
-        """Impute missing values and compute derived features via shared module."""
+    def add_derived_features(self, df, fit: bool = False):
+        """Impute missing values and compute derived features via shared module.
+
+        Args:
+            df: DataFrame to process.
+            fit: When True (training only), compute and store data-dependent
+                 imputation medians from *this* DataFrame.  When False (val/test),
+                 reuse the already-stored ``_imputation_values`` so that
+                 val/test statistics never overwrite the training distribution.
+                 Callers that haven't called ``fit_preprocess`` yet will still
+                 get sensible defaults from ``DEFAULT_IMPUTATION_VALUES``.
+        """
         from .feature_engineering import (
             DEFAULT_IMPUTATION_VALUES,
             compute_derived_features,
@@ -247,13 +257,17 @@ class ModelTrainer:
 
         df = df.copy()
 
-        # Compute data-dependent imputation values: use training data medians
-        # for all numeric columns, with shared defaults as fallback.
-        data_medians = {}
-        for col in self.NUMERIC_COLS:
-            if col in df.columns and df[col].notna().any():
-                data_medians[col] = float(df[col].median())
-        self._imputation_values = {**DEFAULT_IMPUTATION_VALUES, **data_medians}
+        if fit:
+            # Compute data-dependent imputation values: use training data medians
+            # for all numeric columns, with shared defaults as fallback.
+            data_medians = {}
+            for col in self.NUMERIC_COLS:
+                if col in df.columns and df[col].notna().any():
+                    data_medians[col] = float(df[col].median())
+            self._imputation_values = {**DEFAULT_IMPUTATION_VALUES, **data_medians}
+        elif not self._imputation_values:
+            # No training run yet (e.g. standalone transform) — use defaults only.
+            self._imputation_values = dict(DEFAULT_IMPUTATION_VALUES)
 
         df = impute_missing_values(df, self._imputation_values)
         df = compute_derived_features(df)
@@ -263,8 +277,9 @@ class ModelTrainer:
         """Fit encoders/scaler on training data. Returns (transformed df, feature cols)."""
         df = df.copy()
 
-        # Add derived features before encoding/scaling
-        df = self.add_derived_features(df)
+        # Add derived features before encoding/scaling — fit=True so training
+        # medians are stored in _imputation_values for later val/test reuse.
+        df = self.add_derived_features(df, fit=True)
 
         # One-hot encode categorical columns
         df = pd.get_dummies(df, columns=self.CATEGORICAL_COLS, dtype=float)
@@ -286,8 +301,9 @@ class ModelTrainer:
 
         df = df.copy()
 
-        # Add derived features before encoding/scaling
-        df = self.add_derived_features(df)
+        # Add derived features before encoding/scaling — fit=False so val/test
+        # data reuses the training imputation values stored in _imputation_values.
+        df = self.add_derived_features(df, fit=False)
 
         # One-hot encode categorical columns
         df = pd.get_dummies(df, columns=self.CATEGORICAL_COLS, dtype=float)
