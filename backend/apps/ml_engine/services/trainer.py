@@ -747,6 +747,12 @@ class ModelTrainer:
                 {g: round(w, 3) for g, w in weight_map.items()},
             )
 
+        # Snapshot y_train length BEFORE reject-inference augmentation so the
+        # temporal CV alignment check (below) can compare against the pre-augmented
+        # size. After augmentation len(y_train) grows, which would cause the check
+        # to always fail and silently skip temporal CV.
+        _y_train_pre_ri_len = len(y_train)
+
         # ------------------------------------------------------------------
         # Reject-inference-aware training: include denied applications at
         # reduced weight to mitigate selection bias (only training on
@@ -865,7 +871,7 @@ class ModelTrainer:
         # augmentation (below) happens AFTER this block for the XGB path, so we
         # run the temporal CV on pre-augmented indices; but X_train may still
         # have been trimmed by preprocessing earlier, so guard on length.
-        if train_quarters_snapshot is not None and len(train_quarters_snapshot) == len(y_train):
+        if train_quarters_snapshot is not None and len(train_quarters_snapshot) == _y_train_pre_ri_len:
             try:
                 temporal_cv_auc_mean, temporal_cv_folds_used = self._compute_temporal_cv_auc(
                     X_train, y_train, train_quarters_snapshot
@@ -884,9 +890,9 @@ class ModelTrainer:
                 logger.warning("Temporal CV failed: %s", exc)
         else:
             logger.info(
-                "Temporal CV skipped — quarter snapshot unavailable or length mismatch (snapshot=%s, y_train=%d)",
+                "Temporal CV skipped — quarter snapshot unavailable or length mismatch (snapshot=%s, y_train_pre_ri=%d)",
                 "None" if train_quarters_snapshot is None else len(train_quarters_snapshot),
-                len(y_train),
+                _y_train_pre_ri_len,
             )
 
         if algorithm == "xgb":
