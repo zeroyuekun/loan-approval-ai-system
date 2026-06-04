@@ -5,7 +5,10 @@ const isDev = process.env.NODE_ENV !== 'production'
 const apiOrigin = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1').replace(/\/api\/v1\/?$/, '')
 
 const nextConfig = {
-  output: 'standalone',
+  // output: 'standalone' removed (H30) — the Dockerfile uses `npm start`
+  // (standard Next.js server) which requires full node_modules, not the
+  // standalone bundle. Setting output:'standalone' caused the build to emit
+  // .next/standalone/ which was silently discarded, wasting build time.
   async headers() {
     // In development, Next.js needs 'unsafe-eval' and 'unsafe-inline' for HMR.
     // In production, these are removed for strict CSP.
