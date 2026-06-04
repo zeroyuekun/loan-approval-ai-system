@@ -381,8 +381,10 @@ class DecisionReviewSerializer(serializers.ModelSerializer):
         request = self.context["request"]
         user = request.user
         application = attrs["application"]
-        if application.applicant_id != user.id:
-            raise serializers.ValidationError("You can only request a review of your own application.")
+        if self.instance is None:
+            # Ownership check is create-only; updates are officer-driven and bypass this
+            if application.applicant_id != user.id:
+                raise serializers.ValidationError("You can only request a review of your own application.")
         if application.status != "denied":
             raise serializers.ValidationError("Reviews can only be requested on declined applications.")
         from .models import DecisionReview as _DR

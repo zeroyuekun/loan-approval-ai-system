@@ -187,11 +187,18 @@ class AuditLogViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 class DashboardStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrOfficer]
 
+    _CACHE_KEY = "dashboard_stats"
+    _CACHE_TTL = 60
+
     def get(self, request):
-        data = django_cache.get("dashboard_stats")
+        data = django_cache.get(self._CACHE_KEY)
         if data is None:
-            data = self._compute_stats()
-            django_cache.set("dashboard_stats", data, 30)
+            if django_cache.add(f"{self._CACHE_KEY}:lock", True, timeout=5):
+                data = self._compute_stats()
+                django_cache.set(self._CACHE_KEY, data, self._CACHE_TTL)
+            else:
+                # Another request is computing — return stale or compute inline
+                data = django_cache.get(self._CACHE_KEY) or self._compute_stats()
         return Response(data)
 
     def _compute_stats(self):
