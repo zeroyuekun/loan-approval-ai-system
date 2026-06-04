@@ -1474,6 +1474,10 @@ class DataGenerator:
     def save_to_csv(self, df, path):
         """Save DataFrame to CSV, creating directories as needed."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        # Drop post-outcome columns before saving — they encode the label and must not appear in training CSVs
+        cols_to_drop = [c for c in POST_OUTCOME_FEATURES if c in df.columns]
+        if cols_to_drop:
+            df = df.drop(columns=cols_to_drop)
         safe_df = df.apply(lambda col: col.map(self._sanitize_csv_value) if col.dtype == object else col)
         safe_df.to_csv(path, index=False)
         return path
