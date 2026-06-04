@@ -497,3 +497,14 @@ export interface PaginatedResponse<T> {
   previous: string | null;
   results: T[];
 }
+
+export interface AuditLogEntry {
+  id: number;
+  timestamp: string;
+  username: string | null;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  ip_address: string | null;
+  details: Record<string, unknown> | null;
+}
