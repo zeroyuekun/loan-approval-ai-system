@@ -73,7 +73,11 @@ class _CalibratedModel:
             self._calibrator.fit(val_probs.reshape(-1, 1), y_val)
 
     def predict(self, X):
-        return self.estimator.predict(X)
+        # Delegate through predict_proba so the calibrated probabilities drive
+        # the binary decision (threshold 0.5). The raw estimator's predict()
+        # uses the uncalibrated threshold and would disagree with the calibrated
+        # probabilities returned by predict_proba.
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
 
     def predict_proba(self, X):
         raw_probs = self.estimator.predict_proba(X)[:, 1]
