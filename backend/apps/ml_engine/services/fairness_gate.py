@@ -17,9 +17,17 @@ References:
 
 import logging
 
+from django.conf import settings
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_DIR_THRESHOLD = 0.80
+
+# Minimum number of individuals in any protected group before we treat a
+# None disparate_impact_ratio as a hard gate failure rather than "too small
+# to assess".  Groups below this size are skipped (not enough data).
+# Configurable via settings.FAIRNESS_MIN_GROUP_SIZE.
+_MIN_GROUP_SIZE = lambda: getattr(settings, "FAIRNESS_MIN_GROUP_SIZE", 30)  # noqa: E731
 
 
 def check_fairness_gate(
@@ -48,19 +56,48 @@ def check_fairness_gate(
     results = []
     failing_attributes = []
     dir_values = []
+    min_group_size = _MIN_GROUP_SIZE()
 
     for attribute, metrics in fairness_metrics.items():
         dir_value = metrics.get("disparate_impact_ratio")
         if dir_value is None:
-            # Undefined (e.g., single group) — skip
+            # DIR is None when max(approval_rates) == 0, i.e. zero approvals
+            # across all groups for this attribute, OR when only one group exists.
+            # Determine the total sample size across groups so we can decide
+            # whether this is a "too small to assess" case or a genuine failure.
+            groups = metrics.get("groups", {})
+            group_count = sum(g.get("count", 0) for g in groups.values())
+
+            if group_count < min_group_size:
+                # Too few samples — cannot reliably assess DIR; skip silently.
+                results.append(
+                    {
+                        "attribute": attribute,
+                        "dir": None,
+                        "passed": True,
+                        "note": f"Skipped — only {group_count} samples (< {min_group_size} minimum)",
+                    }
+                )
+                continue
+
+            # Sufficient sample but DIR is still None → zero approvals in at
+            # least one non-trivial group.  This is the worst possible disparate
+            # impact and MUST fail the gate.
+            logger.warning(
+                "Fairness gate: attribute '%s' has None DIR with %d samples — "
+                "zero approvals in at least one protected group (HARD FAIL)",
+                attribute,
+                group_count,
+            )
             results.append(
                 {
                     "attribute": attribute,
                     "dir": None,
-                    "passed": True,
-                    "note": "Undefined — single group or zero approvals",
+                    "passed": False,
+                    "note": "zero_approvals_in_protected_group",
                 }
             )
+            failing_attributes.append(attribute)
             continue
 
         passed = dir_value >= threshold
