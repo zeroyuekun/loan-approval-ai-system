@@ -4,6 +4,8 @@ Both ModelTrainer and ModelPredictor import from here to eliminate
 training/serving skew risk from duplicated feature computation.
 """
 
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -306,8 +308,9 @@ def compute_derived_features(df):
 
     # --- APRA stress test & Australian regulatory derived features ---
 
-    # Stressed repayment: monthly repayment at assessment rate + buffer
-    stressed_rate = 0.095 / 12  # ~9.5% = base rate + 3% APRA buffer
+    # RBA cash rate stress test: default 9.5% p.a. — override via ML_STRESS_TEST_RATE env var
+    annual_stress_rate = float(os.environ.get("ML_STRESS_TEST_RATE", "0.095"))
+    stressed_rate = annual_stress_rate / 12
     term_s = df["loan_term_months"].clip(lower=1)
     df["stressed_repayment"] = np.where(
         term_s > 0,
