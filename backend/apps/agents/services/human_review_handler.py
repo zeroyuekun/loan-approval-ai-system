@@ -159,6 +159,80 @@ class HumanReviewHandler:
                 self.tracker.finalize_run(agent_run, steps, start_time)
                 return agent_run
 
+            # Re-run bias detection on the regenerated approval email.
+            # The original pipeline ran bias detection before sending; the resume
+            # path must mirror this check so a regenerated email cannot bypass
+            # bias screening by going through the human-review flow.
+            if email_result and email_result.get("passed_guardrails"):
+                from apps.agents.services.bias.core import BiasDetector
+
+                step_bias = self.tracker.start_step("bias_check_resume")
+                try:
+                    bias_detector = BiasDetector()
+                    bias_result = bias_detector.analyze(
+                        email_result["body"],
+                        {
+                            "loan_amount": float(application.loan_amount),
+                            "purpose": application.get_purpose_display(),
+                            "decision": "approved",
+                        },
+                    )
+                    step_bias = self.tracker.complete_step(
+                        step_bias,
+                        result_summary={
+                            "bias_score": bias_result["score"],
+                            "flagged": bias_result["flagged"],
+                        },
+                    )
+                    steps.append(step_bias)
+
+                    if bias_result.get("flagged"):
+                        logger.warning(
+                            "Agent run %s: resumed approval email re-flagged by bias detector "
+                            "(score=%s) — re-escalating application %s",
+                            agent_run_id,
+                            bias_result["score"],
+                            application.id,
+                        )
+                        step_hold = self.tracker.start_step("email_delivery")
+                        step_hold = self.tracker.complete_step(
+                            step_hold,
+                            result_summary={
+                                "sent": False,
+                                "reason": "Bias detected on resume — re-escalating",
+                            },
+                        )
+                        steps.append(step_hold)
+                        with transaction.atomic():
+                            application.refresh_from_db()
+                            if application.status not in (
+                                LoanApplication.Status.REVIEW,
+                                LoanApplication.Status.PENDING,
+                            ):
+                                application.status = LoanApplication.Status.REVIEW
+                                application.save(update_fields=["status"])
+                        agent_run.status = "escalated"
+                        agent_run.error = (
+                            f"Resumed email re-flagged by bias detector "
+                            f"(score={bias_result['score']}) — re-escalated"
+                        )
+                        self.tracker.finalize_run(agent_run, steps, start_time)
+                        return agent_run
+
+                except Exception as exc:
+                    # Bias check failure on resume — fail-safe: withhold and re-escalate.
+                    logger.error(
+                        "Agent run %s: bias check failed on resume — re-escalating: %s",
+                        agent_run_id,
+                        exc,
+                    )
+                    step_bias = self.tracker.fail_step(step_bias, str(exc), failure_category="transient")
+                    steps.append(step_bias)
+                    agent_run.status = "escalated"
+                    agent_run.error = f"Bias check failed on resume — withheld for safety: {exc}"
+                    self.tracker.finalize_run(agent_run, steps, start_time)
+                    return agent_run
+
             # Send the approval email
             if email_result:
                 step = self.tracker.start_step("email_delivery")

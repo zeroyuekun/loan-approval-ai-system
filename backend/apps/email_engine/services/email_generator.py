@@ -65,6 +65,11 @@ class EmailGenerator:
         else:
             self.client = None
         self.guardrail_checker = GuardrailChecker()
+        # Initialize retry-state attributes here so they are always defined,
+        # regardless of which attempt number generate() is first called with.
+        # Without this, calling generate(attempt=2) directly raises AttributeError
+        # on the _last_feedback reference inside the retry prompt builder.
+        self._last_feedback = ""
         # Circuit breaker lives in ApiBudgetGuard (Redis-backed). The previous
         # per-instance breaker here duplicated that state and did not reset
         # the failure counter after cooldown expired — a buggy shadow of the
@@ -512,33 +517,48 @@ class EmailGenerator:
 
         Sends a minimal 1-token request. Returns False on billing, auth,
         or connection errors so the caller can fall back to templates.
+
+        Result is cached in Redis for 60 seconds (M16) so that concurrent
+        email generation tasks don't each fire a live availability probe.
         """
         import logging
+
+        from django.core.cache import cache
 
         logger = logging.getLogger("email_engine.generator")
         if self.client is None:
             logger.info("No API client configured — using template fallback")
             return False
+
+        _CACHE_KEY = "email_engine:api_available"
+        cached = cache.get(_CACHE_KEY)
+        if cached is not None:
+            return cached
+
         try:
             self.client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=1,
                 messages=[{"role": "user", "content": "hi"}],
             )
-            return True
+            result = True
         except anthropic.AuthenticationError:
             logger.warning("Claude API auth failed — using template fallback")
-            return False
+            result = False
         except anthropic.BadRequestError as e:
             if "credit" in str(e).lower() or "balance" in str(e).lower():
                 logger.warning("Claude API credit insufficient — using template fallback")
-                return False
-            return True  # other bad request errors may be prompt-specific
+                result = False
+            else:
+                result = True  # other bad request errors may be prompt-specific
         except (anthropic.APIConnectionError, anthropic.APITimeoutError):
             logger.warning("Claude API unreachable — using template fallback")
-            return False
+            result = False
         except Exception:
-            return True  # let the main flow handle unexpected errors
+            result = True  # let the main flow handle unexpected errors
+
+        cache.set(_CACHE_KEY, result, timeout=60)
+        return result
 
     def _generate_fallback(self, application, decision, context, start_time):
         """Generate email from smart template when Claude API is unavailable.

@@ -31,7 +31,7 @@ services:
       - "127.0.0.1:3001:3000"
     depends_on:
       prometheus:
-        condition: service_started
+        condition: service_healthy
       loki:
         condition: service_healthy
     restart: unless-stopped

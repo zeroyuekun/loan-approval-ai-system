@@ -43,6 +43,11 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
     try:
         return _do_train(self, algorithm, data_path, lock, segment=segment)
     except Exception:
+        logger.exception(
+            "train_model_task failed for algorithm=%s version_id=%s",
+            algorithm,
+            self.request.id,
+        )
         lock.release()
         raise
 
@@ -241,6 +246,18 @@ def run_prediction_task(self, application_id):
     try:
         predictor = ModelPredictor.for_application(application)
         result = predictor.predict(application)
+    except ValueError as e:
+        # No active model available — not a transient error; do not retry.
+        # Revert to pending so the application can be processed once a model
+        # is activated, and return a structured skipped result.
+        logger.error(
+            "run_prediction_task: no active model for application %s — %s",
+            application_id,
+            e,
+        )
+        application.status = "pending"
+        application.save(update_fields=["status"])
+        return {"status": "skipped", "reason": "no_active_model", "detail": str(e)}
     except Exception:
         # Revert status so the application isn't stuck in 'processing'
         application.transition_to("pending", details={"reason": "prediction_failed"})

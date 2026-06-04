@@ -7,7 +7,7 @@ import httpx
 
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
-from ..api_budget import guarded_api_call
+from ..api_budget import BudgetExhausted, CircuitOpen, guarded_api_call
 
 logger = logging.getLogger("agents.bias_detector")
 
@@ -106,6 +106,8 @@ def _call_with_retry(client, fallback, service_name, final_failure_suffix, **api
                 logger.error("%s client error (%d, not retryable): %s", service_name, e.status_code, e)
                 result = fallback
                 break
+        except (BudgetExhausted, CircuitOpen):
+            raise  # let callers invoke _handle_bias_unavailable
         except Exception as e:
             logger.critical("%s UNEXPECTED failure attempt %d: %s", service_name, attempt + 1, e, exc_info=True)
             result = fallback

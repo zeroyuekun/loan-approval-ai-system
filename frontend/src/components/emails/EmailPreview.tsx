@@ -9,17 +9,36 @@ import { renderEmailHtml } from '@/lib/emailHtmlRenderer'
 import { GuardrailLogDisplay } from './GuardrailLogDisplay'
 import { CheckCircle, XCircle, Clock, Star, Reply, Forward, MoreVertical, Paperclip } from 'lucide-react'
 
-export function HtmlEmailBody({ html }: { html: string }) {
-  // Content is sanitized with DOMPurify before rendering — safe against XSS
-  const sanitized = DOMPurify.sanitize(html, {
+// Sanitize HTML and enforce rel="noopener noreferrer" on _blank anchors.
+// The 'rel' attribute must be in ALLOWED_ATTR so DOMPurify does not strip the
+// value we inject in the post-processing DOM walk (H23 tabnapping fix).
+// nosec: content is sanitized with DOMPurify before the innerHTML assignment
+function sanitizeEmailHtml(html: string): string {
+  const clean = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ['div', 'p', 'strong', 'em', 'br', 'hr', 'table', 'tr', 'td', 'th', 'span', 'b', 'i', 'u', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3'],
-    ALLOWED_ATTR: ['style', 'href', 'role', 'cellpadding', 'cellspacing', 'border', 'align', 'target'],
+    ALLOWED_ATTR: ['style', 'href', 'role', 'cellpadding', 'cellspacing', 'border', 'align', 'target', 'rel'],
   })
+  if (typeof document === 'undefined') return clean
+  // Post-process: force rel="noopener noreferrer" on every _blank anchor to
+  // prevent reverse tabnapping. This DOM walk is universally compatible
+  // regardless of DOMPurify version.
+  const div = document.createElement('div')
+  // nosec: 'clean' is the output of DOMPurify above — already sanitized
+  div.innerHTML = clean
+  div.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]').forEach((a) => {
+    a.setAttribute('rel', 'noopener noreferrer')
+  })
+  return div.innerHTML
+}
+
+export function HtmlEmailBody({ html }: { html: string }) {
+  const safeHtml = sanitizeEmailHtml(html)
 
   return (
     <div
       className="email-html-preview [&_p]:my-2 [&_table]:my-3 [&_hr]:my-4 [&_hr]:border-gray-200"
-      dangerouslySetInnerHTML={{ __html: sanitized }}
+      // nosec: safeHtml is the output of sanitizeEmailHtml (DOMPurify + rel enforcement)
+      dangerouslySetInnerHTML={{ __html: safeHtml }}
     />
   )
 }

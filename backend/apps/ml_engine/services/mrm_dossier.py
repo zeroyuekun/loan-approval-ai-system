@@ -429,8 +429,21 @@ def write_dossier(mv, output_dir) -> str:
     """Write dossier to `<output_dir>/<model_id>/mrm.md`; return the path."""
     from pathlib import Path
 
+    from django.conf import settings
+
+    # Path-traversal guard: resolve to absolute paths and ensure output_dir
+    # remains inside ML_MODELS_DIR.  This prevents a caller-supplied value
+    # like "../../../etc" from escaping the intended directory tree.
+    resolved = Path(output_dir).resolve()
+    allowed_root = Path(settings.ML_MODELS_DIR).resolve()
+    if not str(resolved).startswith(str(allowed_root)):
+        raise ValueError(
+            f"output_dir {output_dir!r} resolves to {resolved!r} which is outside "
+            f"ML_MODELS_DIR ({allowed_root!r}) — path traversal blocked"
+        )
+
     markdown = generate_dossier_markdown(mv)
-    out_root = Path(output_dir) / str(mv.id)
+    out_root = resolved / str(mv.id)
     out_root.mkdir(parents=True, exist_ok=True)
     target = out_root / "mrm.md"
     target.write_text(markdown, encoding="utf-8")

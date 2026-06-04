@@ -3,6 +3,7 @@
 import { Fragment, useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { auditApi } from '@/lib/api'
+import type { AuditLogEntry, PaginatedResponse } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem } from '@/components/ui/select'
@@ -57,7 +58,7 @@ export default function AuditPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [actionFilter, setActionFilter] = useState('')
   const [resourceTypeFilter, setResourceTypeFilter] = useState('')
-  const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [expandedRow, setExpandedRow] = useState<number | null>(null)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -72,7 +73,7 @@ export default function AuditPage() {
   if (actionFilter) params.action = actionFilter
   if (resourceTypeFilter) params.resource_type = resourceTypeFilter
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError } = useQuery<PaginatedResponse<AuditLogEntry>>({
     queryKey: ['audit-logs', params],
     queryFn: () => auditApi.list(params).then((res) => res.data),
   })
@@ -148,7 +149,7 @@ export default function AuditPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {results.map((entry: any) => {
+                  {results.map((entry: AuditLogEntry) => {
                     const isExpanded = expandedRow === entry.id
                     return (
                       <Fragment key={entry.id}>
@@ -172,7 +173,7 @@ export default function AuditPage() {
                             </Badge>
                           </td>
                           <td className="py-3 pr-4">{entry.resource_type}</td>
-                          <td className="py-3 pr-4 font-mono text-xs max-w-[200px] truncate" title={entry.resource_id}>
+                          <td className="py-3 pr-4 font-mono text-xs max-w-[200px] truncate" title={entry.resource_id ?? undefined}>
                             {entry.resource_id}
                           </td>
                           <td className="py-3">{entry.ip_address ?? '-'}</td>

@@ -9,11 +9,17 @@ logger = logging.getLogger(__name__)
 @shared_task(name="apps.loans.tasks.enforce_data_retention")
 def enforce_data_retention():
     """Weekly task: enforce data retention policy per regulatory requirements."""
+    import io
+
     from django.core.management import call_command
 
-    output = call_command("enforce_retention")
-    logger.info("Data retention enforcement completed: %s", output)
-    return output
+    out = io.StringIO()
+    try:
+        call_command("enforce_retention", stdout=out)
+        logger.info("data_retention_cleanup completed: %s", out.getvalue().strip())
+    except Exception:
+        logger.exception("data_retention_cleanup task failed")
+        raise
 
 
 @shared_task(name="apps.loans.tasks.retry_failed_dispatches")

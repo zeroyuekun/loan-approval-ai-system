@@ -74,6 +74,7 @@ AI_GIVEAWAY_TERMS = [
     re.compile(r"\bapologiz(?:e|es|ing|ed)\b", re.IGNORECASE),
     re.compile(r"\bapolog(?:y|ies)\b", re.IGNORECASE),
     re.compile(r"\bdisappointment\b", re.IGNORECASE),
+    # matches bare "regret" and "regretfully/regretful/regrettable" — all banned per project rule
     re.compile(r"\bregret(?:fully|ful|table)?\b", re.IGNORECASE),
     re.compile(r"\bwe want to be transparent about\b", re.IGNORECASE),
     # re.compile(r'\bwe appreciate the trust\b', re.IGNORECASE),  # Removed: legitimate closing in approval letters

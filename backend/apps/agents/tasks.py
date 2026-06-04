@@ -105,9 +105,16 @@ def orchestrate_pipeline_task(self, application_id, force=False):
         orchestrator = PipelineOrchestrator()
         agent_run = orchestrator.orchestrate(application_id)
     except (ConnectionError, TimeoutError, OSError):
-        # Let Celery's autoretry handle these — don't cleanup yet
+        # Infrastructure error — Celery autoretry will re-queue this task.
+        # Do NOT release the dedup lock here: releasing it before the retry
+        # fires opens a window where a duplicate orchestration can start for
+        # the same application (M22).  The lock will be released either when
+        # the retry eventually succeeds, exhausts all retries, or the TTL
+        # expires (whichever comes first).
         raise
     except Exception as e:
+        # Non-retriable failure — release the lock so future attempts can run.
+        cache.delete(lock_key)
         _cleanup_stuck_application(application_id)
         try:
             from apps.loans.models import AuditLog
@@ -121,8 +128,9 @@ def orchestrate_pipeline_task(self, application_id, force=False):
         except Exception:
             logger.warning("Failed to create audit log for pipeline failure on %s", application_id)
         raise
-    finally:
-        cache.delete(lock_key)
+
+    # Success path: release the dedup lock now that the run is complete (M22).
+    cache.delete(lock_key)
 
     try:
         from apps.loans.models import AuditLog

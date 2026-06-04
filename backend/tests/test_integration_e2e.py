@@ -124,9 +124,10 @@ class TestFullPipeline(TestCase):
         resp = self.client.get("/api/v1/health/")
         assert resp.status_code == status.HTTP_200_OK
 
+    @override_settings(HEALTH_CHECK_TOKEN="test-ops-token")
     def test_deep_health_endpoint(self):
-        """Deep health check should verify DB and Redis."""
-        resp = self.client.get("/api/v1/health/deep/")
+        """Deep health check should verify DB and Redis (requires ops token)."""
+        resp = self.client.get("/api/v1/health/deep/", HTTP_X_HEALTH_TOKEN="test-ops-token")
         # 503 if Redis is not available in test environment
         assert resp.status_code in (200, 503)
 

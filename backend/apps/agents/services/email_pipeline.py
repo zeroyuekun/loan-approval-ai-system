@@ -164,6 +164,7 @@ class EmailPipelineService:
         except (LLMServiceError, ConnectionError, TimeoutError) as e:
             logger.error("Application %s: bias check failed: %s", application_id, e)
             step = self.tracker.fail_step(step, str(e), failure_category="transient")
+            steps.append(step)  # always record the failed bias step before delegating
             held = self._handle_bias_unavailable(application, agent_run, steps, step, waterfall, e)
             if held is not None:
                 return held
@@ -171,12 +172,14 @@ class EmailPipelineService:
         except Exception as e:
             logger.critical("Application %s: UNEXPECTED failure at bias_check: %s", application_id, e, exc_info=True)
             step = self.tracker.fail_step(step, str(e), failure_category=None)
+            steps.append(step)  # always record the failed bias step before delegating
             held = self._handle_bias_unavailable(application, agent_run, steps, step, waterfall, e)
             if held is not None:
                 return held
             bias_result = self._legacy_failopen_bias_result(e)
 
-        steps.append(step)
+        else:
+            steps.append(step)
 
         # Waterfall entry for bias check
         bias_flagged = bias_result.get("flagged", False)
@@ -370,7 +373,8 @@ class EmailPipelineService:
                 "reason": "Bias check unavailable — fail-safe withhold (BIAS_FAILURE_MODE=block)",
             },
         )
-        steps.append(step)
+        # Note: the failed bias step was already appended by the caller before
+        # invoking this method.  Only append the email_delivery hold step here.
         steps.append(hold)
 
         with transaction.atomic():

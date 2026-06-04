@@ -79,11 +79,12 @@ class TestDeepHealthConfigured:
     """Deep health must refuse to respond if token is unconfigured in production."""
 
     @override_settings(DEBUG=False, HEALTH_CHECK_TOKEN="")
-    def test_unconfigured_token_in_prod_returns_503(self):
+    def test_unconfigured_token_in_prod_returns_403(self):
+        """Unauthenticated requests are blocked by require_ops_auth before reaching
+        the inner token-config check; the outer gate returns 403."""
         client = APIClient()
         resp = client.get("/api/v1/health/deep/")
-        assert resp.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        assert "not configured" in resp.json().get("error", "").lower()
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
 
     @override_settings(DEBUG=True, HEALTH_CHECK_TOKEN="")
     def test_unconfigured_token_in_debug_allowed(self):

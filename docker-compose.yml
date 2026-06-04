@@ -66,7 +66,7 @@ services:
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
       SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       DJANGO_CACHE_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
@@ -163,7 +163,11 @@ services:
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
     volumes:
       - ./backend:/app
-    command: celery -A config worker -l info -Q email,agents,celery --concurrency 4
+    # --prefetch-multiplier 1 matches celery_worker_ml so each of the 4 IO
+    # worker threads reserves at most 1 task at a time (H28 — without this,
+    # the global worker_prefetch_multiplier=2 allows up to 8 tasks reserved
+    # by one worker, delaying fairness across queues).
+    command: celery -A config worker -l info -Q email,agents,celery --concurrency 4 --prefetch-multiplier 1
     healthcheck:
       test: ["CMD-SHELL", "celery -A config inspect ping --timeout 10"]
       interval: 30s
@@ -203,7 +207,16 @@ services:
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
     volumes:
       - ./backend:/app
-    command: celery -A config beat -l info
+    command: >
+      celery -A config beat -l info
+        --scheduler django_celery_beat.schedulers:DatabaseScheduler
+        --pidfile /tmp/celerybeat.pid
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/celerybeat.pid && kill -0 $(cat /tmp/celerybeat.pid) 2>/dev/null || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
     networks:
       - internal
 
@@ -252,12 +265,11 @@ services:
       backend:
         condition: service_healthy
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
-      WATCHPACK_POLLING: "true"
       # Cap Node heap below the container mem_limit so a runaway
-      # Next.js dev-server watch cycle exits gracefully instead of
-      # being killed with code 243. See docs/runbooks/frontend-exit-243.md.
+      # Next.js process exits gracefully instead of being killed with code 243.
+      # See docs/runbooks/frontend-exit-243.md.
       NODE_OPTIONS: "--max-old-space-size=768"
     mem_limit: 1g
     volumes:
@@ -294,6 +306,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     networks:
       - internal

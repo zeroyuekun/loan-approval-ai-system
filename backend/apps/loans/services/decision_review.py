@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.utils import timezone
 
@@ -44,6 +45,27 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
         locked = DecisionReview.objects.select_for_update().get(pk=review.pk)
         if locked.status in _TERMINAL:
             raise ValueError(f"DecisionReview already resolved ({locked.status})")
+
+        # Four-eyes / maker-checker: the officer who made the original loan
+        # decision (i.e. who last manually transitioned this application to
+        # 'denied') must not be the same person who resolves the review.
+        # Automated ML decisions have user=None and are therefore exempt.
+        original_decider_id = (
+            AuditLog.objects.filter(
+                resource_type="LoanApplication",
+                resource_id=str(locked.application_id),
+                action="status_transition",
+                details__to_status="denied",
+                user__isnull=False,
+            )
+            .order_by("-timestamp")
+            .values_list("user_id", flat=True)
+            .first()
+        )
+        if original_decider_id is not None and original_decider_id == officer.pk:
+            raise PermissionDenied(
+                "An officer cannot resolve their own decision — four-eyes policy requires a second approver."
+            )
 
         locked.assigned_officer = officer
         locked.resolution_note = note

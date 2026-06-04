@@ -489,7 +489,14 @@ class PipelineOrchestrator:
             self._finalize_run(agent_run, steps, start_time)
             return agent_run
 
-        # Email pipeline failure — finalize and return
+        # Email pipeline failure — finalize and return.
+        # Guard: the bias fail-safe block path (escalated=True) was already
+        # handled above and returns early.  Reaching this point with escalated=True
+        # would mean the two None-triple shapes are ambiguous — assert the paths
+        # are mutually exclusive so a future refactor cannot silently mis-route (M18).
+        assert not escalated, (
+            "escalated=True should have been handled by the bias block path before reaching here"
+        )
         if email_result is None and generated_email is None and bias_result is None:
             # Email generation failed — find the error from the last step
             last_step = steps[-1] if steps else {}

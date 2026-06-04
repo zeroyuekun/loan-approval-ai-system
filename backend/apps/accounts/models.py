@@ -59,10 +59,11 @@ class CustomUser(AbstractUser):
             CustomUser.objects.filter(pk=self.pk).update(locked_until=self.locked_until)
 
     def reset_failed_logins(self):
-        if self.failed_login_attempts > 0 or self.locked_until:
-            self.failed_login_attempts = 0
-            self.locked_until = None
-            self.save(update_fields=["failed_login_attempts", "locked_until"])
+        CustomUser.objects.filter(pk=self.pk).update(
+            failed_login_attempts=0,
+            locked_until=None,
+        )
+        self.refresh_from_db(fields=["failed_login_attempts", "locked_until"])
 
 
 class EmploymentStatus(models.TextChoices):

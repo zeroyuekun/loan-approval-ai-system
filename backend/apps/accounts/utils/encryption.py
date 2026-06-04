@@ -1,41 +1,52 @@
 """Field-level encryption utilities using Fernet symmetric encryption.
 
 Provides encrypt/decrypt helpers for PII fields stored at rest in the database.
-The encryption key is read from ``settings.FIELD_ENCRYPTION_KEY`` which may be a
-single Fernet key or a comma-separated list for key rotation (first key encrypts,
-all keys are tried for decryption).
+The encryption key is read from the ``FIELD_ENCRYPTION_KEY`` environment variable
+which may be a single Fernet key or a comma-separated list for key rotation (first
+key encrypts, all keys are tried for decryption).
 """
 
-import functools
 import logging
+import os
+import threading
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
-from django.conf import settings
 
 logger = logging.getLogger("accounts.encryption")
 
+_fernet_lock = threading.Lock()
+_fernet_instance: MultiFernet | None = None
 
-@functools.lru_cache(maxsize=1)
-def get_fernet():
-    """Return a Fernet (or MultiFernet) instance, cached as a singleton.
+
+def get_fernet() -> MultiFernet:
+    """Return a MultiFernet instance, using a thread-safe singleton pattern.
 
     ``FIELD_ENCRYPTION_KEY`` can be a single key or a comma-separated list.
     The first key is used for encryption; all keys are tried for decryption.
     To rotate: generate a new key, prepend it to the comma-separated list,
     then run ``python manage.py rotate_encryption_key`` to re-encrypt data.
+    Call ``clear_fernet_cache()`` after updating the environment variable so
+    the new primary key is picked up without a process restart.
     """
-    raw = getattr(settings, "FIELD_ENCRYPTION_KEY", "")
-    if not raw:
-        raise ValueError(
-            "FIELD_ENCRYPTION_KEY environment variable must be set. "
-            "Generate one with: python -c "
-            '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
-        )
-    keys = [k.strip() for k in raw.split(",") if k.strip()]
-    fernets = [Fernet(k.encode() if isinstance(k, str) else k) for k in keys]
-    if len(fernets) == 1:
-        return fernets[0]
-    return MultiFernet(fernets)
+    global _fernet_instance
+    if _fernet_instance is not None:
+        return _fernet_instance
+    with _fernet_lock:
+        if _fernet_instance is not None:
+            return _fernet_instance
+        raw = os.environ.get("FIELD_ENCRYPTION_KEY", "")
+        keys = [k.strip() for k in raw.split(",") if k.strip()]
+        if not keys:
+            raise ValueError("FIELD_ENCRYPTION_KEY is not set or empty")
+        _fernet_instance = MultiFernet([Fernet(k.encode() if isinstance(k, str) else k) for k in keys])
+        return _fernet_instance
+
+
+def clear_fernet_cache() -> None:
+    """Call this after rotating FIELD_ENCRYPTION_KEY so the new primary key is picked up."""
+    global _fernet_instance
+    with _fernet_lock:
+        _fernet_instance = None
 
 
 def encrypt_field(value):
