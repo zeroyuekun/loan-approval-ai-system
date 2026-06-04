@@ -15,6 +15,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .throttles import TOTPVerifyThrottle
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +78,7 @@ class TOTPVerifyView(APIView):
     """Verify a TOTP code and confirm the device (completes 2FA enrolment)."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [TOTPVerifyThrottle]
 
     def post(self, request):
         ser = TOTPVerifySerializer(data=request.data)
@@ -124,6 +127,7 @@ class TOTPDisableView(APIView):
     """Disable 2FA for the current user (requires valid OTP to confirm)."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [TOTPVerifyThrottle]
 
     def post(self, request):
         ser = TOTPVerifySerializer(data=request.data)
