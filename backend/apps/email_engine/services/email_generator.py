@@ -65,6 +65,11 @@ class EmailGenerator:
         else:
             self.client = None
         self.guardrail_checker = GuardrailChecker()
+        # Initialize retry-state attributes here so they are always defined,
+        # regardless of which attempt number generate() is first called with.
+        # Without this, calling generate(attempt=2) directly raises AttributeError
+        # on the _last_feedback reference inside the retry prompt builder.
+        self._last_feedback = ""
         # Circuit breaker lives in ApiBudgetGuard (Redis-backed). The previous
         # per-instance breaker here duplicated that state and did not reset
         # the failure counter after cooldown expired — a buggy shadow of the
