@@ -427,8 +427,15 @@ class ReferralListView(APIView):
                 qs = applications  # fallback: Python-level filter
 
         status_filter = request.query_params.get("status")
-        if status_filter and hasattr(qs, "filter"):
-            qs = qs.filter(referral_status=status_filter)
+        if status_filter:
+            valid_statuses = LoanApplication.ReferralStatus.values
+            if status_filter not in valid_statuses:
+                return Response(
+                    {"error": f"Invalid status '{status_filter}'. Valid values: {valid_statuses}"},
+                    status=400,
+                )
+            if hasattr(qs, "filter"):
+                qs = qs.filter(referral_status=status_filter)
 
         try:
             limit = int(request.query_params.get("limit", 100))
