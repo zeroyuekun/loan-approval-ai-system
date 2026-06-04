@@ -82,3 +82,4 @@ frontend/test-results/
 # Windows artifacts
 nul
 backend/gunicorn.ctl
+.worktrees/
