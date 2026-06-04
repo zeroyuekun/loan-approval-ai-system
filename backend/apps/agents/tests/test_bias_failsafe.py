@@ -72,10 +72,10 @@ class BiasFailSafeTestCase(TestCase):
     def setUp(self):
         from django.conf import settings as dj
 
-        from apps.accounts.models import _get_fernet
+        from apps.accounts.utils.encryption import clear_fernet_cache
         from apps.ml_engine.models import ModelVersion
 
-        _get_fernet.cache_clear()
+        clear_fernet_cache()
         self.user = CustomUser.objects.create_user(
             username="failsafe",
             password="TestPass123!",
