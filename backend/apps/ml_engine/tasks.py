@@ -43,6 +43,11 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
     try:
         return _do_train(self, algorithm, data_path, lock, segment=segment)
     except Exception:
+        logger.exception(
+            "train_model_task failed for algorithm=%s version_id=%s",
+            algorithm,
+            self.request.id,
+        )
         lock.release()
         raise
 
