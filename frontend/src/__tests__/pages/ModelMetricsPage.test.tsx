@@ -204,4 +204,46 @@ describe('ModelMetricsPage', () => {
       expect(screen.getByText('Failed to load model metrics')).toBeInTheDocument()
     })
   })
+
+  it('defaults to the Performance tab and switches to Diagnostics on click', async () => {
+    const richMetrics = {
+      ...mockMetrics,
+      gini_coefficient: 0.82,
+      ks_statistic: 0.65,
+      brier_score: 0.12,
+      decile_analysis: { deciles: [{ decile: 1, count: 10, actual_rate: 0.1, cumulative_rate: 0.1, lift: 0.5 }] },
+      training_metadata: { split_strategy: 'temporal', train_size: 8000 },
+    }
+    server.use(
+      http.get(`${API_URL}/ml/models/active/metrics/`, () => HttpResponse.json(richMetrics)),
+      http.get(`${API_URL}/ml/models/active/drift-reports/`, () => HttpResponse.json([])),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument())
+
+    // Performance tab is active by default → Confusion Matrix visible
+    expect(screen.getByText('Confusion Matrix')).toBeInTheDocument()
+    // Diagnostics content is NOT in the DOM yet (inactive tab unmounts)
+    expect(screen.queryByText('Training Metadata')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Diagnostics' }))
+
+    expect(await screen.findByText('Training Metadata')).toBeInTheDocument()
+    expect(screen.getByText('Split Strategy')).toBeInTheDocument()
+    // Confusion Matrix (Performance tab) is now unmounted
+    expect(screen.queryByText('Confusion Matrix')).not.toBeInTheDocument()
+  })
+
+  it('hides the Drift tab when there are no drift reports', async () => {
+    server.use(
+      http.get(`${API_URL}/ml/models/active/metrics/`, () => HttpResponse.json(mockMetrics)),
+      http.get(`${API_URL}/ml/models/active/drift-reports/`, () => HttpResponse.json([])),
+    )
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Drift' })).not.toBeInTheDocument()
+  })
 })
