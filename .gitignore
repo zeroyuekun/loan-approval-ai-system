@@ -83,3 +83,4 @@ frontend/test-results/
 nul
 backend/gunicorn.ctl
 .worktrees/
+*.stackdump
