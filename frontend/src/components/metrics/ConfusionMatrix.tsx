@@ -17,10 +17,14 @@ export function ConfusionMatrix({ matrix: raw }: ConfusionMatrixProps) {
     fn: raw.fn ?? raw.false_negatives ?? 0,
   }
   const total = matrix.tp + matrix.fp + matrix.tn + matrix.fn
-  const maxVal = Math.max(matrix.tp, matrix.fp, matrix.tn, matrix.fn)
+  // Scale colour to the largest of the four cells INDEPENDENTLY of TN, which on
+  // imbalanced data dwarfs the rest and washes the heat-map out. TN keeps a
+  // fixed light tint; the other three scale against their own max.
+  const offDiagMax = Math.max(matrix.tp, matrix.fp, matrix.fn)
 
-  function getIntensity(value: number): string {
-    const ratio = maxVal > 0 ? value / maxVal : 0
+  function getIntensity(value: number, isTrueNegative = false): string {
+    if (isTrueNegative) return 'bg-blue-100 text-blue-900'
+    const ratio = offDiagMax > 0 ? value / offDiagMax : 0
     if (ratio > 0.75) return 'bg-blue-600 text-white'
     if (ratio > 0.5) return 'bg-blue-400 text-white'
     if (ratio > 0.25) return 'bg-blue-200 text-blue-900'
@@ -63,7 +67,7 @@ export function ConfusionMatrix({ matrix: raw }: ConfusionMatrixProps) {
               {matrix.fp}
               <span className="text-xs ml-1 opacity-75">FP</span>
             </div>
-            <div className={`flex h-24 w-24 items-center justify-center rounded-md text-lg font-bold ${getIntensity(matrix.tn)}`}>
+            <div className={`flex h-24 w-24 items-center justify-center rounded-md text-lg font-bold ${getIntensity(matrix.tn, true)}`}>
               {matrix.tn}
               <span className="text-xs ml-1 opacity-75">TN</span>
             </div>

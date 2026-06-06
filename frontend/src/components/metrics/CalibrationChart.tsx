@@ -49,7 +49,7 @@ export function CalibrationChart({ fractionOfPositives, meanPredictedValue, ece 
               strokeDasharray="5 5"
             />
             <Line
-              type="monotone"
+              type="linear"
               dataKey="actual"
               stroke="hsl(var(--primary))"
               strokeWidth={2}
