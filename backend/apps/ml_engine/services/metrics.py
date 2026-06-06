@@ -9,7 +9,6 @@ Basel WG-CR scorecard expectations.
 import numpy as np
 import pandas as pd
 from django.conf import settings as django_settings
-from sklearn.calibration import calibration_curve
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -95,16 +94,36 @@ class MetricsService:
         return round(float(log_loss(y_true, y_prob)), 4)
 
     def compute_calibration_data(self, y_true, y_prob, n_bins=10):
-        fraction_of_positives, mean_predicted_value = calibration_curve(
-            y_true, y_prob, n_bins=n_bins, strategy="uniform"
-        )
-        # ECE: mean absolute difference between actual and predicted calibration
-        ece = round(float(np.mean(np.abs(np.array(fraction_of_positives) - np.array(mean_predicted_value)))), 4)
+        """Reliability-diagram data with a population-WEIGHTED ECE.
+
+        ECE = sum_k (n_k / N) * |fraction_positive_k - mean_predicted_k| over
+        non-empty uniform bins, so sparsely populated bins do not dominate.
+        """
+        y_true = np.asarray(y_true, dtype=float)
+        y_prob = np.asarray(y_prob, dtype=float)
+        n = len(y_true)
+
+        edges = np.linspace(0.0, 1.0, n_bins + 1)
+        bin_ids = np.clip(np.digitize(y_prob, edges[1:-1]), 0, n_bins - 1)
+
+        fraction_of_positives = []
+        mean_predicted_value = []
+        ece = 0.0
+        for i in range(n_bins):
+            mask = bin_ids == i
+            count = int(mask.sum())
+            if count == 0:
+                continue
+            frac_pos = float(y_true[mask].mean())
+            mean_pred = float(y_prob[mask].mean())
+            fraction_of_positives.append(round(frac_pos, 4))
+            mean_predicted_value.append(round(mean_pred, 4))
+            ece += (count / n) * abs(frac_pos - mean_pred)
 
         return {
-            "fraction_of_positives": [round(float(x), 4) for x in fraction_of_positives],
-            "mean_predicted_value": [round(float(x), 4) for x in mean_predicted_value],
-            "ece": round(ece, 4),
+            "fraction_of_positives": fraction_of_positives,
+            "mean_predicted_value": mean_predicted_value,
+            "ece": round(float(ece), 4),
             "n_bins": n_bins,
         }
 
@@ -169,7 +188,6 @@ class MetricsService:
         y_prob = np.array(y_prob)
         order = np.argsort(y_prob)
         y_true_sorted = y_true[order]
-        y_prob[order]
 
         n = len(y_true)
         decile_size = n // 10
