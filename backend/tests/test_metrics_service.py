@@ -317,3 +317,80 @@ class TestComputeDecileAnalysis:
         result = svc.compute_decile_analysis(y_true, y_prob)
         lifts = [d["lift"] for d in result["deciles"]]
         assert lifts[-1] == max(lifts)
+
+
+# ── compute_fairness_metrics (disparate impact + small-group stability) ──
+
+
+class TestComputeFairnessMetrics:
+    def _grouped(self, specs):
+        """Build (y_true, y_pred, y_prob, group_labels) from (name, n, n_approved) specs.
+
+        y_true is set equal to y_pred so per-group TPR/FPR are clean and the test
+        focuses on the disparate-impact (predicted approval rate) logic.
+        """
+        y_pred, labels = [], []
+        for name, n, n_approved in specs:
+            y_pred.extend([1] * n_approved + [0] * (n - n_approved))
+            labels.extend([name] * n)
+        y_pred = np.array(y_pred)
+        labels = np.array(labels)
+        y_true = y_pred.copy()
+        y_prob = y_pred.astype(float)
+        return y_true, y_pred, y_prob, labels
+
+    def test_reports_all_groups_and_flags_small_ones(self, svc, settings):
+        settings.FAIRNESS_MIN_GROUP_SIZE = 10
+        y_true, y_pred, y_prob, labels = self._grouped(
+            [("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)]
+        )
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+
+        # Every group is still reported (the chart shows them all)...
+        assert set(res["groups"].keys()) == {"big_a", "big_b", "tiny_c"}
+        assert res["groups"]["tiny_c"]["count"] == 5
+        # ...but the small group is flagged and excluded from the ratio.
+        assert res["groups"]["big_a"]["included_in_fairness"] is True
+        assert res["groups"]["tiny_c"]["included_in_fairness"] is False
+        assert res["excluded_small_groups"] == ["tiny_c"]
+        assert res["min_group_size"] == 10
+
+    def test_tiny_noisy_group_does_not_drive_the_verdict(self, svc, settings):
+        settings.FAIRNESS_MIN_GROUP_SIZE = 10
+        y_true, y_pred, y_prob, labels = self._grouped(
+            [("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)]
+        )
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+        # DI = 0.70 / 0.80 = 0.875 over the two large groups -> PASS.
+        assert res["disparate_impact_ratio"] == pytest.approx(0.875, abs=1e-3)
+        assert res["passes_80_percent_rule"] is True
+
+    def test_small_group_would_fail_the_rule_if_not_excluded(self, svc, settings):
+        """Proof the exclusion is what fixes it: with threshold 1 the noisy group
+        is included and crushes the ratio to 0 -> FAIL."""
+        settings.FAIRNESS_MIN_GROUP_SIZE = 1
+        y_true, y_pred, y_prob, labels = self._grouped(
+            [("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)]
+        )
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+        assert res["disparate_impact_ratio"] == 0.0
+        assert res["passes_80_percent_rule"] is False
+        assert res["excluded_small_groups"] == []
+
+    def test_di_undefined_when_fewer_than_two_assessable_groups(self, svc, settings):
+        settings.FAIRNESS_MIN_GROUP_SIZE = 30
+        y_true, y_pred, y_prob, labels = self._grouped(
+            [("big_a", 50, 40), ("tiny_b", 5, 1), ("tiny_c", 5, 0)]
+        )
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+        assert res["disparate_impact_ratio"] is None
+        assert res["passes_80_percent_rule"] is None
+        assert set(res["excluded_small_groups"]) == {"tiny_b", "tiny_c"}
+
+    def test_group_at_exactly_the_threshold_is_included(self, svc, settings):
+        settings.FAIRNESS_MIN_GROUP_SIZE = 30
+        y_true, y_pred, y_prob, labels = self._grouped([("a", 30, 24), ("b", 40, 28)])
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+        assert res["groups"]["a"]["included_in_fairness"] is True
+        assert res["excluded_small_groups"] == []
+        assert res["disparate_impact_ratio"] == pytest.approx(0.875, abs=1e-3)
