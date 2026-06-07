@@ -133,6 +133,15 @@ class Command(BaseCommand):
         headers = {"X-Health-Token": token} if token else {}
         try:
             resp = httpx.get(backend_url, timeout=10, headers=headers)
+            if resp.status_code == 403:
+                # Deep health is ops-gated (require_ops_auth). A 403 means the
+                # HEALTH_CHECK_TOKEN is unset/invalid — typical in local dev — not a
+                # health failure. Skip this cycle without penalising consecutive_failures.
+                logger.info(
+                    "Deep health gated (HTTP 403): set HEALTH_CHECK_TOKEN to enable "
+                    "watchdog deep checks. Skipping cycle (not a health failure)."
+                )
+                return
             data = resp.json()
 
             db_ok = data.get("database") == "ok"
