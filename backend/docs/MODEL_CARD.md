@@ -450,7 +450,7 @@ This section maps existing system capabilities to applicable regulatory framewor
 | CPS 230 Requirement | System Implementation |
 |---------------------|----------------------|
 | AI risk identification and management | Monotonic constraints (75 features), isotonic calibration, conformal prediction intervals |
-| Business continuity | Docker health checks on all services, readiness probe at `/health/ready/`, deep health check at `/health/deep/` |
+| Business continuity | Docker health checks on all services, liveness probe at `/health/`, deep health check at `/health/deep/` |
 | Third-party risk management | Claude API budget guard ($5/day cap, circuit breaker), template fallback when API unavailable |
 | AI observability | Prometheus custom metrics (prediction latency, drift scores), Grafana dashboards (AI Ops, ML Metrics, SLO) |
 | Operational resilience testing | k6 load tests with SLA assertions, Celery queue separation (ML, email, agents) |

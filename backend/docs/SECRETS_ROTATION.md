@@ -185,7 +185,7 @@ ALTER USER postgres WITH PASSWORD 'old-password';
 2. **Test the new credential** in a staging environment or with a quick smoke test before deploying to production.
 3. **Restart order:** Web workers first, then Celery workers (`ml`, `email`, `agents` queues).
 4. **Verify after rotation:**
-   - Hit `/health/ready/` to confirm the app is up.
+   - Hit `/api/v1/health/` to confirm the app is up.
    - Trigger a test loan pipeline to verify Claude API, email sending, and DB access.
    - Check Celery worker logs for connection errors.
 5. **Audit:** Record the rotation date and who performed it. Update any shared password managers.

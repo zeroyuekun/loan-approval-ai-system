@@ -146,7 +146,7 @@ jobs:
           docker compose up -d backend
           echo "Waiting for backend to be ready..."
           for i in $(seq 1 40); do
-            if curl -sf http://localhost:8000/api/v1/health/ready/ > /dev/null 2>&1; then
+            if curl -sf http://localhost:8000/api/v1/health/ > /dev/null 2>&1; then
               echo "Backend is ready"
               exit 0
             fi
