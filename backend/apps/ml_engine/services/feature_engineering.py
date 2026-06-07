@@ -106,8 +106,12 @@ DEFAULT_IMPUTATION_VALUES = {
     "application_channel": "digital",
     "optimism_bias_flag": 0,
     "financial_literacy_score": 0.5,
-    "prepayment_buffer_months": 6.0,
-    "negative_equity_flag": 0,
+    # prepayment_buffer_months and negative_equity_flag are POST-OUTCOME quantities
+    # (computed after loan disbursement — not available at application time).
+    # They must NOT appear as imputation defaults; adding them here would
+    # silently synthesise post-outcome values if they were ever included in a
+    # feature list used for training or inference.  See feature_prep.py comment
+    # and data_generator.POST_OUTCOME_FEATURES for the authoritative exclusion list.
     "loan_trigger_event": "other",
     # Underwriter-internal variables exposed as features
     # (computed from application at inference time in predictor.py)

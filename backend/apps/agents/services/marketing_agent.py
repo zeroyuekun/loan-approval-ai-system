@@ -141,6 +141,20 @@ class MarketingAgent:
         banking_context = self._get_banking_context(application)
         offers_detail = self._format_offers(nbo_result.get("offers", []))
 
+        # Sanitize all LLM-derived and user-derived strings before injecting
+        # into the prompt.  nbo_analysis comes from the NBO generator LLM output
+        # and could contain injection payloads; loyalty_factors and denial_reasons
+        # may also carry user-supplied data through the pipeline.  applicant_name
+        # and applicant_first_name are already sanitized above.
+        sanitized_denial_reasons = _sanitize_prompt_input(
+            denial_reasons or "Not specified", max_length=500
+        )
+        raw_loyalty = ", ".join(nbo_result.get("loyalty_factors", [])) or "N/A"
+        sanitized_loyalty_factors = _sanitize_prompt_input(raw_loyalty, max_length=300)
+        sanitized_nbo_analysis = _sanitize_prompt_input(
+            nbo_result.get("analysis", "N/A"), max_length=500
+        )
+
         prompt = MARKETING_EMAIL_PROMPT.format(
             applicant_name=applicant_name,
             applicant_first_name=applicant_first_name,
@@ -150,12 +164,12 @@ class MarketingAgent:
             annual_income=float(application.annual_income),
             employment_type=application.get_employment_type_display(),
             employment_length=application.employment_length,
-            denial_reasons=denial_reasons or "Not specified",
+            denial_reasons=sanitized_denial_reasons,
             banking_context=banking_context,
             offers_detail=offers_detail,
             retention_score=nbo_result.get("customer_retention_score", 0),
-            loyalty_factors=", ".join(nbo_result.get("loyalty_factors", [])) or "N/A",
-            nbo_analysis=nbo_result.get("analysis", "N/A"),
+            loyalty_factors=sanitized_loyalty_factors,
+            nbo_analysis=sanitized_nbo_analysis,
         )
 
         # Extract NBO offer amounts for guardrail validation
@@ -186,62 +200,59 @@ class MarketingAgent:
 
         _logger = _logging.getLogger("agents.marketing_agent")
 
+        # Single API attempt — no in-worker sleep/retry loop.
+        # time.sleep() in a Celery worker blocks the thread and prevents other
+        # tasks from running.  Transient errors (RateLimit, Timeout, Connection,
+        # 5xx) fall back to the template immediately; non-transient errors
+        # propagate so Celery's autoretry / task-level error handling owns them.
+        # Budget / auth failures also take the template path (unchanged behaviour).
         response = None
-        for api_attempt in range(3):
-            try:
-                response = guarded_api_call(
-                    self.client,
-                    model="claude-sonnet-4-6",
-                    max_tokens=1500,
-                    temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
-                    messages=[{"role": "user", "content": current_prompt}],
+        try:
+            response = guarded_api_call(
+                self.client,
+                model="claude-sonnet-4-6",
+                max_tokens=1500,
+                temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
+                messages=[{"role": "user", "content": current_prompt}],
+            )
+        except BudgetExhausted:
+            _logger.info("Marketing email API budget exhausted or no API key — using template")
+            return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
+        except anthropic.AuthenticationError as api_err:
+            _logger.error("Marketing email API auth error (not retryable): %s", api_err)
+            return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
+        except anthropic.RateLimitError as api_err:
+            # Transient: rate limit → template fallback (no sleep)
+            _logger.warning("Marketing email API rate limited — using template: %s", api_err)
+            return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
+        except (anthropic.APITimeoutError, anthropic.APIConnectionError) as api_err:
+            # Transient: network/timeout → template fallback (no sleep)
+            _logger.warning("Marketing email API connection/timeout — using template: %s", api_err)
+            return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
+        except anthropic.APIStatusError as api_err:
+            if api_err.status_code >= 500:
+                # Transient: server error → template fallback (no sleep)
+                _logger.warning(
+                    "Marketing email API server error (%d) — using template: %s",
+                    api_err.status_code,
+                    api_err,
                 )
-                break
-            except BudgetExhausted:
-                _logger.info("Marketing email API budget exhausted or no API key — using template")
                 return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
-            except anthropic.AuthenticationError as api_err:
-                _logger.error("Marketing email API auth error (not retryable): %s", api_err)
-                return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
-            except anthropic.RateLimitError as api_err:
-                _logger.warning("Marketing email API attempt %d rate limited: %s", api_attempt + 1, api_err)
-                if api_attempt < 2:
-                    time.sleep(2 ** (api_attempt + 1))
-                else:
-                    raise
-            except (anthropic.APITimeoutError, anthropic.APIConnectionError) as api_err:
-                _logger.warning("Marketing email API attempt %d failed: %s", api_attempt + 1, api_err)
-                if api_attempt < 2:
-                    time.sleep(2**api_attempt)
-                else:
-                    raise
-            except anthropic.APIStatusError as api_err:
-                if api_err.status_code >= 500:
-                    _logger.warning(
-                        "Marketing email API attempt %d server error (%d): %s",
-                        api_attempt + 1,
-                        api_err.status_code,
-                        api_err,
-                    )
-                    if api_attempt < 2:
-                        time.sleep(2**api_attempt)
-                    else:
-                        raise
-                elif "credit" in str(api_err).lower() or "balance" in str(api_err).lower():
-                    _logger.warning("Marketing email API credit insufficient — using template")
-                    return self._marketing_template_fallback(
-                        application, nbo_amounts, start_time, nbo_result=nbo_result
-                    )
-                else:
-                    _logger.error(
-                        "Marketing email API client error (%d, not retryable): %s", api_err.status_code, api_err
-                    )
-                    raise
-            except Exception as api_err:
-                _logger.critical(
-                    "Marketing email API UNEXPECTED failure attempt %d: %s", api_attempt + 1, api_err, exc_info=True
+            elif "credit" in str(api_err).lower() or "balance" in str(api_err).lower():
+                _logger.warning("Marketing email API credit insufficient — using template")
+                return self._marketing_template_fallback(
+                    application, nbo_amounts, start_time, nbo_result=nbo_result
+                )
+            else:
+                _logger.error(
+                    "Marketing email API client error (%d, not retryable): %s", api_err.status_code, api_err
                 )
                 raise
+        except Exception as api_err:
+            _logger.critical(
+                "Marketing email API UNEXPECTED failure: %s", api_err, exc_info=True
+            )
+            raise
 
         response_text = response.content[0].text
         generation_time_ms = int((time.time() - start_time) * 1000)
