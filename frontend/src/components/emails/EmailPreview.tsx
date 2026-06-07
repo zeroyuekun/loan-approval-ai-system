@@ -58,7 +58,7 @@ interface EmailPreviewProps {
 
 export function EmailPreview({ email }: EmailPreviewProps) {
   const htmlContent = useMemo(
-    () => email.html_body || renderEmailHtml(email.body, email.decision === 'approved' ? 'approval' : 'denial'),
+    () => email.html_body || renderEmailHtml(email.body ?? '', email.decision === 'approved' ? 'approval' : 'denial'),
     [email.html_body, email.body, email.decision],
   )
   const isApproval = email.decision === 'approved'

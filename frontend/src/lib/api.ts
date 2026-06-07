@@ -66,6 +66,28 @@ const api = axios.create({
   withCredentials: true, // Send HttpOnly cookies with every request
 })
 
+/**
+ * Clear auth session and redirect to login.
+ *
+ * Called from the response interceptor when a token refresh fails — mirrors
+ * the sessionStorage + redirect convention used by useAuth.logout(), but does
+ * not require importing the React hook (interceptors run outside React).
+ *
+ * Exported so unit tests can spy on / replace it without touching window.location.
+ */
+export function clearAuthAndRedirect(): void {
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem('user')
+  }
+  if (typeof document !== 'undefined') {
+    // Clear the role cookie (max-age=0 expires it immediately)
+    document.cookie = 'user_role=;path=/;max-age=0'
+  }
+  if (typeof window !== 'undefined') {
+    window.location.assign('/login')
+  }
+}
+
 // Helper to read the CSRF token from the csrftoken cookie
 function getCsrfToken(): string | null {
   if (typeof document === 'undefined') return null
@@ -118,7 +140,10 @@ api.interceptors.response.use(
         await refreshPromise
         return api(originalRequest)
       } catch {
-        // Refresh failed — let the error propagate; useAuth handles the redirect
+        // Refresh failed — clear auth state and redirect to login so the user
+        // is not left on a blank/stuck page. Mirror the logout convention in
+        // useAuth (sessionStorage + redirect) without importing the React hook.
+        clearAuthAndRedirect()
         return Promise.reject(error)
       } finally {
         refreshPromise = null

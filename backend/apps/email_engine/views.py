@@ -51,6 +51,9 @@ class EmailListView(APIView):
                     "passed": log.passed,
                     "details": log.details,
                     "category": log.category,
+                    # quality_score is a batch-computed value (not stored per-log).
+                    # Exposed as null here; callers should use the email-level score.
+                    "quality_score": None,
                 }
                 for log in email.guardrail_checks.all()
             ]
@@ -64,11 +67,9 @@ class EmailListView(APIView):
                     "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
                     "decision": email.decision,
                     "subject": email.subject,
-                    "body": email.body,
-                    "html_body": render_html(
-                        email.body,
-                        email_type="approval" if email.decision == "approved" else "denial",
-                    ),
+                    # body and html_body are intentionally excluded from the list
+                    # response — they are KB-scale per record. Fetch them from the
+                    # single-email RETRIEVE endpoint (/emails/<loan_id>/) instead.
                     "model_used": email.model_used,
                     "generation_time_ms": email.generation_time_ms,
                     "attempt_number": email.attempt_number,
@@ -204,6 +205,10 @@ class EmailDetailView(APIView):
                 "check_name": log.check_name,
                 "passed": log.passed,
                 "details": log.details,
+                "category": log.category,
+                # quality_score is a batch-computed value (not stored per-log).
+                # Exposed as null here to match the list endpoint shape.
+                "quality_score": None,
             }
             for log in email.guardrail_checks.all()
         ]
