@@ -144,17 +144,21 @@ curl -fsS -b "${COOKIE_JAR}" -X POST "${API_BASE}/agents/orchestrate/${applicati
 echo "[smoke] Polling for terminal decision (120s ceiling)..."
 decision=""
 app_detail=""
-for i in {1..120}; do
+# Poll every 3s, not 1s: the authenticated-user DRF throttle is 60/min, and
+# 1s polling (plus the setup calls) blows past it with HTTP 429. 40 polls x 3s
+# keeps the 120s ceiling while staying well under the rate limit.
+for i in {1..40}; do
   app_detail=$(curl -fsS -b "${COOKIE_JAR}" "${API_BASE}/loans/${application_id}/")
   decision=$(echo "${app_detail}" | jq -r ".status // empty")
-  if [[ "${decision}" == "approved" || "${decision}" == "declined" || "${decision}" == "referred" ]]; then
-    echo "[smoke] Terminal decision reached after ${i}s: ${decision}"
+  # Terminal statuses per LoanApplication.Status: approved | denied | review.
+  if [[ "${decision}" == "approved" || "${decision}" == "denied" || "${decision}" == "review" ]]; then
+    echo "[smoke] Terminal decision reached: ${decision}"
     break
   fi
-  sleep 1
+  sleep 3
 done
 
-if [[ "${decision}" != "approved" && "${decision}" != "declined" && "${decision}" != "referred" ]]; then
+if [[ "${decision}" != "approved" && "${decision}" != "denied" && "${decision}" != "review" ]]; then
   write_result "failure" "no-terminal-decision-in-120s"
   exit 1
 fi
@@ -163,13 +167,16 @@ model_version=$(echo "${app_detail}" | jq -r ".model_version_id // .ml_predictio
 
 echo "[smoke] Polling for generated email (30s ceiling)..."
 email_subject=""
-for i in {1..30}; do
+# Same 3s cadence as the decision poll to stay under the 60/min user throttle.
+# By the time the decision is terminal the orchestrator has usually already
+# written the email (same pipeline), so 10 x 3s is ample headroom.
+for i in {1..10}; do
   email_detail=$(curl -fsS -b "${COOKIE_JAR}" "${API_BASE}/emails/${application_id}/" 2>/dev/null || echo "{}")
   email_subject=$(echo "${email_detail}" | jq -r ".subject // empty")
   if [[ -n "${email_subject}" ]]; then
     break
   fi
-  sleep 1
+  sleep 3
 done
 
 email_hash=""
