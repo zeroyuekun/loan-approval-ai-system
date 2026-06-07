@@ -20,12 +20,18 @@ spec:
         app.kubernetes.io/component: api
         app.kubernetes.io/part-of: aussieloanai
     spec:
+      # Dockerfile: adduser (Debian) creates appuser at UID 1000
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
       containers:
         - name: backend
           image: ghcr.io/OWNER/loan-approval-ai-system/backend:latest
           ports:
             - containerPort: 8000
               protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
           command:
             - gunicorn
             - config.wsgi:application

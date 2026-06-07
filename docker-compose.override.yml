@@ -8,6 +8,10 @@
 
 services:
   frontend:
+    # user: root — dev-only workaround so bind-mounted host files (npm cache,
+    # .next build dir) are writable. Moved here from docker-compose.yml so the
+    # deploy-safe base file runs as the image's non-root appuser.
+    user: root
     environment:
       NODE_ENV: development
       WATCHPACK_POLLING: "true"

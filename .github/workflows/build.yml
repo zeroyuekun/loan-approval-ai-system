@@ -57,8 +57,13 @@ jobs:
     name: OWASP ZAP DAST Scan
     runs-on: ubuntu-latest
     needs: [docker-build]
-    # Only run on main branch pushes (not on every PR — ZAP is slow)
-    if: github.ref == 'refs/heads/master'
+    # Run on master pushes AND on PRs targeting master so security regressions
+    # are caught before merge. ZAP is slow (~5 min) but the cost is worth the
+    # pre-merge gate. The deploy job (below) is still gated on github.event_name
+    # == 'push' so a successful DAST on a PR does not trigger a deploy.
+    if: >-
+      github.ref == 'refs/heads/master' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'master')
     steps:
       - uses: actions/checkout@v6
 
