@@ -341,9 +341,7 @@ class TestComputeFairnessMetrics:
 
     def test_reports_all_groups_and_flags_small_ones(self, svc, settings):
         settings.FAIRNESS_MIN_GROUP_SIZE = 10
-        y_true, y_pred, y_prob, labels = self._grouped(
-            [("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)]
-        )
+        y_true, y_pred, y_prob, labels = self._grouped([("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)])
         res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
 
         # Every group is still reported (the chart shows them all)...
@@ -357,9 +355,7 @@ class TestComputeFairnessMetrics:
 
     def test_tiny_noisy_group_does_not_drive_the_verdict(self, svc, settings):
         settings.FAIRNESS_MIN_GROUP_SIZE = 10
-        y_true, y_pred, y_prob, labels = self._grouped(
-            [("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)]
-        )
+        y_true, y_pred, y_prob, labels = self._grouped([("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)])
         res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
         # DI = 0.70 / 0.80 = 0.875 over the two large groups -> PASS.
         assert res["disparate_impact_ratio"] == pytest.approx(0.875, abs=1e-3)
@@ -369,9 +365,7 @@ class TestComputeFairnessMetrics:
         """Proof the exclusion is what fixes it: with threshold 1 the noisy group
         is included and crushes the ratio to 0 -> FAIL."""
         settings.FAIRNESS_MIN_GROUP_SIZE = 1
-        y_true, y_pred, y_prob, labels = self._grouped(
-            [("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)]
-        )
+        y_true, y_pred, y_prob, labels = self._grouped([("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)])
         res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
         assert res["disparate_impact_ratio"] == 0.0
         assert res["passes_80_percent_rule"] is False
@@ -379,9 +373,7 @@ class TestComputeFairnessMetrics:
 
     def test_di_undefined_when_fewer_than_two_assessable_groups(self, svc, settings):
         settings.FAIRNESS_MIN_GROUP_SIZE = 30
-        y_true, y_pred, y_prob, labels = self._grouped(
-            [("big_a", 50, 40), ("tiny_b", 5, 1), ("tiny_c", 5, 0)]
-        )
+        y_true, y_pred, y_prob, labels = self._grouped([("big_a", 50, 40), ("tiny_b", 5, 1), ("tiny_c", 5, 0)])
         res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
         assert res["disparate_impact_ratio"] is None
         assert res["passes_80_percent_rule"] is None
