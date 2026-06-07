@@ -15,6 +15,7 @@ type GroupStats = {
   predicted_approval_rate: number
   tpr: number
   fpr: number
+  included_in_fairness?: boolean
 }
 
 function FairnessAttributeCard({ attribute, data }: { attribute: string; data: any }) {
@@ -25,9 +26,11 @@ function FairnessAttributeCard({ attribute, data }: { attribute: string; data: a
   const disparateImpact: number = data.disparate_impact_ratio ?? 1
   const eqOddsDiff: number = data.equalized_odds_difference ?? 0
   const passes80: boolean = data.passes_80_percent_rule ?? true
+  const minGroupSize: number = data.min_group_size ?? 30
+  const excludedGroups: string[] = Array.isArray(data.excluded_small_groups) ? data.excluded_small_groups : []
 
   const chartData = Object.entries(groups).map(([group, vals]) => ({
-    group: group.replace(/_/g, ' '),
+    group: group.replace(/_/g, ' ') + (vals.included_in_fairness === false ? ' *' : ''),
     'Actual Approval': parseFloat((vals.actual_approval_rate * 100).toFixed(1)),
     'Predicted Approval': parseFloat((vals.predicted_approval_rate * 100).toFixed(1)),
     TPR: parseFloat((vals.tpr * 100).toFixed(1)),
@@ -83,6 +86,15 @@ function FairnessAttributeCard({ attribute, data }: { attribute: string; data: a
           </BarChart>
         </ResponsiveContainer>
         <ChartHoverPanel active={active} formatValue={(v) => `${v}%`} />
+        {excludedGroups.length > 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            <span aria-hidden>* </span>
+            {excludedGroups.length} small group{excludedGroups.length === 1 ? '' : 's'} (
+            {excludedGroups.map((g) => g.replace(/_/g, ' ')).join(', ')}) excluded from the
+            disparate-impact ratio — fewer than {minGroupSize} samples to assess reliably. Still
+            shown above for transparency.
+          </p>
+        )}
       </CardContent>
     </Card>
   )
