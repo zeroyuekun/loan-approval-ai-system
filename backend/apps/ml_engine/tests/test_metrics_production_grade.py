@@ -276,3 +276,24 @@ def test_promote_accepts_first_model_when_no_champion(monkeypatch):
     result = ms.promote_if_eligible(candidate)
     assert result.promoted
     assert result.champion_id is None
+
+
+def test_ece_is_population_weighted():
+    """ECE must weight each bin by its sample count, not average bins equally.
+
+    90 samples at p=0.05 (10% positive -> gap 0.05) and 10 samples at p=0.85
+    (50% positive -> gap 0.35). Unweighted mean of gaps = 0.20; population-
+    weighted ECE = 0.9*0.05 + 0.1*0.35 = 0.08.
+    """
+    svc = MetricsService()
+    y_prob = np.concatenate([np.full(90, 0.05), np.full(10, 0.85)])
+    y_true = np.concatenate([
+        np.array([1] * 9 + [0] * 81),   # 9/90 positive in low bin
+        np.array([1] * 5 + [0] * 5),     # 5/10 positive in high bin
+    ])
+
+    result = svc.compute_calibration_data(y_true, y_prob, n_bins=10)
+
+    assert result["ece"] == 0.08
+    assert result["mean_predicted_value"] == [0.05, 0.85]
+    assert result["fraction_of_positives"] == [0.1, 0.5]
