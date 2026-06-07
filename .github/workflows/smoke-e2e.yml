@@ -33,7 +33,7 @@ jobs:
       - name: Migrate + seed minimal dataset
         run: |
           docker compose exec -T backend python manage.py migrate
-          docker compose exec -T backend python manage.py generate_data --count 500
+          docker compose exec -T backend python manage.py generate_data --num-records 500
           docker compose exec -T backend python manage.py train_model --algorithm xgb
 
       - name: Run smoke script
