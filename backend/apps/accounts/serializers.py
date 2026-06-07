@@ -246,6 +246,14 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+        # Government ID numbers are encrypted at rest. Customers may SET them
+        # but must never READ back the decrypted value — only the masked
+        # variants (primary_id_number_masked / secondary_id_number_masked)
+        # are returned on GET.  This mirrors AdminCustomerProfileUpdateSerializer.
+        extra_kwargs = {
+            "primary_id_number": {"write_only": True, "required": False},
+            "secondary_id_number": {"write_only": True, "required": False},
+        }
 
     def validate(self, data):
         warnings = []

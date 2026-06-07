@@ -52,8 +52,7 @@ def test_generate_does_not_sleep_on_rate_limit(monkeypatch):
     monkeypatch.setattr("apps.agents.services.api_budget.guarded_api_call", _raise_rate_limit)
 
     gen = EmailGenerator()
-    gen.client = object()  # non-None so _api_available is bypassed below
-    monkeypatch.setattr(gen, "_api_available", lambda: True)
+    gen.client = object()  # non-None so generate() proceeds to the (mocked) API call
 
     class _FakeApplicant:
         first_name = "Test"
@@ -199,13 +198,13 @@ def test_send_occurs_once_when_not_yet_sent(monkeypatch, sample_application):
 
 @pytest.mark.django_db
 def test_template_fallback_when_api_unavailable(monkeypatch, sample_application):
-    """When _api_available returns False, generate() must use the template path
+    """When no Claude client is configured, generate() must use the template path
     (template_fallback=True) rather than calling the Claude API."""
     from apps.email_engine.services.email_generator import EmailGenerator
 
     gen = EmailGenerator()
-    # Force the API-available probe to return False without touching the network.
-    monkeypatch.setattr(gen, "_api_available", lambda: False)
+    # No API client configured → generate() falls back to the template path.
+    monkeypatch.setattr(gen, "client", None)
 
     result = gen.generate(sample_application, "denied")
 
@@ -225,7 +224,7 @@ def test_denial_template_has_no_apology_language(monkeypatch, sample_application
     from apps.email_engine.services.email_generator import EmailGenerator
 
     gen = EmailGenerator()
-    monkeypatch.setattr(gen, "_api_available", lambda: False)
+    monkeypatch.setattr(gen, "client", None)
 
     result = gen.generate(sample_application, "denied")
     body = result["body"].lower()

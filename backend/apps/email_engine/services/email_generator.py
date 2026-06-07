@@ -345,9 +345,15 @@ class EmailGenerator:
                     "use simpler language and stick to the exact template structure.\n"
                 )
 
-        # Pre-flight: detect billing/auth errors immediately so the pipeline
-        # completes end-to-end using templates rather than failing at this step.
-        if attempt == 1 and not self._api_available():
+        # Pre-flight: if no API client is configured fall back immediately.
+        # Previously a live 1-token probe (_api_available) was used here, but
+        # it bypassed guarded_api_call() so the probe cost was unaccounted for.
+        # The main call path already handles all fallback cases:
+        #   • budget.check_budget()   → BudgetExhausted → template fallback
+        #   • guarded_api_call()      → BudgetExhausted / AuthenticationError
+        #                               → template fallback or exception
+        # so the separate probe is redundant and has been removed.
+        if self.client is None:
             return self._generate_fallback(application, decision, context, start_time)
 
         # Call Claude API with tool_use for structured output (with budget check)
@@ -511,54 +517,6 @@ class EmailGenerator:
             subject = "Regarding Your Loan Application"
 
         return subject, body
-
-    def _api_available(self):
-        """Quick check if the Claude API is reachable and has credits.
-
-        Sends a minimal 1-token request. Returns False on billing, auth,
-        or connection errors so the caller can fall back to templates.
-
-        Result is cached in Redis for 60 seconds (M16) so that concurrent
-        email generation tasks don't each fire a live availability probe.
-        """
-        import logging
-
-        from django.core.cache import cache
-
-        logger = logging.getLogger("email_engine.generator")
-        if self.client is None:
-            logger.info("No API client configured — using template fallback")
-            return False
-
-        _CACHE_KEY = "email_engine:api_available"
-        cached = cache.get(_CACHE_KEY)
-        if cached is not None:
-            return cached
-
-        try:
-            self.client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1,
-                messages=[{"role": "user", "content": "hi"}],
-            )
-            result = True
-        except anthropic.AuthenticationError:
-            logger.warning("Claude API auth failed — using template fallback")
-            result = False
-        except anthropic.BadRequestError as e:
-            if "credit" in str(e).lower() or "balance" in str(e).lower():
-                logger.warning("Claude API credit insufficient — using template fallback")
-                result = False
-            else:
-                result = True  # other bad request errors may be prompt-specific
-        except (anthropic.APIConnectionError, anthropic.APITimeoutError):
-            logger.warning("Claude API unreachable — using template fallback")
-            result = False
-        except Exception:
-            result = True  # let the main flow handle unexpected errors
-
-        cache.set(_CACHE_KEY, result, timeout=60)
-        return result
 
     def _generate_fallback(self, application, decision, context, start_time):
         """Generate email from smart template when Claude API is unavailable.
