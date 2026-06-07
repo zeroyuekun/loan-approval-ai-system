@@ -1,5 +1,7 @@
 import logging
 
+from utils.sanitization import sanitize_prompt_input
+
 logger = logging.getLogger("agents.orchestrator")
 
 
@@ -35,8 +37,8 @@ class ApplicationContextBuilder:
             if hasattr(profile, "total_monthly_liabilities")
             else None,
             "employment_status": getattr(profile, "employment_status", ""),
-            "occupation": getattr(profile, "occupation", ""),
-            "industry": getattr(profile, "industry", ""),
+            "occupation": sanitize_prompt_input(getattr(profile, "occupation", "") or ""),
+            "industry": sanitize_prompt_input(getattr(profile, "industry", "") or ""),
         }
 
     @staticmethod

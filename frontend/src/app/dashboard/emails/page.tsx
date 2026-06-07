@@ -75,6 +75,7 @@ export default function EmailsPage() {
     )
   }
 
+  const totalCount = data?.count ?? 0
   const customerGroups = groupByCustomer(emails)
   const filtered = search.trim()
     ? customerGroups.filter((g) => g.applicant_name.toLowerCase().includes(search.toLowerCase()))
@@ -85,6 +86,11 @@ export default function EmailsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Generated Emails</h1>
         <p className="text-muted-foreground">Select a client to view their email history</p>
+        {totalCount > emails.length && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Showing first {emails.length} of {totalCount} emails
+          </p>
+        )}
       </div>
 
       <div className="relative">

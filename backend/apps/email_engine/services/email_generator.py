@@ -65,6 +65,11 @@ class EmailGenerator:
         else:
             self.client = None
         self.guardrail_checker = GuardrailChecker()
+        # Initialize retry-state attributes here so they are always defined,
+        # regardless of which attempt number generate() is first called with.
+        # Without this, calling generate(attempt=2) directly raises AttributeError
+        # on the _last_feedback reference inside the retry prompt builder.
+        self._last_feedback = ""
         # Circuit breaker lives in ApiBudgetGuard (Redis-backed). The previous
         # per-instance breaker here duplicated that state and did not reset
         # the failure counter after cooldown expired — a buggy shadow of the
@@ -163,6 +168,31 @@ class EmailGenerator:
             )
             reasons.append(readable)
         return "; ".join(reasons)
+
+    def _render_nbo_block(self, nbo_offer):
+        """Render a neutral, factual alternative-offer teaser for denial emails.
+
+        No apology/emotion language (locked project rule). Returns "" when no
+        usable offer is supplied so the prompt is unchanged.
+        """
+        if not nbo_offer:
+            return ""
+        name = nbo_offer.get("name") or nbo_offer.get("type")
+        amount = nbo_offer.get("amount")
+        if not name or amount is None:
+            return ""
+        rate = nbo_offer.get("estimated_rate")
+        monthly = nbo_offer.get("monthly_repayment")
+        headline = f"${float(amount):,.0f}"
+        if rate:
+            headline += f" at {float(rate):.2f}% p.a."
+        if monthly:
+            headline += f", around ${float(monthly):,.0f}/month"
+        return (
+            "A specific option you may qualify for now:\n"
+            f"  •  {name}: {headline}\n"
+            "You can discuss this option using the contact details below."
+        )
 
     def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
         """Generate an approval/denial email for the given loan application."""
@@ -268,13 +298,26 @@ class EmailGenerator:
                 decision_obj.feature_importances if decision_obj else None,
                 shap_values=decision_obj.shap_values if decision_obj else None,
             )
+            nbo_offer = (profile_context or {}).get("nbo_offer")
+            alternative_offer = self._render_nbo_block(nbo_offer)
             prompt = DENIAL_EMAIL_PROMPT.format(
                 applicant_name=applicant_name,
                 loan_amount=float(application.loan_amount),
                 purpose=application.get_purpose_display(),
                 reasons=reasons,
                 banking_context=banking_context,
+                alternative_offer=alternative_offer,
             )
+            # Whitelist the teaser figures so the hallucinated-numbers guardrail
+            # (engine.py:61) recognises them on the decision email.
+            if nbo_offer:
+                nbo_amounts = []
+                for key in ("amount", "monthly_repayment", "fortnightly_repayment"):
+                    val = nbo_offer.get(key)
+                    if val:
+                        nbo_amounts.append(float(val))
+                if nbo_amounts:
+                    context["nbo_amounts"] = nbo_amounts
 
         # Add retry feedback if not first attempt.
         # The feedback is structured to tell Claude exactly what failed,
@@ -302,9 +345,15 @@ class EmailGenerator:
                     "use simpler language and stick to the exact template structure.\n"
                 )
 
-        # Pre-flight: detect billing/auth errors immediately so the pipeline
-        # completes end-to-end using templates rather than failing at this step.
-        if attempt == 1 and not self._api_available():
+        # Pre-flight: if no API client is configured fall back immediately.
+        # Previously a live 1-token probe (_api_available) was used here, but
+        # it bypassed guarded_api_call() so the probe cost was unaccounted for.
+        # The main call path already handles all fallback cases:
+        #   • budget.check_budget()   → BudgetExhausted → template fallback
+        #   • guarded_api_call()      → BudgetExhausted / AuthenticationError
+        #                               → template fallback or exception
+        # so the separate probe is redundant and has been removed.
+        if self.client is None:
             return self._generate_fallback(application, decision, context, start_time)
 
         # Call Claude API with tool_use for structured output (with budget check)
@@ -325,41 +374,22 @@ class EmailGenerator:
 
         input_tokens = 0
         output_tokens = 0
+        _model = "claude-sonnet-4-6"
         try:
-            # Retry with exponential backoff on rate limit (429) errors.
-            # The org-level limit is 30k input tokens/min — with prompts
-            # ~5k tokens each, rapid sequential calls will hit this.
-            max_api_retries = 3
-            response = None
-            _model = "claude-sonnet-4-6"
-            for api_attempt in range(max_api_retries):
-                try:
-                    response = guarded_api_call(
-                        self.client,
-                        model=_model,
-                        max_tokens=token_limit,
-                        temperature=getattr(django_settings, "AI_TEMPERATURE_DECISION_EMAIL", 0.0),
-                        messages=[{"role": "user", "content": prompt}],
-                        tools=[EMAIL_SUBMIT_TOOL],
-                        tool_choice={"type": "tool", "name": "submit_email"},
-                    )
-                    break  # Success — exit retry loop
-                except BudgetExhausted:
-                    return self._generate_fallback(application, decision, context, start_time)
-                except anthropic.RateLimitError:
-                    if api_attempt < max_api_retries - 1:
-                        wait = 2**api_attempt * 30  # 30s, 60s, 120s
-                        import logging
-
-                        logging.getLogger(__name__).warning(
-                            "Rate limited (429), retrying in %ds (attempt %d/%d)",
-                            wait,
-                            api_attempt + 1,
-                            max_api_retries,
-                        )
-                        time.sleep(wait)
-                    else:
-                        raise  # Final attempt — propagate to outer handler
+            # A single guarded API call. Backoff on rate limits no longer happens
+            # here with time.sleep (which blocked the worker inside a hard
+            # time_limit, risking SIGKILL + duplicate sends). Instead a 429 is
+            # surfaced as a typed RateLimited signal so the Celery task can
+            # self.retry(countdown=...) and free the worker (M6/L25).
+            response = guarded_api_call(
+                self.client,
+                model=_model,
+                max_tokens=token_limit,
+                temperature=getattr(django_settings, "AI_TEMPERATURE_DECISION_EMAIL", 0.0),
+                messages=[{"role": "user", "content": prompt}],
+                tools=[EMAIL_SUBMIT_TOOL],
+                tool_choice={"type": "tool", "name": "submit_email"},
+            )
 
             # Read actual token usage from the response
             usage = getattr(response, "usage", None)
@@ -368,8 +398,12 @@ class EmailGenerator:
                 output_tokens = getattr(usage, "output_tokens", 0)
         except BudgetExhausted:
             return self._generate_fallback(application, decision, context, start_time)
+        except anthropic.RateLimitError as exc:
+            from .exceptions import RateLimited
+
+            raise RateLimited(retry_after=30) from exc
         # Failure accounting (record_failure, circuit-breaker tripping) happens
-        # inside guarded_api_call. Any exception here propagates to the caller.
+        # inside guarded_api_call. Any other exception here propagates to the caller.
 
         # Extract structured output from tool_use response
         subject, body = self._parse_tool_response(response)
@@ -483,39 +517,6 @@ class EmailGenerator:
             subject = "Regarding Your Loan Application"
 
         return subject, body
-
-    def _api_available(self):
-        """Quick check if the Claude API is reachable and has credits.
-
-        Sends a minimal 1-token request. Returns False on billing, auth,
-        or connection errors so the caller can fall back to templates.
-        """
-        import logging
-
-        logger = logging.getLogger("email_engine.generator")
-        if self.client is None:
-            logger.info("No API client configured — using template fallback")
-            return False
-        try:
-            self.client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1,
-                messages=[{"role": "user", "content": "hi"}],
-            )
-            return True
-        except anthropic.AuthenticationError:
-            logger.warning("Claude API auth failed — using template fallback")
-            return False
-        except anthropic.BadRequestError as e:
-            if "credit" in str(e).lower() or "balance" in str(e).lower():
-                logger.warning("Claude API credit insufficient — using template fallback")
-                return False
-            return True  # other bad request errors may be prompt-specific
-        except (anthropic.APIConnectionError, anthropic.APITimeoutError):
-            logger.warning("Claude API unreachable — using template fallback")
-            return False
-        except Exception:
-            return True  # let the main flow handle unexpected errors
 
     def _generate_fallback(self, application, decision, context, start_time):
         """Generate email from smart template when Claude API is unavailable.

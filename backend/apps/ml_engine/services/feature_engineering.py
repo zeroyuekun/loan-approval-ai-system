@@ -4,6 +4,8 @@ Both ModelTrainer and ModelPredictor import from here to eliminate
 training/serving skew risk from duplicated feature computation.
 """
 
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -104,8 +106,12 @@ DEFAULT_IMPUTATION_VALUES = {
     "application_channel": "digital",
     "optimism_bias_flag": 0,
     "financial_literacy_score": 0.5,
-    "prepayment_buffer_months": 6.0,
-    "negative_equity_flag": 0,
+    # prepayment_buffer_months and negative_equity_flag are POST-OUTCOME quantities
+    # (computed after loan disbursement — not available at application time).
+    # They must NOT appear as imputation defaults; adding them here would
+    # silently synthesise post-outcome values if they were ever included in a
+    # feature list used for training or inference.  See feature_prep.py comment
+    # and data_generator.POST_OUTCOME_FEATURES for the authoritative exclusion list.
     "loan_trigger_event": "other",
     # Underwriter-internal variables exposed as features
     # (computed from application at inference time in predictor.py)
@@ -306,8 +312,9 @@ def compute_derived_features(df):
 
     # --- APRA stress test & Australian regulatory derived features ---
 
-    # Stressed repayment: monthly repayment at assessment rate + buffer
-    stressed_rate = 0.095 / 12  # ~9.5% = base rate + 3% APRA buffer
+    # RBA cash rate stress test: default 9.5% p.a. — override via ML_STRESS_TEST_RATE env var
+    annual_stress_rate = float(os.environ.get("ML_STRESS_TEST_RATE", "0.095"))
+    stressed_rate = annual_stress_rate / 12
     term_s = df["loan_term_months"].clip(lower=1)
     df["stressed_repayment"] = np.where(
         term_s > 0,

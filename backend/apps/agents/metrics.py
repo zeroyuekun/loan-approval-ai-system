@@ -47,3 +47,15 @@ bias_review_total = Counter(
     "Bias review decisions by outcome",
     labelnames=["outcome"],  # pass | escalated | ai_cleared | human_resolved
 )
+
+
+# Incremented whenever the bias check could not run (detector construction,
+# pre-screen crash, or any unexpected error) and the pipeline fell back to its
+# failure policy. A non-zero rate means fairness screening is effectively
+# offline — alert on it. `mode` is the BIAS_FAILURE_MODE in force at the time
+# (block = email withheld + run failed; warn/off = legacy fail-open).
+bias_check_unavailable_total = Counter(
+    "bias_check_unavailable",
+    "Bias check could not run; pipeline applied its failure policy",
+    labelnames=["mode"],  # block | warn | off
+)

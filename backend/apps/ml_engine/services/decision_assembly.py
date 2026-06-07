@@ -28,6 +28,7 @@ Fail-open on pricing: a pricing-engine exception returns `{tier:
 from __future__ import annotations
 
 import logging
+import os
 
 from apps.ml_engine.services.pricing_engine import get_tier
 
@@ -36,7 +37,12 @@ __all__ = ["assemble_decision"]
 logger = logging.getLogger(__name__)
 
 
-_BORDERLINE_MARGIN = 0.10
+# Borderline margin: applications within this many probability points of the
+# effective threshold are routed to human review. 0.10 flags ~20% of all
+# applications which is far too broad for operational use. Reduced to 0.05
+# and made env-configurable (ML_BORDERLINE_MARGIN) for tuning without
+# redeploys. See M11 fix.
+_BORDERLINE_MARGIN = float(os.environ.get("ML_BORDERLINE_MARGIN", "0.05"))
 
 
 def assemble_decision(

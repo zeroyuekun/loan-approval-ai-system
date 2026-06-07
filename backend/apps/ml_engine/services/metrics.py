@@ -9,7 +9,6 @@ Basel WG-CR scorecard expectations.
 import numpy as np
 import pandas as pd
 from django.conf import settings as django_settings
-from sklearn.calibration import calibration_curve
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -23,6 +22,8 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+
+from apps.ml_engine.services import drift_monitor
 
 
 class MetricsService:
@@ -93,16 +94,36 @@ class MetricsService:
         return round(float(log_loss(y_true, y_prob)), 4)
 
     def compute_calibration_data(self, y_true, y_prob, n_bins=10):
-        fraction_of_positives, mean_predicted_value = calibration_curve(
-            y_true, y_prob, n_bins=n_bins, strategy="uniform"
-        )
-        # ECE: mean absolute difference between actual and predicted calibration
-        ece = round(float(np.mean(np.abs(np.array(fraction_of_positives) - np.array(mean_predicted_value)))), 4)
+        """Reliability-diagram data with a population-WEIGHTED ECE.
+
+        ECE = sum_k (n_k / N) * |fraction_positive_k - mean_predicted_k| over
+        non-empty uniform bins, so sparsely populated bins do not dominate.
+        """
+        y_true = np.asarray(y_true, dtype=float)
+        y_prob = np.asarray(y_prob, dtype=float)
+        n = len(y_true)
+
+        edges = np.linspace(0.0, 1.0, n_bins + 1)
+        bin_ids = np.clip(np.digitize(y_prob, edges[1:-1]), 0, n_bins - 1)
+
+        fraction_of_positives = []
+        mean_predicted_value = []
+        ece = 0.0
+        for i in range(n_bins):
+            mask = bin_ids == i
+            count = int(mask.sum())
+            if count == 0:
+                continue
+            frac_pos = float(y_true[mask].mean())
+            mean_pred = float(y_prob[mask].mean())
+            fraction_of_positives.append(round(frac_pos, 4))
+            mean_predicted_value.append(round(mean_pred, 4))
+            ece += (count / n) * abs(frac_pos - mean_pred)
 
         return {
-            "fraction_of_positives": [round(float(x), 4) for x in fraction_of_positives],
-            "mean_predicted_value": [round(float(x), 4) for x in mean_predicted_value],
-            "ece": round(ece, 4),
+            "fraction_of_positives": fraction_of_positives,
+            "mean_predicted_value": mean_predicted_value,
+            "ece": round(float(ece), 4),
             "n_bins": n_bins,
         }
 
@@ -167,7 +188,6 @@ class MetricsService:
         y_prob = np.array(y_prob)
         order = np.argsort(y_prob)
         y_true_sorted = y_true[order]
-        y_prob[order]
 
         n = len(y_true)
         decile_size = n // 10
@@ -238,8 +258,11 @@ class MetricsService:
         actual_pct = actual_pct / actual_pct.sum()
 
         # PSI = sum((actual% - expected%) * ln(actual% / expected%))
+        # Route the scalar through the canonical primitive so every PSI
+        # consumer reports the same number (single source of truth, M1).
+        # The per-bin breakdown below is presentation-only.
         psi_components = (actual_pct - expected_pct) * np.log(actual_pct / expected_pct)
-        psi_value = float(np.sum(psi_components))
+        psi_value = drift_monitor.compute_psi(expected, actual, bins=n_bins)
 
         if psi_value < 0.10:
             status = "stable"
@@ -897,29 +920,18 @@ def psi(expected_dist, actual_dist, bins: int = 10) -> float:
     PSI < 0.10: stable, 0.10-0.25: moderate shift, > 0.25: significant.
     Matches the compute_psi implementation above but returns a bare float
     so gate logic can `psi(...) <= 0.25` without indexing a dict.
-    """
-    import numpy as _np
 
-    expected = _np.asarray(expected_dist, dtype=float)
-    actual = _np.asarray(actual_dist, dtype=float)
-    expected = expected[_np.isfinite(expected)]
-    actual = actual[_np.isfinite(actual)]
+    Thin wrapper over the canonical ``drift_monitor.compute_psi`` primitive
+    (single source of truth, M1). The small-sample guard is preserved so the
+    gate-logic contract (under-`bins` samples → 0.0) is unchanged.
+    """
+    expected = np.asarray(expected_dist, dtype=float)
+    actual = np.asarray(actual_dist, dtype=float)
+    expected = expected[np.isfinite(expected)]
+    actual = actual[np.isfinite(actual)]
     if len(expected) < bins or len(actual) < bins:
         return 0.0
-
-    edges = _np.unique(_np.percentile(expected, _np.linspace(0, 100, bins + 1)))
-    if len(edges) < 3:
-        return 0.0
-
-    eps = 1e-4
-    exp_counts = _np.histogram(expected, bins=edges)[0]
-    act_counts = _np.histogram(actual, bins=edges)[0]
-    exp_pct = (exp_counts + eps) / (len(expected) + eps * len(exp_counts))
-    act_pct = (act_counts + eps) / (len(actual) + eps * len(act_counts))
-    exp_pct = exp_pct / exp_pct.sum()
-    act_pct = act_pct / act_pct.sum()
-
-    return float(_np.sum((act_pct - exp_pct) * _np.log(act_pct / exp_pct)))
+    return drift_monitor.compute_psi(expected, actual, bins=bins)
 
 
 def psi_by_feature(X_ref, X_cur, feature_cols, bins: int = 10) -> dict:

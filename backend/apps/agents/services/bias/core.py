@@ -6,6 +6,7 @@ from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..deterministic_prescreen import DeterministicBiasPreScreen
 from .helpers import _call_with_retry, _format_flag_detail, _make_anthropic_client
+from .thresholds import is_severe
 from .tools import BIAS_ANALYSIS_TOOL
 
 logger = logging.getLogger("agents.bias_detector")
@@ -78,7 +79,7 @@ class BiasDetector:
         # Clear compliance breach — no need for LLM interpretation.
         # Inclusive bound: a score equal to the review threshold is, by
         # definition, at the "review" level and must escalate, not pass.
-        if det_score >= bias_threshold_review:
+        if is_severe(det_score, bias_threshold_review):
             logger.warning("Bias pre-screen: severe violation, deterministic_score=%d — blocking", det_score)
             return {
                 "score": det_score,
@@ -196,7 +197,12 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             "categories": result.get("categories", []),
             "analysis": result.get("analysis", ""),
             "flagged": final_score > bias_threshold_pass,
-            "requires_human_review": bias_threshold_pass < final_score <= bias_threshold_review,
+            # L18: requires_human_review must be monotonic with `flagged` — any
+            # flagged report needs review. Previously this used an upper bound
+            # (<= review_threshold), so a high composite (e.g. 71) could be
+            # flagged=True / requires_human_review=False, which the human-review
+            # queue and admin filter mis-handle.
+            "requires_human_review": final_score > bias_threshold_pass,
         }
 
     def _format_prescreen_results(self, prescreen):
