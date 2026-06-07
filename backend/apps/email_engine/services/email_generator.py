@@ -518,21 +518,6 @@ class EmailGenerator:
 
         return subject, body
 
-    def _api_available(self):
-        """No-op stub — retained for monkeypatching in tests only.
-
-        The live 1-token probe that previously lived here was removed because
-        it called self.client.messages.create() directly, bypassing
-        guarded_api_call() and therefore the daily budget accounting.
-        Fallback is now handled at the call site:
-          • self.client is None  → immediate template fallback (no key configured)
-          • budget.check_budget() → BudgetExhausted → template fallback
-          • guarded_api_call()   → BudgetExhausted / auth errors → fallback
-        This method is no longer called by generate(); it exists so that any
-        test that monkeypatches it (lambda: False / lambda: True) still compiles.
-        """
-        return True
-
     def _generate_fallback(self, application, decision, context, start_time):
         """Generate email from smart template when Claude API is unavailable.
 
