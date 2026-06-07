@@ -51,6 +51,27 @@ class TestPsiFromHistogramBasic:
         assert "psi" in result
         assert "status" in result
 
+    def test_empty_reference_bin_diverges_from_old_eps_formula(self):
+        """Discriminating regression guard for Fix 2 (empty reference bin).
+
+        When the reference histogram has an EMPTY bin that the actual data
+        populates, the eps handling dominates the PSI term for that bin. The
+        canonical zero-only replacement (eps=1e-8) yields PSI ~3.41; the OLD
+        formula that added eps=1e-4 to EVERY bin yields ~1.56. Asserting the
+        value sits in the canonical band fails if anyone reverts to `+eps`.
+        (Dense-bin tests can't catch this — they have no zero bins, so the two
+        formulas agree to within tolerance there.)
+        """
+        edges = [0.0, 1.0, 2.0, 3.0]
+        counts = [100.0, 0.0, 100.0]  # reference bin 1 (1–2) is empty
+        actual_vals = [0.5] * 100 + [1.5] * 50 + [2.5] * 100  # actual fills bin 1
+        result = _psi_from_histogram(counts, edges, actual_vals)
+        assert 3.0 < result["psi"] < 3.8, (
+            f"Empty-reference-bin PSI must use eps=1e-8 zero-replacement (~3.41); "
+            f"the old +1e-4 formula gives ~1.56. Got {result['psi']}"
+        )
+        assert result["status"] == "significant_shift"
+
 
 class TestPsiConsistency:
     """_psi_from_histogram and compute_psi must agree on the same data."""
