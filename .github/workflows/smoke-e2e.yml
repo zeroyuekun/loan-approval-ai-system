@@ -42,7 +42,7 @@ jobs:
           docker compose exec -T backend python manage.py train_model --algorithm xgb
 
       - name: Run smoke script
-        run: tools/smoke_e2e.sh --keep-up
+        run: bash tools/smoke_e2e.sh --keep-up  # invoke via bash; the script isn't marked +x
 
       - name: Print backend + celery logs on failure
         if: failure()
