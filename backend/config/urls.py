@@ -221,7 +221,6 @@ urlpatterns = [
     path(".well-known/security.txt", security_txt, name="security-txt"),
     path("api/v1/health/", health_check, name="health-check"),
     path("api/v1/health/deep/", require_ops_auth(deep_health_check), name="deep-health-check"),
-    path("api/v1/health/ready/", require_ops_auth(deep_health_check), name="readiness-probe"),
     path(settings.DJANGO_ADMIN_URL, admin.site.urls),
     path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/loans/", include("apps.loans.urls")),
