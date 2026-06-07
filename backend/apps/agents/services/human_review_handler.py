@@ -213,8 +213,7 @@ class HumanReviewHandler:
                                 application.save(update_fields=["status"])
                         agent_run.status = "escalated"
                         agent_run.error = (
-                            f"Resumed email re-flagged by bias detector "
-                            f"(score={bias_result['score']}) — re-escalated"
+                            f"Resumed email re-flagged by bias detector (score={bias_result['score']}) — re-escalated"
                         )
                         self.tracker.finalize_run(agent_run, steps, start_time)
                         return agent_run

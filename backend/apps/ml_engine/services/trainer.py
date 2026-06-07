@@ -1123,9 +1123,7 @@ class ModelTrainer:
         # all candidate features — not just the subset that survived IV pruning.
         _woe_cols = getattr(self, "_original_numeric_cols", None) or list(self.NUMERIC_COLS)
         try:
-            woe_iv = self.metrics_service.compute_all_woe_iv(
-                df_test_raw[_woe_cols], y_test, _woe_cols, n_bins=10
-            )
+            woe_iv = self.metrics_service.compute_all_woe_iv(df_test_raw[_woe_cols], y_test, _woe_cols, n_bins=10)
             metrics["woe_iv"] = {
                 col: {"iv": v["iv"], "interpretation": v["iv_interpretation"]}
                 for col, v in woe_iv.items()
@@ -1290,9 +1288,7 @@ class ModelTrainer:
             import sklearn as _sklearn
 
             if cv_fit_params and _sklearn.__version__ >= "1.4":
-                scores = cross_val_score(
-                    model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params
-                )
+                scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
             else:
                 # sklearn <1.4: pass sample_weight via fit_params (deprecated in 1.4)
                 if cv_fit_params:

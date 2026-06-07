@@ -146,14 +146,10 @@ class MarketingAgent:
         # and could contain injection payloads; loyalty_factors and denial_reasons
         # may also carry user-supplied data through the pipeline.  applicant_name
         # and applicant_first_name are already sanitized above.
-        sanitized_denial_reasons = _sanitize_prompt_input(
-            denial_reasons or "Not specified", max_length=500
-        )
+        sanitized_denial_reasons = _sanitize_prompt_input(denial_reasons or "Not specified", max_length=500)
         raw_loyalty = ", ".join(nbo_result.get("loyalty_factors", [])) or "N/A"
         sanitized_loyalty_factors = _sanitize_prompt_input(raw_loyalty, max_length=300)
-        sanitized_nbo_analysis = _sanitize_prompt_input(
-            nbo_result.get("analysis", "N/A"), max_length=500
-        )
+        sanitized_nbo_analysis = _sanitize_prompt_input(nbo_result.get("analysis", "N/A"), max_length=500)
 
         prompt = MARKETING_EMAIL_PROMPT.format(
             applicant_name=applicant_name,
@@ -240,18 +236,12 @@ class MarketingAgent:
                 return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
             elif "credit" in str(api_err).lower() or "balance" in str(api_err).lower():
                 _logger.warning("Marketing email API credit insufficient — using template")
-                return self._marketing_template_fallback(
-                    application, nbo_amounts, start_time, nbo_result=nbo_result
-                )
+                return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
             else:
-                _logger.error(
-                    "Marketing email API client error (%d, not retryable): %s", api_err.status_code, api_err
-                )
+                _logger.error("Marketing email API client error (%d, not retryable): %s", api_err.status_code, api_err)
                 raise
         except Exception as api_err:
-            _logger.critical(
-                "Marketing email API UNEXPECTED failure: %s", api_err, exc_info=True
-            )
+            _logger.critical("Marketing email API UNEXPECTED failure: %s", api_err, exc_info=True)
             raise
 
         response_text = response.content[0].text

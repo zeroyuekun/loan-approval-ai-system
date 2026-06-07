@@ -101,9 +101,7 @@ def test_list_endpoint_excludes_body(email_with_guardrails, staff_user):
     assert len(results) >= 1
 
     for item in results:
-        assert "body" not in item, (
-            "LIST endpoint must not include body — it is large and unused by the list view"
-        )
+        assert "body" not in item, "LIST endpoint must not include body — it is large and unused by the list view"
 
 
 @pytest.mark.django_db
@@ -151,9 +149,7 @@ def test_list_guardrail_checks_include_quality_score(email_with_guardrails, staf
 
     for item in results:
         for check in item.get("guardrail_checks", []):
-            assert "quality_score" in check, (
-                "LIST guardrail_checks must include quality_score"
-            )
+            assert "quality_score" in check, "LIST guardrail_checks must include quality_score"
 
 
 @pytest.mark.django_db

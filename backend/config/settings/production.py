@@ -15,6 +15,7 @@ _hosts = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
 ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()]
 if not ALLOWED_HOSTS:
     from django.core.exceptions import ImproperlyConfigured
+
     raise ImproperlyConfigured(
         "DJANGO_ALLOWED_HOSTS must be set to a non-empty comma-separated list in production. "
         "Example: DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com"

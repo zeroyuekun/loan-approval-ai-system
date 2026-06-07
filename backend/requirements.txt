@@ -22,7 +22,7 @@ cloudpickle==3.1.2
 colorlog==6.10.1
 cryptography==46.0.7
 distro==1.9.0
-django[argon2]==5.2.14  # PYSEC-2026-50/54/55 fix (session Vary cache leak, Vary:* cache poisoning, ASGI upload-limit bypass)
+django[argon2]==5.2.15  # PYSEC-2026-197..201 fix (signed-cookie salt derivation, Vary/Cache-Control cache leaks, SMTP STARTTLS reuse)
 django-celery-results==2.6.0
 django-cors-headers==4.9.0
 django-csp==4.0

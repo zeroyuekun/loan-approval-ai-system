@@ -40,9 +40,7 @@ def test_fabricated_sub5k_amount_is_flagged(checker):
         "nbo_amounts": [20000],
     }
     result = checker.check_hallucinated_numbers(text, context)
-    assert not result["passed"], (
-        "Expected $4,999 to be flagged as an unrecognised hallucinated amount"
-    )
+    assert not result["passed"], "Expected $4,999 to be flagged as an unrecognised hallucinated amount"
     assert "4,999" in result["details"] or "4999" in result["details"], result["details"]
 
 
@@ -61,9 +59,7 @@ def test_completely_invented_small_amount_flagged(checker):
         "nbo_amounts": [50000],
     }
     result = checker.check_hallucinated_numbers(text, context)
-    assert not result["passed"], (
-        "Expected $333 (not derivable from $50k offer) to be flagged"
-    )
+    assert not result["passed"], "Expected $333 (not derivable from $50k offer) to be flagged"
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +86,7 @@ def test_annual_interest_passess(checker):
     }
     result = checker.check_hallucinated_numbers(text, context)
     # $2,850 must be within ±10% of $3,000 (10000 × 0.30) → allowed
-    assert result["passed"], (
-        f"Legitimately derived annual interest $2,850 should pass: {result['details']}"
-    )
+    assert result["passed"], f"Legitimately derived annual interest $2,850 should pass: {result['details']}"
 
 
 def test_monthly_repayment_derived_from_nbo_passes(checker):
@@ -105,9 +99,7 @@ def test_monthly_repayment_derived_from_nbo_passes(checker):
     }
     result = checker.check_hallucinated_numbers(text, context)
     # $1,850 vs $2,000 = 7.5% difference → within 10% → should pass
-    assert result["passed"], (
-        f"Monthly amount $1,850 derived from $24,000 NBO should pass: {result['details']}"
-    )
+    assert result["passed"], f"Monthly amount $1,850 derived from $24,000 NBO should pass: {result['details']}"
 
 
 def test_exact_nbo_amount_always_passes(checker):
@@ -140,9 +132,7 @@ def test_no_false_positive_on_passing_nbo_email(checker):
         "nbo_amounts": [15000],
     }
     result = checker.check_hallucinated_numbers(text, context)
-    assert result["passed"], (
-        f"Legitimate NBO email with derivable amounts should pass: {result['details']}"
-    )
+    assert result["passed"], f"Legitimate NBO email with derivable amounts should pass: {result['details']}"
 
 
 def test_no_nbo_unaffected(checker):
@@ -154,6 +144,4 @@ def test_no_nbo_unaffected(checker):
         "nbo_amounts": [],
     }
     result = checker.check_hallucinated_numbers(text, context)
-    assert not result["passed"], (
-        "Unrecognised $4,999 without NBO context should remain flagged"
-    )
+    assert not result["passed"], "Unrecognised $4,999 without NBO context should remain flagged"

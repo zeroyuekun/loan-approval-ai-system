@@ -125,6 +125,5 @@ class TestPsiConsistency:
 
         result = _psi_from_histogram(hist_counts, hist_edges, data)
         assert result["psi"] == pytest.approx(0.0, abs=0.01), (
-            f"Old eps inflation would push PSI above 0 even for identical data; "
-            f"got {result['psi']}"
+            f"Old eps inflation would push PSI above 0 even for identical data; got {result['psi']}"
         )
