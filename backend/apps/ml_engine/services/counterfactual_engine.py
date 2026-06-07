@@ -104,8 +104,7 @@ class CounterfactualEngine:
         current_term = int(original["loan_term_months"])
         max_term = 84  # 7 years max
         candidate_terms = [
-            t for t in [current_term + 12, current_term + 24, current_term + 36]
-            if t <= max_term and t != current_term
+            t for t in [current_term + 12, current_term + 24, current_term + 36] if t <= max_term and t != current_term
         ]
         for candidate_term in candidate_terms:
             test_df = features_df.copy()

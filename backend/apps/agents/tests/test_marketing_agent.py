@@ -671,9 +671,7 @@ class TestPromptInjectionSanitizationLLMFields:
     def test_nbo_analysis_injection_is_neutralised(self, mock_call, mock_anthropic_cls):
         """Injection payload in nbo_analysis (raw LLM output) must be stripped."""
         mock_anthropic_cls.return_value = MagicMock()
-        mock_call.return_value = _make_mock_text_response(
-            "Subject: Next steps\n\nDear Jane,\n\nCall 1300 000 000."
-        )
+        mock_call.return_value = _make_mock_text_response("Subject: Next steps\n\nDear Jane,\n\nCall 1300 000 000.")
         agent = MarketingAgent()
         app = _make_mock_application()
 
@@ -691,9 +689,7 @@ class TestPromptInjectionSanitizationLLMFields:
     def test_denial_reasons_injection_is_neutralised(self, mock_call, mock_anthropic_cls):
         """Injection payload in denial_reasons must be stripped."""
         mock_anthropic_cls.return_value = MagicMock()
-        mock_call.return_value = _make_mock_text_response(
-            "Subject: Next steps\n\nDear Jane,\n\nCall 1300 000 000."
-        )
+        mock_call.return_value = _make_mock_text_response("Subject: Next steps\n\nDear Jane,\n\nCall 1300 000 000.")
         agent = MarketingAgent()
         app = _make_mock_application()
 
@@ -712,9 +708,7 @@ class TestPromptInjectionSanitizationLLMFields:
     def test_loyalty_factors_injection_is_neutralised(self, mock_call, mock_anthropic_cls):
         """Injection payload in loyalty_factors (LLM output) must be stripped."""
         mock_anthropic_cls.return_value = MagicMock()
-        mock_call.return_value = _make_mock_text_response(
-            "Subject: Next steps\n\nDear Jane,\n\nCall 1300 000 000."
-        )
+        mock_call.return_value = _make_mock_text_response("Subject: Next steps\n\nDear Jane,\n\nCall 1300 000 000.")
         agent = MarketingAgent()
         app = _make_mock_application()
 
@@ -734,9 +728,7 @@ class TestPromptInjectionSanitizationLLMFields:
     def test_clean_nbo_analysis_passes_through(self, mock_call, mock_anthropic_cls):
         """Clean NBO analysis text must appear in the prompt (not over-stripped)."""
         mock_anthropic_cls.return_value = MagicMock()
-        mock_call.return_value = _make_mock_text_response(
-            "Subject: Next steps\n\nDear Jane,\n\nCall 1300 000 000."
-        )
+        mock_call.return_value = _make_mock_text_response("Subject: Next steps\n\nDear Jane,\n\nCall 1300 000 000.")
         agent = MarketingAgent()
         app = _make_mock_application()
 

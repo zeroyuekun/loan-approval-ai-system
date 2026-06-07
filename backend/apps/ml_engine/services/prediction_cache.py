@@ -75,9 +75,7 @@ def _verify_model_hash(file_path, expected_hash, version_id=None):
     """
     if not expected_hash:
         if os.environ.get("DJANGO_DEBUG", "False").lower() not in ("true", "1"):
-            raise ValueError(
-                f"Model version {version_id} has no file_hash — hash verification required in production"
-            )
+            raise ValueError(f"Model version {version_id} has no file_hash — hash verification required in production")
         logger.warning("No file_hash stored for model version %s — skipping integrity check (dev mode)", version_id)
         return
     sha256 = hashlib.sha256()

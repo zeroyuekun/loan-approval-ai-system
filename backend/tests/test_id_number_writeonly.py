@@ -91,9 +91,7 @@ def test_get_profile_returns_masked_variants(customer_with_ids):
     assert "secondary_id_number_masked" in data, "secondary_id_number_masked not in response"
 
     # Masked values should show only last 4 chars
-    assert data["primary_id_number_masked"] == "****5678", (
-        f"Expected ****5678, got {data['primary_id_number_masked']}"
-    )
+    assert data["primary_id_number_masked"] == "****5678", f"Expected ****5678, got {data['primary_id_number_masked']}"
     assert data["secondary_id_number_masked"] == "****4321", (
         f"Expected ****4321, got {data['secondary_id_number_masked']}"
     )

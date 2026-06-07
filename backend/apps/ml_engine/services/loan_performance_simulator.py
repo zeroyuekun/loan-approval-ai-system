@@ -18,9 +18,7 @@ class LoanPerformanceSimulator:
     Extracted from DataGenerator to isolate loan performance simulation logic.
     """
 
-    def simulate_loan_performance(
-        self, df: pd.DataFrame, *, rng: np.random.Generator | None = None
-    ) -> pd.DataFrame:
+    def simulate_loan_performance(self, df: pd.DataFrame, *, rng: np.random.Generator | None = None) -> pd.DataFrame:
         """Simulate loan performance outcomes for approved loans.
 
         For each approved loan, runs month-by-month Markov chain simulation

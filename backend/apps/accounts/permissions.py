@@ -18,10 +18,6 @@ class IsCustomer(BasePermission):
 
 class IsAdminOrOfficer(BasePermission):
     def has_permission(self, request, view):
-        return (
-            request.user.is_authenticated
-            and (
-                getattr(request.user, "role", None) in ("admin", "officer")
-                or request.user.is_superuser
-            )
+        return request.user.is_authenticated and (
+            getattr(request.user, "role", None) in ("admin", "officer") or request.user.is_superuser
         )

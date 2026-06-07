@@ -361,9 +361,11 @@ class StaffCustomerActivityView(generics.GenericAPIView):
             .order_by("-created_at")
             .values_list("id", flat=True)[:50]
         )
-        emails_qs = GeneratedEmail.objects.filter(id__in=top_email_ids).prefetch_related(
-            "guardrail_checks"
-        ).order_by("-created_at")
+        emails_qs = (
+            GeneratedEmail.objects.filter(id__in=top_email_ids)
+            .prefetch_related("guardrail_checks")
+            .order_by("-created_at")
+        )
 
         emails = []
         for email in emails_qs:

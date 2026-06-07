@@ -76,11 +76,10 @@ class TestNboDbFailureDoesNotRaiseNameError:
         agent_run = _make_mock_agent_run()
         steps = []
 
-        with patch(
-            "apps.agents.services.marketing_pipeline.NextBestOfferGenerator"
-        ) as mock_gen_cls, patch(
-            "apps.agents.services.marketing_pipeline.NextBestOffer"
-        ) as mock_nbo_model:
+        with (
+            patch("apps.agents.services.marketing_pipeline.NextBestOfferGenerator") as mock_gen_cls,
+            patch("apps.agents.services.marketing_pipeline.NextBestOffer") as mock_nbo_model,
+        ):
             # LLM generate() succeeds and returns a valid result with offers
             mock_gen_cls.return_value.generate.return_value = _valid_nbo_result()
 
@@ -108,11 +107,10 @@ class TestNboDbFailureDoesNotRaiseNameError:
         agent_run = _make_mock_agent_run()
         steps = []
 
-        with patch(
-            "apps.agents.services.marketing_pipeline.NextBestOfferGenerator"
-        ) as mock_gen_cls, patch(
-            "apps.agents.services.marketing_pipeline.NextBestOffer"
-        ) as mock_nbo_model:
+        with (
+            patch("apps.agents.services.marketing_pipeline.NextBestOfferGenerator") as mock_gen_cls,
+            patch("apps.agents.services.marketing_pipeline.NextBestOffer") as mock_nbo_model,
+        ):
             mock_gen_cls.return_value.generate.return_value = _valid_nbo_result()
             mock_nbo_model.objects.create.side_effect = Exception("DB write failed")
 
@@ -138,11 +136,10 @@ class TestNboDbFailureDoesNotRaiseNameError:
         agent_run = _make_mock_agent_run()
         steps = []
 
-        with patch(
-            "apps.agents.services.marketing_pipeline.NextBestOfferGenerator"
-        ) as mock_gen_cls, patch(
-            "apps.agents.services.marketing_pipeline.NextBestOffer"
-        ) as mock_nbo_model:
+        with (
+            patch("apps.agents.services.marketing_pipeline.NextBestOfferGenerator") as mock_gen_cls,
+            patch("apps.agents.services.marketing_pipeline.NextBestOffer") as mock_nbo_model,
+        ):
             mock_gen_cls.return_value.generate.return_value = _valid_nbo_result()
             mock_nbo_model.objects.create.side_effect = Exception("DB write failed")
 
@@ -171,9 +168,7 @@ class TestNboDbFailureDoesNotRaiseNameError:
         agent_run = _make_mock_agent_run()
         steps = []
 
-        with patch(
-            "apps.agents.services.marketing_pipeline.NextBestOfferGenerator"
-        ) as mock_gen_cls:
+        with patch("apps.agents.services.marketing_pipeline.NextBestOfferGenerator") as mock_gen_cls:
             # LLM call itself fails
             mock_gen_cls.return_value.generate.side_effect = ConnectionError("timeout")
 

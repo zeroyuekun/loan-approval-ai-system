@@ -70,9 +70,7 @@ class TestOrchestrateTaskOnFailure:
 
         _invoke_on_failure(retries=3, max_retries=3, args=[app_id], kwargs={})
 
-        assert cache.get(lock_key) is None, (
-            "Dedup lock must be released after max_retries exhausted"
-        )
+        assert cache.get(lock_key) is None, "Dedup lock must be released after max_retries exhausted"
 
     @CACHE_OVERRIDE
     def test_lock_kept_during_retry(self):
@@ -88,9 +86,7 @@ class TestOrchestrateTaskOnFailure:
         _invoke_on_failure(retries=1, max_retries=3, args=[app_id], kwargs={})
 
         # Lock must still be held so the next retry is protected (M22)
-        assert cache.get(lock_key) is not None, (
-            "Dedup lock must be kept alive during retries (M22)"
-        )
+        assert cache.get(lock_key) is not None, "Dedup lock must be kept alive during retries (M22)"
 
     @CACHE_OVERRIDE
     def test_lock_released_when_application_id_from_kwargs(self):

@@ -126,9 +126,7 @@ class ModelCardGenerator:
 
         return {
             "protected_attributes": (
-                list(fairness.keys())
-                if fairness
-                else ["employment_type", "applicant_type", "state"]
+                list(fairness.keys()) if fairness else ["employment_type", "applicant_type", "state"]
             ),
             "disparate_impact_ratio": disparate_impact,
             "mitigation": "Fairness reweighting during training",

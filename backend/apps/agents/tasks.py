@@ -35,6 +35,7 @@ class _OrchestrateTask(Task):
         # directly without Celery's full task machinery.
         Task.on_failure(self, exc, task_id, args, kwargs, einfo)
 
+
 # Redis dedup lock TTL — slightly longer than the task soft time limit
 _DEDUP_LOCK_TTL = 600
 
