@@ -23,6 +23,7 @@ class MarketingPipelineService:
     def run(self, application, agent_run, steps, denial_reasons, profile_context):
         """Run the full NBO + marketing email pipeline. Returns updated steps list."""
         nbo_result = None
+        nbo_record = None
         nbo_generator = NextBestOfferGenerator()
 
         # NBO generation
@@ -63,8 +64,8 @@ class MarketingPipelineService:
                 "Application %s: no NBO offers generated — skipping marketing email pipeline", application.pk
             )
 
-        # Marketing Message Generation (if NBO succeeded)
-        if nbo_result and nbo_result.get("offers"):
+        # Marketing Message Generation (if NBO succeeded AND DB record was created)
+        if nbo_result and nbo_result.get("offers") and nbo_record:
             step = self.tracker.start_step("marketing_message_generation")
             try:
                 marketing_result = nbo_generator.generate_marketing_message(
@@ -96,8 +97,8 @@ class MarketingPipelineService:
 
             steps.append(step)
 
-        # Marketing Agent Email (if NBO succeeded)
-        if nbo_result and nbo_result.get("offers"):
+        # Marketing Agent Email (if NBO succeeded AND DB record was created)
+        if nbo_result and nbo_result.get("offers") and nbo_record:
             step = self.tracker.start_step("marketing_email_generation")
             email_result_marketing = None
             try:

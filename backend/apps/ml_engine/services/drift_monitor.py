@@ -85,13 +85,25 @@ _ON_DEMAND_FIELD_MAP = {
 
 
 def _psi_from_histogram(hist_counts, hist_edges, actual_vals):
-    """Canonical histogram-bin PSI used by the on-demand /drift/ endpoint."""
+    """Canonical histogram-bin PSI used by the on-demand /drift/ endpoint.
+
+    Uses the same approach as compute_psi: normalise to proportions, then
+    replace ONLY zero bins with eps (1e-8) — no renormalisation after
+    substitution, so the sum of percentages is preserved and PSI stays at
+    0.0 for identical distributions.  The previous implementation added eps
+    to EVERY bin and used a much larger eps (1e-4), causing the on-demand
+    endpoint to report systematically different PSI values than the weekly
+    DriftReport path for the same data.
+    """
     bin_edges = np.array(hist_edges)
     expected_counts = np.array(hist_counts, dtype=float)
     actual_counts = np.histogram(actual_vals, bins=bin_edges)[0].astype(float)
-    eps = 1e-4
-    expected_pct = expected_counts / expected_counts.sum() + eps
-    actual_pct = actual_counts / actual_counts.sum() + eps
+    eps = 1e-8  # Match compute_psi — small enough not to distort near-identical distributions
+    expected_pct = expected_counts / expected_counts.sum()
+    actual_pct = actual_counts / actual_counts.sum()
+    # Replace zeros only (avoid log(0)); do NOT re-normalise after substitution
+    expected_pct = np.where(expected_pct == 0, eps, expected_pct)
+    actual_pct = np.where(actual_pct == 0, eps, actual_pct)
     psi_value = float(np.sum((actual_pct - expected_pct) * np.log(actual_pct / expected_pct)))
     if psi_value < PSI_STABLE:
         psi_status = "stable"

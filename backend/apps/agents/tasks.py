@@ -1,10 +1,39 @@
 import logging
 
-from celery import shared_task
+from celery import Task, shared_task
 from django.core.cache import cache
 from django.db import transaction
 
 logger = logging.getLogger("agents.tasks")
+
+
+class _OrchestrateTask(Task):
+    """Custom Task base that releases the dedup lock on terminal failure.
+
+    When ``autoretry_for`` retries are exhausted Celery calls ``on_failure``
+    on the task instance.  At that point ``self.request.retries`` equals
+    ``self.max_retries``, indicating terminal (non-recoverable) failure.
+
+    The dedup lock is intentionally kept alive DURING retries (M22 — prevents
+    a race between the retry and a duplicate orchestration).  Only the terminal
+    failure path releases it here, so the lock is not held for the full TTL
+    (~600 s) after the task gives up.
+    """
+
+    abstract = True
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        application_id = args[0] if args else kwargs.get("application_id")
+        if application_id and self.request.retries >= self.max_retries:
+            lock_key = f"orchestrate_lock:{application_id}"
+            cache.delete(lock_key)
+            logger.warning(
+                "Application %s: dedup lock released after max_retries exhausted (terminal failure)",
+                application_id,
+            )
+        # Explicit base-class call so unit tests can instantiate this class
+        # directly without Celery's full task machinery.
+        Task.on_failure(self, exc, task_id, args, kwargs, einfo)
 
 # Redis dedup lock TTL — slightly longer than the task soft time limit
 _DEDUP_LOCK_TTL = 600
@@ -65,6 +94,7 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
 
 @shared_task(
     bind=True,
+    base=_OrchestrateTask,
     name="apps.agents.tasks.orchestrate_pipeline_task",
     acks_late=True,
     time_limit=600,
