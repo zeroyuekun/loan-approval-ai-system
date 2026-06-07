@@ -21,9 +21,13 @@ scrape_configs:
         values:
           - ${HEALTH_CHECK_TOKEN}
 
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:6379']
+  # TODO: Redis does not expose Prometheus metrics natively; scraping :6379
+  # produces TCP errors every interval. Add oliver006/redis_exporter:9121 as a
+  # sidecar or monitoring-profile service, then restore this job pointing at
+  # redis_exporter:9121 instead of redis:6379.
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis_exporter:9121']
 
   - job_name: 'celery-exporter'
     static_configs:

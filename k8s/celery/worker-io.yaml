@@ -20,9 +20,15 @@ spec:
         app.kubernetes.io/component: worker
         app.kubernetes.io/part-of: aussieloanai
     spec:
+      # Dockerfile: adduser (Debian) creates appuser at UID 1000
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
       containers:
         - name: celery-worker-io
           image: ghcr.io/OWNER/loan-approval-ai-system/backend:latest
+          securityContext:
+            allowPrivilegeEscalation: false
           command:
             - celery
             - -A

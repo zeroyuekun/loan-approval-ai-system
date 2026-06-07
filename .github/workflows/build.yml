@@ -19,6 +19,24 @@ permissions:
   packages: write
 
 jobs:
+  k8s-placeholder-check:
+    name: K8s Placeholder Guard
+    runs-on: ubuntu-latest
+    # Runs on every PR targeting master and on master pushes.
+    # PRs: verifies no placeholder secrets are committed on branches that will
+    #   be deployed. If your branch intentionally keeps placeholders (local dev
+    #   only), this job will fail — replace secrets before opening a deploy PR.
+    # Note: the repo's committed secrets.yaml contains Q0hBTkdFX01F as explicit
+    #   placeholder values; a real deploy pipeline must substitute these via
+    #   Sealed Secrets / External Secrets / vault before this check will pass.
+    #   This job acts as a gate so placeholder substitution can't be forgotten.
+    steps:
+      - uses: actions/checkout@v6
+      - name: Fail if CHANGE_ME placeholder secrets remain in k8s manifests
+        run: |
+          chmod +x scripts/check-k8s-placeholders.sh
+          ./scripts/check-k8s-placeholders.sh k8s
+
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
@@ -57,8 +75,13 @@ jobs:
     name: OWASP ZAP DAST Scan
     runs-on: ubuntu-latest
     needs: [docker-build]
-    # Only run on main branch pushes (not on every PR — ZAP is slow)
-    if: github.ref == 'refs/heads/master'
+    # Run on master pushes AND on PRs targeting master so security regressions
+    # are caught before merge. ZAP is slow (~5 min) but the cost is worth the
+    # pre-merge gate. The deploy job (below) is still gated on github.event_name
+    # == 'push' so a successful DAST on a PR does not trigger a deploy.
+    if: >-
+      github.ref == 'refs/heads/master' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'master')
     steps:
       - uses: actions/checkout@v6
 
@@ -215,7 +238,7 @@ jobs:
   deploy:
     name: Build & Push Images
     runs-on: ubuntu-latest
-    needs: [docker-build, dast-scan, load-test]
+    needs: [k8s-placeholder-check, docker-build, dast-scan, load-test]
     # NOTE: test / lint / security jobs live in separate workflow files
     # (test.yml, lint.yml, security.yml). GitHub Actions does not support
     # needs: across workflow files — those gates must be enforced via
