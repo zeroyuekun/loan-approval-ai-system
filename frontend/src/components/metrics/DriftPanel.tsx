@@ -4,6 +4,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { DriftReport } from '@/types'
+import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface DriftPanelProps {
   reports: DriftReport[]
@@ -16,6 +17,7 @@ const ALERT_CONFIG: Record<string, { label: string; variant: 'success' | 'warnin
 }
 
 export function DriftPanel({ reports }: DriftPanelProps) {
+  const { active, hoverProps } = useChartHover()
   if (!reports.length) return null
 
   const latest = reports[0]
@@ -60,18 +62,19 @@ export function DriftPanel({ reports }: DriftPanelProps) {
           </div>
           <div>
             <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={trend} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+              <LineChart data={trend} margin={{ top: 10, right: 20, bottom: 30, left: 10 }} {...hoverProps}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }}>
                   <Label value="Report Date" position="bottom" offset={10} style={{ fontSize: 12, fill: '#6b7280' }} />
                 </XAxis>
                 <YAxis tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }} />
-                <Tooltip />
+                <Tooltip content={renderEmptyTooltip} />
                 <ReferenceLine y={0.10} stroke="#eab308" strokeDasharray="5 5" label={{ value: '0.10', position: 'right', fontSize: 10, fill: '#eab308' }} />
                 <ReferenceLine y={0.25} stroke="#ef4444" strokeDasharray="5 5" label={{ value: '0.25', position: 'right', fontSize: 10, fill: '#ef4444' }} />
-                <Line type="monotone" dataKey="psi" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 3, fill: 'hsl(var(--primary))' }} />
+                <Line type="monotone" dataKey="psi" name="PSI" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 3, fill: 'hsl(var(--primary))' }} />
               </LineChart>
             </ResponsiveContainer>
+            <ChartHoverPanel active={active} />
           </div>
         </div>
       </CardContent>
