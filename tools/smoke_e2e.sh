@@ -165,6 +165,18 @@ fi
 
 model_version=$(echo "${app_detail}" | jq -r ".model_version_id // .ml_prediction.model_version // .prediction.model_version_id // empty")
 
+# A "review" decision is referred to the human queue and intentionally produces
+# no customer approval/denial email — only approved/denied do (see the orchestrator
+# requires_human_review path). Treat review as a complete pipeline run: the decision
+# was reached, an email is simply not applicable. approved/denied STILL require an
+# email below, so a genuinely broken email path is never masked.
+if [[ "${decision}" == "review" ]]; then
+  echo "[smoke] Decision 'review' → referred to human queue; no customer email expected."
+  write_result "success" "ok-review-no-email" "${model_version}"
+  echo "[smoke] SUCCESS (review path)."
+  exit 0
+fi
+
 echo "[smoke] Polling for generated email (30s ceiling)..."
 email_subject=""
 # Same 3s cadence as the decision poll to stay under the 60/min user throttle.

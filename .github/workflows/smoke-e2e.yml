@@ -38,7 +38,11 @@ jobs:
           # with PermissionError.
           mkdir -p backend/.tmp backend/ml_models && chmod 777 backend/.tmp backend/ml_models
           docker compose exec -T backend python manage.py migrate
-          docker compose exec -T backend python manage.py generate_data --num-records 500
+          # 2000 (not 500) records: a 500-row model is poorly calibrated and lands
+          # even a pristine applicant inside the +/-0.05 borderline band, escalating
+          # to "review" and skipping the email path. 2000 rows give a confident
+          # decision so the smoke test actually exercises email generation.
+          docker compose exec -T backend python manage.py generate_data --num-records 2000
           docker compose exec -T backend python manage.py train_model --algorithm xgb
 
       - name: Run smoke script
