@@ -45,6 +45,13 @@ export const formSchema = z.object({
 export type FormData = z.infer<typeof formSchema>
 
 const DRAFT_KEY = 'loan_application_draft'
+/** Drafts expire after 24 hours — mirrors TTL pattern used in useMetrics.ts (15 min for training tasks). */
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000
+
+interface DraftEnvelope {
+  savedAt: number
+  data: Partial<FormData>
+}
 
 export function useApplicationForm(onSuccessPath?: string) {
   const [step, setStep] = useState(1)
@@ -57,8 +64,15 @@ export function useApplicationForm(onSuccessPath?: string) {
 
   const getSavedDraft = useCallback((): Partial<FormData> | null => {
     try {
-      const saved = localStorage.getItem(DRAFT_KEY)
-      if (saved) return JSON.parse(saved)
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (!raw) return null
+      const envelope: DraftEnvelope = JSON.parse(raw)
+      // Expire drafts older than DRAFT_TTL_MS
+      if (Date.now() - envelope.savedAt > DRAFT_TTL_MS) {
+        localStorage.removeItem(DRAFT_KEY)
+        return null
+      }
+      return envelope.data
     } catch (e) { console.warn('[useApplicationForm] Failed to parse draft from localStorage:', e) }
     return null
   }, [])
@@ -98,7 +112,8 @@ export function useApplicationForm(onSuccessPath?: string) {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         try {
-          localStorage.setItem(DRAFT_KEY, JSON.stringify(values))
+          const envelope: DraftEnvelope = { savedAt: Date.now(), data: values as Partial<FormData> }
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(envelope))
         } catch (e) { console.warn('[useApplicationForm] Failed to save draft to localStorage:', e) }
       }, 500)
     })

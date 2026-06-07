@@ -110,4 +110,25 @@ describe('Sidebar', () => {
     const aside = screen.getByLabelText('Main navigation')
     expect(aside).toHaveClass('translate-x-0')
   })
+
+  it('renders without crashing when user is missing email and first_name (partial cached user)', () => {
+    // Simulate the sessionStorage-cached partial user: only role + username present
+    vi.mocked(useAuth).mockReturnValue({
+      user: { username: 'partialuser', role: 'admin' } as ReturnType<typeof useAuth>['user'],
+    } as ReturnType<typeof useAuth>)
+
+    expect(() => render(<Sidebar {...defaultProps} />)).not.toThrow()
+    // Avatar should fall back to username initial 'P'
+    expect(screen.getByText('P')).toBeInTheDocument()
+  })
+
+  it('renders without crashing when username is empty string (corrupted cache)', () => {
+    vi.mocked(useAuth).mockReturnValue({
+      user: { username: '', role: 'officer' } as ReturnType<typeof useAuth>['user'],
+    } as ReturnType<typeof useAuth>)
+
+    expect(() => render(<Sidebar {...defaultProps} />)).not.toThrow()
+    // Falls back to '?' sentinel when username is empty
+    expect(screen.getByText('?')).toBeInTheDocument()
+  })
 })

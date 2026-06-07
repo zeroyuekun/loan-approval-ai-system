@@ -87,7 +87,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           <div className="border-t border-white/10 p-4">
             <div className="flex items-center gap-3 rounded-lg bg-white/5 p-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 via-indigo-500 to-violet-500 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 border border-white/20">
-                {user.first_name?.[0] || user.username[0].toUpperCase()}
+                {user.first_name?.[0] || (user.username?.[0]?.toUpperCase() ?? '?')}
               </div>
               <div className="flex-1 overflow-hidden">
                 <p className="truncate text-sm font-medium text-white">

@@ -295,7 +295,9 @@ export interface GeneratedEmail {
   applicant_name?: string;
   decision: string;
   subject: string;
-  body: string;
+  /** Only present in the RETRIEVE (single-email) response; absent from list. */
+  body?: string;
+  /** Only present in the RETRIEVE (single-email) response; absent from list. */
   html_body?: string;
   model_used: string;
   passed_guardrails: boolean;
