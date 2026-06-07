@@ -32,6 +32,10 @@ jobs:
 
       - name: Migrate + seed minimal dataset
         run: |
+          # generate_data writes its CSV to /app/.tmp; that path is bind-mounted
+          # from the host and the backend runs as non-root appuser, so pre-create
+          # it world-writable on the runner or the write fails with PermissionError.
+          mkdir -p backend/.tmp && chmod 777 backend/.tmp
           docker compose exec -T backend python manage.py migrate
           docker compose exec -T backend python manage.py generate_data --num-records 500
           docker compose exec -T backend python manage.py train_model --algorithm xgb
