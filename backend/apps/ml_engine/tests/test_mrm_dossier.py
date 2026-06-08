@@ -90,10 +90,10 @@ REQUIRED_SECTION_HEADERS = [
 
 
 def test_all_11_sections_present_with_populated_data():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     # Changelog section touches ORM; short-circuit with a patch.
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\nNo prior version on segment `personal` — this is the first dossier."
         md = generate_dossier_markdown(_make_mv())
 
@@ -102,9 +102,9 @@ def test_all_11_sections_present_with_populated_data():
 
 
 def test_no_placeholder_strings_leak_into_output():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(no prior version)"
         md = generate_dossier_markdown(_make_mv())
 
@@ -115,9 +115,9 @@ def test_no_placeholder_strings_leak_into_output():
 
 
 def test_header_section_contains_model_metadata():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_mv())
 
@@ -128,9 +128,9 @@ def test_header_section_contains_model_metadata():
 
 
 def test_purpose_statement_matches_segment():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
 
         md_personal = generate_dossier_markdown(_make_mv(segment="personal"))
@@ -146,10 +146,10 @@ def test_purpose_statement_matches_segment():
 
 
 def test_missing_psi_data_renders_guidance_not_empty_table():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     mv = _make_mv(training_metadata={"psi_by_feature": {}})
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(mv)
 
@@ -158,10 +158,10 @@ def test_missing_psi_data_renders_guidance_not_empty_table():
 
 
 def test_missing_fairness_metrics_renders_guidance():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     mv = _make_mv(fairness_metrics={})
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(mv)
 
@@ -170,10 +170,10 @@ def test_missing_fairness_metrics_renders_guidance():
 
 
 def test_missing_calibration_renders_guidance():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     mv = _make_mv(calibration_data={})
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(mv)
 
@@ -187,9 +187,9 @@ def test_missing_calibration_renders_guidance():
 
 
 def test_monotone_table_includes_positive_and_negative_features():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_mv())
 
@@ -207,9 +207,9 @@ def test_monotone_table_includes_positive_and_negative_features():
 
 def test_policy_section_enumerates_all_p_codes():
     from apps.ml_engine.services.credit_policy import POLICY_RULES
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_mv())
 
@@ -230,9 +230,9 @@ def test_policy_section_enumerates_all_p_codes():
 
 
 def test_performance_section_no_longer_claims_gates_are_enforced():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
 
@@ -250,9 +250,9 @@ def test_performance_section_no_longer_claims_gates_are_enforced():
 
 
 def test_monitoring_drift_url_uses_actual_route():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
 
@@ -270,9 +270,9 @@ def test_monitoring_drift_url_uses_actual_route():
 
 def test_purpose_section_default_mode_emits_shadow_wording():
     """Default settings (no env override) → shadow wording, **not blocked**."""
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
 
@@ -285,11 +285,11 @@ def test_purpose_section_default_mode_emits_shadow_wording():
 def test_purpose_section_enforce_mode_emits_mandatory_referral():
     from django.test import override_settings
 
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     with (
         override_settings(CREDIT_POLICY_OVERLAY_MODE="enforce"),
-        patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+        patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl,
     ):
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
@@ -302,11 +302,11 @@ def test_purpose_section_enforce_mode_emits_mandatory_referral():
 def test_purpose_section_off_mode_emits_no_overlay_message():
     from django.test import override_settings
 
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     with (
         override_settings(CREDIT_POLICY_OVERLAY_MODE="off"),
-        patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+        patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl,
     ):
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
@@ -319,11 +319,11 @@ def test_purpose_section_unknown_mode_falls_through_to_shadow():
     """Mirrors credit_policy.py:405 — unknown values default to shadow."""
     from django.test import override_settings
 
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     with (
         override_settings(CREDIT_POLICY_OVERLAY_MODE="bogus_value"),
-        patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+        patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl,
     ):
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
@@ -365,7 +365,7 @@ def _make_compliant_mv(**overrides):
 
 
 def test_compliance_status_compliant_when_all_gates_pass_and_evidence_present():
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     status, reasons = _compliance_status(_make_compliant_mv())
     assert status == "COMPLIANT"
@@ -373,7 +373,7 @@ def test_compliance_status_compliant_when_all_gates_pass_and_evidence_present():
 
 
 def test_compliance_status_non_compliant_on_failed_fairness():
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(
         fairness_metrics={
@@ -388,7 +388,7 @@ def test_compliance_status_non_compliant_on_failed_fairness():
 
 
 def test_compliance_status_non_compliant_on_high_psi():
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(
         training_metadata={
@@ -401,7 +401,7 @@ def test_compliance_status_non_compliant_on_high_psi():
 
 
 def test_compliance_status_non_compliant_on_high_ece():
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(ece=0.08)
     status, reasons = _compliance_status(mv)
@@ -410,7 +410,7 @@ def test_compliance_status_non_compliant_on_high_ece():
 
 
 def test_compliance_status_needs_review_when_fairness_evidence_missing():
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(fairness_metrics={})
     status, reasons = _compliance_status(mv)
@@ -419,7 +419,7 @@ def test_compliance_status_needs_review_when_fairness_evidence_missing():
 
 
 def test_compliance_status_needs_review_when_psi_missing():
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(training_metadata={"psi_by_feature": {}})
     status, reasons = _compliance_status(mv)
@@ -428,7 +428,7 @@ def test_compliance_status_needs_review_when_psi_missing():
 
 
 def test_compliance_status_needs_review_when_calibration_missing():
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(calibration_data={})
     status, reasons = _compliance_status(mv)
@@ -449,7 +449,7 @@ def test_compliance_status_marks_warn_mode_promotion_rejection_noncompliant():
     """A `warn`-mode promotion gate rejection must flip the banner from
     COMPLIANT to NON-COMPLIANT — otherwise the dossier silently endorses a
     model the audit log already flagged as a regression vs the champion."""
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(
         training_metadata={
@@ -478,7 +478,7 @@ def test_compliance_status_marks_warn_mode_fairness_failure_noncompliant():
     """A recorded fairness-gate verdict trumps the raw 80%-rule scan. Even
     when fairness_metrics is clean (e.g. trainer post-processed the slice
     after the gate ran), the recorded verdict still drives the banner."""
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(
         fairness_metrics={
@@ -506,7 +506,7 @@ def test_compliance_status_marks_warn_mode_fairness_failure_noncompliant():
 
 def test_compliance_status_compliant_when_gate_verdict_passed():
     """Defense — a recorded `passed=True` verdict does not flip the banner."""
-    from apps.ml_engine.services.mrm_compliance import _compliance_status
+    from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
     mv = _make_compliant_mv(
         training_metadata={
@@ -529,10 +529,10 @@ def test_compliance_status_compliant_when_gate_verdict_passed():
 
 def test_header_renders_non_compliant_status_when_fairness_fails():
     """Even with is_active=True, a failed fairness gate must surface in §1."""
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
     mv = _make_mv(is_active=True)  # default has age_group failing
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(mv)
 
@@ -541,9 +541,9 @@ def test_header_renders_non_compliant_status_when_fairness_fails():
 
 
 def test_header_renders_compliant_status_when_clean():
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
 
@@ -552,9 +552,9 @@ def test_header_renders_compliant_status_when_clean():
 
 def test_document_subtitle_drops_alignment_keeps_format_reference():
     """Regression guard for the implicit-claim removal (Codex finding 2)."""
-    from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
+    from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
 
-    with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+    with patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl:
         _cl.return_value = "## 11. Change log\n\n(stub)"
         md = generate_dossier_markdown(_make_compliant_mv())
 
@@ -573,14 +573,14 @@ def test_document_subtitle_drops_alignment_keeps_format_reference():
 
 
 def test_write_dossier_creates_file_at_expected_path():
-    from apps.ml_engine.services.mrm_dossier import write_dossier
+    from apps.ml_engine.services.governance.mrm_dossier import write_dossier
 
     mv = _make_mv()
     with tempfile.TemporaryDirectory() as tmpdir:
         # The H11 path-traversal guard checks output_dir against ML_MODELS_DIR.
         # Override ML_MODELS_DIR to the tmp directory so the check passes in tests.
         with (
-            patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+            patch("apps.ml_engine.services.governance.mrm_dossier._changelog_section") as _cl,
             patch("django.conf.settings.ML_MODELS_DIR", tmpdir),
         ):
             _cl.return_value = "## 11. Change log\n\n(stub)"

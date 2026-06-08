@@ -167,7 +167,7 @@ class ModelDriftView(APIView):
 
     def get(self, request):
         """Compute PSI for recent applications vs training distribution."""
-        from apps.ml_engine.services.drift_monitor import compute_on_demand_feature_psi
+        from apps.ml_engine.services.governance.drift_monitor import compute_on_demand_feature_psi
         from apps.ml_engine.services.model_selector import select_model_version
         from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
 
@@ -223,7 +223,7 @@ class ModelCardView(APIView):
     permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         try:
             generator = ModelCardGenerator()

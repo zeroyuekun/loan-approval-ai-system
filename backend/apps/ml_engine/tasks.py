@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
-from apps.ml_engine.services.drift_monitor import compute_psi as _compute_psi
+from apps.ml_engine.services.governance.drift_monitor import compute_psi as _compute_psi
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +56,14 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
     """Inner training logic — called with lock held."""
     from types import SimpleNamespace
 
-    from apps.ml_engine.services.fairness_gate_mode import (
+    from apps.ml_engine.services.governance.fairness_gate_mode import (
         evaluate_fairness_gate_for_activation,
+    )
+    from apps.ml_engine.services.governance.promotion_gate_mode import (
+        evaluate_promotion_gates_for_activation,
     )
     from apps.ml_engine.services.model_selector import promote_if_eligible
     from apps.ml_engine.services.predictor import clear_model_cache
-    from apps.ml_engine.services.promotion_gate_mode import (
-        evaluate_promotion_gates_for_activation,
-    )
     from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.trainer import ModelTrainer
     from apps.ml_engine.services.validation_gate_mode import (
@@ -517,7 +517,7 @@ def generate_mrm_dossier_task(self, model_version_id: str):
         logger.warning("generate_mrm_dossier_task: ModelVersion %s not found", model_version_id)
         return {"status": "skipped", "reason": "model_not_found"}
 
-    from apps.ml_engine.services.mrm_dossier import write_dossier
+    from apps.ml_engine.services.governance.mrm_dossier import write_dossier
 
     output_dir = str(settings.ML_MODELS_DIR)
     try:

@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from apps.loans.models import LoanApplication
-from apps.ml_engine.services import drift_monitor
+from apps.ml_engine.services.governance import drift_monitor
 
 pytestmark = pytest.mark.django_db
 

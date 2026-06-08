@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from apps.ml_engine.services.fairness_gate import check_fairness_gate
+from apps.ml_engine.services.governance.fairness_gate import check_fairness_gate
 
 logger = logging.getLogger(__name__)
 

@@ -23,7 +23,7 @@ from sklearn.metrics import (
     roc_curve,
 )
 
-from apps.ml_engine.services import drift_monitor
+from apps.ml_engine.services.governance import drift_monitor
 
 
 class MetricsService:

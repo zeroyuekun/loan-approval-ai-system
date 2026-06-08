@@ -12,7 +12,7 @@ eps=1e-8.
 import numpy as np
 import pytest
 
-from apps.ml_engine.services.drift_monitor import _psi_from_histogram, compute_psi
+from apps.ml_engine.services.governance.drift_monitor import _psi_from_histogram, compute_psi
 
 
 class TestPsiFromHistogramBasic:

@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
-from apps.ml_engine.services.mrm_compliance import _compliance_status
+from apps.ml_engine.services.governance.mrm_compliance import _compliance_status
 
 # ---------------------------------------------------------------------------
 # Purpose statements per segment. Kept adjacent so a change to the training

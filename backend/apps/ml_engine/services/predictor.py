@@ -26,6 +26,9 @@ from apps.ml_engine.services.feature_prep import (
 from apps.ml_engine.services.feature_prep import (
     validate_input as _validate_input_helper,
 )
+from apps.ml_engine.services.governance.shadow_scoring import (
+    score_challengers_shadow as _score_challengers_shadow_helper,
+)
 from apps.ml_engine.services.policy_overlay import (
     apply_policy_overlay as _apply_policy_overlay_helper,
 )
@@ -59,9 +62,6 @@ from apps.ml_engine.services.prediction_features import (
 )
 from apps.ml_engine.services.prediction_features import (
     derive_underwriter_features as _derive_underwriter_features_helper,
-)
-from apps.ml_engine.services.shadow_scoring import (
-    score_challengers_shadow as _score_challengers_shadow_helper,
 )
 from apps.ml_engine.services.shap_attribution import (
     compute_shap_attribution as _compute_shap_attribution_helper,
