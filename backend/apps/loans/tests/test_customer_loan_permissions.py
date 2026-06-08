@@ -106,9 +106,7 @@ class TestCustomerLoanDetailPermissions:
         if isinstance(body, dict) and "count" in body:
             assert body["count"] == 0
 
-    def test_customer_a_can_retrieve_own_denied_app_with_counterfactuals(
-        self, customer_a, denied_app_for_a
-    ):
+    def test_customer_a_can_retrieve_own_denied_app_with_counterfactuals(self, customer_a, denied_app_for_a):
         client = APIClient()
         client.force_authenticate(user=customer_a)
         response = client.get(f"/api/v1/loans/{denied_app_for_a.id}/")
