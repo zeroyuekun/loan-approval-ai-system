@@ -11,7 +11,6 @@ from django.http import HttpResponse, JsonResponse
 from django.urls import include, path
 from django_prometheus.exports import ExportToDjangoView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from rest_framework import status as http_status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -23,64 +22,69 @@ from config.ops_auth import require_ops_auth
 class TaskStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
+    # Sentinel returned for non-staff when the task is non-existent, not yet
+    # complete, or belongs to a different user.  All three cases are
+    # INDISTINGUISHABLE — same status code, same body shape — so an attacker
+    # cannot use the response to probe whether a given task_id exists in the
+    # system (IDOR / task-existence information leak).
+    _PENDING_ENVELOPE = staticmethod(
+        lambda task_id: {
+            "task_id": task_id,
+            "status": "PENDING",
+            "result": None,
+            "date_done": None,
+        }
+    )
+
     def get(self, request, task_id):
         """Check the status of an async Celery task with ownership verification."""
         from django_celery_results.models import TaskResult
 
+        user = request.user
+        is_staff = user.role in ("admin", "officer")
+
         try:
             result = TaskResult.objects.get(task_id=task_id)
         except TaskResult.DoesNotExist:
+            # Staff see an explicit PENDING (task genuinely not recorded yet).
+            # Non-staff see the same PENDING envelope as every other non-owned
+            # case — indistinguishable from "task exists but not yours".
+            return Response(self._PENDING_ENVELOPE(task_id))
+
+        # Staff have full visibility of any task's real status.
+        if is_staff:
             return Response(
                 {
                     "task_id": task_id,
-                    "status": "PENDING",
-                    "result": None,
-                    "date_done": None,
+                    "status": result.status,
+                    "result": result.result,
+                    "date_done": result.date_done.isoformat() if result.date_done else None,
                 }
             )
 
-        # Staff can see all tasks
-        user = request.user
-        if user.role not in ("admin", "officer"):
-            # For completed tasks, verify ownership via application_id in the result
-            if result.result:
-                try:
-                    result_data = json.loads(result.result) if isinstance(result.result, str) else result.result
-                    app_id = None
-                    if isinstance(result_data, dict):
-                        app_id = result_data.get("application_id")
-                    if app_id:
-                        if not LoanApplication.objects.filter(pk=app_id, applicant=user).exists():
-                            return Response(
-                                {"error": "You do not have permission to view this task"},
-                                status=http_status.HTTP_403_FORBIDDEN,
-                            )
-                    else:
-                        # No application_id in result — deny non-staff access
-                        return Response(
-                            {"error": "You do not have permission to view this task"},
-                            status=http_status.HTTP_403_FORBIDDEN,
-                        )
-                except (json.JSONDecodeError, TypeError):
+        # Non-staff path: return the real result ONLY when the task is
+        # complete AND the application_id in the result belongs to this user.
+        # Every other case (no result yet, no app_id, wrong owner, parse
+        # error) returns the same safe PENDING envelope.
+        if result.result:
+            try:
+                result_data = json.loads(result.result) if isinstance(result.result, str) else result.result
+                app_id = result_data.get("application_id") if isinstance(result_data, dict) else None
+                if app_id and LoanApplication.objects.filter(pk=app_id, applicant=user).exists():
                     return Response(
-                        {"error": "You do not have permission to view this task"},
-                        status=http_status.HTTP_403_FORBIDDEN,
+                        {
+                            "task_id": task_id,
+                            "status": result.status,
+                            "result": result.result,
+                            "date_done": result.date_done.isoformat() if result.date_done else None,
+                        }
                     )
-            else:
-                # PENDING/no result yet — deny non-staff unless they can't trace ownership
-                return Response(
-                    {"error": "You do not have permission to view this task"},
-                    status=http_status.HTTP_403_FORBIDDEN,
-                )
+            except (json.JSONDecodeError, TypeError):
+                pass
 
-        return Response(
-            {
-                "task_id": task_id,
-                "status": result.status,
-                "result": result.result,
-                "date_done": result.date_done.isoformat() if result.date_done else None,
-            }
-        )
+        # Task exists but not owned / not ready / unparseable — return the
+        # same PENDING envelope as the DoesNotExist path above.
+        return Response(self._PENDING_ENVELOPE(task_id))
 
 
 def security_txt(request):
@@ -220,8 +224,7 @@ urlpatterns = [
     path("metrics", require_ops_auth(ExportToDjangoView), name="prometheus-django-metrics"),
     path(".well-known/security.txt", security_txt, name="security-txt"),
     path("api/v1/health/", health_check, name="health-check"),
-    path("api/v1/health/deep/", deep_health_check, name="deep-health-check"),
-    path("api/v1/health/ready/", deep_health_check, name="readiness-probe"),
+    path("api/v1/health/deep/", require_ops_auth(deep_health_check), name="deep-health-check"),
     path(settings.DJANGO_ADMIN_URL, admin.site.urls),
     path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/loans/", include("apps.loans.urls")),

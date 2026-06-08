@@ -79,11 +79,12 @@ class TestDeepHealthConfigured:
     """Deep health must refuse to respond if token is unconfigured in production."""
 
     @override_settings(DEBUG=False, HEALTH_CHECK_TOKEN="")
-    def test_unconfigured_token_in_prod_returns_503(self):
+    def test_unconfigured_token_in_prod_returns_403(self):
+        """Unauthenticated requests are blocked by require_ops_auth before reaching
+        the inner token-config check; the outer gate returns 403."""
         client = APIClient()
         resp = client.get("/api/v1/health/deep/")
-        assert resp.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        assert "not configured" in resp.json().get("error", "").lower()
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
 
     @override_settings(DEBUG=True, HEALTH_CHECK_TOKEN="")
     def test_unconfigured_token_in_debug_allowed(self):
@@ -108,3 +109,32 @@ class TestDeepHealthConfigured:
         assert resp.status_code in (200, 503)
         body = resp.json()
         assert body.get("error") != "unauthorized"
+
+
+@pytest.mark.django_db
+class TestHealthProbeContract:
+    """Orchestrator probes (Docker/k8s healthchecks, CI smoke, load tests) must hit
+    an UNauthenticated liveness endpoint. `/api/v1/health/` stays open; the old
+    `/api/v1/health/ready/` alias — a gated duplicate of `/deep/` that silently 403'd
+    every container healthcheck after #77 — is removed so nothing can be pointed back
+    at it. Regression guard for the #77 ops-auth gating fallout.
+    """
+
+    def test_liveness_open_without_auth(self):
+        """The endpoint every orchestrator probe uses must answer 200 with no auth."""
+        client = APIClient()
+        resp = client.get("/api/v1/health/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.json() == {"status": "ok"}
+
+    def test_deep_health_still_gated(self):
+        """Deep/ops health must remain behind require_ops_auth (info-leak guard)."""
+        client = APIClient()
+        resp = client.get("/api/v1/health/deep/")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_ready_alias_removed(self):
+        """The misnamed gated `/ready/` route must no longer exist (404, not 403)."""
+        client = APIClient()
+        resp = client.get("/api/v1/health/ready/")
+        assert resp.status_code == status.HTTP_404_NOT_FOUND

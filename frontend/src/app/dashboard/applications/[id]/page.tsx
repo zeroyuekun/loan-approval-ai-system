@@ -22,7 +22,7 @@ export default function ApplicationDetailPage() {
 
   const { data: application, isLoading: appLoading, isError, error } = useApplication(id)
 
-  const { data: email } = useQuery<GeneratedEmail>({
+  const { data: email, isError: emailError, error: emailQueryError } = useQuery<GeneratedEmail>({
     queryKey: ['email', id],
     queryFn: async () => {
       const { data } = await emailApi.get(id)
@@ -86,14 +86,19 @@ export default function ApplicationDetailPage() {
   }
 
   return (
-    <ApplicationDetail
-      application={application}
-      email={email || null}
-      onRefresh={handleRefresh}
-      onDelete={isAdmin ? handleDelete : undefined}
-      isDeleting={isDeleting}
-      showDeleteConfirm={showDeleteConfirm}
-      onDeleteConfirmToggle={setShowDeleteConfirm}
-    />
+    <>
+      {emailError && (emailQueryError as any)?.response?.status !== 404 && (
+        <p className="text-sm text-destructive mb-4">Failed to load email preview. Please refresh.</p>
+      )}
+      <ApplicationDetail
+        application={application}
+        email={email || null}
+        onRefresh={handleRefresh}
+        onDelete={isAdmin ? handleDelete : undefined}
+        isDeleting={isDeleting}
+        showDeleteConfirm={showDeleteConfirm}
+        onDeleteConfirmToggle={setShowDeleteConfirm}
+      />
+    </>
   )
 }

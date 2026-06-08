@@ -84,7 +84,8 @@ def check_regression(
         except (TypeError, ValueError):
             continue
         drop = baseline_f - observed_f
-        if drop > tol_f:
+        # Boundary: drop == tolerance fails the gate (conservative — we want strictly better)
+        if drop >= tol_f:
             breaches.append(
                 f"{name} regressed by {drop:.4f} (observed={observed_f:.4f} "
                 f"< baseline {baseline_f:.4f} − tol {tol_f:.4f})"

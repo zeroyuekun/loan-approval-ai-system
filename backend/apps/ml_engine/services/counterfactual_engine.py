@@ -102,22 +102,23 @@ class CounterfactualEngine:
 
         # --- 2. Extend loan term ---
         current_term = int(original["loan_term_months"])
-        if current_term < 60:
-            for candidate_term in [48, 60]:
-                if candidate_term <= current_term:
-                    continue
-                test_df = features_df.copy()
-                test_df["loan_term_months"] = candidate_term
-                prob = self._predict_prob(test_df)
-                if prob >= self.threshold:
-                    changes = {"loan_term_months": candidate_term}
-                    results.append(
-                        {
-                            "changes": changes,
-                            "statement": self._format_statement(changes, features_df),
-                        }
-                    )
-                    break
+        max_term = 84  # 7 years max
+        candidate_terms = [
+            t for t in [current_term + 12, current_term + 24, current_term + 36] if t <= max_term and t != current_term
+        ]
+        for candidate_term in candidate_terms:
+            test_df = features_df.copy()
+            test_df["loan_term_months"] = candidate_term
+            prob = self._predict_prob(test_df)
+            if prob >= self.threshold:
+                changes = {"loan_term_months": candidate_term}
+                results.append(
+                    {
+                        "changes": changes,
+                        "statement": self._format_statement(changes, features_df),
+                    }
+                )
+                break
 
         # --- 3. Cosigner toggle ---
         if int(original["has_cosigner"]) == 0:

@@ -5,6 +5,8 @@ age- and risk-conditional transition probabilities. Extracted from `DataGenerato
 performance simulation can evolve independently of upstream feature generation.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 
@@ -16,7 +18,7 @@ class LoanPerformanceSimulator:
     Extracted from DataGenerator to isolate loan performance simulation logic.
     """
 
-    def simulate_loan_performance(self, df: pd.DataFrame) -> pd.DataFrame:
+    def simulate_loan_performance(self, df: pd.DataFrame, *, rng: np.random.Generator | None = None) -> pd.DataFrame:
         """Simulate loan performance outcomes for approved loans.
 
         For each approved loan, runs month-by-month Markov chain simulation
@@ -24,11 +26,20 @@ class LoanPerformanceSimulator:
         Produces: months_on_book, ever_30dpd, ever_90dpd, default_flag,
         prepaid_flag, current_status.
 
+        Parameters
+        ----------
+        rng:
+            Per-instance numpy Generator for reproducible, non-global RNG.
+            When None a fresh Generator is created (non-reproducible — avoid in
+            production data generation; always pass the caller's rng).
+
         Calibrated to:
         - APRA NPL 1.04% (via transition matrix)
         - Moody's AU RMBS CPR 15-22% annually
         - S&P APAC cure rates (30dpd: 40-60%, 60dpd: 10-20%)
         """
+        if rng is None:
+            rng = np.random.default_rng()
         from .real_world_benchmarks import RealWorldBenchmarks
 
         reference_date = pd.Timestamp("2025-12-31")
@@ -107,10 +118,11 @@ class LoanPerformanceSimulator:
                 total = sum(adjusted_probs.values())
                 adjusted_probs = {k: v / total for k, v in adjusted_probs.items()}
 
-                # Transition
+                # Transition — use per-instance Generator (not global np.random)
+                # to ensure reproducibility across concurrent Celery workers.
                 states = list(adjusted_probs.keys())
                 probs = list(adjusted_probs.values())
-                state = np.random.choice(states, p=probs)
+                state = rng.choice(states, p=probs)
 
                 if state in ("30dpd", "60dpd", "90dpd"):
                     ever_30 = True

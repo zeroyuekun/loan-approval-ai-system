@@ -577,7 +577,12 @@ def test_write_dossier_creates_file_at_expected_path():
 
     mv = _make_mv()
     with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        # The H11 path-traversal guard checks output_dir against ML_MODELS_DIR.
+        # Override ML_MODELS_DIR to the tmp directory so the check passes in tests.
+        with (
+            patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+            patch("django.conf.settings.ML_MODELS_DIR", tmpdir),
+        ):
             _cl.return_value = "## 11. Change log\n\n(stub)"
             path = write_dossier(mv, tmpdir)
 

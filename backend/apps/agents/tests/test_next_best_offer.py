@@ -306,8 +306,14 @@ class TestGenerate:
         with patch.object(gen, "_generate_messaging") as mock_llm:
             mock_llm.return_value = {
                 "offer_reasoning": [
-                    "Reasoning specific to offer 1 (refs $10k savings).",
-                    "Reasoning specific to offer 2 (build deposit).",
+                    {
+                        "product_id": "secured_personal",
+                        "reasoning": "Reasoning specific to offer 1 (refs $10k savings).",
+                    },
+                    {
+                        "product_id": "savings",
+                        "reasoning": "Reasoning specific to offer 2 (build deposit).",
+                    },
                 ],
                 "analysis": "Retention strategy paragraph.",
                 "personalized_message": "Thanks Jane.",
@@ -315,8 +321,9 @@ class TestGenerate:
             result = gen.generate(_make_mock_application(), "low savings")
 
         assert len(result["offers"]) == 2
-        assert result["offers"][0]["reasoning"] == "Reasoning specific to offer 1 (refs $10k savings)."
-        assert result["offers"][1]["reasoning"] == "Reasoning specific to offer 2 (build deposit)."
+        offers = {o["type"]: o for o in result["offers"]}
+        assert offers["secured_personal"]["reasoning"] == "Reasoning specific to offer 1 (refs $10k savings)."
+        assert offers["savings"]["reasoning"] == "Reasoning specific to offer 2 (build deposit)."
         assert result["analysis"] == "Retention strategy paragraph."
         assert result["personalized_message"] == "Thanks Jane."
 
@@ -330,15 +337,71 @@ class TestGenerate:
         gen = NextBestOfferGenerator()
         with patch.object(gen, "_generate_messaging") as mock_llm:
             mock_llm.return_value = {
-                "offer_reasoning": ["only one reasoning"],
+                "offer_reasoning": [
+                    {"product_id": "secured_personal", "reasoning": "only one reasoning"},
+                ],
                 "analysis": "x",
                 "personalized_message": "y",
             }
             result = gen.generate(_make_mock_application())
 
-        assert result["offers"][0]["reasoning"] == "only one reasoning"
-        # Second offer keeps whatever reasoning it already had (or lacks one)
-        assert result["offers"][1].get("reasoning") != "only one reasoning"
+        offers = {o["type"]: o for o in result["offers"]}
+        assert offers["secured_personal"]["reasoning"] == "only one reasoning"
+        # The savings offer was not in the LLM output -> deterministic benefit text.
+        assert offers["savings"]["reasoning"] == offers["savings"]["benefit"]
+
+
+class TestKeyBoundReasoningMerge:
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("apps.agents.services.next_best_offer.RecommendationEngine")
+    def test_reasoning_bound_by_product_key_even_when_reordered(self, mock_engine_cls):
+        """LLM returns reasoning objects in a DIFFERENT order than the offers;
+        each reasoning must still attach to its own product by key."""
+        mock_engine = MagicMock()
+        mock_engine.recommend.return_value = _engine_result_with_offers()
+        mock_engine_cls.return_value = mock_engine
+
+        gen = NextBestOfferGenerator()
+        with patch.object(gen, "_generate_messaging") as mock_llm:
+            # Reversed order vs offers (secured_personal first, savings second).
+            mock_llm.return_value = {
+                "offer_reasoning": [
+                    {"product_id": "savings", "reasoning": "SAVINGS reasoning"},
+                    {"product_id": "secured_personal", "reasoning": "SECURED reasoning"},
+                ],
+                "analysis": "a",
+                "personalized_message": "m",
+            }
+            result = gen.generate(_make_mock_application(), "low savings")
+
+        offers = {o["type"]: o for o in result["offers"]}
+        assert offers["secured_personal"]["reasoning"] == "SECURED reasoning"
+        assert offers["savings"]["reasoning"] == "SAVINGS reasoning"
+
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("apps.agents.services.next_best_offer.RecommendationEngine")
+    def test_missing_key_falls_back_to_benefit_text(self, mock_engine_cls):
+        """If the LLM drops an offer's reasoning, that offer falls back to its
+        deterministic benefit text rather than borrowing another product's."""
+        mock_engine = MagicMock()
+        mock_engine.recommend.return_value = _engine_result_with_offers()
+        mock_engine_cls.return_value = mock_engine
+
+        gen = NextBestOfferGenerator()
+        with patch.object(gen, "_generate_messaging") as mock_llm:
+            mock_llm.return_value = {
+                "offer_reasoning": [
+                    {"product_id": "secured_personal", "reasoning": "only secured"},
+                ],
+                "analysis": "a",
+                "personalized_message": "m",
+            }
+            result = gen.generate(_make_mock_application())
+
+        offers = {o["type"]: o for o in result["offers"]}
+        assert offers["secured_personal"]["reasoning"] == "only secured"
+        # savings was not in the LLM output -> deterministic benefit text
+        assert offers["savings"]["reasoning"] == offers["savings"]["benefit"]
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +440,7 @@ class TestGenerateMessaging:
         )
         gen = NextBestOfferGenerator()
         result = gen._generate_messaging(_make_mock_application(), _sample_offers())
-        assert result["offer_reasoning"] == [
+        assert [r["reasoning"] for r in result["offer_reasoning"]] == [
             "Lower rate with collateral",
             "Build deposit",
         ]
@@ -417,7 +480,7 @@ class TestGenerateMessaging:
         mock_call.side_effect = ValueError("weird happened")
         gen = NextBestOfferGenerator()
         result = gen._generate_messaging(_make_mock_application(), _sample_offers())
-        assert result["offer_reasoning"] == [
+        assert [r["reasoning"] for r in result["offer_reasoning"]] == [
             "Lower rate with collateral",
             "Build deposit",
         ]
