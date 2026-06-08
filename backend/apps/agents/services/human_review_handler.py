@@ -16,6 +16,25 @@ from .step_tracker import StepTracker
 logger = logging.getLogger("agents.orchestrator")
 
 
+def build_denial_reason_summary(shap_values: dict, feature_importances: dict) -> str:
+    """Human-readable denial-reason summary for the marketing/NBO step.
+
+    Uses the shared DecisionExplanation ranking + reason codes instead of the
+    old ad-hoc `"feature: 0.123"` float dump.
+    """
+    from apps.ml_engine.services.reason_codes import generate_adverse_action_reasons
+
+    reasons = generate_adverse_action_reasons(shap_values or {}, "denied")
+    if reasons:
+        return "; ".join(r["reason"] for r in reasons)
+    if feature_importances:
+        from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
+
+        drivers = ranked_denial_drivers(shap_values=shap_values or {}, feature_importances=feature_importances, max_n=3)
+        return ", ".join(name.replace("_", " ") for name, _ in drivers)
+    return ""
+
+
 class HumanReviewHandler:
     """Handles resuming the pipeline after human review."""
 
@@ -140,6 +159,79 @@ class HumanReviewHandler:
                 self.tracker.finalize_run(agent_run, steps, start_time)
                 return agent_run
 
+            # Re-run bias detection on the regenerated approval email.
+            # The original pipeline ran bias detection before sending; the resume
+            # path must mirror this check so a regenerated email cannot bypass
+            # bias screening by going through the human-review flow.
+            if email_result and email_result.get("passed_guardrails"):
+                from apps.agents.services.bias.core import BiasDetector
+
+                step_bias = self.tracker.start_step("bias_check_resume")
+                try:
+                    bias_detector = BiasDetector()
+                    bias_result = bias_detector.analyze(
+                        email_result["body"],
+                        {
+                            "loan_amount": float(application.loan_amount),
+                            "purpose": application.get_purpose_display(),
+                            "decision": "approved",
+                        },
+                    )
+                    step_bias = self.tracker.complete_step(
+                        step_bias,
+                        result_summary={
+                            "bias_score": bias_result["score"],
+                            "flagged": bias_result["flagged"],
+                        },
+                    )
+                    steps.append(step_bias)
+
+                    if bias_result.get("flagged"):
+                        logger.warning(
+                            "Agent run %s: resumed approval email re-flagged by bias detector "
+                            "(score=%s) — re-escalating application %s",
+                            agent_run_id,
+                            bias_result["score"],
+                            application.id,
+                        )
+                        step_hold = self.tracker.start_step("email_delivery")
+                        step_hold = self.tracker.complete_step(
+                            step_hold,
+                            result_summary={
+                                "sent": False,
+                                "reason": "Bias detected on resume — re-escalating",
+                            },
+                        )
+                        steps.append(step_hold)
+                        with transaction.atomic():
+                            application.refresh_from_db()
+                            if application.status not in (
+                                LoanApplication.Status.REVIEW,
+                                LoanApplication.Status.PENDING,
+                            ):
+                                application.status = LoanApplication.Status.REVIEW
+                                application.save(update_fields=["status"])
+                        agent_run.status = "escalated"
+                        agent_run.error = (
+                            f"Resumed email re-flagged by bias detector (score={bias_result['score']}) — re-escalated"
+                        )
+                        self.tracker.finalize_run(agent_run, steps, start_time)
+                        return agent_run
+
+                except Exception as exc:
+                    # Bias check failure on resume — fail-safe: withhold and re-escalate.
+                    logger.error(
+                        "Agent run %s: bias check failed on resume — re-escalating: %s",
+                        agent_run_id,
+                        exc,
+                    )
+                    step_bias = self.tracker.fail_step(step_bias, str(exc), failure_category="transient")
+                    steps.append(step_bias)
+                    agent_run.status = "escalated"
+                    agent_run.error = f"Bias check failed on resume — withheld for safety: {exc}"
+                    self.tracker.finalize_run(agent_run, steps, start_time)
+                    return agent_run
+
             # Send the approval email
             if email_result:
                 step = self.tracker.start_step("email_delivery")
@@ -186,13 +278,12 @@ class HumanReviewHandler:
                 steps.append(step)
 
         elif decision == "denied":
-            # Extract denial reasons from stored feature importances
             denial_reasons = ""
             try:
-                fi = application.decision.feature_importances
-                if fi:
-                    top_factors = sorted(fi.items(), key=lambda x: x[1], reverse=True)[:3]
-                    denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
+                denial_reasons = build_denial_reason_summary(
+                    application.decision.shap_values,
+                    application.decision.feature_importances,
+                )
             except (LoanDecision.DoesNotExist, AttributeError) as exc:
                 logger.debug(
                     "denial_feature_importances_missing",
@@ -219,6 +310,12 @@ class HumanReviewHandler:
                 decision,
                 details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
             )
+            # H2: record that a human was involved, so the ADM disclosure can
+            # truthfully report "assisted" after status moves off 'review'.
+            loan_decision = application.decision
+            if loan_decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
+                loan_decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+                loan_decision.save(update_fields=["human_involvement"])
         self.tracker.finalize_run(agent_run, steps, start_time)
 
         # Emit time-to-resolution for the bias review queue (docs/slo.md).

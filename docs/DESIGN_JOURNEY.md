@@ -106,9 +106,16 @@ email composition → next-best-offer (NBO) injection. Every step writes to one
 how long each step took, and what decisions the agent made. A bias-detection
 agent scores each decision against protected attributes and escalates to a
 human review queue when the score crosses a threshold. NBO activates on
-denials — it looks at the counterfactual results and suggests a smaller
-amount, longer term, or cosigner option that the model would approve, and the
-email engine injects that suggestion into the denial letter.
+denials, and it reaches the customer through two distinct emails. The denial
+**decision email** carries a single, deterministic alternative-offer teaser
+(the best-scoring product plus its headline figure, computed by the
+recommendation engine and validated by the same hallucinated-number guardrail
+the rest of the letter uses), so the customer sees one concrete next step
+immediately. The **full personalised offer set** — every eligible product with
+LLM-written reasoning — ships as a **separate marketing follow-up email** that
+runs through its own bias-detection and senior-review gate. This
+decision-vs-marketing split keeps the regulated decision letter concise and
+compliant while letting the marketing message be richer and more persuasive.
 
 **Why I chose this approach.** A single task with step-level logging gives me
 auditability without distributed-transaction overhead. Microservices would add
@@ -122,10 +129,16 @@ and trains reviewers to rubber-stamp.
 **What I considered and rejected.** A DAG framework (Airflow, Prefect) — way
 too heavy for a five-step pipeline. LangGraph-style agent graphs with
 dynamic routing — rejected because the pipeline is fundamentally linear and
-the "agentic" branching would be illusory. Putting NBO in the email template
-instead of as its own step — rejected because NBO consumes counterfactual
-output, and I wanted that dependency expressed in the orchestrator, not
-hidden inside a Jinja template.
+the "agentic" branching would be illusory. Making NBO *only* a separate
+marketing email — rejected because a denied customer should see at least one
+concrete alternative in the decision letter itself, not have to wait for a
+follow-up. Equally, putting the *full* offer set inside the decision letter —
+rejected because it would bloat a regulated communication and mix marketing
+into a compliance document. The final design renders a single deterministic
+teaser into the denial prompt from engine output (data, not a Jinja template),
+while the orchestrator still owns NBO as an explicit step that produces the
+richer marketing email — so the counterfactual/NBO dependency stays visible in
+the pipeline rather than hidden in a template.
 
 **What I'd do differently.** I'd deploy earlier, even if half the steps were
 stubs. Running the pipeline on real traffic (internal, synthetic customers)

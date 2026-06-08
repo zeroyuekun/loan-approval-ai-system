@@ -27,7 +27,7 @@ export default function CustomersPage() {
 
   const customers = data?.results || []
   const totalCount = data?.count || 0
-  const pageSize = 10
+  const pageSize = 20 // match backend DRF PAGE_SIZE (config/settings/base.py)
   const totalPages = Math.ceil(totalCount / pageSize)
 
   return (

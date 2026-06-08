@@ -100,6 +100,28 @@ def check_feature_drift(features: dict, reference_distribution: dict | None) -> 
     return warnings
 
 
+def _shock_income_and_dti(features: dict, shock_factor: float) -> tuple[float, float]:
+    """Apply an income shock and re-derive the TOTAL ``debt_to_income``.
+
+    ``debt_to_income`` is a TOTAL DTI = existing-debt portion + new-loan portion.
+    Existing repayments are fixed dollars, so their DTI *rises* as income falls;
+    only the new-loan portion is recomputed at the shocked income. Re-deriving
+    DTI as loan-only would discard existing debt and could make an adverse income
+    shock look LESS risky than baseline (``debt_to_income`` carries a strong
+    negative monotone constraint). Returns ``(shocked_income, shocked_dti)``.
+    """
+    base_income = float(features.get("annual_income", 0) or 0)
+    base_dti = float(features.get("debt_to_income", 0) or 0)
+    loan_amount = float(features.get("loan_amount", 0) or 0)
+    shocked_income = base_income * shock_factor
+    if shocked_income <= 0:
+        return shocked_income, 999.0  # Maximum DTI when income is zero
+    new_loan_portion_base = loan_amount / base_income if base_income > 0 else 0.0
+    existing_portion = max(0.0, base_dti - new_loan_portion_base)
+    shocked_dti = existing_portion * (base_income / shocked_income) + loan_amount / shocked_income
+    return shocked_income, shocked_dti
+
+
 def run_stress_scenarios(
     features: dict,
     threshold: float,
@@ -134,11 +156,7 @@ def run_stress_scenarios(
 
         # Scenario 1: Income -15%
         stressed = features.copy()
-        stressed["annual_income"] = float(stressed["annual_income"]) * 0.85
-        if stressed["annual_income"] > 0:
-            stressed["debt_to_income"] = float(stressed.get("loan_amount", 0)) / stressed["annual_income"]
-        else:
-            stressed["debt_to_income"] = 999.0  # Maximum DTI when income is zero
+        stressed["annual_income"], stressed["debt_to_income"] = _shock_income_and_dti(features, 0.85)
         df_s = pd.DataFrame([stressed])
         df_s = transform_fn(df_s)
         prob = float(model.predict_proba(df_s[feature_cols])[0][1])
@@ -179,11 +197,7 @@ def run_stress_scenarios(
 
         # Scenario 4: Combined stress (all three)
         stressed = features.copy()
-        stressed["annual_income"] = float(stressed["annual_income"]) * 0.85
-        if stressed["annual_income"] > 0:
-            stressed["debt_to_income"] = float(stressed.get("loan_amount", 0)) / stressed["annual_income"]
-        else:
-            stressed["debt_to_income"] = 999.0  # Maximum DTI when income is zero
+        stressed["annual_income"], stressed["debt_to_income"] = _shock_income_and_dti(features, 0.85)
         if float(stressed.get("property_value", 0)) > 0:
             stressed["property_value"] = float(stressed["property_value"]) * 0.80
             recompute_lvr_driven_policy_vars(stressed)

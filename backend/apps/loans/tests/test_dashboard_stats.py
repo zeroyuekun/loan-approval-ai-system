@@ -2,6 +2,7 @@
 (p50/p95 decision latency, 24h decision count, LLM spend, raw
 approved/denied counts).
 """
+
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -80,9 +81,7 @@ class TestDashboardStatsExtensions:
 
     @pytest.mark.django_db
     @patch("apps.loans.views.ApiBudgetGuard")
-    def test_response_includes_all_new_fields(
-        self, mock_budget_class, api_client, officer_user
-    ):
+    def test_response_includes_all_new_fields(self, mock_budget_class, api_client, officer_user):
         # Arrange: budget stub returns known spend
         mock_budget_class.return_value.get_daily_stats.return_value = {
             "calls": 12,
@@ -133,12 +132,13 @@ class TestDashboardStatsExtensions:
 
     @pytest.mark.django_db
     @patch("apps.loans.views.ApiBudgetGuard")
-    def test_handles_no_runs_in_window(
-        self, mock_budget_class, api_client, officer_user
-    ):
+    def test_handles_no_runs_in_window(self, mock_budget_class, api_client, officer_user):
         mock_budget_class.return_value.get_daily_stats.return_value = {
-            "calls": 0, "tokens": 0, "cost_usd": 0.0,
-            "budget_limit_usd": 5.0, "call_limit": 500,
+            "calls": 0,
+            "tokens": 0,
+            "cost_usd": 0.0,
+            "budget_limit_usd": 5.0,
+            "call_limit": 500,
             "circuit_breaker_open": False,
         }
         # No AgentRuns at all
@@ -152,9 +152,7 @@ class TestDashboardStatsExtensions:
 
     @pytest.mark.django_db
     @patch("apps.loans.views.ApiBudgetGuard")
-    def test_handles_budget_guard_failure_gracefully(
-        self, mock_budget_class, api_client, officer_user
-    ):
+    def test_handles_budget_guard_failure_gracefully(self, mock_budget_class, api_client, officer_user):
         # Budget call blows up (e.g. Redis truly broken).
         # The view must still return a 200 with zeroed spend, not 500.
         mock_budget_class.return_value.get_daily_stats.side_effect = Exception("redis dead")

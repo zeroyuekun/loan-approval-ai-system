@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { useAgentRun, useTaskStatus } from '@/hooks/useAgentStatus'
@@ -31,6 +31,44 @@ const mockCompletedRun = {
 }
 
 describe('useAgentRun', () => {
+  it('stops polling when unmounted', async () => {
+    vi.useFakeTimers()
+
+    let fetchCount = 0
+    server.use(
+      http.get(`${API_URL}/agents/runs/:loanId/`, () => {
+        fetchCount += 1
+        return HttpResponse.json({
+          ...mockCompletedRun,
+          // Return running status so polling continues
+          status: 'running',
+        })
+      }),
+    )
+
+    const { unmount } = renderHook(() => useAgentRun('loan-123', { pipelineQueued: false }), {
+      wrapper: createWrapper(),
+    })
+
+    // Advance to trigger the first refetch interval (2s)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500)
+    })
+    const callsBeforeUnmount = fetchCount
+
+    unmount()
+
+    // Advance well past several poll intervals
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000)
+    })
+
+    // No additional polling calls after unmount
+    expect(fetchCount).toBe(callsBeforeUnmount)
+
+    vi.useRealTimers()
+  })
+
   it('fetches agent run for a loan', async () => {
     server.use(
       http.get(`${API_URL}/agents/runs/:loanId/`, () => {

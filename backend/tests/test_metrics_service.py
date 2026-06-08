@@ -317,3 +317,120 @@ class TestComputeDecileAnalysis:
         result = svc.compute_decile_analysis(y_true, y_prob)
         lifts = [d["lift"] for d in result["deciles"]]
         assert lifts[-1] == max(lifts)
+
+
+# ── compute_fairness_metrics (disparate impact + small-group stability) ──
+
+
+class TestComputeFairnessMetrics:
+    def _grouped(self, specs):
+        """Build (y_true, y_pred, y_prob, group_labels) from (name, n, n_approved) specs.
+
+        y_true is set equal to y_pred so per-group TPR/FPR are clean and the test
+        focuses on the disparate-impact (predicted approval rate) logic.
+        """
+        y_pred, labels = [], []
+        for name, n, n_approved in specs:
+            y_pred.extend([1] * n_approved + [0] * (n - n_approved))
+            labels.extend([name] * n)
+        y_pred = np.array(y_pred)
+        labels = np.array(labels)
+        y_true = y_pred.copy()
+        y_prob = y_pred.astype(float)
+        return y_true, y_pred, y_prob, labels
+
+    def _grouped_confusion(self, specs):
+        """Build (y_true, y_pred, y_prob, group_labels) from (name, tp, fn, fp, tn) specs.
+
+        Unlike _grouped (which sets y_true == y_pred, pinning every group to TPR=1/FPR=0),
+        this lets groups genuinely disagree on TPR/FPR so the equalized-odds path is
+        exercised. tp: true=1,pred=1 · fn: true=1,pred=0 · fp: true=0,pred=1 · tn: true=0,pred=0.
+        """
+        y_true, y_pred, labels = [], [], []
+        for name, tp, fn, fp, tn in specs:
+            y_true.extend([1] * tp + [1] * fn + [0] * fp + [0] * tn)
+            y_pred.extend([1] * tp + [0] * fn + [1] * fp + [0] * tn)
+            labels.extend([name] * (tp + fn + fp + tn))
+        y_true = np.array(y_true)
+        y_pred = np.array(y_pred)
+        labels = np.array(labels)
+        y_prob = y_pred.astype(float)
+        return y_true, y_pred, y_prob, labels
+
+    def test_reports_all_groups_and_flags_small_ones(self, svc, settings):
+        settings.FAIRNESS_MIN_GROUP_SIZE = 10
+        y_true, y_pred, y_prob, labels = self._grouped([("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)])
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+
+        # Every group is still reported (the chart shows them all)...
+        assert set(res["groups"].keys()) == {"big_a", "big_b", "tiny_c"}
+        assert res["groups"]["tiny_c"]["count"] == 5
+        # ...but the small group is flagged and excluded from the ratio.
+        assert res["groups"]["big_a"]["included_in_fairness"] is True
+        assert res["groups"]["tiny_c"]["included_in_fairness"] is False
+        assert res["excluded_small_groups"] == ["tiny_c"]
+        assert res["min_group_size"] == 10
+
+    def test_tiny_noisy_group_does_not_drive_the_verdict(self, svc, settings):
+        settings.FAIRNESS_MIN_GROUP_SIZE = 10
+        y_true, y_pred, y_prob, labels = self._grouped([("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)])
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+        # DI = 0.70 / 0.80 = 0.875 over the two large groups -> PASS.
+        assert res["disparate_impact_ratio"] == pytest.approx(0.875, abs=1e-3)
+        assert res["passes_80_percent_rule"] is True
+
+    def test_small_group_would_fail_the_rule_if_not_excluded(self, svc, settings):
+        """Proof the exclusion is what fixes it: with threshold 1 the noisy group
+        is included and crushes the ratio to 0 -> FAIL."""
+        settings.FAIRNESS_MIN_GROUP_SIZE = 1
+        y_true, y_pred, y_prob, labels = self._grouped([("big_a", 50, 40), ("big_b", 50, 35), ("tiny_c", 5, 0)])
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+        assert res["disparate_impact_ratio"] == 0.0
+        assert res["passes_80_percent_rule"] is False
+        assert res["excluded_small_groups"] == []
+
+    def test_di_undefined_when_fewer_than_two_assessable_groups(self, svc, settings):
+        settings.FAIRNESS_MIN_GROUP_SIZE = 30
+        y_true, y_pred, y_prob, labels = self._grouped([("big_a", 50, 40), ("tiny_b", 5, 1), ("tiny_c", 5, 0)])
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+        assert res["disparate_impact_ratio"] is None
+        assert res["passes_80_percent_rule"] is None
+        assert set(res["excluded_small_groups"]) == {"tiny_b", "tiny_c"}
+
+    def test_group_at_exactly_the_threshold_is_included(self, svc, settings):
+        settings.FAIRNESS_MIN_GROUP_SIZE = 30
+        y_true, y_pred, y_prob, labels = self._grouped([("a", 30, 24), ("b", 40, 28)])
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+        assert res["groups"]["a"]["included_in_fairness"] is True
+        assert res["excluded_small_groups"] == []
+        assert res["disparate_impact_ratio"] == pytest.approx(0.875, abs=1e-3)
+
+    def test_equalized_odds_uses_only_assessable_groups(self, svc, settings):
+        """A tiny group with extreme TPR/FPR must not inflate the equalized-odds gap.
+
+        large_a: TPR 0.9 / FPR 0.1 · large_b: TPR 0.8 / FPR 0.2 · tiny_c (excluded):
+        TPR 0.0 / FPR 1.0. The gap is taken over the two large groups only —
+        max(TPR gap 0.1, FPR gap 0.1) = 0.1. If tiny_c were counted it would be ~0.9.
+        """
+        settings.FAIRNESS_MIN_GROUP_SIZE = 30
+        y_true, y_pred, y_prob, labels = self._grouped_confusion(
+            [("large_a", 27, 3, 2, 18), ("large_b", 24, 6, 4, 16), ("tiny_c", 0, 3, 3, 0)]
+        )
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+
+        assert res["groups"]["large_a"]["tpr"] == pytest.approx(0.9, abs=1e-3)
+        assert res["groups"]["large_b"]["tpr"] == pytest.approx(0.8, abs=1e-3)
+        assert res["groups"]["tiny_c"]["included_in_fairness"] is False
+        # Driven by the assessable groups only — NOT inflated to ~0.9 by tiny_c.
+        assert res["equalized_odds_difference"] == pytest.approx(0.1, abs=1e-3)
+
+    def test_equalized_odds_zero_with_single_assessable_group(self, svc, settings):
+        """Fewer than two assessable groups -> no pair to compare -> gap is 0.0,
+        even when an excluded tiny group has a wildly different TPR/FPR."""
+        settings.FAIRNESS_MIN_GROUP_SIZE = 30
+        y_true, y_pred, y_prob, labels = self._grouped_confusion([("large_a", 27, 3, 2, 18), ("tiny_b", 0, 3, 3, 0)])
+        res = svc.compute_fairness_metrics(y_true, y_pred, y_prob, labels)
+
+        assert res["groups"]["large_a"]["included_in_fairness"] is True
+        assert res["groups"]["tiny_b"]["included_in_fairness"] is False
+        assert res["equalized_odds_difference"] == 0.0

@@ -11,6 +11,10 @@ def build_documentation_checklist(application) -> str:
 
     This is injected into the approval email prompt so Claude includes
     the correct list in the email body.
+
+    IMPORTANT: All items appended to `docs` must be static strings.
+    Never append user-supplied values directly — pass through
+    `_sanitize_prompt_input()` first to prevent prompt injection.
     """
     purpose = application.purpose
     emp_type = application.employment_type

@@ -31,7 +31,7 @@ jobs:
           cache: pip
 
       - name: Install linters
-        run: pip install ruff
+        run: pip install ruff==0.15.8  # keep in sync with backend/requirements-dev.txt
 
       - name: Lint with Ruff
         working-directory: backend

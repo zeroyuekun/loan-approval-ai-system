@@ -23,12 +23,41 @@ import logging
 from collections.abc import Callable
 
 import pandas as pd
+from django.core.cache import cache
 
 from apps.ml_engine.models import ModelVersion, PredictionLog
 
 __all__ = ["score_challengers_shadow"]
 
 logger = logging.getLogger(__name__)
+
+# TTL for the cached challenger list.  30 s is short enough to pick up model
+# promotions quickly while still amortising the ORM round-trip across many
+# concurrent requests on the hot prediction path.
+_CHALLENGER_CACHE_KEY = "ml:challenger_models"
+_CHALLENGER_CACHE_TTL = 30  # seconds
+
+
+def _get_challenger_models(champion_pk) -> list:
+    """Return active challenger ModelVersions, cached for _CHALLENGER_CACHE_TTL seconds.
+
+    We cache the full queryset result (a plain Python list) rather than a
+    lazy QuerySet so the cache hit is a single dict lookup with no DB round-trip.
+    The cache key does NOT encode champion_pk — the champion exclusion is applied
+    after retrieval so a single cached list is shared across all champions.
+    """
+    cached = cache.get(_CHALLENGER_CACHE_KEY)
+    if cached is not None:
+        return [c for c in cached if c.pk != champion_pk]
+    challengers = list(
+        ModelVersion.objects.filter(
+            is_active=False,
+            traffic_percentage__gt=0,
+            traffic_percentage__lt=100,
+        ).select_related()
+    )
+    cache.set(_CHALLENGER_CACHE_KEY, challengers, timeout=_CHALLENGER_CACHE_TTL)
+    return [c for c in challengers if c.pk != champion_pk]
 
 
 ScoreFn = Callable[[ModelVersion, pd.DataFrame], "tuple[float, str]"]
@@ -59,13 +88,12 @@ def score_challengers_shadow(
             Encapsulates the challenger's transform + predict_proba + threshold.
         max_challengers: Cap the number of challengers evaluated per request
             (default 2) so shadow scoring never dominates the hot-path latency.
+
+    The challenger list is cached for _CHALLENGER_CACHE_TTL seconds to avoid
+    an N+1 ORM query on the hot prediction path.
     """
     try:
-        challengers = ModelVersion.objects.filter(
-            is_active=False,
-            traffic_percentage__gt=0,
-            traffic_percentage__lt=100,
-        ).exclude(pk=champion_version.pk)
+        challengers = _get_challenger_models(champion_version.pk)
 
         for challenger in challengers[:max_challengers]:
             try:

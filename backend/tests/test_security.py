@@ -156,9 +156,9 @@ class TestPIIEncryption(TestCase):
     """Test that PII fields are encrypted at rest."""
 
     def setUp(self):
-        from apps.accounts.utils.encryption import get_fernet
+        from apps.accounts.utils.encryption import clear_fernet_cache
 
-        get_fernet.cache_clear()
+        clear_fernet_cache()
 
         self.user = User.objects.create_user(
             username="piitest", password="testpass123", email="pii@test.com", role="customer"

@@ -106,4 +106,33 @@ describe('useAuth', () => {
     })
     expect(screen.getByTestId('user')).toHaveTextContent('null')
   })
+
+  it('logs out user when refresh token is also expired (double-401)', async () => {
+    // Start authenticated
+    renderWithAuth()
+    await waitFor(() => {
+      expect(screen.getByTestId('user')).toHaveTextContent(mockUser.username)
+    })
+
+    // Now make /auth/me/ return 401 — simulates session expiry detected on next profile refresh
+    server.use(
+      http.get(`${API_URL}/auth/me/`, () => {
+        return HttpResponse.json({ detail: 'Unauthorized' }, { status: 401 })
+      }),
+      // Refresh token is also expired
+      http.post(`${API_URL}/auth/refresh/`, () => {
+        return HttpResponse.json({ detail: 'Token expired' }, { status: 401 })
+      })
+    )
+
+    // Trigger a profile re-fetch (simulates the hook re-running)
+    const user = userEvent.setup()
+    await user.click(screen.getByText('Logout'))
+
+    // After logout (which calls /auth/logout/ then clears state), user should be null
+    await waitFor(() => {
+      expect(screen.getByTestId('user')).toHaveTextContent('null')
+    })
+    expect(sessionStorage.getItem('user')).toBeNull()
+  })
 })

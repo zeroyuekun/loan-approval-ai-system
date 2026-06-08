@@ -8,6 +8,97 @@ spec:
   policyTypes:
     - Ingress
 ---
+# Default-deny all egress; explicit rules below open only what is needed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: loan-approval
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+# Allow all pods → kube-dns (UDP+TCP 53) so service discovery works.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-dns
+  namespace: loan-approval
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Allow backend + celery workers/beat → postgres:5432
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-postgres
+  namespace: loan-approval
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: aussieloanai
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Allow backend + celery workers/beat → redis:6379
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-redis
+  namespace: loan-approval
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: aussieloanai
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# Allow backend + celery workers → external HTTPS:443 (Anthropic API, etc.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-external-https
+  namespace: loan-approval
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: aussieloanai
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 443
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
