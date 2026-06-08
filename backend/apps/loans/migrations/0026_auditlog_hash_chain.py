@@ -15,7 +15,6 @@ import json
 import django.utils.timezone
 from django.db import migrations, models
 
-
 GENESIS_HASH = "0" * 64
 
 
@@ -66,9 +65,8 @@ def backfill_hash_chain(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ("loans", "0023_add_referral_fields"),
+        ("loans", "0025_loandecision_human_involvement"),
     ]
 
     operations = [
