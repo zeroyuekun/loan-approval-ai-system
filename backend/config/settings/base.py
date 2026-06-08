@@ -333,6 +333,19 @@ if not FIELD_ENCRYPTION_KEY and not DEBUG:
 
     raise ImproperlyConfigured("FIELD_ENCRYPTION_KEY must be set in production")
 
+# KMS abstraction for field-level encryption (PR-1 of security gap-closure).
+#  - "env" (default): read FIELD_ENCRYPTION_KEY from settings (current behaviour)
+#  - "aws": fetch a DEK from AWS KMS via boto3.generate_data_key
+#
+# When KMS_BACKEND='aws':
+#   - AWS_KMS_KEY_ID is required (key ID, ARN, or alias e.g. alias/loanapp-fields)
+#   - KMS_DEK_TTL controls how long the fetched DEK is cached in-process (default 1h)
+#
+# See docs/superpowers/specs/2026-05-25-security-gap-closure-design.md.
+KMS_BACKEND = os.environ.get("KMS_BACKEND", "env").lower()
+AWS_KMS_KEY_ID = os.environ.get("AWS_KMS_KEY_ID", "")
+KMS_DEK_TTL = int(os.environ.get("KMS_DEK_TTL", "3600"))
+
 # Email — use Gmail SMTP when credentials are set, otherwise log to console
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
