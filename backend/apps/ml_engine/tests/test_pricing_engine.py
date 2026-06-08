@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.ml_engine.services.pricing_engine import (
+from apps.ml_engine.services.scoring.pricing_engine import (
     get_tier,
 )
 

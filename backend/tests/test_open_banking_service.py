@@ -3,12 +3,12 @@
 import dataclasses
 from unittest.mock import patch
 
-from apps.ml_engine.services.open_banking_service import (
+from apps.ml_engine.services.external.open_banking import (
     OpenBankingProfile,
     OpenBankingService,
     _clamp,
 )
-from apps.ml_engine.services.predictor import FEATURE_BOUNDS
+from apps.ml_engine.services.scoring.predictor import FEATURE_BOUNDS
 
 # ---------------------------------------------------------------------------
 # Sample transaction data (realistic Adatree / OBP format)

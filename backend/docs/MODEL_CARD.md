@@ -114,7 +114,7 @@ Isotonic regression fitted on the held-out validation set (10% of data). The `_C
 
 ### Monotonic Constraints
 
-21 features have enforced monotonic constraints during XGBoost tree construction (see `backend/apps/ml_engine/services/trainer.py::_build_monotonic_constraints`):
+75 features have enforced monotonic constraints during XGBoost tree construction (see `backend/apps/ml_engine/services/trainer.py::_build_monotonic_constraints`):
 
 - **13 positive** (higher value improves approval): credit_score, annual_income, employment_length, savings_balance, credit_history_months, salary_credit_regularity, income_verification_score, property_value, deposit_amount, has_cosigner, on_time_payment_pct, savings_to_loan_ratio, debt_service_coverage.
 - **8 negative** (higher value worsens approval): debt_to_income, num_defaults_5yr, worst_arrears_months, existing_credit_card_limit, monthly_expenses, num_credit_enquiries_6m, bureau_risk_score, stressed_dsr.
@@ -403,7 +403,7 @@ Expected Loss = PD x LGD x EAD, computed per application.
 - **No protected characteristics used as features.** The model does not include age, gender, ethnicity, marital status, or disability as input features.
 - **Fairness metrics monitored** across employment type, applicant type, and geography. Disparate impact ratio must pass the EEOC 80% rule (>= 0.80).
 - **Fairness reweighting** during training equalises group representation, preventing the model from systematically disadvantaging under-represented employment types.
-- **Monotonic constraints** (21 features) prevent paradoxical outcomes. A higher credit score cannot produce a worse outcome, all else being equal. A bankruptcy flag cannot improve approval chances.
+- **Monotonic constraints** (75 features) prevent paradoxical outcomes. A higher credit score cannot produce a worse outcome, all else being equal. A bankruptcy flag cannot improve approval chances.
 - **Bias detection pipeline** reviews all generated customer communications (denial emails, next best offers) for discriminatory or inappropriate language.
 - **Human-in-the-loop escalation** for low-confidence predictions where |probability - threshold| <= 0.10, and for applications with significant feature drift (z-score > 4.0 from training mean).
 
@@ -449,8 +449,8 @@ This section maps existing system capabilities to applicable regulatory framewor
 
 | CPS 230 Requirement | System Implementation |
 |---------------------|----------------------|
-| AI risk identification and management | Monotonic constraints (33 features), isotonic calibration, conformal prediction intervals |
-| Business continuity | Docker health checks on all services, readiness probe at `/health/ready/`, deep health check at `/health/deep/` |
+| AI risk identification and management | Monotonic constraints (75 features), isotonic calibration, conformal prediction intervals |
+| Business continuity | Docker health checks on all services, liveness probe at `/health/`, deep health check at `/health/deep/` |
 | Third-party risk management | Claude API budget guard ($5/day cap, circuit breaker), template fallback when API unavailable |
 | AI observability | Prometheus custom metrics (prediction latency, drift scores), Grafana dashboards (AI Ops, ML Metrics, SLO) |
 | Operational resilience testing | k6 load tests with SLA assertions, Celery queue separation (ML, email, agents) |

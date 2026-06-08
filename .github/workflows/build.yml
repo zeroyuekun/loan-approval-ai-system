@@ -57,8 +57,20 @@ jobs:
     name: OWASP ZAP DAST Scan
     runs-on: ubuntu-latest
     needs: [docker-build]
-    # Only run on main branch pushes (not on every PR — ZAP is slow)
-    if: github.ref == 'refs/heads/master'
+    # Run on master pushes AND on PRs targeting master so security regressions
+    # are caught before merge. ZAP is slow (~5 min) but the cost is worth the
+    # pre-merge gate. The deploy job (below) is still gated on github.event_name
+    # == 'push' so a successful DAST on a PR does not trigger a deploy.
+    if: >-
+      github.ref == 'refs/heads/master' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'master')
+    # docker-compose.yml interpolates ${POSTGRES_PASSWORD:?} on EVERY `docker
+    # compose` invocation (build/up/exec/down), so ALL steps need it — not just
+    # Start. Without this, the always()-run "Stop application stack" cleanup
+    # (docker compose down) errors on the missing var and fails the whole job.
+    env:
+      POSTGRES_PASSWORD: testpass
+      REDIS_PASSWORD: testpass
     steps:
       - uses: actions/checkout@v6
 
@@ -130,6 +142,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: [docker-build]
     if: github.ref == 'refs/heads/master'
+    # Same as dast-scan: the Seed and Stop steps also run `docker compose`,
+    # which needs POSTGRES_PASSWORD to interpolate the compose file.
+    env:
+      POSTGRES_PASSWORD: testpass
+      REDIS_PASSWORD: testpass
     steps:
       - uses: actions/checkout@v6
 
@@ -146,7 +163,7 @@ jobs:
           docker compose up -d backend
           echo "Waiting for backend to be ready..."
           for i in $(seq 1 40); do
-            if curl -sf http://localhost:8000/api/v1/health/ready/ > /dev/null 2>&1; then
+            if curl -sf http://localhost:8000/api/v1/health/ > /dev/null 2>&1; then
               echo "Backend is ready"
               exit 0
             fi
@@ -215,11 +232,14 @@ jobs:
   deploy:
     name: Build & Push Images
     runs-on: ubuntu-latest
-    needs: [docker-build, dast-scan]
-    # Relies on branch-protection rules to require green Lint / Test / Security
-    # workflow conclusions before a push reaches master. See
-    # docs/runbooks/ci-deployment.md for the required-checks list.
-    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.docker-build.result == 'success' && needs.dast-scan.result == 'success'
+    needs: [docker-build, dast-scan, load-test]
+    # NOTE: test / lint / security jobs live in separate workflow files
+    # (test.yml, lint.yml, security.yml). GitHub Actions does not support
+    # needs: across workflow files — those gates must be enforced via
+    # repository branch-protection rules ("Require status checks to pass
+    # before merging"). See docs/runbooks/ci-deployment.md for the
+    # required-checks list.
+    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.docker-build.result == 'success' && needs.dast-scan.result == 'success' && needs.load-test.result != 'failure'
     steps:
       - uses: actions/checkout@v6
 

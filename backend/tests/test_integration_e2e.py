@@ -22,6 +22,12 @@ def _no_throttle(self, request, view):
 
 @override_settings(
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+    # The standalone predict endpoint (POST /ml/predict/<id>/) is gated OFF by
+    # default in production because it escalates to 'review' without creating a
+    # resumable, escalated AgentRun (an ADM-disclosure gap). The orchestrator is
+    # the production path. These e2e tests legitimately exercise the standalone
+    # endpoint, so they opt in to the enabled behaviour here.
+    ML_STANDALONE_PREDICT_ENABLED=True,
 )
 @patch("apps.accounts.views.RegisterRateThrottle.allow_request", _no_throttle)
 @patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
@@ -118,9 +124,10 @@ class TestFullPipeline(TestCase):
         resp = self.client.get("/api/v1/health/")
         assert resp.status_code == status.HTTP_200_OK
 
+    @override_settings(HEALTH_CHECK_TOKEN="test-ops-token")
     def test_deep_health_endpoint(self):
-        """Deep health check should verify DB and Redis."""
-        resp = self.client.get("/api/v1/health/deep/")
+        """Deep health check should verify DB and Redis (requires ops token)."""
+        resp = self.client.get("/api/v1/health/deep/", HTTP_X_HEALTH_TOKEN="test-ops-token")
         # 503 if Redis is not available in test environment
         assert resp.status_code in (200, 503)
 

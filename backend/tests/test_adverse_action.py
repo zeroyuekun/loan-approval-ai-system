@@ -6,7 +6,7 @@ All tests use mocks — no Django DB required.
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from apps.ml_engine.services.adverse_action import (
+from apps.ml_engine.services.scoring.adverse_action import (
     AFCA_COMPLAINT_TEXT,
     AU_RIGHT_TO_REQUEST_TEXT,
     generate_adverse_action_notice,

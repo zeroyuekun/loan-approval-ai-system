@@ -6,7 +6,7 @@ class TestPSIComputation:
 
     def test_identical_distributions_low_psi(self):
         """Same distribution should produce PSI near 0."""
-        from apps.ml_engine.services.drift_monitor import compute_psi
+        from apps.ml_engine.services.governance.drift_monitor import compute_psi
 
         np.random.seed(42)
         data = np.random.normal(0, 1, 1000)
@@ -16,7 +16,7 @@ class TestPSIComputation:
 
     def test_similar_distributions_stable(self):
         """Similar distributions should produce PSI < 0.10."""
-        from apps.ml_engine.services.drift_monitor import compute_psi
+        from apps.ml_engine.services.governance.drift_monitor import compute_psi
 
         np.random.seed(42)
         expected = np.random.normal(0, 1, 1000)
@@ -27,7 +27,7 @@ class TestPSIComputation:
 
     def test_shifted_distribution_high_psi(self):
         """Significantly shifted distribution should produce PSI > 0.25."""
-        from apps.ml_engine.services.drift_monitor import compute_psi
+        from apps.ml_engine.services.governance.drift_monitor import compute_psi
 
         np.random.seed(42)
         expected = np.random.normal(0, 1, 1000)
@@ -38,7 +38,7 @@ class TestPSIComputation:
 
     def test_empty_distribution(self):
         """Empty arrays should return PSI = 0."""
-        from apps.ml_engine.services.drift_monitor import compute_psi
+        from apps.ml_engine.services.governance.drift_monitor import compute_psi
 
         psi = compute_psi([], [1, 2, 3])
         assert psi == 0.0
@@ -48,7 +48,7 @@ class TestPSIComputation:
 
     def test_psi_symmetric_approximately(self):
         """PSI should be roughly symmetric (not exactly due to binning)."""
-        from apps.ml_engine.services.drift_monitor import compute_psi
+        from apps.ml_engine.services.governance.drift_monitor import compute_psi
 
         np.random.seed(42)
         a = np.random.normal(0, 1, 1000)
@@ -62,7 +62,7 @@ class TestPSIComputation:
 
     def test_constant_distribution_returns_zero(self):
         """Constant distribution (all same value) should return PSI = 0."""
-        from apps.ml_engine.services.drift_monitor import compute_psi
+        from apps.ml_engine.services.governance.drift_monitor import compute_psi
 
         expected = np.ones(100)
         actual = np.ones(100)
@@ -72,7 +72,7 @@ class TestPSIComputation:
 
     def test_psi_non_negative(self):
         """PSI should always be non-negative."""
-        from apps.ml_engine.services.drift_monitor import compute_psi
+        from apps.ml_engine.services.governance.drift_monitor import compute_psi
 
         np.random.seed(42)
         for _ in range(10):
@@ -87,7 +87,7 @@ class TestPSIThresholds:
 
     def test_threshold_values(self):
         """Verify threshold constants match industry standards."""
-        from apps.ml_engine.services.drift_monitor import PSI_INVESTIGATE, PSI_STABLE
+        from apps.ml_engine.services.governance.drift_monitor import PSI_INVESTIGATE, PSI_STABLE
 
         assert PSI_STABLE == 0.10, f"PSI_STABLE should be 0.10, got {PSI_STABLE}"
         assert PSI_INVESTIGATE == 0.25, f"PSI_INVESTIGATE should be 0.25, got {PSI_INVESTIGATE}"

@@ -2,6 +2,7 @@
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface FeatureImportanceProps {
   features: Record<string, number> | Array<{ feature: string; importance: number }>
@@ -9,6 +10,7 @@ interface FeatureImportanceProps {
 }
 
 export function FeatureImportance({ features, title = 'Feature Importance' }: FeatureImportanceProps) {
+  const { active, hoverProps } = useChartHover()
   const FEATURE_LABELS: Record<string, string> = {
     // Interactions
     lvr_x_dti: 'LVR × DTI',
@@ -127,15 +129,24 @@ export function FeatureImportance({ features, title = 'Feature Importance' }: Fe
     .filter((d) => Number.isFinite(d.importance) && d.importance > 0)
     .sort((a, b) => b.importance - a.importance)
 
+  const TOP_N = 15
+  const hiddenCount = Math.max(0, data.length - TOP_N)
+  const shown = data.slice(0, TOP_N)
+
   return (
     <Card>
       <CardHeader className="pb-4">
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div role="img" aria-label={`Bar chart of top ${data.length} features by importance: ${data.slice(0, 3).map((d) => `${d.name} ${(d.importance * 100).toFixed(1)}%`).join(', ')}`}>
-        <ResponsiveContainer width="100%" height={Math.max(280, data.length * 36)}>
-          <BarChart data={data} layout="vertical" margin={{ top: 5, right: 30, bottom: 5, left: 10 }}>
+        <ul className="sr-only" aria-label="Feature importance list">
+          {shown.map((d) => (
+            <li key={d.name}>{d.name}</li>
+          ))}
+        </ul>
+        <div role="img" aria-label={`Bar chart of top ${shown.length} features by importance: ${shown.slice(0, 3).map((d) => `${d.name} ${(d.importance * 100).toFixed(1)}%`).join(', ')}`}>
+        <ResponsiveContainer width="100%" height={Math.max(280, shown.length * 36)}>
+          <BarChart data={shown} layout="vertical" margin={{ top: 5, right: 30, bottom: 5, left: 10 }} {...hoverProps}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} horizontal={false} />
             <XAxis type="number" tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }} />
             <YAxis
@@ -146,11 +157,17 @@ export function FeatureImportance({ features, title = 'Feature Importance' }: Fe
               tickLine={false}
               axisLine={false}
             />
-            <Tooltip />
-            <Bar dataKey="importance" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
+            <Tooltip content={renderEmptyTooltip} />
+            <Bar dataKey="importance" name="Importance" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
         </div>
+        <ChartHoverPanel active={active} formatValue={(v) => `${(Number(v) * 100).toFixed(1)}%`} />
+        {hiddenCount > 0 && (
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            +{hiddenCount} more feature{hiddenCount === 1 ? '' : 's'} not shown
+          </p>
+        )}
       </CardContent>
     </Card>
   )

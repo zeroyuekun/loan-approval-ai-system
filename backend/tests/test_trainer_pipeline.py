@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from apps.ml_engine.services.data_generator import DataGenerator
-from apps.ml_engine.services.trainer import ModelTrainer
+from apps.ml_engine.services.datagen.data_generator import DataGenerator
+from apps.ml_engine.services.training.trainer import ModelTrainer
 
 
 @pytest.fixture
@@ -235,3 +235,24 @@ class TestTrainerPipeline:
         meta = metrics.get("training_metadata", {})
         assert "split_strategy" in meta
         assert meta["split_strategy"] in ("temporal", "random_stratified")
+
+    def test_train_propagates_psi_by_feature_into_training_metadata(self, csv_path):
+        """Regression guard: model_selector._max_psi, mrm_dossier._psi_section,
+        and mrm_compliance._compliance_status all read
+        `training_metadata.psi_by_feature`. The trainer computes the map at
+        `metrics["psi_by_feature"]` and MUST also propagate it into the
+        persisted `metrics["training_metadata"]` block — otherwise the
+        promotion gate's PSI check returns float('inf') for every candidate
+        and the dossier always renders 'No PSI data'.
+        """
+        trainer = ModelTrainer()
+        _model, metrics = trainer.train(csv_path, algorithm="rf", use_reject_inference=False)
+
+        meta = metrics.get("training_metadata", {})
+        assert "psi_by_feature" in meta, (
+            "training_metadata is missing psi_by_feature — promotion gate, "
+            "MRM dossier §7, and compliance banner will all break"
+        )
+        # When the computation succeeded, top-level and nested copies must agree.
+        top_level = metrics.get("psi_by_feature", {})
+        assert meta["psi_by_feature"] == top_level

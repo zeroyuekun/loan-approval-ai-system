@@ -25,7 +25,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
-from apps.ml_engine.services.shap_attribution import compute_shap_attribution
+from apps.ml_engine.services.scoring.shap_attribution import compute_shap_attribution
 
 
 def _model_with_importances(importances):
@@ -47,7 +47,7 @@ class TestComputeShapAttribution:
         df = _df(feature_cols, [1, 2, 3])
 
         # SHAP will be called — mock it to return a simple 2D array.
-        with patch("apps.ml_engine.services.shap_attribution.shap.TreeExplainer") as TE:
+        with patch("apps.ml_engine.services.scoring.shap_attribution.shap.TreeExplainer") as TE:
             TE.return_value.shap_values.return_value = np.array([[0.01, 0.02, 0.03]])
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
@@ -66,7 +66,7 @@ class TestComputeShapAttribution:
         feature_cols = ["a", "b"]
         df = _df(feature_cols, [1, 2])
 
-        with patch("apps.ml_engine.services.shap_attribution.shap.TreeExplainer") as TE:
+        with patch("apps.ml_engine.services.scoring.shap_attribution.shap.TreeExplainer") as TE:
             TE.return_value.shap_values.return_value = np.array([[0.01, 0.02]])
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
@@ -85,7 +85,7 @@ class TestComputeShapAttribution:
         feature_cols = ["a", "b"]
         df = _df(feature_cols, [1, 2])
 
-        with patch("apps.ml_engine.services.shap_attribution.shap.TreeExplainer") as TE:
+        with patch("apps.ml_engine.services.scoring.shap_attribution.shap.TreeExplainer") as TE:
             TE.return_value.shap_values.return_value = [
                 np.array([[-0.1, -0.2]]),  # negative class
                 np.array([[0.1, 0.2]]),  # positive class
@@ -109,7 +109,7 @@ class TestComputeShapAttribution:
         # Shape: 1 sample, 2 features, 2 classes. Positive = [..., 1].
         sv = np.array([[[-0.1, 0.1], [-0.2, 0.2]]])
 
-        with patch("apps.ml_engine.services.shap_attribution.shap.TreeExplainer") as TE:
+        with patch("apps.ml_engine.services.scoring.shap_attribution.shap.TreeExplainer") as TE:
             TE.return_value.shap_values.return_value = sv
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
@@ -129,7 +129,7 @@ class TestComputeShapAttribution:
 
         sv = np.array([[0.3, 0.4]])
 
-        with patch("apps.ml_engine.services.shap_attribution.shap.TreeExplainer") as TE:
+        with patch("apps.ml_engine.services.scoring.shap_attribution.shap.TreeExplainer") as TE:
             TE.return_value.shap_values.return_value = sv
             TE.return_value.expected_value = 0.5
             result = compute_shap_attribution(
@@ -151,7 +151,7 @@ class TestComputeShapAttribution:
         feature_cols = ["a", "b"]
         df = _df(feature_cols, [1, 2])
 
-        with patch("apps.ml_engine.services.shap_attribution.shap.TreeExplainer") as TE:
+        with patch("apps.ml_engine.services.scoring.shap_attribution.shap.TreeExplainer") as TE:
             TE.return_value.shap_values.return_value = np.array([[0.01, 0.02]])
             TE.return_value.expected_value = 0.5
             compute_shap_attribution(
@@ -170,7 +170,7 @@ class TestComputeShapAttribution:
         df = _df(feature_cols, [1, 2])
 
         with patch(
-            "apps.ml_engine.services.shap_attribution.shap.TreeExplainer",
+            "apps.ml_engine.services.scoring.shap_attribution.shap.TreeExplainer",
             side_effect=RuntimeError("not a tree model"),
         ):
             result = compute_shap_attribution(
@@ -192,7 +192,7 @@ class TestComputeShapAttribution:
         df = _df(feature_cols, [1])
 
         with patch(
-            "apps.ml_engine.services.shap_attribution.shap.TreeExplainer",
+            "apps.ml_engine.services.scoring.shap_attribution.shap.TreeExplainer",
             side_effect=RuntimeError("nope"),
         ):
             result = compute_shap_attribution(

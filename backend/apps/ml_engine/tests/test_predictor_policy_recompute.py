@@ -7,7 +7,7 @@ to the LMI-rate schedule or purpose gating must update these tests.
 
 import pytest
 
-from apps.ml_engine.services.predictor import _recompute_lvr_driven_policy_vars
+from apps.ml_engine.services.scoring.predictor import _recompute_lvr_driven_policy_vars
 
 
 class TestRecomputeLvrDrivenPolicyVars:

@@ -1,4 +1,4 @@
-from apps.ml_engine.services.predictor import (
+from apps.ml_engine.services.scoring.predictor import (
     ml_drift_warnings_total,
     ml_prediction_confidence,
     ml_prediction_latency_seconds,

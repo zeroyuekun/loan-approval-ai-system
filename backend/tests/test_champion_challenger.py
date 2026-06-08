@@ -143,6 +143,25 @@ class TestModelVersionAPI:
         assert mv2.is_active is True
         assert mv2.traffic_percentage == 100
 
+    def test_activate_only_deactivates_same_segment(self):
+        """Activating a model must not retire OTHER segments' champions
+        (regression: blanket deactivation knocked out cross-segment champions,
+        forcing those products onto the unified model)."""
+        client = self._make_admin_client()
+        other = _create_model_version(True, version="home_champ", segment="home_owner_occupier", traffic_percentage=100)
+        target = _create_model_version(
+            True, version="unified_new", segment="unified", traffic_percentage=0, is_active=False
+        )
+
+        resp = client.post(f"/api/v1/ml/models/{target.id}/activate/")
+        assert resp.status_code == 200
+
+        other.refresh_from_db()
+        target.refresh_from_db()
+        assert other.is_active is True, "Other-segment champion must remain active"
+        assert other.traffic_percentage == 100
+        assert target.is_active is True
+
     def test_update_traffic(self):
         client = self._make_admin_client()
         mv = _create_model_version(True, version="traffic_v1", traffic_percentage=100)

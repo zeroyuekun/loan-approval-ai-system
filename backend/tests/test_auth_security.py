@@ -242,6 +242,30 @@ class TestAccountLockout:
             "Login with correct password should fail while account is locked"
         )
 
+    def test_lockout_applies_when_authenticating_by_email(self, auth_client, login_user):
+        """Submitting the EMAIL in the username field must be subject to the same
+        lockout + failed-attempt accounting (regression: email login bypassed the
+        lockout entirely because the view resolved the user only by username)."""
+        for i in range(5):
+            resp = auth_client.post(
+                LOGIN_URL,
+                {"username": login_user.email, "password": "wrong_password"},
+            )
+            assert resp.status_code == status.HTTP_400_BAD_REQUEST, f"Attempt {i + 1}"
+
+        login_user.refresh_from_db()
+        assert login_user.failed_login_attempts == 5, "Failed attempts must count for email login"
+        assert login_user.is_locked, "Account should lock after 5 email-based failures"
+
+        # Correct password via email must still be rejected while locked.
+        resp = auth_client.post(
+            LOGIN_URL,
+            {"username": login_user.email, "password": PASSWORD},
+        )
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
+            "Correct password via email should fail while the account is locked"
+        )
+
 
 @pytest.mark.django_db
 @patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)

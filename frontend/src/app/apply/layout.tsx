@@ -64,10 +64,10 @@ export default function CustomerLayout({
                 aria-haspopup="true"
               >
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-[11px] font-semibold text-white">
-                  {user.first_name?.[0] || user.username?.[0]?.toUpperCase()}
+                  {user.first_name?.[0] || (user.username?.[0]?.toUpperCase() ?? '?')}
                 </div>
                 <span className="hidden sm:inline">
-                  {user.first_name ? `${user.first_name} ${user.last_name}` : user.username}
+                  {user.first_name ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() : user.username}
                 </span>
                 <ChevronDown className="h-3.5 w-3.5 text-blue-300" />
               </button>
@@ -77,8 +77,8 @@ export default function CustomerLayout({
                   <div className="fixed inset-0" onClick={() => setShowDropdown(false)} />
                   <div className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-slate-200/60 bg-white p-1.5 shadow-lg animate-in fade-in slide-in-from-top-2 duration-200 z-50">
                     <div className="px-3 py-2.5">
-                      <p className="text-sm font-medium text-foreground">{user.first_name} {user.last_name}</p>
-                      <p className="text-xs text-muted-foreground">{user.email}</p>
+                      <p className="text-sm font-medium text-foreground">{`${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.username}</p>
+                      <p className="text-xs text-muted-foreground">{user.email ?? ''}</p>
                     </div>
                     <hr className="my-1" />
                     <Link

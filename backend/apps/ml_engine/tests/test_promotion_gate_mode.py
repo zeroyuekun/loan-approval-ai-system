@@ -19,14 +19,14 @@ import logging
 
 import pytest
 
-from apps.ml_engine.services.model_selector import PromotionDecision
-from apps.ml_engine.services.promotion_gate_mode import (
+from apps.ml_engine.services.governance.promotion_gate_mode import (
     DEFAULT_MODE,
     VALID_MODES,
     PromotionGateBlocked,
     evaluate_promotion_gates_for_activation,
     normalize_mode,
 )
+from apps.ml_engine.services.model_selector import PromotionDecision
 
 # ---------------------------------------------------------------------------
 # PromotionDecision fixtures — keep these terse; the gate-by-gate evidence

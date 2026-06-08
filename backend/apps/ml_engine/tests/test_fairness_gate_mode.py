@@ -14,7 +14,7 @@ import logging
 
 import pytest
 
-from apps.ml_engine.services.fairness_gate_mode import (
+from apps.ml_engine.services.governance.fairness_gate_mode import (
     DEFAULT_MODE,
     VALID_MODES,
     FairnessGateBlocked,
@@ -140,7 +140,7 @@ def test_block_mode_does_not_call_check_fairness_gate_when_data_missing():
     """
     from unittest.mock import patch
 
-    with patch("apps.ml_engine.services.fairness_gate_mode.check_fairness_gate") as mock_gate:
+    with patch("apps.ml_engine.services.governance.fairness_gate_mode.check_fairness_gate") as mock_gate:
         with pytest.raises(FairnessGateBlocked):
             evaluate_fairness_gate_for_activation({}, "block")
     mock_gate.assert_not_called()
@@ -178,7 +178,7 @@ def test_off_mode_skips_check_for_missing_data():
 def test_off_mode_does_not_call_check_fairness_gate():
     from unittest.mock import patch
 
-    with patch("apps.ml_engine.services.fairness_gate_mode.check_fairness_gate") as mock_gate:
+    with patch("apps.ml_engine.services.governance.fairness_gate_mode.check_fairness_gate") as mock_gate:
         evaluate_fairness_gate_for_activation(_failing_fairness(), "off")
     mock_gate.assert_not_called()
 

@@ -23,5 +23,8 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/apply/:path*'],
+  // Bare paths are required in addition to :path* patterns — Next.js middleware
+  // matchers treat '/dashboard/:path*' as "one or more segments after /dashboard"
+  // and do NOT match the bare '/dashboard' route (H24).
+  matcher: ['/dashboard', '/dashboard/:path*', '/apply', '/apply/:path*'],
 }

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from apps.ml_engine.services.property_data_service import PropertyDataService
+from apps.ml_engine.services.external.property_data import PropertyDataService
 
 
 @pytest.fixture(scope="module")

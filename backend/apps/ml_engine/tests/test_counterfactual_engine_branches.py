@@ -19,7 +19,7 @@ each step of the fallback cascade is exercised:
 import numpy as np
 import pandas as pd
 
-from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 
 
 class _PredictFnModel:

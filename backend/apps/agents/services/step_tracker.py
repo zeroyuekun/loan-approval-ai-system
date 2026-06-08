@@ -93,9 +93,17 @@ class StepTracker:
         total_time = int((time.time() - start_time) * 1000)
         agent_run.steps = steps
         agent_run.total_time_ms = total_time
-        if agent_run.status != "escalated":
+        # Preserve a status (and error) the caller deliberately set before
+        # finalizing: "escalated" (bias human-review) and "failed" (e.g. the
+        # bias-check fail-safe hold, which withholds the email and records its
+        # own descriptive error). Only auto-derive status when the caller left
+        # it unset/in-progress.
+        if agent_run.status not in ("escalated", "failed"):
             agent_run.status = "failed" if error else "completed"
-        agent_run.error = error or ""
+        if error:
+            agent_run.error = error
+        elif agent_run.status != "failed":
+            agent_run.error = ""
         agent_run.save()
 
         # Emit Prometheus e2e-latency histogram. Metric emission must never

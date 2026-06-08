@@ -11,7 +11,7 @@ import math
 
 import pytest
 
-from apps.ml_engine.services.feature_prep import (
+from apps.ml_engine.services.training.feature_prep import (
     ApplicationValidationError,
     safe_get_state,
     validate_input,

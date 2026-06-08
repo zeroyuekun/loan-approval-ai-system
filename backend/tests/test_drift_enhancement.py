@@ -5,7 +5,7 @@ Pure computation tests -- no Django DB required.
 
 import numpy as np
 
-from apps.ml_engine.services.drift_monitor import (
+from apps.ml_engine.services.governance.drift_monitor import (
     CSI_INVESTIGATE,
     CSI_STABLE,
     compute_csi,
@@ -159,6 +159,6 @@ class TestCSIThresholds:
 
     def test_investigate_stricter_than_psi(self):
         """CSI investigate threshold should be stricter than PSI investigate."""
-        from apps.ml_engine.services.drift_monitor import PSI_INVESTIGATE
+        from apps.ml_engine.services.governance.drift_monitor import PSI_INVESTIGATE
 
         assert CSI_INVESTIGATE < PSI_INVESTIGATE

@@ -14,15 +14,15 @@ def _make_mock_version(pk=1, path="/tmp/fake.joblib", file_hash=None):
 
 class TestModelCacheTTL:
     def setup_method(self):
-        from apps.ml_engine.services import predictor
+        from apps.ml_engine.services.scoring import predictor
 
         predictor.clear_model_cache()
 
-    @patch("apps.ml_engine.services.prediction_cache._verify_model_hash")
-    @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
-    @patch("apps.ml_engine.services.prediction_cache.joblib.load")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._verify_model_hash")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._validate_model_path")
+    @patch("apps.ml_engine.services.scoring.prediction_cache.joblib.load")
     def test_cache_reloads_after_ttl(self, mock_load, mock_validate, mock_verify):
-        from apps.ml_engine.services import predictor
+        from apps.ml_engine.services.scoring import predictor
 
         mock_validate.return_value = "/tmp/fake.joblib"
         mock_load.side_effect = [
@@ -44,11 +44,11 @@ class TestModelCacheTTL:
         assert predictor._load_bundle(version) == {"model": "B"}
         assert mock_load.call_count == 2
 
-    @patch("apps.ml_engine.services.prediction_cache._verify_model_hash")
-    @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
-    @patch("apps.ml_engine.services.prediction_cache.joblib.load")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._verify_model_hash")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._validate_model_path")
+    @patch("apps.ml_engine.services.scoring.prediction_cache.joblib.load")
     def test_cache_bounded_to_maxsize(self, mock_load, mock_validate, mock_verify):
-        from apps.ml_engine.services import predictor
+        from apps.ml_engine.services.scoring import predictor
 
         mock_validate.return_value = "/tmp/fake.joblib"
         mock_load.side_effect = [{"m": i} for i in range(10)]

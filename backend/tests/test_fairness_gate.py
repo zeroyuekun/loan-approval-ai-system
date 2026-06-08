@@ -4,7 +4,7 @@ The fairness gate checks disparate impact ratio >= 0.80 (EEOC four-fifths rule)
 across all protected attributes before a model can go active.
 """
 
-from apps.ml_engine.services.fairness_gate import check_fairness_gate
+from apps.ml_engine.services.governance.fairness_gate import check_fairness_gate
 
 
 class TestFairnessGate:

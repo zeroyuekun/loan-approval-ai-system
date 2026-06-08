@@ -9,7 +9,7 @@ class TestWOEIVFeatureSelection:
     """Test Weight of Evidence / Information Value feature selection."""
 
     def test_compute_woe_iv_basic(self):
-        from apps.ml_engine.services.feature_selection import compute_woe_iv
+        from apps.ml_engine.services.training.feature_selection import compute_woe_iv
 
         np.random.seed(42)
         n = 1000
@@ -29,7 +29,7 @@ class TestWOEIVFeatureSelection:
         assert result["iv"] > 0.02, f"Good feature should have IV > 0.02, got {result['iv']}"
 
     def test_compute_woe_iv_noise_feature(self):
-        from apps.ml_engine.services.feature_selection import compute_woe_iv
+        from apps.ml_engine.services.training.feature_selection import compute_woe_iv
 
         np.random.seed(42)
         n = 1000
@@ -44,7 +44,7 @@ class TestWOEIVFeatureSelection:
         assert result["iv"] < 0.1, f"Noise feature should have low IV, got {result['iv']}"
 
     def test_select_features_excludes_weak(self):
-        from apps.ml_engine.services.feature_selection import select_features_by_iv
+        from apps.ml_engine.services.training.feature_selection import select_features_by_iv
 
         np.random.seed(42)
         n = 1000
@@ -69,7 +69,7 @@ class TestWOEIVFeatureSelection:
         )
 
     def test_select_features_flags_leakage(self):
-        from apps.ml_engine.services.feature_selection import select_features_by_iv
+        from apps.ml_engine.services.training.feature_selection import select_features_by_iv
 
         np.random.seed(42)
         n = 1000
@@ -112,7 +112,7 @@ class TestMonotonicConstraints:
     def test_constraint_count_reduced(self):
         """Should have <= 10 monotonic constraints (reduced from 27)."""
         try:
-            from apps.ml_engine.services.trainer import ModelTrainer
+            from apps.ml_engine.services.training.trainer import ModelTrainer
 
             trainer = ModelTrainer()
             if hasattr(trainer, "MONOTONIC_FEATURES"):

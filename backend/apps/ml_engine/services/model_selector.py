@@ -5,7 +5,7 @@ import random
 from dataclasses import dataclass, field
 
 from apps.ml_engine.models import ModelVersion
-from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
+from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
 
 logger = logging.getLogger("ml_engine.model_selector")
 

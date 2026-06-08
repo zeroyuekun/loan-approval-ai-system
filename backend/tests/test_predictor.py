@@ -4,11 +4,11 @@ from django.test import TestCase
 
 
 class PredictorInputValidationTestCase(TestCase):
-    @patch("apps.ml_engine.services.predictor._load_bundle")
+    @patch("apps.ml_engine.services.scoring.predictor._load_bundle")
     @patch("apps.ml_engine.services.model_selector.select_model_version")
     def test_feature_bounds_validation(self, mock_select, mock_load):
         """Feature bounds should reject out-of-range values."""
-        from apps.ml_engine.services.predictor import ModelPredictor
+        from apps.ml_engine.services.scoring.predictor import ModelPredictor
 
         mock_select.return_value = MagicMock(id=1, version_label="test-v1")
         mock_load.return_value = {
@@ -56,7 +56,7 @@ class PredictorInputValidationTestCase(TestCase):
 class RiskGradeTestCase(TestCase):
     def test_risk_grade_mapping(self):
         """Risk grades should map correctly from probability."""
-        from apps.ml_engine.services.predictor import compute_risk_grade
+        from apps.ml_engine.services.scoring.predictor import compute_risk_grade
 
         # pd = 1 - probability; thresholds: <0.005=AAA, <0.01=AA, <0.03=A, <0.07=BBB, <0.15=BB, <0.30=B, else CCC
         self.assertEqual(compute_risk_grade(0.999), "AAA")  # pd=0.001

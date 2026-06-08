@@ -1,6 +1,6 @@
 import pytest
 
-from apps.ml_engine.services.consistency import DataConsistencyChecker, _safe_float
+from apps.ml_engine.services.scoring.consistency import DataConsistencyChecker, _safe_float
 
 # Base features representing a valid personal loan application (no warnings/errors)
 BASE_FEATURES = {

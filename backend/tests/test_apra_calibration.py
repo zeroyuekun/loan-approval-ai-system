@@ -7,11 +7,11 @@ from datetime import datetime
 
 import pytest
 
-from apps.ml_engine.services.macro_data_service import MacroDataService
+from apps.ml_engine.services.external.macro_data import MacroDataService
 
 # APRA benchmarks are a class attribute on MacroDataService
 APRA_QUARTERLY_BENCHMARKS = MacroDataService.APRA_QUARTERLY_BENCHMARKS
-from apps.ml_engine.services.calibration_validator import CalibrationValidator
+from apps.ml_engine.services.governance.calibration_validator import CalibrationValidator
 
 # ---------------------------------------------------------------------------
 # Fixtures

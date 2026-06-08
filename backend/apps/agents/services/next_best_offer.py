@@ -75,11 +75,16 @@ class NextBestOfferGenerator:
         # Get LLM to write messaging around the pre-calculated offers
         messaging = self._generate_messaging(application, result["offers"], denial_reasons)
 
-        # Merge LLM reasoning into each offer
-        offer_reasonings = messaging.get("offer_reasoning", [])
-        for i, offer in enumerate(result["offers"]):
-            if i < len(offer_reasonings):
-                offer["reasoning"] = offer_reasonings[i]
+        # Merge LLM reasoning into each offer by product key (NOT by position),
+        # so a reordered/dropped LLM response can never attach the wrong figures
+        # to the wrong product. Falls back to the deterministic benefit text.
+        reasoning_by_key = {}
+        for item in messaging.get("offer_reasoning", []):
+            if isinstance(item, dict) and item.get("product_id"):
+                reasoning_by_key[item["product_id"]] = item.get("reasoning", "")
+        for offer in result["offers"]:
+            key = offer.get("type")
+            offer["reasoning"] = reasoning_by_key.get(key) or offer.get("benefit", "")
 
         result["analysis"] = messaging.get("analysis", "")
         result["personalized_message"] = messaging.get("personalized_message", "")
@@ -115,9 +120,7 @@ Your job is ONLY to write personalised reasoning text for each offer. DO NOT cha
 Write the following in JSON format:
 {{
     "offer_reasoning": [
-        "<reasoning for offer 1 — explain why this suits THIS customer, reference their actual numbers>",
-        "<reasoning for offer 2>",
-        "<reasoning for offer 3 if present>"
+        {{"product_id": "<the product_id of the offer, exactly as shown in the pre-calculated offers block>", "reasoning": "<why this suits THIS customer, reference their actual numbers>"}}
     ],
     "analysis": "<2-3 sentence retention strategy for this customer>",
     "personalized_message": "<warm 1-2 sentence message acknowledging their situation>"
@@ -142,7 +145,14 @@ RULES:
                     "properties": {
                         "offer_reasoning": {
                             "type": "array",
-                            "items": {"type": "string"},
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "product_id": {"type": "string"},
+                                    "reasoning": {"type": "string"},
+                                },
+                                "required": ["product_id", "reasoning"],
+                            },
                         },
                         "analysis": {"type": "string"},
                         "personalized_message": {"type": "string"},
@@ -177,7 +187,9 @@ RULES:
             _logging.getLogger("agents.next_best_offer").warning("NBO messaging LLM call failed: %s", e)
             # Fallback: generate basic reasoning from the benefit text
             return {
-                "offer_reasoning": [o.get("benefit", "") for o in offers],
+                "offer_reasoning": [
+                    {"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers
+                ],
                 "analysis": "We have identified alternative products based on your financial profile.",
                 "personalized_message": (
                     "Thank you for your interest in banking with us. "
@@ -192,7 +204,9 @@ RULES:
             )
             # Fallback: generate basic reasoning from the benefit text
             return {
-                "offer_reasoning": [o.get("benefit", "") for o in offers],
+                "offer_reasoning": [
+                    {"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers
+                ],
                 "analysis": "We have identified alternative products based on your financial profile.",
                 "personalized_message": (
                     "Thank you for your interest in banking with us. "
@@ -204,7 +218,7 @@ RULES:
         """Format pre-calculated offers for the messaging prompt."""
         lines = []
         for i, o in enumerate(offers, 1):
-            parts = [f"Offer {i}: {o.get('name', o.get('type', 'Product'))}"]
+            parts = [f"Offer {i}: {o.get('name', o.get('type', 'Product'))} (product_id: {o.get('type', 'product')})"]
             if o.get("amount"):
                 parts.append(f"  Amount: ${o['amount']:,.2f}")
             if o.get("term_months"):

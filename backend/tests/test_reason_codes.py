@@ -1,6 +1,6 @@
 """Tests for adverse action reason codes and reapplication guidance — pure Python, no DB."""
 
-from apps.ml_engine.services.reason_codes import (
+from apps.ml_engine.services.scoring.reason_codes import (
     generate_adverse_action_reasons,
     generate_reapplication_guidance,
 )

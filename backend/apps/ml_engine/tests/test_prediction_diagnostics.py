@@ -21,8 +21,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 
-from apps.ml_engine.services.prediction_diagnostics import (
+from apps.ml_engine.services.scoring.prediction_diagnostics import (
+    _shock_income_and_dti,
     check_feature_drift,
     run_stress_scenarios,
 )
@@ -224,3 +226,25 @@ class TestRunStressScenarios:
         # Fail-open: return an empty-ish result; never propagate.
         assert result["base_probability"] is None
         assert result["scenarios"] == {}
+
+
+def test_shock_income_and_dti_preserves_existing_debt():
+    """An income drop must not push total DTI BELOW baseline — the existing-debt
+    portion is fixed dollars, so its DTI rises as income falls. (ml-core-1)"""
+    features = {"annual_income": 100000.0, "loan_amount": 50000.0, "debt_to_income": 1.5}
+    shocked_income, shocked_dti = _shock_income_and_dti(features, 0.85)
+
+    assert shocked_income == pytest.approx(85000.0)
+    # Loan-only would give 50000/85000 ~= 0.59 < base 1.5 (the bug). Correct total
+    # DTI: existing portion (1.5 - 0.5 = 1.0) scaled by the income drop + new ratio.
+    assert shocked_dti == pytest.approx(1.0 * (100000 / 85000) + 50000 / 85000)
+    assert shocked_dti >= features["debt_to_income"]
+
+
+def test_shock_income_and_dti_zero_income_sentinel():
+    """Zero post-shock income keeps the 999.0 max-DTI sentinel."""
+    shocked_income, shocked_dti = _shock_income_and_dti(
+        {"annual_income": 0.0, "loan_amount": 10000.0, "debt_to_income": 0.0}, 0.85
+    )
+    assert shocked_income == 0.0
+    assert shocked_dti == 999.0

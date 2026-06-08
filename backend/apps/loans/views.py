@@ -1,8 +1,10 @@
 import logging
 
+from django.conf import settings
 from django.core.cache import cache as django_cache
 from django.db import models, transaction
 from rest_framework import permissions, viewsets
+from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
@@ -11,17 +13,20 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
+from apps.agents.services.api_budget import ApiBudgetGuard
 
 from .filters import AuditLogFilter, LoanApplicationFilter
-from .models import AuditLog, Complaint, LoanApplication
+from .models import AuditLog, Complaint, DecisionReview, LoanApplication
 from .serializers import (
     AuditLogSerializer,
     ComplaintSerializer,
     CustomerLoanApplicationSerializer,
+    DecisionReviewSerializer,
     LoanApplicationCreateSerializer,
     LoanApplicationCustomerUpdateSerializer,
     LoanApplicationSerializer,
 )
+from .services.decision_review import apply_review_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -183,39 +188,78 @@ class AuditLogViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 class DashboardStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrOfficer]
 
+    _CACHE_KEY = "dashboard_stats"
+    _CACHE_TTL = 60
+
     def get(self, request):
-        data = django_cache.get("dashboard_stats")
+        data = django_cache.get(self._CACHE_KEY)
         if data is None:
-            data = self._compute_stats()
-            django_cache.set("dashboard_stats", data, 30)
+            if django_cache.add(f"{self._CACHE_KEY}:lock", True, timeout=5):
+                data = self._compute_stats()
+                django_cache.set(self._CACHE_KEY, data, self._CACHE_TTL)
+            else:
+                # Another request is computing — return stale or compute inline
+                data = django_cache.get(self._CACHE_KEY) or self._compute_stats()
         return Response(data)
 
     def _compute_stats(self):
         from datetime import timedelta
 
+        import numpy as np
         from django.db.models import Avg, Count, Q
         from django.db.models.functions import TruncDate
         from django.utils import timezone
 
         from apps.agents.models import AgentRun
+        from apps.loans.services.dashboard_status import compute_status_strip
         from apps.ml_engine.models import ModelVersion
 
         now = timezone.now()
+        last_24h = now - timedelta(hours=24)
 
         # Total applications
         total = LoanApplication.objects.count()
 
-        # Approval rate
+        # Approval rate (lifetime) — and raw counts for the donut chart
         decided = LoanApplication.objects.filter(status__in=["approved", "denied"])
         decided_count = decided.count()
-        approved = decided.filter(status="approved").count()
-        approval_rate = round(approved / decided_count * 100, 1) if decided_count > 0 else 0
+        approved_count = decided.filter(status="approved").count()
+        denied_count = decided_count - approved_count
+        approval_rate = round(approved_count / decided_count * 100, 1) if decided_count > 0 else 0
 
-        # Average processing time from AgentRun
+        # Lifetime average processing time (kept for back-compat with any
+        # current callers — new tiles use the 24h window below).
         avg_time = AgentRun.objects.filter(status="completed", total_time_ms__isnull=False).aggregate(
             avg=Avg("total_time_ms")
         )["avg"]
         avg_processing_seconds = round(avg_time / 1000, 1) if avg_time else None
+
+        # 24h rolling decision latency window
+        latencies_ms_24h = list(
+            AgentRun.objects.filter(
+                status="completed",
+                total_time_ms__isnull=False,
+                created_at__gte=last_24h,
+            ).values_list("total_time_ms", flat=True)
+        )
+        decisions_24h_count = len(latencies_ms_24h)
+        if latencies_ms_24h:
+            p50_ms_24h, p95_ms_24h = (int(x) for x in np.percentile(latencies_ms_24h, [50, 95]))
+        else:
+            p50_ms_24h = None
+            p95_ms_24h = None
+
+        # LLM spend — safe-defaults if the budget guard cannot reach Redis
+        # at all (already returns zeros on Redis error per
+        # api_budget.py:234, but defend against the rare case where
+        # ApiBudgetGuard itself raises during construction).
+        try:
+            budget_stats = ApiBudgetGuard().get_daily_stats()
+            llm_spend_today_usd = float(budget_stats.get("cost_usd", 0.0))
+            llm_spend_cap_usd = float(budget_stats.get("budget_limit_usd", 5.0))
+        except Exception:
+            llm_spend_today_usd = 0.0
+            llm_spend_cap_usd = 5.0
 
         # Active model
         active_model = ModelVersion.objects.filter(is_active=True).first()
@@ -258,7 +302,14 @@ class DashboardStatsView(APIView):
         return {
             "total_applications": total,
             "approval_rate": approval_rate,
+            "approved_count": approved_count,
+            "denied_count": denied_count,
             "avg_processing_seconds": avg_processing_seconds,
+            "decision_latency_p50_ms_24h": p50_ms_24h,
+            "decision_latency_p95_ms_24h": p95_ms_24h,
+            "decisions_24h_count": decisions_24h_count,
+            "llm_spend_today_usd": llm_spend_today_usd,
+            "llm_spend_cap_usd": llm_spend_cap_usd,
             "active_model": {
                 "name": f"{active_model.algorithm} v{active_model.version}" if active_model else None,
                 "auc": float(active_model.auc_roc) if active_model and active_model.auc_roc else None,
@@ -274,6 +325,7 @@ class DashboardStatsView(APIView):
                 "escalated": pipeline_escalated,
                 "success_rate": round(pipeline_completed / pipeline_total * 100, 1) if pipeline_total > 0 else 0,
             },
+            "status_strip": compute_status_strip(),
         }
 
 
@@ -305,6 +357,85 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return [ComplaintFilingThrottle()]
         return super().get_throttles()
+
+
+class DecisionReviewFilingThrottle(UserRateThrottle):
+    scope = "decision_review_filing"
+    rate = "10/hour"
+
+
+class DecisionReviewViewSet(viewsets.ModelViewSet):
+    """Customers file/view their own decision reviews; staff view all + resolve."""
+
+    serializer_class = DecisionReviewSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = DecisionReview.objects.select_related("application", "requested_by")
+        if user.role not in ("admin", "officer"):
+            qs = qs.filter(requested_by=user)
+        application_id = self.request.query_params.get("application")
+        if application_id:
+            qs = qs.filter(application_id=application_id)
+        return qs
+
+    def get_throttles(self):
+        if self.action == "create":
+            return [DecisionReviewFilingThrottle()]
+        return super().get_throttles()
+
+    def create(self, request, *args, **kwargs):
+        # Feature flag: filing can be disabled instantly without removing the surface.
+        if not getattr(settings, "DECISION_REVIEW_ENABLED", True):
+            return Response({"detail": "Decision review requests are not currently available."}, status=503)
+        return super().create(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsAdminOrOfficer])
+    def resolve(self, request, pk=None):
+        review = self.get_object()
+        outcome = request.data.get("outcome")
+        note = request.data.get("note", "")
+        if len(note) > 4000:
+            return Response({"detail": "note must be 4000 characters or fewer"}, status=400)
+        if outcome not in ("upheld", "overturned"):
+            return Response({"detail": "outcome must be 'upheld' or 'overturned'"}, status=400)
+
+        # L29 (OPTIONAL): maker/checker gate on high-value overturns. Default
+        # mode is "off" — no behaviour change until an operator opts in.
+        if outcome == "overturned":
+            from django_otp.plugins.otp_totp.models import TOTPDevice
+
+            from apps.loans.services.overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+
+            mode = normalize_overturn_mode(getattr(settings, "DECISION_OVERTURN_GATE_MODE", "off"))
+            has_2fa = TOTPDevice.objects.filter(user=request.user, confirmed=True).exists()
+            gate = evaluate_overturn_gate(
+                amount=float(review.application.loan_amount or 0),
+                threshold=getattr(settings, "DECISION_OVERTURN_THRESHOLD", 100000.0),
+                mode=mode,
+                officer_has_2fa=has_2fa,
+            )
+            if not gate["allowed"]:
+                return Response({"detail": gate["reason"]}, status=403)
+
+        try:
+            updated = apply_review_outcome(review, officer=request.user, outcome=outcome, note=note)
+        except (ValueError, LoanApplication.InvalidStateTransition) as exc:
+            return Response({"detail": str(exc)}, status=409)
+        return Response(DecisionReviewSerializer(updated, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def withdraw(self, request, pk=None):
+        from apps.loans.services.decision_review import withdraw_review
+
+        review = self.get_object()
+        try:
+            updated = withdraw_review(review, user=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=409)
+        return Response(DecisionReviewSerializer(updated, context={"request": request}).data)
 
 
 class ReferralListView(APIView):
@@ -344,10 +475,21 @@ class ReferralListView(APIView):
                 qs = applications  # fallback: Python-level filter
 
         status_filter = request.query_params.get("status")
-        if status_filter and hasattr(qs, "filter"):
-            qs = qs.filter(referral_status=status_filter)
+        if status_filter:
+            valid_statuses = LoanApplication.ReferralStatus.values
+            if status_filter not in valid_statuses:
+                return Response(
+                    {"error": f"Invalid status '{status_filter}'. Valid values: {valid_statuses}"},
+                    status=400,
+                )
+            if hasattr(qs, "filter"):
+                qs = qs.filter(referral_status=status_filter)
 
-        limit = min(int(request.query_params.get("limit", 100)), 500)
+        try:
+            limit = int(request.query_params.get("limit", 100))
+        except (ValueError, TypeError):
+            limit = 100
+        limit = max(1, min(limit, 500))
         results = []
         for app in list(qs)[:limit]:
             results.append(

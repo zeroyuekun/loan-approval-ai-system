@@ -5,7 +5,7 @@ Pure computation tests — no Django DB required.
 
 import numpy as np
 
-from apps.ml_engine.services.intersectional_fairness import (
+from apps.ml_engine.services.governance.intersectional_fairness import (
     _compute_group_fairness,
     compute_intersectional_fairness,
 )

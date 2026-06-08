@@ -1,17 +1,26 @@
 import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 
 from apps.common.models import SoftDeleteModel
 
 
 class AuditLog(models.Model):
-    """Immutable audit trail for all significant actions in the system."""
+    """Immutable, hash-chained audit trail for significant actions.
+
+    Each row binds to its predecessor via SHA-256: tampering with any
+    field (or inserting/deleting rows out of band) breaks the chain
+    and is detected by the ``verify_audit_chain`` management command.
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    # default=timezone.now (not auto_now_add) so save() can read the value
+    # before INSERT to bind it into hash_self.
+    timestamp = models.DateTimeField(default=timezone.now, db_index=True, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -24,6 +33,20 @@ class AuditLog(models.Model):
     resource_id = models.CharField(max_length=255)
     details = models.JSONField(default=dict, blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
+    hash_prev = models.CharField(
+        max_length=64,
+        default="",
+        blank=True,
+        editable=False,
+        help_text="hash_self of the prior chronological row; '0'*64 for the chain root.",
+    )
+    hash_self = models.CharField(
+        max_length=64,
+        default="",
+        blank=True,
+        editable=False,
+        help_text="SHA-256 of this row's canonical payload (including hash_prev).",
+    )
 
     class Meta:
         ordering = ["-timestamp"]
@@ -35,6 +58,45 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"[{self.timestamp}] {self.action} on {self.resource_type}({self.resource_id})"
+
+    def save(self, *args, **kwargs):
+        # Append-only chain: compute hash_prev/hash_self only on INSERT.
+        # UPDATE bypasses the chain logic entirely so existing hashes stay pinned.
+        if not self._state.adding:
+            return super().save(*args, **kwargs)
+
+        # Local import avoids circular dependency at module load time.
+        from apps.loans.services.audit_chain import (
+            GENESIS_HASH,
+            audit_log_insert_lock,
+            compute_hash,
+        )
+
+        with transaction.atomic():
+            with audit_log_insert_lock():
+                # Fetch prior chain head inside the lock so we both link
+                # to the right predecessor AND keep timestamps strictly
+                # monotonic. Without monotonicity, two same-microsecond
+                # inserts would order randomly under (timestamp, id)
+                # because UUIDs aren't time-sortable — breaking the
+                # chain when walked in that order.
+                prior = AuditLog.objects.order_by("-timestamp", "-id").only("timestamp", "hash_self").first()
+                now = timezone.now()
+                if prior and prior.timestamp >= now:
+                    self.timestamp = prior.timestamp + timedelta(microseconds=1)
+                else:
+                    self.timestamp = now
+                self.hash_prev = prior.hash_self if prior and prior.hash_self else GENESIS_HASH
+                self.hash_self = compute_hash(
+                    hash_prev=self.hash_prev,
+                    timestamp=self.timestamp.isoformat(),
+                    user_id=str(self.user_id) if self.user_id else None,
+                    action=self.action,
+                    resource_type=self.resource_type,
+                    resource_id=self.resource_id,
+                    details=self.details or {},
+                )
+                return super().save(*args, **kwargs)
 
 
 class LoanApplication(SoftDeleteModel):
@@ -340,6 +402,7 @@ class LoanApplication(SoftDeleteModel):
         "review": ["approved", "denied", "processing", "pending"],  # pending = regenerate, processing = retry
         "approved": ["processing"],  # allow pipeline re-run
         "denied": ["processing"],  # allow pipeline re-run
+        "queue_failed": ["pending"],  # allow retry after queue dispatch failure
     }
 
     class InvalidStateTransition(Exception):
@@ -418,6 +481,18 @@ class LoanDecision(models.Model):
         help_text="ML model version that produced this decision",
     )
     reasoning = models.TextField(blank=True)
+
+    class HumanInvolvement(models.TextChoices):
+        NONE = "none", "Solely automated"
+        ASSISTED = "assisted", "Automated assessment, human review"
+        OVERRIDDEN = "overridden", "Human officer override"
+
+    human_involvement = models.CharField(
+        max_length=20,
+        choices=HumanInvolvement.choices,
+        default=HumanInvolvement.NONE,
+        help_text="Whether a human was involved in this decision (Privacy Act ADM disclosure, APP 1.7-1.9)",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -525,3 +600,50 @@ class PipelineDispatchOutbox(models.Model):
 
     def __str__(self):
         return f"outbox<{self.application_id}> attempts={self.attempts}"
+
+
+class DecisionReview(models.Model):
+    """Customer-initiated request for human review of an automated decision.
+
+    Implements the ADM "right to human review" (Privacy Act APP, Voluntary AI
+    Safety Standard contestability guardrail). Deliberately ORTHOGONAL to:
+      * the bias-detection escalation queue (model-triggered, bias-only), and
+      * `Complaint` (RG 271 grievance + AFCA escalation).
+    On `UPHELD` the customer is pointed to the existing Complaint->AFCA path;
+    on `OVERTURNED` an officer override re-decides via the locked service in
+    `loans/services/decision_review.py`.
+    """
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        UNDER_REVIEW = "under_review", "Under review"
+        UPHELD = "upheld", "Decision upheld"
+        OVERTURNED = "overturned", "Decision overturned"
+        WITHDRAWN = "withdrawn", "Withdrawn by applicant"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="decision_reviews")
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="decision_reviews"
+    )
+    reason = models.TextField(help_text="Why the applicant believes the decision is wrong")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.REQUESTED, db_index=True)
+    assigned_officer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_decision_reviews",
+    )
+    resolution_note = models.TextField(blank=True)
+    outcome_decision = models.CharField(max_length=20, blank=True, default="")
+    sla_deadline = models.DateTimeField(null=True, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+        indexes = [models.Index(fields=["status", "-requested_at"], name="decisionreview_status_req")]
+
+    def __str__(self):
+        return f"DecisionReview {self.id} - {self.get_status_display()}"

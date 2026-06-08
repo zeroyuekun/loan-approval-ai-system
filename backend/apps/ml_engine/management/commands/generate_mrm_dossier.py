@@ -16,7 +16,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.ml_engine.models import ModelVersion
-from apps.ml_engine.services.mrm_dossier import write_dossier
+from apps.ml_engine.services.governance.mrm_dossier import write_dossier
 
 
 class Command(BaseCommand):

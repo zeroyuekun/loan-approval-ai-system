@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from apps.ml_engine.services.predictor import FEATURE_BOUNDS, ModelPredictor, compute_risk_grade
+from apps.ml_engine.services.scoring.predictor import FEATURE_BOUNDS, ModelPredictor, compute_risk_grade
 
 
 class TestPredictorFeatureEngineering:
@@ -11,7 +11,7 @@ class TestPredictorFeatureEngineering:
 
     def test_derived_features_match_trainer(self):
         """ModelPredictor._add_derived_features should produce the same columns as trainer."""
-        from apps.ml_engine.services.trainer import ModelTrainer
+        from apps.ml_engine.services.training.trainer import ModelTrainer
 
         # Build a minimal dataframe with all required columns
         df = pd.DataFrame(

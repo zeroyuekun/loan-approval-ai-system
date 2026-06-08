@@ -171,13 +171,13 @@ class TestModelCardGenerator:
         return mv, dummy_path
 
     def test_raises_when_no_active_model(self):
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         with pytest.raises(ValueError, match="No active model found"):
             ModelCardGenerator()
 
     def test_generate_returns_all_sections(self):
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         mv, path = self._create_model_version()
         try:
@@ -201,7 +201,7 @@ class TestModelCardGenerator:
                 os.unlink(path)
 
     def test_training_data_size_sums_splits(self):
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         mv, path = self._create_model_version()
         try:
@@ -213,7 +213,7 @@ class TestModelCardGenerator:
                 os.unlink(path)
 
     def test_label_distribution_from_class_balance(self):
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         mv, path = self._create_model_version()
         try:
@@ -227,7 +227,7 @@ class TestModelCardGenerator:
 
     def test_gini_fallback_from_auc(self):
         """When gini_coefficient is null, derive from AUC: 2*AUC - 1."""
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         mv, path = self._create_model_version(gini_coefficient=None, auc_roc=0.88)
         try:
@@ -238,7 +238,7 @@ class TestModelCardGenerator:
                 os.unlink(path)
 
     def test_fairness_extracts_disparate_impact(self):
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         mv, path = self._create_model_version()
         try:
@@ -252,7 +252,7 @@ class TestModelCardGenerator:
 
     def test_accepts_explicit_model_version(self):
         """Constructor accepts a specific ModelVersion rather than auto-detecting."""
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         mv, path = self._create_model_version(is_active=False, version="explicit_v1")
         try:
@@ -263,7 +263,7 @@ class TestModelCardGenerator:
                 os.unlink(path)
 
     def test_empty_fairness_metrics_handled(self):
-        from apps.ml_engine.services.model_card import ModelCardGenerator
+        from apps.ml_engine.services.governance.model_card import ModelCardGenerator
 
         mv, path = self._create_model_version(fairness_metrics={})
         try:
