@@ -70,12 +70,39 @@ export default function GlobalError({
             style={{
               fontSize: '0.875rem',
               color: '#94a3b8',
-              margin: '0 0 1.5rem',
+              margin: '0 0 1rem',
               lineHeight: 1.5,
             }}
           >
             An unexpected error occurred. Please try again or return to the home page.
           </p>
+          {error.digest && (
+            <p
+              style={{
+                fontSize: '0.75rem',
+                color: '#64748b',
+                margin: '0 0 0.5rem',
+                fontFamily: 'monospace',
+              }}
+            >
+              Error ID: {error.digest}
+            </p>
+          )}
+          {process.env.NODE_ENV === 'development' && (
+            <pre
+              style={{
+                fontSize: '0.75rem',
+                color: '#94a3b8',
+                margin: '0 0 1rem',
+                textAlign: 'left',
+                overflowX: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {error.message}
+            </pre>
+          )}
           <div
             style={{
               display: 'flex',

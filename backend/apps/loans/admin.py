@@ -3,7 +3,8 @@ import logging
 from django.contrib import admin, messages
 from django.db import transaction
 
-from .models import Complaint, LoanApplication, LoanDecision, PipelineDispatchOutbox
+from .models import Complaint, DecisionReview, LoanApplication, LoanDecision, PipelineDispatchOutbox
+from .services.decision_review import apply_review_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -130,3 +131,36 @@ class PipelineDispatchOutboxAdmin(admin.ModelAdmin):
     search_fields = ("application__id",)
     readonly_fields = ("id", "application", "attempts", "last_error", "last_attempt_at", "created_at")
     ordering = ("-created_at",)
+
+
+@admin.register(DecisionReview)
+class DecisionReviewAdmin(admin.ModelAdmin):
+    list_display = ("id", "application", "requested_by", "status", "assigned_officer", "requested_at")
+    list_filter = ("status",)
+    search_fields = ("application__id", "requested_by__username", "reason")
+    readonly_fields = ("id", "application", "requested_by", "reason", "requested_at", "resolved_at")
+    actions = ["mark_upheld", "mark_overturned"]
+
+    @admin.action(description="Uphold selected decisions (no change to loan)")
+    def mark_upheld(self, request, queryset):
+        done = 0
+        for review in queryset:
+            try:
+                apply_review_outcome(review, officer=request.user, outcome="upheld", note="Resolved via Django admin")
+                done += 1
+            except ValueError as exc:
+                self.message_user(request, f"{review.id}: {exc}", level=messages.WARNING)
+        self.message_user(request, f"{done} review(s) upheld.", level=messages.SUCCESS)
+
+    @admin.action(description="Overturn selected decisions (officer override -> approve)")
+    def mark_overturned(self, request, queryset):
+        done = 0
+        for review in queryset:
+            try:
+                apply_review_outcome(
+                    review, officer=request.user, outcome="overturned", note="Overturned via Django admin"
+                )
+                done += 1
+            except ValueError as exc:
+                self.message_user(request, f"{review.id}: {exc}", level=messages.WARNING)
+        self.message_user(request, f"{done} decision(s) overturned + approval email queued.", level=messages.SUCCESS)

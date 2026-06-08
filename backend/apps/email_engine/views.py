@@ -1,3 +1,5 @@
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -49,6 +51,9 @@ class EmailListView(APIView):
                     "passed": log.passed,
                     "details": log.details,
                     "category": log.category,
+                    # quality_score is a batch-computed value (not stored per-log).
+                    # Exposed as null here; callers should use the email-level score.
+                    "quality_score": None,
                 }
                 for log in email.guardrail_checks.all()
             ]
@@ -62,11 +67,9 @@ class EmailListView(APIView):
                     "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
                     "decision": email.decision,
                     "subject": email.subject,
-                    "body": email.body,
-                    "html_body": render_html(
-                        email.body,
-                        email_type="approval" if email.decision == "approved" else "denial",
-                    ),
+                    # body and html_body are intentionally excluded from the list
+                    # response — they are KB-scale per record. Fetch them from the
+                    # single-email RETRIEVE endpoint (/emails/<loan_id>/) instead.
                     "model_used": email.model_used,
                     "generation_time_ms": email.generation_time_ms,
                     "attempt_number": email.attempt_number,
@@ -148,25 +151,32 @@ class SendLatestEmailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        result = send_decision_email(
-            recipient,
-            email.subject,
-            email.body,
-            email_type="approval" if email.decision == "approved" else "denial",
+        with transaction.atomic():
+            locked = GeneratedEmail.objects.select_for_update().get(pk=email.pk)
+            if locked.sent_at is not None:
+                return Response({"detail": "Email already sent."}, status=status.HTTP_200_OK)
+
+            result = send_decision_email(
+                recipient,
+                locked.subject,
+                locked.body,
+                email_type="approval" if locked.decision == "approved" else "denial",
+            )
+            if result["sent"]:
+                locked.sent_at = timezone.now()
+                locked.save(update_fields=["sent_at"])
+                return Response(
+                    {
+                        "sent": True,
+                        "recipient": recipient,
+                        "email_id": str(locked.id),
+                    }
+                )
+
+        return Response(
+            {"sent": False, "error": result.get("error", "Send failed")},
+            status=status.HTTP_502_BAD_GATEWAY,
         )
-        if result["sent"]:
-            return Response(
-                {
-                    "sent": True,
-                    "recipient": recipient,
-                    "email_id": str(email.id),
-                }
-            )
-        else:
-            return Response(
-                {"sent": False, "error": result.get("error", "Send failed")},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
 
 
 class EmailDetailView(APIView):
@@ -195,6 +205,10 @@ class EmailDetailView(APIView):
                 "check_name": log.check_name,
                 "passed": log.passed,
                 "details": log.details,
+                "category": log.category,
+                # quality_score is a batch-computed value (not stored per-log).
+                # Exposed as null here to match the list endpoint shape.
+                "quality_score": None,
             }
             for log in email.guardrail_checks.all()
         ]

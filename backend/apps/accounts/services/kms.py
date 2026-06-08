@@ -6,10 +6,11 @@ PR-1 of the security gap-closure cycle
 Backends:
   - ``EnvKMS`` (default): reads the Fernet key from
     ``settings.FIELD_ENCRYPTION_KEY``. Current behaviour, unchanged.
-  - ``AWSKmsAdapter``: fetches the Data Encryption Key (DEK) from AWS KMS
-    via ``GenerateDataKey``. Caches the DEK in-process for ``KMS_DEK_TTL``
-    seconds (default 1 hour) to avoid hammering KMS on every field
-    read/write.
+  - ``AWSKmsAdapter``: NOT IMPLEMENTED — gated off behind ``NotImplementedError``.
+    The naive ``GenerateDataKey`` approach discarded the ``CiphertextBlob`` and
+    cached only the plaintext DEK, which silently loses data once the cache TTL
+    expires. Do not enable ``KMS_BACKEND="aws"`` until real envelope encryption
+    lands (see the ``AWSKmsAdapter`` class docstring).
 
 Settings:
   - ``KMS_BACKEND``: ``"env"`` (default) or ``"aws"``.
@@ -32,7 +33,6 @@ from __future__ import annotations
 import abc
 import logging
 import threading
-import time
 
 from django.conf import settings
 
@@ -53,9 +53,6 @@ class KMSAdapter(abc.ABC):
     @abc.abstractmethod
     def get_data_encryption_key(self) -> str:
         """Return the DEK as a string (single key or comma-separated keys)."""
-
-    def rotate(self) -> None:  # pragma: no cover — default no-op
-        """Trigger backend-specific key rotation. Default is a no-op."""
 
 
 class EnvKMS(KMSAdapter):
@@ -78,69 +75,30 @@ class EnvKMS(KMSAdapter):
 
 
 class AWSKmsAdapter(KMSAdapter):
-    """Production backend — fetches the DEK from AWS KMS.
+    """Production backend placeholder — AWS KMS envelope encryption is NOT yet
+    implemented and MUST NOT be enabled.
 
-    Uses ``boto3.client('kms').generate_data_key`` with KeySpec='AES_256',
-    then base64-url-encodes the plaintext key into Fernet's expected
-    32-byte url-safe form. Caches the DEK in-process for ``KMS_DEK_TTL``
-    seconds.
+    A previous implementation called ``generate_data_key`` and cached only the
+    plaintext DEK, discarding the ``CiphertextBlob``. Because ``GenerateDataKey``
+    returns a NEW random key on every call, once the in-process cache expired
+    (``KMS_DEK_TTL``) the next fetch produced a DIFFERENT DEK — silently making all
+    previously-encrypted PII undecryptable (``decrypt_field`` returns ``""`` on
+    ``InvalidToken``). That is a data-loss defect, so the AWS path is gated off
+    behind ``NotImplementedError`` until real envelope encryption lands: persist
+    the per-record ``CiphertextBlob`` and call ``kms.Decrypt`` (or use direct
+    ``Encrypt``/``Decrypt`` per field). Tracked as a follow-up to PR-1.
 
-    boto3 is imported lazily so the default ``EnvKMS`` path has no boto3
-    dependency. ``AWSKmsAdapter`` raises ``KMSError`` if boto3 is not
-    installed.
+    The default ``EnvKMS`` backend is unaffected and remains the supported path.
     """
 
-    def __init__(self) -> None:
-        self._key_id = getattr(settings, "AWS_KMS_KEY_ID", "")
-        self._ttl = int(getattr(settings, "KMS_DEK_TTL", 3600))
-        self._cached_dek: str | None = None
-        self._cached_at: float = 0.0
-        self._lock = threading.Lock()
-
     def get_data_encryption_key(self) -> str:
-        if not self._key_id:
-            raise KMSError(
-                "AWS_KMS_KEY_ID must be set when KMS_BACKEND='aws' "
-                "(key ID, ARN, or alias)."
-            )
-
-        now = time.monotonic()
-        with self._lock:
-            if self._cached_dek is not None and (now - self._cached_at) < self._ttl:
-                return self._cached_dek
-
-            try:
-                import base64
-
-                import boto3
-            except ImportError as exc:
-                raise KMSError(
-                    "boto3 is not installed but KMS_BACKEND='aws'. "
-                    "Install boto3 or switch back to KMS_BACKEND='env'."
-                ) from exc
-
-            try:
-                client = boto3.client("kms")
-                response = client.generate_data_key(KeyId=self._key_id, KeySpec="AES_256")
-                # Fernet expects 32 bytes encoded as url-safe base64
-                plaintext = response["Plaintext"]
-                dek = base64.urlsafe_b64encode(plaintext).decode()
-            except Exception as exc:
-                logger.error("AWS KMS generate_data_key failed: %s", exc)
-                raise KMSError(f"AWS KMS DEK fetch failed: {exc}") from exc
-
-            self._cached_dek = dek
-            self._cached_at = now
-            logger.info(
-                "AWS KMS DEK fetched (key_id=%s, ttl=%ds)", self._key_id, self._ttl
-            )
-            return dek
-
-    def rotate(self) -> None:
-        """Invalidate the cached DEK so the next call re-fetches from KMS."""
-        with self._lock:
-            self._cached_dek = None
-            self._cached_at = 0.0
+        raise NotImplementedError(
+            "AWS KMS envelope encryption is not implemented. KMS_BACKEND='env' is "
+            "the only supported backend; do not set KMS_BACKEND='aws' until "
+            "per-record CiphertextBlob persistence + kms.Decrypt is implemented. "
+            "The naive GenerateDataKey approach silently loses data once the DEK "
+            "cache TTL expires (a new random DEK can no longer decrypt old data)."
+        )
 
 
 _adapter_singleton: KMSAdapter | None = None
@@ -167,9 +125,7 @@ def get_kms_adapter() -> KMSAdapter:
         elif backend == "aws":
             _adapter_singleton = AWSKmsAdapter()
         else:
-            raise KMSError(
-                f"Unknown KMS_BACKEND={backend!r}. Must be 'env' or 'aws'."
-            )
+            raise KMSError(f"Unknown KMS_BACKEND={backend!r}. Must be 'env' or 'aws'.")
         logger.info("KMS adapter initialised: backend=%s", backend)
         return _adapter_singleton
 

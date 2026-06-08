@@ -20,3 +20,18 @@ resources:
   - ingress.yaml
 commonLabels:
   app.kubernetes.io/part-of: aussieloanai
+
+# Image tag pinning — CI must override these with the real SHA before deploying.
+# Usage:  kustomize edit set image \
+#           ghcr.io/OWNER/loan-approval-ai-system/backend=ghcr.io/OWNER/loan-approval-ai-system/backend:$GIT_SHA
+#          kustomize edit set image \
+#           ghcr.io/OWNER/loan-approval-ai-system/frontend=ghcr.io/OWNER/loan-approval-ai-system/frontend:$GIT_SHA
+# The deployment files keep `:latest` as a human-readable fallback reference;
+# kustomize replaces the tag at render time using the entries below.
+images:
+  - name: ghcr.io/OWNER/loan-approval-ai-system/backend
+    # REPLACE_WITH_GIT_SHA — set by CI via: kustomize edit set image ...=...:$GIT_SHA
+    newTag: "REPLACE_WITH_GIT_SHA"
+  - name: ghcr.io/OWNER/loan-approval-ai-system/frontend
+    # REPLACE_WITH_GIT_SHA — set by CI via: kustomize edit set image ...=...:$GIT_SHA
+    newTag: "REPLACE_WITH_GIT_SHA"

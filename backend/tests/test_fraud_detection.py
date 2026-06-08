@@ -46,9 +46,9 @@ class FraudDetectionServiceTest(TestCase):
 
     def setUp(self):
         cache.clear()
-        from apps.accounts.models import _get_fernet
+        from apps.accounts.utils.encryption import clear_fernet_cache
 
-        _get_fernet.cache_clear()
+        clear_fernet_cache()
         self.user = _create_user()
         self.service = FraudDetectionService()
 

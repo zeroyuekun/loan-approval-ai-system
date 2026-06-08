@@ -2,6 +2,7 @@ import logging
 
 from django.conf import settings as django_settings
 from django.contrib.auth.hashers import check_password, make_password
+from django.db.models import Prefetch
 from django.middleware.csrf import get_token as get_csrf_token
 from django.middleware.csrf import rotate_token
 from django.shortcuts import get_object_or_404
@@ -196,9 +197,15 @@ class LoginView(generics.GenericAPIView):
         username = request.data.get("username", "")
         user_obj = None
         if username:
-            try:
-                user_obj = CustomUser.objects.get(username=username)
-            except CustomUser.DoesNotExist:
+            # Resolve the acting user the SAME way LoginSerializer does (it
+            # accepts an email in this field). Resolving only by username here
+            # would let an attacker bypass the lockout + failed-attempt audit
+            # entirely by submitting the email instead of the username.
+            if "@" in username:
+                user_obj = CustomUser.objects.filter(email=username).first()
+            else:
+                user_obj = CustomUser.objects.filter(username=username).first()
+            if user_obj is None:
                 # Perform a dummy password check to equalise timing
                 check_password(request.data.get("password", ""), self._DUMMY_HASH)
 
@@ -276,7 +283,7 @@ class StaffCustomerListView(generics.ListAPIView):
     permission_classes = (IsAdminOrOfficer,)
 
     def get_queryset(self):
-        qs = CustomUser.objects.select_related("profile").order_by("-created_at")
+        qs = CustomUser.objects.filter(role=CustomUser.Role.CUSTOMER).select_related("profile").order_by("-created_at")
         search = self.request.query_params.get("search", "").strip()
         if search:
             from django.db.models import Q
@@ -304,8 +311,11 @@ class StaffCustomerProfileView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         user_id = self.kwargs["user_id"]
-        get_object_or_404(CustomUser, pk=user_id)
-        profile, _ = CustomerProfile.objects.select_related("user").get_or_create(user_id=user_id)
+        # Gate the profile fetch on role=customer BEFORE the get_or_create so we
+        # never auto-attach a CustomerProfile row to a staff account. Codex
+        # adversarial review (v1.10.7) flagged this as a PII trust-boundary leak.
+        user = get_object_or_404(CustomUser, pk=user_id, role=CustomUser.Role.CUSTOMER)
+        profile, _ = CustomerProfile.objects.select_related("user").get_or_create(user=user)
         return profile
 
     def check_permissions(self, request):
@@ -336,7 +346,7 @@ class StaffCustomerActivityView(generics.GenericAPIView):
 
     def get(self, request, user_id):
         try:
-            customer = CustomUser.objects.get(pk=user_id)
+            customer = CustomUser.objects.get(pk=user_id, role=CustomUser.Role.CUSTOMER)
         except CustomUser.DoesNotExist:
             return Response(
                 {"error": "Customer not found"},
@@ -346,10 +356,18 @@ class StaffCustomerActivityView(generics.GenericAPIView):
         app_ids = list(customer.loan_applications.values_list("id", flat=True))
 
         # Emails (bounded to 50 most recent)
-        emails_qs = (
+        # Fetch the 50 most-recent IDs first so prefetch_related operates on a
+        # non-sliced queryset (Django drops prefetches on sliced querysets,
+        # causing an N+1 on guardrail_checks).
+        top_email_ids = list(
             GeneratedEmail.objects.filter(application_id__in=app_ids)
+            .order_by("-created_at")
+            .values_list("id", flat=True)[:50]
+        )
+        emails_qs = (
+            GeneratedEmail.objects.filter(id__in=top_email_ids)
             .prefetch_related("guardrail_checks")
-            .order_by("-created_at")[:50]
+            .order_by("-created_at")
         )
 
         emails = []
@@ -500,15 +518,35 @@ class CustomerDataExportView(generics.GenericAPIView):
             data["profile"] = None
 
         # Loan applications with related decisions, emails, agent runs, bias reports
+        from apps.agents.models import AgentRun as _AgentRun
+        from apps.agents.models import MarketingEmail as _MarketingEmail
+        from apps.email_engine.models import GeneratedEmail as _GeneratedEmail
         from apps.loans.models import LoanApplication, LoanDecision
 
         applications = (
             LoanApplication.objects.filter(applicant=user)
             .select_related("decision", "decision__model_version")
             .prefetch_related(
-                "emails",
-                "agent_runs__bias_reports",
-                "marketing_emails",
+                # Use Prefetch with bounded sub-querysets so Django's prefetch
+                # cache is hit inside the loop (list(qs)[:n] bypasses the cache
+                # and causes N+1 queries per application — M2 fix).
+                Prefetch(
+                    "emails",
+                    queryset=_GeneratedEmail.objects.order_by("-created_at")[: self.MAX_EMAILS_PER_APP],
+                    to_attr="_emails_cached",
+                ),
+                Prefetch(
+                    "agent_runs",
+                    queryset=_AgentRun.objects.prefetch_related("bias_reports").order_by("-created_at")[
+                        : self.MAX_AGENT_RUNS_PER_APP
+                    ],
+                    to_attr="_agent_runs_cached",
+                ),
+                Prefetch(
+                    "marketing_emails",
+                    queryset=_MarketingEmail.objects.order_by("-created_at")[: self.MAX_EMAILS_PER_APP],
+                    to_attr="_marketing_emails_cached",
+                ),
             )
             .order_by("-created_at")[: self.MAX_APPLICATIONS]
         )
@@ -546,7 +584,7 @@ class CustomerDataExportView(generics.GenericAPIView):
                     "decision": e.decision,
                     "created_at": e.created_at.isoformat(),
                 }
-                for e in list(app.emails.all())[: self.MAX_EMAILS_PER_APP]
+                for e in getattr(app, "_emails_cached", [])
             ]
 
             app_dict["marketing_emails"] = [
@@ -557,7 +595,7 @@ class CustomerDataExportView(generics.GenericAPIView):
                     "sent_at": me.sent_at.isoformat() if me.sent_at else None,
                     "created_at": me.created_at.isoformat(),
                 }
-                for me in list(app.marketing_emails.all())[: self.MAX_EMAILS_PER_APP]
+                for me in getattr(app, "_marketing_emails_cached", [])
             ]
 
             app_dict["agent_runs"] = [
@@ -576,7 +614,7 @@ class CustomerDataExportView(generics.GenericAPIView):
                         for br in run.bias_reports.all()
                     ],
                 }
-                for run in list(app.agent_runs.all())[: self.MAX_AGENT_RUNS_PER_APP]
+                for run in getattr(app, "_agent_runs_cached", [])
             ]
 
             apps_data.append(app_dict)

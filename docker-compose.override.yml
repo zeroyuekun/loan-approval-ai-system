@@ -1,0 +1,18 @@
+# docker-compose.override.yml — local development overrides
+#
+# This file is automatically merged by `docker compose up` when present.
+# It restores the dev-mode settings that docker-compose.yml intentionally
+# sets to production values so the base file is deploy-safe.
+#
+# DO NOT commit secrets or credentials here.
+
+services:
+  frontend:
+    # user: root — dev-only workaround so bind-mounted host files (npm cache,
+    # .next build dir) are writable. Moved here from docker-compose.yml so the
+    # deploy-safe base file runs as the image's non-root appuser.
+    user: root
+    environment:
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"
+    command: sh -c "npm ci && npm run dev"

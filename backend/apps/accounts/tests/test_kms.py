@@ -5,18 +5,13 @@ Covers:
   - EnvKMS raises KMSError when the env var is empty
   - get_kms_adapter() default (no setting) yields EnvKMS
   - get_kms_adapter() with KMS_BACKEND='aws' yields AWSKmsAdapter
-  - AWSKmsAdapter raises KMSError when AWS_KMS_KEY_ID is unset
-  - AWSKmsAdapter raises KMSError when boto3 is not installed
-  - AWSKmsAdapter caches the DEK within TTL and re-fetches after TTL
+  - AWSKmsAdapter.get_data_encryption_key() raises NotImplementedError
+    (the AWS envelope path is gated off — see kms.AWSKmsAdapter)
   - reset_kms_adapter() invalidates the singleton (test isolation)
   - Existing get_fernet() consumer still works via the env path
 """
 
 from __future__ import annotations
-
-import sys
-import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 from django.test import override_settings
@@ -28,17 +23,17 @@ from apps.accounts.services.kms import (
     get_kms_adapter,
     reset_kms_adapter,
 )
-from apps.accounts.utils.encryption import get_fernet
+from apps.accounts.utils.encryption import clear_fernet_cache, get_fernet
 
 
 @pytest.fixture(autouse=True)
 def _reset_adapter():
-    """Clear adapter + get_fernet caches between tests."""
+    """Clear adapter + fernet caches between tests."""
     reset_kms_adapter()
-    get_fernet.cache_clear()
+    clear_fernet_cache()
     yield
     reset_kms_adapter()
-    get_fernet.cache_clear()
+    clear_fernet_cache()
 
 
 class TestEnvKMS:
@@ -90,91 +85,32 @@ class TestGetKMSAdapterFactory:
 
 
 class TestAWSKmsAdapter:
+    """The AWS envelope-encryption path is intentionally gated off (Path A).
+
+    The previous GenerateDataKey implementation discarded the CiphertextBlob and
+    cached only the plaintext DEK, silently losing data after the cache TTL. Until
+    real envelope encryption lands, get_data_encryption_key() raises
+    NotImplementedError rather than risk data loss.
+    """
+
+    @override_settings(KMS_BACKEND="aws", AWS_KMS_KEY_ID="alias/test")
+    def test_get_dek_raises_not_implemented(self):
+        adapter = AWSKmsAdapter()
+        with pytest.raises(NotImplementedError, match="AWS KMS envelope encryption"):
+            adapter.get_data_encryption_key()
+
     @override_settings(KMS_BACKEND="aws", AWS_KMS_KEY_ID="")
-    def test_raises_when_key_id_missing(self):
+    def test_get_dek_gated_regardless_of_key_id(self):
+        """Gated off regardless of configuration — never reaches a key fetch."""
         adapter = AWSKmsAdapter()
-        with pytest.raises(KMSError, match="AWS_KMS_KEY_ID"):
+        with pytest.raises(NotImplementedError):
             adapter.get_data_encryption_key()
 
     @override_settings(KMS_BACKEND="aws", AWS_KMS_KEY_ID="alias/test")
-    def test_raises_when_boto3_unavailable(self):
-        """If boto3 is not installed, AWSKmsAdapter must surface KMSError
-        with a clear message — not crash on ImportError."""
-        adapter = AWSKmsAdapter()
-        # Force the import to fail inside get_data_encryption_key
-        with patch.dict(sys.modules, {"boto3": None}):
-            with pytest.raises(KMSError, match="boto3 is not installed"):
-                adapter.get_data_encryption_key()
-
-    @override_settings(KMS_BACKEND="aws", AWS_KMS_KEY_ID="alias/test", KMS_DEK_TTL=3600)
-    def test_caches_dek_within_ttl(self):
-        """After the first call, subsequent calls within TTL return the
-        cached DEK without re-calling AWS."""
-        pytest.importorskip("boto3")
-        adapter = AWSKmsAdapter()
-        fake_plaintext = b"0" * 32  # 32 random bytes (KeySpec=AES_256)
-        fake_response = {"Plaintext": fake_plaintext}
-
-        mock_client = MagicMock()
-        mock_client.generate_data_key.return_value = fake_response
-
-        with patch("boto3.client", return_value=mock_client) as mock_boto3_client:
-            dek1 = adapter.get_data_encryption_key()
-            dek2 = adapter.get_data_encryption_key()
-            dek3 = adapter.get_data_encryption_key()
-
-        assert dek1 == dek2 == dek3
-        # boto3.client called once, generate_data_key called once
-        assert mock_boto3_client.call_count == 1
-        assert mock_client.generate_data_key.call_count == 1
-
-    @override_settings(KMS_BACKEND="aws", AWS_KMS_KEY_ID="alias/test", KMS_DEK_TTL=0)
-    def test_zero_ttl_means_no_cache(self):
-        pytest.importorskip("boto3")
-        adapter = AWSKmsAdapter()
-        fake_plaintext = b"0" * 32
-        fake_response = {"Plaintext": fake_plaintext}
-
-        mock_client = MagicMock()
-        mock_client.generate_data_key.return_value = fake_response
-
-        with patch("boto3.client", return_value=mock_client):
-            adapter.get_data_encryption_key()
-            # Sleep just past 0s TTL boundary
-            time.sleep(0.001)
-            adapter.get_data_encryption_key()
-
-        # With TTL=0, second call should refetch
-        assert mock_client.generate_data_key.call_count == 2
-
-    @override_settings(KMS_BACKEND="aws", AWS_KMS_KEY_ID="alias/test", KMS_DEK_TTL=3600)
-    def test_rotate_invalidates_cache(self):
-        pytest.importorskip("boto3")
-        adapter = AWSKmsAdapter()
-        fake_plaintext = b"0" * 32
-        fake_response = {"Plaintext": fake_plaintext}
-
-        mock_client = MagicMock()
-        mock_client.generate_data_key.return_value = fake_response
-
-        with patch("boto3.client", return_value=mock_client):
-            adapter.get_data_encryption_key()
-            adapter.rotate()  # invalidate cache
-            adapter.get_data_encryption_key()
-
-        # After rotate(), the next call refetches
-        assert mock_client.generate_data_key.call_count == 2
-
-    @override_settings(KMS_BACKEND="aws", AWS_KMS_KEY_ID="alias/test")
-    def test_kms_error_wraps_aws_exception(self):
-        pytest.importorskip("boto3")
-        adapter = AWSKmsAdapter()
-        mock_client = MagicMock()
-        mock_client.generate_data_key.side_effect = RuntimeError("KMS denied access")
-
-        with patch("boto3.client", return_value=mock_client):
-            with pytest.raises(KMSError, match="AWS KMS DEK fetch failed"):
-                adapter.get_data_encryption_key()
+    def test_factory_still_builds_aws_adapter(self):
+        """The factory wires KMS_BACKEND='aws' to AWSKmsAdapter; the guard fires
+        only when a key is actually requested, so misconfiguration fails loud."""
+        assert isinstance(get_kms_adapter(), AWSKmsAdapter)
 
 
 class TestGetFernetWithKMS:
@@ -186,7 +122,7 @@ class TestGetFernetWithKMS:
         valid_key = Fernet.generate_key().decode()
         with override_settings(KMS_BACKEND="env", FIELD_ENCRYPTION_KEY=valid_key):
             reset_kms_adapter()
-            get_fernet.cache_clear()
+            clear_fernet_cache()
             f = get_fernet()
             assert f is not None
             # Round-trip test — proves the DEK is valid for Fernet

@@ -256,7 +256,9 @@ def test_marketing_unsubscribe_mandatory():
     body = _load_fixture("marketing_01_three_options")
     html = render_html(body, email_type="marketing")
     assert "Unsubscribe" in html
-    assert 'href="https://aussieloanai.com.au/unsubscribe' in html
+    # The per-recipient token must survive into the unsubscribe href — a generic
+    # fallback URL can't identify whom to suppress (Spam Act 2003 one-click rule).
+    assert 'href="https://aussieloanai.com.au/unsubscribe?token=EXAMPLE"' in html
 
 
 def test_marketing_term_deposit_fcs_disclaimer():
@@ -602,4 +604,5 @@ def test_marketing_footer_preserves_legitimate_unsubscribe_url():
         "Unsubscribe: https://aussieloanai.com.au/unsubscribe?u=abc123"
     )
     out = render_html(body, email_type="marketing")
-    assert "https://aussieloanai.com.au/unsubscribe?u=abc123" in out
+    # Must land inside the unsubscribe href, not merely leak as escaped body text.
+    assert 'href="https://aussieloanai.com.au/unsubscribe?u=abc123"' in out

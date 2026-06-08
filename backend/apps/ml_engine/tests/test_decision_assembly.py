@@ -110,11 +110,13 @@ class TestAssembleDecision:
         assert result["effective_threshold"] == 0.4
         assert result["prediction_label"] == "approved"
 
-    def test_borderline_within_10pp_flags_review(self):
+    def test_borderline_within_5pp_flags_review(self):
+        # _BORDERLINE_MARGIN was reduced from 0.10 to 0.05 (M11).
+        # Use 0.53 so |0.53 - 0.5| = 0.03 is clearly inside the 5pp window.
         mv = _mk_version(optimal_threshold=0.5)
         with _patch_pricing():
             result = assemble_decision(
-                probability_positive=0.55,
+                probability_positive=0.53,
                 model_version=mv,
                 group_thresholds=None,
                 employment_type="full_time",
@@ -122,7 +124,7 @@ class TestAssembleDecision:
                 segment="personal",
             )
 
-        # |0.55 - 0.5| = 0.05 <= 0.10 → borderline
+        # |0.53 - 0.5| = 0.03 <= 0.05 → borderline
         assert result["requires_human_review"] is True
 
     def test_drift_severity_escalates_review(self):

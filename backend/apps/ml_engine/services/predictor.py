@@ -196,6 +196,30 @@ class ModelPredictor:
         """Validate feature values against hard + user bounds. See `feature_prep`."""
         _validate_input_helper(features, FEATURE_BOUNDS, user_bounds=self.feature_bounds)
 
+    def transform(self, df):
+        """Public seam over the engineered + one-hot/scale pipeline.
+
+        Stable contract for cross-app callers (e.g. the agents orchestrator)
+        so internal ``_transform`` changes don't leak across boundaries (L17).
+        """
+        return self._transform(df)
+
+    def build_counterfactual_engine(self, features_df, original_loan_amount):
+        """Construct a CounterfactualEngine wired to this model's transform
+        pipeline. Returns the engine; the caller invokes ``.generate(...)``.
+
+        Keeps the agents orchestrator off ``ModelPredictor`` internals (L17).
+        """
+        from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+
+        return CounterfactualEngine(
+            model=self.model,
+            feature_cols=self.feature_cols,
+            training_data=features_df,
+            threshold=self.model_version.optimal_threshold or 0.5,
+            transform_fn=self.transform,
+        )
+
     def _transform(self, df):
         """Transform a DataFrame using the saved preprocessing artifacts.
 

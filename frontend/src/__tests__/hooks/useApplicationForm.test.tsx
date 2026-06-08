@@ -75,7 +75,8 @@ describe('useApplicationForm', () => {
 
   it('restores draft from localStorage', () => {
     const draft = { annual_income: 120000, credit_score: 800 }
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+    // Write in the envelope format (savedAt within 24h)
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), data: draft }))
 
     const { result } = renderHook(() => useApplicationForm(), {
       wrapper: createWrapper(),
@@ -98,13 +99,16 @@ describe('useApplicationForm', () => {
     await waitFor(() => {
       const stored = localStorage.getItem(DRAFT_KEY)
       expect(stored).toBeTruthy()
-      expect(JSON.parse(stored!).annual_income).toBe(95000)
+      const envelope = JSON.parse(stored!)
+      // New envelope format: { savedAt, data }
+      expect(envelope.savedAt).toBeGreaterThan(0)
+      expect(envelope.data.annual_income).toBe(95000)
     })
   })
 
   it('clears draft on successful submission', async () => {
     mockMutateAsync.mockResolvedValue({ id: 'new-123' })
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ annual_income: 50000 }))
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), data: { annual_income: 50000 } }))
 
     const { result } = renderHook(() => useApplicationForm(), {
       wrapper: createWrapper(),
@@ -166,6 +170,37 @@ describe('useApplicationForm', () => {
     // Should still initialize with defaults, not crash
     expect(result.current.step).toBe(1)
     expect(result.current.watch().applicant_type).toBe('single')
+  })
+})
+
+describe('useApplicationForm — localStorage draft TTL', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('does NOT load a draft older than 24 hours (expired)', () => {
+    const staleTimestamp = Date.now() - 25 * 60 * 60 * 1000 // 25h ago
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: staleTimestamp, data: { annual_income: 99999 } }))
+
+    const { result } = renderHook(() => useApplicationForm(), {
+      wrapper: createWrapper(),
+    })
+
+    // Expired draft must not be loaded
+    expect(result.current.watch().annual_income).toBe(0) // default value
+    // Key must be removed
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('loads a draft with a fresh timestamp (within 24h)', () => {
+    const freshTimestamp = Date.now() - 60 * 1000 // 1 minute ago
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: freshTimestamp, data: { annual_income: 77777 } }))
+
+    const { result } = renderHook(() => useApplicationForm(), {
+      wrapper: createWrapper(),
+    })
+
+    expect(result.current.watch().annual_income).toBe(77777)
   })
 })
 

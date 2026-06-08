@@ -91,9 +91,11 @@ FEATURE_BOUNDS = {
     "postcode_default_rate": (0, 1),
     # Behavioral features
     "financial_literacy_score": (0.0, 1.0),
-    "prepayment_buffer_months": (0, 60),
+    # prepayment_buffer_months and negative_equity_flag are POST_OUTCOME_FEATURES
+    # (computed after approval/disbursement) and must never appear as model inputs
+    # at inference time. Removed from FEATURE_BOUNDS to prevent accidental inclusion
+    # in validation or feature-engineering pipelines. See data_generator.POST_OUTCOME_FEATURES.
     "optimism_bias_flag": (0, 1),
-    "negative_equity_flag": (0, 1),
     # Underwriter-internal variables exposed as features.
     "hem_benchmark": (0, 20_000),
     "hem_gap": (-20_000, 20_000),

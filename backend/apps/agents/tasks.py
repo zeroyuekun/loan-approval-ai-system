@@ -1,31 +1,92 @@
 import logging
 
-from celery import shared_task
+from celery import Task, shared_task
 from django.core.cache import cache
 from django.db import transaction
 
 logger = logging.getLogger("agents.tasks")
 
+
+class _OrchestrateTask(Task):
+    """Custom Task base that releases the dedup lock on terminal failure.
+
+    When ``autoretry_for`` retries are exhausted Celery calls ``on_failure``
+    on the task instance.  At that point ``self.request.retries`` equals
+    ``self.max_retries``, indicating terminal (non-recoverable) failure.
+
+    The dedup lock is intentionally kept alive DURING retries (M22 — prevents
+    a race between the retry and a duplicate orchestration).  Only the terminal
+    failure path releases it here, so the lock is not held for the full TTL
+    (~600 s) after the task gives up.
+    """
+
+    abstract = True
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        application_id = args[0] if args else kwargs.get("application_id")
+        if application_id and self.request.retries >= self.max_retries:
+            lock_key = f"orchestrate_lock:{application_id}"
+            cache.delete(lock_key)
+            logger.warning(
+                "Application %s: dedup lock released after max_retries exhausted (terminal failure)",
+                application_id,
+            )
+        # Explicit base-class call so unit tests can instantiate this class
+        # directly without Celery's full task machinery.
+        Task.on_failure(self, exc, task_id, args, kwargs, einfo)
+
+
 # Redis dedup lock TTL — slightly longer than the task soft time limit
 _DEDUP_LOCK_TTL = 600
 
 
-def _cleanup_stuck_application(application_id):
-    """Reset application status if it's stuck at 'processing' after a task failure."""
+def _cleanup_stuck_application(application_id, clear_lock=False):
+    """Reset a stuck-'processing' application to REVIEW under a row lock.
+
+    No-ops if a newer AgentRun is already COMPLETED for the application
+    (another actor owns the work), so the watchdog, the orchestrator
+    stale-reset, and Celery autoretry cannot fight over the same state (L22).
+
+    When ``clear_lock`` is True the Redis dedup lock is released too — used by
+    the watchdog's revoke path so a legitimate retry isn't starved behind a
+    still-held lock.
+    """
     try:
-        from apps.agents.models import AgentRun  # noqa: F401 — local import for Celery
-        from apps.loans.models import LoanApplication  # noqa: F401 — local import for Celery
+        from apps.agents.models import AgentRun
+        from apps.loans.models import LoanApplication
 
         with transaction.atomic():
-            LoanApplication.objects.filter(
-                pk=application_id,
-                status=LoanApplication.Status.PROCESSING,
-            ).update(status=LoanApplication.Status.REVIEW)
+            # Lock by pk — never via a nullable profile join (FOR UPDATE caveat).
+            app = (
+                LoanApplication.objects.select_for_update()
+                .filter(pk=application_id, status=LoanApplication.Status.PROCESSING)
+                .first()
+            )
+            if app is None:
+                return  # not stuck, or already moved on
+
+            # Another actor owns the work — do not stomp it.
+            if AgentRun.objects.filter(
+                application_id=application_id,
+                status=AgentRun.Status.COMPLETED,
+            ).exists():
+                logger.info("Application %s: cleanup skipped, a completed run owns it", application_id)
+                return
 
             AgentRun.objects.filter(
                 application_id=application_id,
-                status__in=("pending", "running"),
+                status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
             ).update(status=AgentRun.Status.FAILED, error="Task failed unexpectedly — application reset to review")
+
+            # processing -> review is in ALLOWED_TRANSITIONS; route through the
+            # state machine so the reset produces a status_transition AuditLog.
+            app.transition_to(
+                LoanApplication.Status.REVIEW,
+                details={"source": "stuck_cleanup"},
+            )
+
+        if clear_lock:
+            cache.delete(f"orchestrate_lock:{application_id}")
 
         logger.warning("Application %s: cleaned up stuck processing status", application_id)
     except Exception as e:
@@ -34,6 +95,7 @@ def _cleanup_stuck_application(application_id):
 
 @shared_task(
     bind=True,
+    base=_OrchestrateTask,
     name="apps.agents.tasks.orchestrate_pipeline_task",
     acks_late=True,
     time_limit=600,
@@ -54,20 +116,11 @@ def orchestrate_pipeline_task(self, application_id, force=False):
             status=AgentRun.Status.COMPLETED,
         ).exists()
         if existing:
-            # Restore application status from its decision if it was reset to pending
-            from apps.loans.models import LoanApplication, LoanDecision
-
+            # A completed run owns this application — delegate the idempotent,
+            # audited status restore to the orchestrator service (L16). The
+            # task stays a thin dispatcher.
             try:
-                app = LoanApplication.objects.get(pk=application_id)
-                if app.status == LoanApplication.Status.PENDING:
-                    decision = LoanDecision.objects.filter(application_id=application_id).first()
-                    if decision:
-                        new_status = decision.decision  # 'approved' or 'denied'
-                        app.status = new_status
-                        app.save(update_fields=["status"])
-                        logger.info(
-                            "Application %s: restored status to %s from completed run", application_id, new_status
-                        )
+                PipelineOrchestrator().restore_status_from_decision(application_id)
             except Exception as e:
                 logger.warning("Application %s: failed to restore status: %s", application_id, e)
             return {"status": "already_completed", "application_id": str(application_id)}
@@ -83,9 +136,16 @@ def orchestrate_pipeline_task(self, application_id, force=False):
         orchestrator = PipelineOrchestrator()
         agent_run = orchestrator.orchestrate(application_id)
     except (ConnectionError, TimeoutError, OSError):
-        # Let Celery's autoretry handle these — don't cleanup yet
+        # Infrastructure error — Celery autoretry will re-queue this task.
+        # Do NOT release the dedup lock here: releasing it before the retry
+        # fires opens a window where a duplicate orchestration can start for
+        # the same application (M22).  The lock will be released either when
+        # the retry eventually succeeds, exhausts all retries, or the TTL
+        # expires (whichever comes first).
         raise
     except Exception as e:
+        # Non-retriable failure — release the lock so future attempts can run.
+        cache.delete(lock_key)
         _cleanup_stuck_application(application_id)
         try:
             from apps.loans.models import AuditLog
@@ -99,8 +159,9 @@ def orchestrate_pipeline_task(self, application_id, force=False):
         except Exception:
             logger.warning("Failed to create audit log for pipeline failure on %s", application_id)
         raise
-    finally:
-        cache.delete(lock_key)
+
+    # Success path: release the dedup lock now that the run is complete (M22).
+    cache.delete(lock_key)
 
     try:
         from apps.loans.models import AuditLog

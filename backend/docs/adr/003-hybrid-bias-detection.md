@@ -20,7 +20,7 @@ Implement a three-layer hybrid bias detection system:
 
 2. **LLM review via Claude API** — for moderate-risk emails flagged by heuristic scoring. Evaluates nuanced and contextual bias that regex cannot detect (e.g., "consider your family situation" is appropriate in some contexts but discriminatory in others). Provides structured severity scoring.
 
-3. **AI Email Reviewer** — a senior compliance second opinion for borderline cases where the LLM review returns an ambiguous score. Uses a separate prompt focused on regulatory compliance standards.
+3. **Human escalation (decision emails) / senior AI review (marketing emails)** — for decision emails, a score at or above the review threshold escalates the application to the human-review queue (no per-email senior Claude call, to respect the $5/day budget cap). For *marketing* emails to declined customers — a higher cross-selling-risk surface — a senior compliance reviewer (`MarketingEmailReviewer`, Opus) assesses moderate-band emails and escalates when its confidence is below 0.70. The `AIEmailReviewer` class exists for a decision-email senior pass but is intentionally not wired into the decision pipeline on cost grounds; enabling it is a documented future option, not current behaviour.
 
 ### Why not pure LLM?
 
@@ -61,3 +61,17 @@ Implement a three-layer hybrid bias detection system:
 | Pure regex/keyword matching | Misses contextual and subtle bias, high false negative rate |
 | Fine-tuned classifier (BERT/RoBERTa) | Requires labeled bias training data (scarce), ongoing retraining, still misses novel patterns |
 | Human review for all emails | Does not scale, introduces delay, expensive at volume |
+
+## Implementation note (2026-06-01)
+
+Layer 2 (junior LLM) runs only on the *moderate* deterministic band; clean and
+severe emails are resolved by the deterministic gate alone (zero API cost / one
+escalation respectively). Layer 3 for **decision** emails is direct human
+escalation — the `AIEmailReviewer` senior pass is implemented but not invoked,
+to keep within the $5/day Claude budget. Senior AI review is applied to
+**marketing** emails only, where cross-selling risk justifies the spend. The
+severe-violation boundary is inclusive (`>=`) and shared across the decision and
+marketing gates via `apps/agents/services/bias/thresholds.is_severe`. On a bias
+check *infrastructure* failure the pipeline fails SAFE (`BIAS_FAILURE_MODE`,
+default `block`): the email is withheld and the run is flagged — it never ships a
+decision with bias detection effectively off.

@@ -11,7 +11,7 @@ import sentry_sdk
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application version (synced with CHANGELOG.md)
-APP_VERSION = "1.10.6"
+APP_VERSION = "1.11.1"
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 
@@ -88,16 +88,25 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+# Tag this app's PostgreSQL connections so the watchdog's idle-in-transaction
+# reaper (L24) can scope pg_terminate_backend to ONLY this app's wedged
+# transactions and never touch a pooler's healthy idle connections. The
+# watchdog reads the same DB_APPLICATION_NAME setting — keep them in sync.
+DB_APPLICATION_NAME = os.environ.get("DB_APPLICATION_NAME", "loan_approval")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.environ.get("POSTGRES_DB", "loan_approval"),
         "USER": os.environ.get("POSTGRES_USER", "postgres"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
         "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
         "CONN_MAX_AGE": 600,
         "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": {
+            "application_name": DB_APPLICATION_NAME,
+        },
     }
 }
 
@@ -138,6 +147,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "20/min",
         "user": "60/min",
+        "totp_verify": "5/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
@@ -220,6 +230,11 @@ ML_MODELS_DIR = BASE_DIR / "ml_models"
 ML_EARLY_STOPPING_ROUNDS = 30
 ML_COST_FP_FN_RATIO = 5  # FP cost : FN cost ratio for threshold optimization
 ML_FAIRNESS_TARGET_DI = 0.80  # Target disparate impact ratio (EEOC 80% rule)
+# Minimum samples a protected group needs before it drives the disparate-impact
+# verdict. Smaller groups (e.g. a state with ~10-20 test rows) are still reported
+# but excluded from the min/max ratio, which is otherwise dominated by their
+# sampling noise. Shared by MetricsService.compute_fairness_metrics and the gate.
+FAIRNESS_MIN_GROUP_SIZE = 30
 ML_OVERFITTING_THRESHOLD = 0.05  # Flag if train-test AUC gap exceeds this
 # XGBoost max_bin for histogram construction. 256 is the XGBoost default and
 # is plenty for the 50k-row / 35-feature synthetic dataset; 512 doubled the
@@ -265,6 +280,31 @@ ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
 # D7 — MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
 MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").lower() == "true"
+
+# Decision review (human contestability of automated decisions).
+# Set DECISION_REVIEW_ENABLED=false to disable the filing endpoint instantly
+# without removing the API surface (returns 503).
+DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# L29 — maker/checker gate on high-value officer overturns. Default "off"
+# (no behaviour change). "2fa" requires the acting officer to hold a verified
+# TOTP device before overturning a denial >= DECISION_OVERTURN_THRESHOLD;
+# "second_approver" blocks such overturns at the API pending dual approval.
+# Unknown values collapse to "off" (see overturn_policy.normalize_overturn_mode).
+DECISION_OVERTURN_GATE_MODE = os.environ.get("DECISION_OVERTURN_GATE_MODE", "off")
+DECISION_OVERTURN_THRESHOLD = float(os.environ.get("DECISION_OVERTURN_THRESHOLD", "100000"))
+
+# Standalone single-application prediction endpoint (/ml/predict/<id>/).
+# The agent orchestrator is the production decision path; the standalone task
+# does NOT create an escalated AgentRun, so a borderline/drift/policy-refer
+# prediction would park the application in 'review' with no resumable run and a
+# stale ADM disclosure. Default OFF; flip on only for ad-hoc scoring that does
+# not rely on the human-review queue. (Phase-1 holistic Issue 1.)
+ML_STANDALONE_PREDICT_ENABLED = os.environ.get("ML_STANDALONE_PREDICT_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"
@@ -343,6 +383,19 @@ BIAS_THRESHOLD_REVIEW = 60  # 31-60: moderate bias, LLM reviews for false positi
 MARKETING_BIAS_THRESHOLD_PASS = 50  # 0-50: compliant marketing email
 MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior AI review
 # 71+: blocked entirely — marketing to vulnerable declined customers requires zero bias risk
+
+# Bias-check failure policy (M7/M10/L21). When the bias check cannot RUN
+# (detector construction, pre-screen crash, or an unexpected error — NOT a
+# Claude LLM outage, which already falls back to the deterministic score),
+# the pipeline applies this policy. Mirrors the warn/block/off pattern of the
+# ML gate modes.
+#   "block" (default): FAIL-SAFE — withhold the decision email, roll the
+#       application back to PENDING for retry, mark the AgentRun failed, and
+#       emit the bias_check_unavailable_total alert. Never auto-ships a
+#       decision with bias detection effectively off.
+#   "warn": log + emit the alert metric but proceed fail-open (legacy score=25).
+#   "off": explicit escape hatch — legacy fail-open with no special handling.
+BIAS_FAILURE_MODE = os.environ.get("BIAS_FAILURE_MODE", "block").lower()
 
 # API Documentation (drf-spectacular)
 SPECTACULAR_SETTINGS = {
