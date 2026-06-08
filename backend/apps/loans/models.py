@@ -1,17 +1,26 @@
 import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 
 from apps.common.models import SoftDeleteModel
 
 
 class AuditLog(models.Model):
-    """Immutable audit trail for all significant actions in the system."""
+    """Immutable, hash-chained audit trail for significant actions.
+
+    Each row binds to its predecessor via SHA-256: tampering with any
+    field (or inserting/deleting rows out of band) breaks the chain
+    and is detected by the ``verify_audit_chain`` management command.
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    # default=timezone.now (not auto_now_add) so save() can read the value
+    # before INSERT to bind it into hash_self.
+    timestamp = models.DateTimeField(default=timezone.now, db_index=True, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -24,6 +33,20 @@ class AuditLog(models.Model):
     resource_id = models.CharField(max_length=255)
     details = models.JSONField(default=dict, blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
+    hash_prev = models.CharField(
+        max_length=64,
+        default="",
+        blank=True,
+        editable=False,
+        help_text="hash_self of the prior chronological row; '0'*64 for the chain root.",
+    )
+    hash_self = models.CharField(
+        max_length=64,
+        default="",
+        blank=True,
+        editable=False,
+        help_text="SHA-256 of this row's canonical payload (including hash_prev).",
+    )
 
     class Meta:
         ordering = ["-timestamp"]
@@ -35,6 +58,45 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"[{self.timestamp}] {self.action} on {self.resource_type}({self.resource_id})"
+
+    def save(self, *args, **kwargs):
+        # Append-only chain: compute hash_prev/hash_self only on INSERT.
+        # UPDATE bypasses the chain logic entirely so existing hashes stay pinned.
+        if not self._state.adding:
+            return super().save(*args, **kwargs)
+
+        # Local import avoids circular dependency at module load time.
+        from apps.loans.services.audit_chain import (
+            GENESIS_HASH,
+            audit_log_insert_lock,
+            compute_hash,
+        )
+
+        with transaction.atomic():
+            with audit_log_insert_lock():
+                # Fetch prior chain head inside the lock so we both link
+                # to the right predecessor AND keep timestamps strictly
+                # monotonic. Without monotonicity, two same-microsecond
+                # inserts would order randomly under (timestamp, id)
+                # because UUIDs aren't time-sortable — breaking the
+                # chain when walked in that order.
+                prior = AuditLog.objects.order_by("-timestamp", "-id").only("timestamp", "hash_self").first()
+                now = timezone.now()
+                if prior and prior.timestamp >= now:
+                    self.timestamp = prior.timestamp + timedelta(microseconds=1)
+                else:
+                    self.timestamp = now
+                self.hash_prev = prior.hash_self if prior and prior.hash_self else GENESIS_HASH
+                self.hash_self = compute_hash(
+                    hash_prev=self.hash_prev,
+                    timestamp=self.timestamp.isoformat(),
+                    user_id=str(self.user_id) if self.user_id else None,
+                    action=self.action,
+                    resource_type=self.resource_type,
+                    resource_id=self.resource_id,
+                    details=self.details or {},
+                )
+                return super().save(*args, **kwargs)
 
 
 class LoanApplication(SoftDeleteModel):

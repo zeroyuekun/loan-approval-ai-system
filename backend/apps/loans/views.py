@@ -13,6 +13,7 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
+from apps.agents.services.api_budget import ApiBudgetGuard
 
 from .filters import AuditLogFilter, LoanApplicationFilter
 from .models import AuditLog, Complaint, DecisionReview, LoanApplication
@@ -204,29 +205,61 @@ class DashboardStatsView(APIView):
     def _compute_stats(self):
         from datetime import timedelta
 
+        import numpy as np
         from django.db.models import Avg, Count, Q
         from django.db.models.functions import TruncDate
         from django.utils import timezone
 
         from apps.agents.models import AgentRun
+        from apps.loans.services.dashboard_status import compute_status_strip
         from apps.ml_engine.models import ModelVersion
 
         now = timezone.now()
+        last_24h = now - timedelta(hours=24)
 
         # Total applications
         total = LoanApplication.objects.count()
 
-        # Approval rate
+        # Approval rate (lifetime) — and raw counts for the donut chart
         decided = LoanApplication.objects.filter(status__in=["approved", "denied"])
         decided_count = decided.count()
-        approved = decided.filter(status="approved").count()
-        approval_rate = round(approved / decided_count * 100, 1) if decided_count > 0 else 0
+        approved_count = decided.filter(status="approved").count()
+        denied_count = decided_count - approved_count
+        approval_rate = round(approved_count / decided_count * 100, 1) if decided_count > 0 else 0
 
-        # Average processing time from AgentRun
+        # Lifetime average processing time (kept for back-compat with any
+        # current callers — new tiles use the 24h window below).
         avg_time = AgentRun.objects.filter(status="completed", total_time_ms__isnull=False).aggregate(
             avg=Avg("total_time_ms")
         )["avg"]
         avg_processing_seconds = round(avg_time / 1000, 1) if avg_time else None
+
+        # 24h rolling decision latency window
+        latencies_ms_24h = list(
+            AgentRun.objects.filter(
+                status="completed",
+                total_time_ms__isnull=False,
+                created_at__gte=last_24h,
+            ).values_list("total_time_ms", flat=True)
+        )
+        decisions_24h_count = len(latencies_ms_24h)
+        if latencies_ms_24h:
+            p50_ms_24h, p95_ms_24h = (int(x) for x in np.percentile(latencies_ms_24h, [50, 95]))
+        else:
+            p50_ms_24h = None
+            p95_ms_24h = None
+
+        # LLM spend — safe-defaults if the budget guard cannot reach Redis
+        # at all (already returns zeros on Redis error per
+        # api_budget.py:234, but defend against the rare case where
+        # ApiBudgetGuard itself raises during construction).
+        try:
+            budget_stats = ApiBudgetGuard().get_daily_stats()
+            llm_spend_today_usd = float(budget_stats.get("cost_usd", 0.0))
+            llm_spend_cap_usd = float(budget_stats.get("budget_limit_usd", 5.0))
+        except Exception:
+            llm_spend_today_usd = 0.0
+            llm_spend_cap_usd = 5.0
 
         # Active model
         active_model = ModelVersion.objects.filter(is_active=True).first()
@@ -269,7 +302,14 @@ class DashboardStatsView(APIView):
         return {
             "total_applications": total,
             "approval_rate": approval_rate,
+            "approved_count": approved_count,
+            "denied_count": denied_count,
             "avg_processing_seconds": avg_processing_seconds,
+            "decision_latency_p50_ms_24h": p50_ms_24h,
+            "decision_latency_p95_ms_24h": p95_ms_24h,
+            "decisions_24h_count": decisions_24h_count,
+            "llm_spend_today_usd": llm_spend_today_usd,
+            "llm_spend_cap_usd": llm_spend_cap_usd,
             "active_model": {
                 "name": f"{active_model.algorithm} v{active_model.version}" if active_model else None,
                 "auc": float(active_model.auc_roc) if active_model and active_model.auc_roc else None,
@@ -285,6 +325,7 @@ class DashboardStatsView(APIView):
                 "escalated": pipeline_escalated,
                 "success_rate": round(pipeline_completed / pipeline_total * 100, 1) if pipeline_total > 0 else 0,
             },
+            "status_strip": compute_status_strip(),
         }
 
 

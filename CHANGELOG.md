@@ -1,8 +1,20 @@
 # Changelog
 
+## Unreleased — post-v1.11.1 hardening (on `master`, not yet tagged)
+
+Work landed on `master` after the `v1.11.1` tag. Not yet cut as a release.
+
+- **Model Metrics redesign + chart hover + fairness honesty.** Tabbed Model Metrics page (357→125-line page, redesign + ECE/visualisation correctness fixes) (#211). Hover detail now renders in a fixed strip *below* each of the 7 charts instead of a floating tooltip that covered the plot, with capitalised group labels (#220). Fairness disparate-impact ratio now **excludes protected groups below `FAIRNESS_MIN_GROUP_SIZE`** (default 30) so a ~10-20-sample cohort's sampling noise can't manufacture a fail; excluded groups are still shown for transparency, and an un-assessable result (fewer than two large groups) renders a neutral "Not assessable" badge instead of a false green PASS (#222 + #220).
+- **Deep 5-agent review remediation (~22 findings across #212–#219, #221).** Backend agents/ML correctness & operability (#213); backend security / guardrails / API hardening (#214); frontend null-safety, auth-redirect, payload + PII hardening (#215); k8s / compose / CI / monitoring hardening (#216); backend healthcheck moved to the open `/api/v1/health/` probe, gated `/ready/` removed (#212); CI greened — ruff pinned, Django 5.2.15, build-workflow env, smoke-e2e (#217–#219); `celery_beat` uses the default scheduler, not django-celery-beat (#221).
+- **Staff-endpoint PII trust boundary (#171).** Staff customer endpoints now filter to `role=CUSTOMER`, so an officer can no longer enumerate admin/officer accounts or auto-create a phantom `CustomerProfile` against a non-customer.
+
+## v1.11.1 — Full-codebase review remediation (2026-06-05)
+
+A 93-finding full-codebase senior review (9 Critical / 30 High / 36 Medium / 18 Low), every finding adversarially re-verified before fixing, landed across the review branch and merged to master. `APP_VERSION` bumped to `1.11.1` (#210) and tagged `v1.11.1`. Scope spanned correctness, security, reliability, and operability fixes on top of the v1.11.0 ADM/contestability baseline; no model retraining or API-surface removal.
+
 ## v1.11.0 — Decision Transparency, Contestability & Audit Remediation
 
-Adds Privacy Act automated-decision-making (ADM) transparency + a customer contestability path, then works a verified senior-audit backlog (3 HIGH / 9 MEDIUM / 21 LOW, every finding adversarially re-verified) across six phases. On branch `feat/decision-transparency-contestability` (PR #207). Backend + frontend green end-to-end; pending merge.
+Adds Privacy Act automated-decision-making (ADM) transparency + a customer contestability path, then works a verified senior-audit backlog (3 HIGH / 9 MEDIUM / 21 LOW, every finding adversarially re-verified) across six phases. Released 2026-06-03 (PR #207 merged to master, merge commit `eb21013`, tagged `v1.11.0`).
 
 ### Phase 1 — ADM transparency correctness (3 HIGH)
 

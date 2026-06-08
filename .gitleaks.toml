@@ -12,4 +12,9 @@ paths = [
     '''tests/''',
     '''\.env\.example''',
     '''\.github/workflows/''',
+    # Design/plan prose (GSD/superpowers artifacts) — markdown, not code.
+    # Snake_case identifiers and example payloads in these docs trip the
+    # entropy-based generic-api-key rule (false positives, e.g. a KeyError
+    # example naming a response field). No real secrets live here.
+    '''docs/superpowers/''',
 ]

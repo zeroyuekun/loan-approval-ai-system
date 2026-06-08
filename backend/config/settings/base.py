@@ -230,6 +230,11 @@ ML_MODELS_DIR = BASE_DIR / "ml_models"
 ML_EARLY_STOPPING_ROUNDS = 30
 ML_COST_FP_FN_RATIO = 5  # FP cost : FN cost ratio for threshold optimization
 ML_FAIRNESS_TARGET_DI = 0.80  # Target disparate impact ratio (EEOC 80% rule)
+# Minimum samples a protected group needs before it drives the disparate-impact
+# verdict. Smaller groups (e.g. a state with ~10-20 test rows) are still reported
+# but excluded from the min/max ratio, which is otherwise dominated by their
+# sampling noise. Shared by MetricsService.compute_fairness_metrics and the gate.
+FAIRNESS_MIN_GROUP_SIZE = 30
 ML_OVERFITTING_THRESHOLD = 0.05  # Flag if train-test AUC gap exceeds this
 # XGBoost max_bin for histogram construction. 256 is the XGBoost default and
 # is plenty for the 50k-row / 35-feature synthetic dataset; 512 doubled the
@@ -301,6 +306,23 @@ ML_STANDALONE_PREDICT_ENABLED = os.environ.get("ML_STANDALONE_PREDICT_ENABLED", 
     "yes",
 )
 
+# Two-factor authentication (PR-4 of the security gap-closure cycle —
+# spec: docs/superpowers/specs/2026-05-25-security-gap-closure-design.md).
+#
+# ENFORCE_2FA_FOR_STAFF — when "true", IsAdmin / IsAdminOrOfficer /
+# IsLoanOfficer permissions require the user to have a confirmed TOTP
+# device. Off by default so existing tests (and any pre-rollout
+# environments) keep working. Flip to "true" in production AFTER all
+# admin/officer accounts are enrolled in TOTP via /api/v1/auth/2fa/setup/.
+#
+# ALLOW_2FA_BYPASS — break-glass switch that skips the OTP check at
+# login for users who already have a TOTP device. Every bypass is
+# logged in AuditLog as `login_2fa_bypassed`. Set to "true" only during
+# documented incident response and remove from the env immediately
+# after — see docs/SECRETS_ROTATION.md (planned).
+ENFORCE_2FA_FOR_STAFF = os.environ.get("ENFORCE_2FA_FOR_STAFF", "false").lower() == "true"
+ALLOW_2FA_BYPASS = os.environ.get("ALLOW_2FA_BYPASS", "false").lower() == "true"
+
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -327,6 +349,19 @@ if not FIELD_ENCRYPTION_KEY and not DEBUG:
     from django.core.exceptions import ImproperlyConfigured
 
     raise ImproperlyConfigured("FIELD_ENCRYPTION_KEY must be set in production")
+
+# KMS abstraction for field-level encryption (PR-1 of security gap-closure).
+#  - "env" (default): read FIELD_ENCRYPTION_KEY from settings (current behaviour)
+#  - "aws": fetch a DEK from AWS KMS via boto3.generate_data_key
+#
+# When KMS_BACKEND='aws':
+#   - AWS_KMS_KEY_ID is required (key ID, ARN, or alias e.g. alias/loanapp-fields)
+#   - KMS_DEK_TTL controls how long the fetched DEK is cached in-process (default 1h)
+#
+# See docs/superpowers/specs/2026-05-25-security-gap-closure-design.md.
+KMS_BACKEND = os.environ.get("KMS_BACKEND", "env").lower()
+AWS_KMS_KEY_ID = os.environ.get("AWS_KMS_KEY_ID", "")
+KMS_DEK_TTL = int(os.environ.get("KMS_DEK_TTL", "3600"))
 
 # Email — use Gmail SMTP when credentials are set, otherwise log to console
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
