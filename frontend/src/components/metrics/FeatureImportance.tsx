@@ -9,9 +9,7 @@ interface FeatureImportanceProps {
   title?: string
 }
 
-export function FeatureImportance({ features, title = 'Feature Importance' }: FeatureImportanceProps) {
-  const { active, hoverProps } = useChartHover()
-  const FEATURE_LABELS: Record<string, string> = {
+const FEATURE_LABELS: Record<string, string> = {
     // Interactions
     lvr_x_dti: 'LVR × DTI',
     lvr_x_property_growth: 'LVR × Property Growth',
@@ -110,10 +108,96 @@ export function FeatureImportance({ features, title = 'Feature Importance' }: Fe
     industry_risk_tier_medium: 'Industry Risk: Medium',
     industry_risk_tier_high: 'Industry Risk: High',
     industry_risk_tier_very_high: 'Industry Risk: Very High',
-  }
+}
 
-  const formatFeatureName = (s: string) =>
-    FEATURE_LABELS[s] ?? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+// One-hot dummy prefix → parent categorical label. Mirrors
+// ModelTrainer.CATEGORICAL_COLS in
+// backend/apps/ml_engine/services/training/trainer.py — keep in sync if a
+// categorical is added there. An unmatched categorical degrades gracefully
+// (renders as individual dummy bars); it is never silently wrong.
+const CATEGORY_GROUPS: Record<string, string> = {
+  state_: 'State',
+  industry_anzsic_: 'Industry (ANZSIC)',
+  industry_risk_tier_: 'Industry Risk Tier',
+  purpose_: 'Loan Purpose',
+  home_ownership_: 'Home Ownership',
+  employment_type_: 'Employment Type',
+  applicant_type_: 'Applicant Type',
+  savings_trend_3m_: 'Savings Trend (3m)',
+}
+// Match the most specific (longest) prefix first.
+const CATEGORY_PREFIXES = Object.keys(CATEGORY_GROUPS).sort((a, b) => b.length - a.length)
+
+const TOP_N = 20
+
+function formatFeatureName(s: string): string {
+  return FEATURE_LABELS[s] ?? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function parentLabelFor(rawKey: string): string | null {
+  for (const prefix of CATEGORY_PREFIXES) {
+    if (rawKey.startsWith(prefix)) return CATEGORY_GROUPS[prefix]
+  }
+  return null
+}
+
+function toEntries(
+  features: Record<string, number> | Array<{ feature: string; importance: number }>,
+): Array<{ feature: string; importance: number }> {
+  if (Array.isArray(features)) {
+    return features.filter(
+      (f): f is { feature: string; importance: number } =>
+        f != null && typeof f === 'object' && 'feature' in f && 'importance' in f,
+    )
+  }
+  return Object.entries(features).map(([feature, importance]) => ({ feature, importance: Number(importance) }))
+}
+
+export interface FeatureBar {
+  name: string
+  importance: number
+  isOther?: boolean
+}
+
+export interface FeatureImportanceModel {
+  charted: FeatureBar[]
+  unusedCount: number
+  total: number
+}
+
+/**
+ * Collapse one-hot dummies into parent categoricals, then split into the
+ * charted set (importance > 0, sorted desc) and a count of unused features
+ * (importance rounds to 0 — the model never split on them).
+ */
+export function buildFeatureImportanceModel(
+  features: Record<string, number> | Array<{ feature: string; importance: number }>,
+): FeatureImportanceModel {
+  const groups = new Map<string, number>()
+  for (const { feature, importance } of toEntries(features)) {
+    const imp = Number(importance)
+    if (!Number.isFinite(imp)) continue
+    const label = parentLabelFor(feature) ?? formatFeatureName(feature)
+    groups.set(label, (groups.get(label) ?? 0) + imp)
+  }
+  const grouped: FeatureBar[] = Array.from(groups.entries()).map(([name, importance]) => ({ name, importance }))
+  const charted = grouped.filter((d) => d.importance > 0).sort((a, b) => b.importance - a.importance)
+  return { charted, unusedCount: grouped.length - charted.length, total: charted.length }
+}
+
+/** Collapsed view = top N + an "Other (k features)" rollup; expanded = full charted set. */
+export function selectShownBars(charted: FeatureBar[], expanded: boolean, topN: number = TOP_N): FeatureBar[] {
+  if (expanded || charted.length <= topN) return charted
+  const tail = charted.slice(topN)
+  const otherSum = tail.reduce((acc, d) => acc + d.importance, 0)
+  return [
+    ...charted.slice(0, topN),
+    { name: `Other (${tail.length} feature${tail.length === 1 ? '' : 's'})`, importance: otherSum, isOther: true },
+  ]
+}
+
+export function FeatureImportance({ features, title = 'Feature Importance' }: FeatureImportanceProps) {
+  const { active, hoverProps } = useChartHover()
 
   const data = (Array.isArray(features)
     ? features
