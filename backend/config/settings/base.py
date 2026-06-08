@@ -245,6 +245,10 @@ ML_MAX_BIN = 256
 ML_OPTUNA_TRIALS = 30
 # Threads per XGBoost training. Matches the celery_worker_ml CPU quota.
 ML_XGB_N_JOBS = 2
+# Rows the training task auto-generates when .tmp/synthetic_loans.csv is missing
+# (fresh clone / cleared .tmp). Smaller than the 50k canonical seed so the
+# self-heal stays fast while still producing a usable model. Env-overridable.
+ML_AUTO_SEED_ROWS = int(os.environ.get("ML_AUTO_SEED_ROWS", "20000"))
 
 # Hard credit policy overlay (D3). Modes: "off" (not applied), "shadow"
 # (evaluated + logged, model verdict stands), "enforce" (hard-fails override

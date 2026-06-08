@@ -33,6 +33,13 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Training {algorithm.upper()} model with data from {data_path}...")
 
+        # Self-heal: parity with the Celery "Train Model" path so a fresh clone
+        # (no .tmp/synthetic_loans.csv) doesn't die with a cryptic FileNotFoundError.
+        from apps.ml_engine.tasks import _ensure_training_data
+
+        if _ensure_training_data(data_path):
+            self.stdout.write(self.style.WARNING(f"No training data at {data_path} — generated a synthetic dataset."))
+
         trainer = ModelTrainer()
         model, metrics = trainer.train(data_path, algorithm=algorithm)
 
