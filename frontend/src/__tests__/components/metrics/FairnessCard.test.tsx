@@ -52,6 +52,28 @@ describe('FairnessCard', () => {
     expect(screen.queryByText(/excluded from the/i)).not.toBeInTheDocument()
   })
 
+  it('shows "Not assessable" instead of a green PASS when the ratio is null', () => {
+    // Backend emits null DI / null pass when fewer than two groups are assessable.
+    const notAssessable = {
+      state: {
+        groups: {
+          nsw: { count: 500, actual_approval_rate: 0.6, predicted_approval_rate: 0.62, tpr: 0.8, fpr: 0.2, included_in_fairness: true },
+          nt: { count: 12, actual_approval_rate: 0.3, predicted_approval_rate: 0.25, tpr: 0.5, fpr: 0.1, included_in_fairness: false },
+        },
+        disparate_impact_ratio: null,
+        equalized_odds_difference: 0,
+        passes_80_percent_rule: null,
+        min_group_size: 30,
+        excluded_small_groups: ['nt'],
+      },
+    }
+    render(<FairnessCard fairnessMetrics={notAssessable} />)
+    expect(screen.getByText(/Not assessable/i)).toBeInTheDocument()
+    // Must NOT coerce an un-measurable result into a clean pass.
+    expect(screen.queryByText(/PASS/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/DI: 1\.000/)).not.toBeInTheDocument()
+  })
+
   it('renders nothing when there are no fairness metrics', () => {
     const { container } = render(<FairnessCard fairnessMetrics={{}} />)
     expect(container).toBeEmptyDOMElement()

@@ -41,12 +41,20 @@ interface RechartsTooltipState {
  * recharts' cursor crosshair and tells it to compute `activePayload`, while the
  * detail renders in a sibling <ChartHoverPanel /> under the chart.
  */
+function sameHover(a: ChartHoverState | null, b: ChartHoverState): boolean {
+  if (!a || a.label !== b.label || a.items.length !== b.items.length) return false
+  return a.items.every((x, i) => {
+    const y = b.items[i]
+    return x.key === y.key && x.name === y.name && x.value === y.value && x.color === y.color
+  })
+}
+
 export function useChartHover() {
   const [active, setActive] = useState<ChartHoverState | null>(null)
 
   const onMouseMove = useCallback((state: RechartsTooltipState) => {
     if (state?.isTooltipActive && state.activePayload && state.activePayload.length > 0) {
-      setActive({
+      const next: ChartHoverState = {
         label: state.activeLabel ?? '',
         items: state.activePayload
           .filter((p) => p.value !== undefined && p.value !== null)
@@ -56,9 +64,12 @@ export function useChartHover() {
             value: p.value as number | string,
             color: p.color || p.stroke || p.fill || 'hsl(var(--primary))',
           })),
-      })
+      }
+      // recharts fires onMouseMove on every pointer pixel; skip the state update
+      // (and re-render) while the hovered point is unchanged.
+      setActive((prev) => (sameHover(prev, next) ? prev : next))
     } else {
-      setActive(null)
+      setActive((prev) => (prev === null ? prev : null))
     }
   }, [])
 
