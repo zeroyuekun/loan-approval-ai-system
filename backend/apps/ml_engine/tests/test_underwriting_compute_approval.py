@@ -12,8 +12,8 @@ call does not KeyError.
 
 import numpy as np
 
-from apps.ml_engine.services.data_generator import DataGenerator
-from apps.ml_engine.services.underwriting_engine import UnderwritingEngine
+from apps.ml_engine.services.datagen.data_generator import DataGenerator
+from apps.ml_engine.services.datagen.underwriting_engine import UnderwritingEngine
 
 
 def _frame(n=300, seed=7):

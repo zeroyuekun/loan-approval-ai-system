@@ -12,16 +12,16 @@ import pandas as pd
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from apps.ml_engine.services.scoring.predictor import (
+    FEATURE_BOUNDS,
+    ModelPredictor,
+    compute_risk_grade,
+)
 from apps.ml_engine.services.training.feature_engineering import (
     DEFAULT_IMPUTATION_VALUES,
     DERIVED_FEATURE_NAMES,
     compute_derived_features,
     impute_missing_values,
-)
-from apps.ml_engine.services.scoring.predictor import (
-    FEATURE_BOUNDS,
-    ModelPredictor,
-    compute_risk_grade,
 )
 
 # ---------------------------------------------------------------------------

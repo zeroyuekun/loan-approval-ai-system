@@ -13,15 +13,6 @@ import numpy as np
 import pandas as pd
 from prometheus_client import Counter, Histogram
 
-from apps.ml_engine.services.training.feature_prep import (
-    FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
-)
-from apps.ml_engine.services.training.feature_prep import (
-    safe_get_state as _safe_get_state_helper,
-)
-from apps.ml_engine.services.training.feature_prep import (
-    validate_input as _validate_input_helper,
-)
 from apps.ml_engine.services.governance.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
 )
@@ -65,6 +56,15 @@ from apps.ml_engine.services.scoring.prediction_features import (
 )
 from apps.ml_engine.services.scoring.shap_attribution import (
     compute_shap_attribution as _compute_shap_attribution_helper,
+)
+from apps.ml_engine.services.training.feature_prep import (
+    FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
+)
+from apps.ml_engine.services.training.feature_prep import (
+    safe_get_state as _safe_get_state_helper,
+)
+from apps.ml_engine.services.training.feature_prep import (
+    validate_input as _validate_input_helper,
 )
 
 ml_predictions_total = Counter(

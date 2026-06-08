@@ -9,7 +9,7 @@ alongside APRA APG 223 serviceability guidance without touching data generation.
 import numpy as np
 import pandas as pd
 
-from . import underwriting_helpers as _helpers
+from .. import underwriting_helpers as _helpers
 
 
 class UnderwritingEngine:

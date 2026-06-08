@@ -100,7 +100,7 @@ jobs:
         working-directory: backend
         run: |
           mypy --config-file mypy.ini \
-            apps/ml_engine/services/feature_prep.py \
+            apps/ml_engine/services/training/feature_prep.py \
             apps/ml_engine/services/scoring/prediction_cache.py \
             apps/ml_engine/services/scoring/policy_overlay.py \
             apps/ml_engine/services/scoring/policy_recompute.py \

@@ -9,7 +9,7 @@ checksum assertions break immediately.
 import pandas as pd
 import pytest
 
-from apps.ml_engine.services.data_generator import DataGenerator
+from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
 
 @pytest.fixture(scope="module")
