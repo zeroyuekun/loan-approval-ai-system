@@ -2,6 +2,7 @@
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface CalibrationChartProps {
   fractionOfPositives: number[]
@@ -10,6 +11,7 @@ interface CalibrationChartProps {
 }
 
 export function CalibrationChart({ fractionOfPositives, meanPredictedValue, ece }: CalibrationChartProps) {
+  const { active, hoverProps } = useChartHover()
   if (!fractionOfPositives?.length || !meanPredictedValue?.length) return null
 
   const data = meanPredictedValue.map((predicted, i) => ({
@@ -25,7 +27,7 @@ export function CalibrationChart({ fractionOfPositives, meanPredictedValue, ece 
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={350}>
-          <LineChart data={data} margin={{ top: 10, right: 20, bottom: 30, left: 20 }}>
+          <LineChart data={data} margin={{ top: 10, right: 20, bottom: 30, left: 20 }} {...hoverProps}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
             <XAxis
               dataKey="predicted"
@@ -42,7 +44,7 @@ export function CalibrationChart({ fractionOfPositives, meanPredictedValue, ece 
             >
               <Label value="Fraction of Positives" angle={-90} position="left" offset={0} style={{ fontSize: 12, fill: '#6b7280', textAnchor: 'middle' }} />
             </YAxis>
-            <Tooltip />
+            <Tooltip content={renderEmptyTooltip} />
             <ReferenceLine
               segment={[{ x: 0, y: 0 }, { x: 1, y: 1 }]}
               stroke="#d1d5db"
@@ -58,6 +60,7 @@ export function CalibrationChart({ fractionOfPositives, meanPredictedValue, ece 
             />
           </LineChart>
         </ResponsiveContainer>
+        <ChartHoverPanel active={active} formatLabel={(l) => `Predicted ${l}`} />
       </CardContent>
     </Card>
   )

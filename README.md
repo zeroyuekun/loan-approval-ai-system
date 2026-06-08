@@ -88,7 +88,8 @@ Applicants can **request a human review** of a declined automated decision; an o
 | Frontend | Next.js 15, React 19, TanStack Query, Tailwind, shadcn/ui |
 | ML | scikit-learn, XGBoost, SHAP, Optuna |
 | AI | Claude API (Sonnet for generation, Opus for compliance review) |
-| Infra | Docker Compose, 7 containers, separate ML and IO Celery workers |
+| Infra (local) | Docker Compose, separate ML and IO Celery workers |
+| Infra (cloud) | Kubernetes (deployments, HPA, NetworkPolicies, PodDisruptionBudgets, Ingress) + Terraform (AWS EKS, RDS Postgres, ElastiCache Redis) |
 
 ## Run locally in 60 seconds
 
@@ -132,6 +133,8 @@ frontend/src/
 scripts/            # init_db.sh, seed_data.sh
 tools/              # standalone training + evaluation scripts
 workflows/          # markdown SOPs for each pipeline stage
+k8s/                # Kubernetes manifests — deployments, HPA, NetworkPolicies, PDBs, Ingress
+terraform/          # AWS infra-as-code — EKS, RDS Postgres, ElastiCache Redis
 ```
 
 </details>
@@ -152,7 +155,7 @@ workflows/          # markdown SOPs for each pipeline stage
 <details>
 <summary><strong>ML model details</strong> (click to expand)</summary>
 
-XGBoost trained on synthetic Australian lending data. 71 raw applicant input fields (48 numeric + categoricals) with 31 engineered interactions, Optuna Bayesian hyperparameter optimisation, isotonic probability calibration, 75 monotonic constraints (higher income -> lower risk, etc.).
+XGBoost trained on synthetic Australian lending data. 71 raw applicant input fields (48 numeric + categoricals) with 31 engineered interactions, Optuna Bayesian hyperparameter optimisation, isotonic probability calibration, 76 monotonic constraints (higher income -> lower risk, etc.).
 
 The synthetic data is calibrated against ATO, ABS, APRA, and Equifax published statistics. It includes latent variables the model can't see (documentation quality, savings patterns, employer stability), underwriter disagreement noise, and measurement error — so the model hits realistic metrics (test AUC 0.88 per the active `ModelVersion`; reproducible benchmark on a 2,000-record subset is 0.85 with default hyperparameters — see `docs/experiments/benchmark.md`) rather than the 0.99 you get with clean synthetic labels.
 

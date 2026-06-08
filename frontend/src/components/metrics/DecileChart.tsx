@@ -2,6 +2,7 @@
 
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Label } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface DecileEntry {
   decile: number
@@ -16,6 +17,7 @@ interface DecileChartProps {
 }
 
 export function DecileChart({ deciles }: DecileChartProps) {
+  const { active, hoverProps } = useChartHover()
   if (!deciles?.length) return null
 
   const safePercent = (v: number) => {
@@ -41,7 +43,7 @@ export function DecileChart({ deciles }: DecileChartProps) {
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={380}>
-          <ComposedChart data={data} margin={{ top: 10, right: 30, bottom: 10, left: 10 }}>
+          <ComposedChart data={data} margin={{ top: 10, right: 30, bottom: 10, left: 10 }} {...hoverProps}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
             <XAxis dataKey="decile" tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }} />
             <YAxis yAxisId="left" domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }}>
@@ -50,13 +52,14 @@ export function DecileChart({ deciles }: DecileChartProps) {
             <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }}>
               <Label value="Lift" angle={90} position="insideRight" offset={10} style={{ fontSize: 12, fill: '#6b7280', textAnchor: 'middle' }} />
             </YAxis>
-            <Tooltip />
+            <Tooltip content={renderEmptyTooltip} />
             <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: 11, paddingBottom: 8 }} />
             <Bar yAxisId="left" dataKey="Approval Rate" fill="#60a5fa" radius={[4, 4, 0, 0]} />
             <Line yAxisId="right" type="monotone" dataKey="Lift" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
             <Line yAxisId="left" type="monotone" dataKey="Cumulative Rate" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} strokeDasharray="4 4" />
           </ComposedChart>
         </ResponsiveContainer>
+        <ChartHoverPanel active={active} />
       </CardContent>
     </Card>
   )

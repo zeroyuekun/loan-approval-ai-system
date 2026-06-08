@@ -311,8 +311,18 @@ class MetricsService:
         group_labels = np.array(group_labels)
         unique_groups = np.unique(group_labels)
 
+        min_group_size = int(getattr(django_settings, "FAIRNESS_MIN_GROUP_SIZE", 30))
+
         group_metrics = {}
-        approval_rates = []
+        # Only groups with enough samples drive the disparate-impact / equalized-odds
+        # verdict. A min/max approval-rate ratio is dominated by sampling noise when a
+        # group is tiny (e.g. a state with ~10-20 test rows), so such groups are still
+        # REPORTED for transparency but excluded from the ratio. Configurable via
+        # settings.FAIRNESS_MIN_GROUP_SIZE (default 30) — consistent with the gate.
+        assessable_rates = []
+        assessable_tprs = []
+        assessable_fprs = []
+        excluded_small_groups = []
 
         for group in unique_groups:
             mask = group_labels == group
@@ -321,7 +331,6 @@ class MetricsService:
                 continue
             g_true = y_true[mask]
             g_pred = y_pred[mask]
-            y_prob[mask]
 
             approval_rate = float(g_pred.mean())
             # TPR = recall for positive class
@@ -333,27 +342,34 @@ class MetricsService:
             tn = ((g_pred == 0) & (g_true == 0)).sum()
             fpr_val = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
 
+            assessable = count >= min_group_size
             group_metrics[str(group)] = {
                 "count": count,
                 "actual_approval_rate": round(float(g_true.mean()), 4),
                 "predicted_approval_rate": round(approval_rate, 4),
                 "tpr": round(tpr, 4),
                 "fpr": round(fpr_val, 4),
+                "included_in_fairness": assessable,
             }
-            approval_rates.append(approval_rate)
 
-        # Disparate impact ratio: min(rate) / max(rate). EEOC 80% rule: must be > 0.80
-        if len(approval_rates) >= 2 and max(approval_rates) > 0:
-            disparate_impact = min(approval_rates) / max(approval_rates)
+            if assessable:
+                assessable_rates.append(approval_rate)
+                assessable_tprs.append(tpr)
+                assessable_fprs.append(fpr_val)
+            else:
+                excluded_small_groups.append(str(group))
+
+        # Disparate impact ratio: min(rate) / max(rate) over assessable groups only.
+        # EEOC 80% rule: must be >= 0.80.
+        if len(assessable_rates) >= 2 and max(assessable_rates) > 0:
+            disparate_impact = min(assessable_rates) / max(assessable_rates)
         else:
-            disparate_impact = None  # Undefined when all groups have 0% approval
+            disparate_impact = None  # Undefined: <2 assessable groups or zero approvals
 
-        # Equalized odds difference: max gap in TPR or FPR across groups
-        tprs = [m["tpr"] for m in group_metrics.values()]
-        fprs = [m["fpr"] for m in group_metrics.values()]
+        # Equalized odds difference: max gap in TPR or FPR across assessable groups.
         eq_odds_diff = max(
-            (max(tprs) - min(tprs)) if tprs else 0.0,
-            (max(fprs) - min(fprs)) if fprs else 0.0,
+            (max(assessable_tprs) - min(assessable_tprs)) if len(assessable_tprs) >= 2 else 0.0,
+            (max(assessable_fprs) - min(assessable_fprs)) if len(assessable_fprs) >= 2 else 0.0,
         )
 
         return {
@@ -361,6 +377,8 @@ class MetricsService:
             "disparate_impact_ratio": round(disparate_impact, 4) if disparate_impact is not None else None,
             "equalized_odds_difference": round(eq_odds_diff, 4),
             "passes_80_percent_rule": disparate_impact >= 0.80 if disparate_impact is not None else None,
+            "min_group_size": min_group_size,
+            "excluded_small_groups": excluded_small_groups,
         }
 
     # ==================================================================

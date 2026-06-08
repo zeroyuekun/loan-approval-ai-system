@@ -1036,8 +1036,8 @@ class ModelTrainer:
             "iv_features_selected": len(getattr(self, "_iv_result", {}).get("selected_features", [])),
             "iv_features_excluded_weak": len(getattr(self, "_iv_result", {}).get("excluded_weak", [])),
             "iv_features_excluded_leakage": len(getattr(self, "_iv_result", {}).get("excluded_leakage", [])),
-            # Per-feature PSI (test vs train) — consumed by the MRM dossier and
-            # compliance banner, which read it from training_metadata.
+            # Per-feature PSI (test vs train) — consumed by model_selector._max_psi,
+            # the MRM dossier, and mrm_compliance._compliance_status via training_metadata.
             "psi_by_feature": metrics.get("psi_by_feature", {}),
             # Score-distribution reference for the weekly drift monitor's PSI.
             # Downsampled via quantiles to bound JSONField size while preserving

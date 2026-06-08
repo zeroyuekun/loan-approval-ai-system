@@ -2,6 +2,7 @@
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface ROCCurveProps {
   fpr: number[]
@@ -10,6 +11,7 @@ interface ROCCurveProps {
 }
 
 export function ROCCurve({ fpr, tpr, auc }: ROCCurveProps) {
+  const { active, hoverProps } = useChartHover()
   if (!fpr?.length || !tpr?.length) return null
 
   const data = fpr.map((x, i) => ({
@@ -26,7 +28,7 @@ export function ROCCurve({ fpr, tpr, auc }: ROCCurveProps) {
       <CardContent>
         <div role="img" aria-label={`ROC curve plotting true positive rate against false positive rate; AUC ${auc != null ? auc.toFixed(4) : 'unavailable'}. Higher AUC indicates better model discrimination.`}>
         <ResponsiveContainer width="100%" height={350}>
-          <LineChart data={data} margin={{ top: 10, right: 20, bottom: 30, left: 20 }}>
+          <LineChart data={data} margin={{ top: 10, right: 20, bottom: 30, left: 20 }} {...hoverProps}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
             <XAxis
               dataKey="fpr"
@@ -43,7 +45,7 @@ export function ROCCurve({ fpr, tpr, auc }: ROCCurveProps) {
             >
               <Label value="True Positive Rate" angle={-90} position="left" offset={0} style={{ fontSize: 12, fill: '#6b7280', textAnchor: 'middle' }} />
             </YAxis>
-            <Tooltip />
+            <Tooltip content={renderEmptyTooltip} />
             <ReferenceLine
               segment={[{ x: 0, y: 0 }, { x: 1, y: 1 }]}
               stroke="#d1d5db"
@@ -52,6 +54,7 @@ export function ROCCurve({ fpr, tpr, auc }: ROCCurveProps) {
             <Line
               type="monotone"
               dataKey="tpr"
+              name="TPR"
               stroke="hsl(var(--primary))"
               strokeWidth={2}
               dot={false}
@@ -59,6 +62,7 @@ export function ROCCurve({ fpr, tpr, auc }: ROCCurveProps) {
           </LineChart>
         </ResponsiveContainer>
         </div>
+        <ChartHoverPanel active={active} formatLabel={(l) => `FPR ${l}`} />
       </CardContent>
     </Card>
   )
