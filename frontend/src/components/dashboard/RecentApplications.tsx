@@ -25,28 +25,42 @@ export function RecentApplications({ applications }: RecentApplicationsProps) {
               <TableHead>Amount</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Date</TableHead>
+              <TableHead className="sr-only">Open</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {applications.slice(0, 5).map((app) => (
-              <TableRow key={app.id}>
-                <TableCell>
-                  <Link href={`/dashboard/customers/${app.applicant.id}`} className="font-medium text-blue-600 hover:underline">
-                    {app.applicant.first_name} {app.applicant.last_name}
-                  </Link>
-                </TableCell>
-                <TableCell>{formatCurrency(app.loan_amount)}</TableCell>
-                <TableCell>
-                  {(() => { const s = getDisplayStatus(app.status, app.decision); return (
+            {applications.slice(0, 5).map((app) => {
+              const s = getDisplayStatus(app.status, app.decision)
+              return (
+                <TableRow key={app.id} className="hover:bg-muted/50">
+                  <TableCell>
+                    <Link
+                      href={`/dashboard/customers/${app.applicant.id}`}
+                      className="font-medium text-blue-600 hover:underline"
+                    >
+                      {app.applicant.first_name} {app.applicant.last_name}
+                    </Link>
+                  </TableCell>
+                  <TableCell>{formatCurrency(app.loan_amount)}</TableCell>
+                  <TableCell>
                     <Badge className={s.color} variant="outline">{s.label}</Badge>
-                  ) })()}
-                </TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(app.created_at)}</TableCell>
-              </TableRow>
-            ))}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{formatDate(app.created_at)}</TableCell>
+                  <TableCell className="text-right">
+                    <Link
+                      href={`/dashboard/applications/${app.id}`}
+                      aria-label={`Open application ${app.id}`}
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Open →
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
             {applications.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   No applications yet
                 </TableCell>
               </TableRow>
