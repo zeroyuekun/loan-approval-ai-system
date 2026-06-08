@@ -230,6 +230,11 @@ ML_MODELS_DIR = BASE_DIR / "ml_models"
 ML_EARLY_STOPPING_ROUNDS = 30
 ML_COST_FP_FN_RATIO = 5  # FP cost : FN cost ratio for threshold optimization
 ML_FAIRNESS_TARGET_DI = 0.80  # Target disparate impact ratio (EEOC 80% rule)
+# Minimum samples a protected group needs before it drives the disparate-impact
+# verdict. Smaller groups (e.g. a state with ~10-20 test rows) are still reported
+# but excluded from the min/max ratio, which is otherwise dominated by their
+# sampling noise. Shared by MetricsService.compute_fairness_metrics and the gate.
+FAIRNESS_MIN_GROUP_SIZE = 30
 ML_OVERFITTING_THRESHOLD = 0.05  # Flag if train-test AUC gap exceeds this
 # XGBoost max_bin for histogram construction. 256 is the XGBoost default and
 # is plenty for the 50k-row / 35-feature synthetic dataset; 512 doubled the
