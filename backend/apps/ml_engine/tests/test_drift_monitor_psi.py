@@ -71,7 +71,7 @@ def test_compute_on_demand_feature_psi_returns_zero_for_identical(customer):
     model_version.id = "abc-123"
 
     with patch(
-        "apps.ml_engine.services.predictor.ModelPredictor",
+        "apps.ml_engine.services.scoring.predictor.ModelPredictor",
         return_value=fake_predictor,
     ):
         result = drift_monitor.compute_on_demand_feature_psi(model_version, days=30)
@@ -91,7 +91,7 @@ def test_compute_on_demand_insufficient_data(customer):
     model_version = MagicMock()
     model_version.id = "abc-123"
     with patch(
-        "apps.ml_engine.services.predictor.ModelPredictor",
+        "apps.ml_engine.services.scoring.predictor.ModelPredictor",
         return_value=fake_predictor,
     ):
         result = drift_monitor.compute_on_demand_feature_psi(model_version, days=30)
@@ -104,7 +104,7 @@ def test_compute_on_demand_no_reference_distribution():
     fake_predictor.reference_distribution = {}
     model_version = MagicMock()
     with patch(
-        "apps.ml_engine.services.predictor.ModelPredictor",
+        "apps.ml_engine.services.scoring.predictor.ModelPredictor",
         return_value=fake_predictor,
     ):
         result = drift_monitor.compute_on_demand_feature_psi(model_version, days=30)

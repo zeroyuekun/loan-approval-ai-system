@@ -101,12 +101,12 @@ jobs:
         run: |
           mypy --config-file mypy.ini \
             apps/ml_engine/services/feature_prep.py \
-            apps/ml_engine/services/prediction_cache.py \
-            apps/ml_engine/services/policy_overlay.py \
-            apps/ml_engine/services/policy_recompute.py \
-            apps/ml_engine/services/prediction_diagnostics.py \
-            apps/ml_engine/services/prediction_explanations.py \
-            apps/ml_engine/services/prediction_features.py \
+            apps/ml_engine/services/scoring/prediction_cache.py \
+            apps/ml_engine/services/scoring/policy_overlay.py \
+            apps/ml_engine/services/scoring/policy_recompute.py \
+            apps/ml_engine/services/scoring/prediction_diagnostics.py \
+            apps/ml_engine/services/scoring/prediction_explanations.py \
+            apps/ml_engine/services/scoring/prediction_features.py \
             apps/ml_engine/services/governance/shadow_scoring.py \
-            apps/ml_engine/services/shap_attribution.py \
-            apps/ml_engine/services/decision_assembly.py
+            apps/ml_engine/services/scoring/shap_attribution.py \
+            apps/ml_engine/services/scoring/decision_assembly.py

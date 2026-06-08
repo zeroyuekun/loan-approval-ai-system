@@ -10,7 +10,6 @@ from apps.agents.models import AgentRun
 from apps.loans.models import FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
-from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 from apps.ml_engine.services.scoring.predictor import ModelPredictor
 from apps.ml_engine.services.scoring.segmentation import derive_segment
 

@@ -14,6 +14,7 @@ foundation — they are arbitrary convention. We supplement with KS-test
 import logging
 from datetime import timedelta
 
+import joblib
 import numpy as np
 from django.utils import timezone
 from scipy.stats import ks_2samp
@@ -119,7 +120,7 @@ def compute_on_demand_feature_psi(model_version, days=30):
     stored reference distribution. Single source of truth for the
     ModelDriftView endpoint — mirrors the weekly DriftReport binning."""
     from apps.loans.models import LoanApplication
-    from apps.ml_engine.services.predictor import ModelPredictor
+    from apps.ml_engine.services.scoring.predictor import ModelPredictor
 
     predictor = ModelPredictor(model_version=model_version)
     ref_dist = predictor.reference_distribution

@@ -13,10 +13,6 @@ import numpy as np
 import pandas as pd
 from prometheus_client import Counter, Histogram
 
-from apps.ml_engine.services.scoring.consistency import DataConsistencyChecker
-from apps.ml_engine.services.scoring.decision_assembly import (
-    assemble_decision as _assemble_decision_helper,
-)
 from apps.ml_engine.services.feature_prep import (
     FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
 )
@@ -28,6 +24,10 @@ from apps.ml_engine.services.feature_prep import (
 )
 from apps.ml_engine.services.governance.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
+)
+from apps.ml_engine.services.scoring.consistency import DataConsistencyChecker
+from apps.ml_engine.services.scoring.decision_assembly import (
+    assemble_decision as _assemble_decision_helper,
 )
 from apps.ml_engine.services.scoring.policy_overlay import (
     apply_policy_overlay as _apply_policy_overlay_helper,
@@ -210,7 +210,7 @@ class ModelPredictor:
 
         Keeps the agents orchestrator off ``ModelPredictor`` internals (L17).
         """
-        from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+        from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 
         return CounterfactualEngine(
             model=self.model,

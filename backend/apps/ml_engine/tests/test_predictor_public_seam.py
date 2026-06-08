@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 
-from apps.ml_engine.services.predictor import ModelPredictor
+from apps.ml_engine.services.scoring.predictor import ModelPredictor
 
 
 def test_build_counterfactual_engine_uses_public_transform(monkeypatch):
@@ -21,7 +21,7 @@ def test_build_counterfactual_engine_uses_public_transform(monkeypatch):
     called = {}
     monkeypatch.setattr(p, "_transform", lambda df: called.setdefault("hit", df) or df)
     df = pd.DataFrame([{"credit_score": 500, "loan_amount": 200000.0}])
-    import apps.ml_engine.services.counterfactual_engine as cf_mod
+    import apps.ml_engine.services.scoring.counterfactual_engine as cf_mod
 
     monkeypatch.setattr(cf_mod, "CounterfactualEngine", MagicMock(), raising=False)
     engine = p.build_counterfactual_engine(df, original_loan_amount=200000.0)
