@@ -77,6 +77,11 @@ class DataGenerator:
     HOME_OWNERSHIP = ["own", "rent", "mortgage"]
     HOME_OWNERSHIP_WEIGHTS = [0.22, 0.30, 0.48]
     EMPLOYMENT_TYPES = ["payg_permanent", "payg_casual", "self_employed", "contract"]
+    # ABS Characteristics of Employment Aug 2025 reports perm 77% / casual 19%
+    # / SE 7.6% / contract 4% — but ABS counts casual workers within "PAYG"
+    # so the row sums to >1.0. The project models perm-NON-casual / casual /
+    # SE / contract as four NON-OVERLAPPING categories, hence the [0.68, 0.12,
+    # 0.12, 0.08] split. Recorded in backend/docs/CALIBRATION_SOURCES.md.
     EMPLOYMENT_TYPE_WEIGHTS = [0.68, 0.12, 0.12, 0.08]
     APPLICANT_TYPES = ["single", "couple"]
     APPLICANT_TYPE_WEIGHTS = [0.42, 0.58]
