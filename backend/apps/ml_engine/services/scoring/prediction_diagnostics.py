@@ -27,7 +27,7 @@ import logging
 
 import pandas as pd
 
-from apps.ml_engine.services.policy_recompute import (
+from apps.ml_engine.services.scoring.policy_recompute import (
     recompute_lvr_driven_policy_vars,
 )
 

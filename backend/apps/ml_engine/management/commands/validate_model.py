@@ -215,7 +215,7 @@ class Command(BaseCommand):
             roc_auc_score,
         )
 
-        from apps.ml_engine.services.predictor import ModelPredictor
+        from apps.ml_engine.services.scoring.predictor import ModelPredictor
 
         # Score through the model's OWN preprocessing pipeline (feature
         # engineering + one-hot + scaling) aligned to the trained feature_cols.
@@ -243,7 +243,7 @@ class Command(BaseCommand):
 
     def _evaluate_fairness(self, model_version, df):
         """Run disparate impact analysis on protected attributes."""
-        from apps.ml_engine.services.predictor import ModelPredictor
+        from apps.ml_engine.services.scoring.predictor import ModelPredictor
 
         predictor = ModelPredictor(model_version=model_version)
         X = predictor.transform(df)[predictor.feature_cols]

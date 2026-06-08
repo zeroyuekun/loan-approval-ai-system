@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pandas as pd
 
-from apps.ml_engine.services.prediction_explanations import (
+from apps.ml_engine.services.scoring.prediction_explanations import (
     compute_conformal_interval,
     search_counterfactuals,
 )

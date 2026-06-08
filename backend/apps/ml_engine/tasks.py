@@ -63,8 +63,8 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
         evaluate_promotion_gates_for_activation,
     )
     from apps.ml_engine.services.model_selector import promote_if_eligible
-    from apps.ml_engine.services.predictor import clear_model_cache
-    from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
+    from apps.ml_engine.services.scoring.predictor import clear_model_cache
+    from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.trainer import ModelTrainer
     from apps.ml_engine.services.validation_gate_mode import (
         ValidationSignoffBlocked,
@@ -272,7 +272,7 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
 )
 def run_prediction_task(self, application_id):
     """Run ML prediction on a loan application."""
-    from apps.ml_engine.services.predictor import ModelPredictor
+    from apps.ml_engine.services.scoring.predictor import ModelPredictor
 
     application = LoanApplication.objects.get(pk=application_id)
     try:

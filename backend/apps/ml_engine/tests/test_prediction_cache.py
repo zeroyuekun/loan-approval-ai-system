@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apps.ml_engine.services import prediction_cache
+from apps.ml_engine.services.scoring import prediction_cache
 
 
 @pytest.fixture(autouse=True)
@@ -105,9 +105,9 @@ class TestVerifyModelHash:
 
 
 class TestLoadBundle:
-    @patch("apps.ml_engine.services.prediction_cache._verify_model_hash")
-    @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
-    @patch("apps.ml_engine.services.prediction_cache.joblib.load")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._verify_model_hash")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._validate_model_path")
+    @patch("apps.ml_engine.services.scoring.prediction_cache.joblib.load")
     def test_cache_hit_avoids_repeat_load(self, mock_load, mock_validate, mock_verify):
         mock_validate.return_value = "/tmp/fake.joblib"  # noqa: S108 — mock return, no file IO
         mock_load.side_effect = [{"model": "A"}, {"model": "B"}]
@@ -117,9 +117,9 @@ class TestLoadBundle:
         assert prediction_cache._load_bundle(version) == {"model": "A"}
         assert mock_load.call_count == 1
 
-    @patch("apps.ml_engine.services.prediction_cache._verify_model_hash")
-    @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
-    @patch("apps.ml_engine.services.prediction_cache.joblib.load")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._verify_model_hash")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._validate_model_path")
+    @patch("apps.ml_engine.services.scoring.prediction_cache.joblib.load")
     def test_cache_reloads_after_ttl(self, mock_load, mock_validate, mock_verify):
         mock_validate.return_value = "/tmp/fake.joblib"  # noqa: S108 — mock return, no file IO
         mock_load.side_effect = [{"model": "A"}, {"model": "B"}]
@@ -132,9 +132,9 @@ class TestLoadBundle:
         assert prediction_cache._load_bundle(version) == {"model": "B"}
         assert mock_load.call_count == 2
 
-    @patch("apps.ml_engine.services.prediction_cache._verify_model_hash")
-    @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
-    @patch("apps.ml_engine.services.prediction_cache.joblib.load")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._verify_model_hash")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._validate_model_path")
+    @patch("apps.ml_engine.services.scoring.prediction_cache.joblib.load")
     def test_cache_bounded_to_maxsize(self, mock_load, mock_validate, mock_verify):
         mock_validate.return_value = "/tmp/fake.joblib"  # noqa: S108 — mock return, no file IO
         mock_load.side_effect = [{"m": i} for i in range(10)]
@@ -144,9 +144,9 @@ class TestLoadBundle:
 
         assert len(prediction_cache._model_cache) <= prediction_cache._MAX_CACHE_ENTRIES
 
-    @patch("apps.ml_engine.services.prediction_cache._verify_model_hash")
-    @patch("apps.ml_engine.services.prediction_cache._validate_model_path")
-    @patch("apps.ml_engine.services.prediction_cache.joblib.load")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._verify_model_hash")
+    @patch("apps.ml_engine.services.scoring.prediction_cache._validate_model_path")
+    @patch("apps.ml_engine.services.scoring.prediction_cache.joblib.load")
     def test_clear_model_cache_empties(self, mock_load, mock_validate, mock_verify):
         mock_validate.return_value = "/tmp/fake.joblib"  # noqa: S108 — mock return, no file IO
         mock_load.return_value = {"model": "A"}

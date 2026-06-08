@@ -22,7 +22,7 @@ def build_denial_reason_summary(shap_values: dict, feature_importances: dict) ->
     Uses the shared DecisionExplanation ranking + reason codes instead of the
     old ad-hoc `"feature: 0.123"` float dump.
     """
-    from apps.ml_engine.services.reason_codes import generate_adverse_action_reasons
+    from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action_reasons
 
     reasons = generate_adverse_action_reasons(shap_values or {}, "denied")
     if reasons:

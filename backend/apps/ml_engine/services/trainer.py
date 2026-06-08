@@ -564,7 +564,7 @@ class ModelTrainer:
             segment. Falls back to unified training when the segment slice
             is below SEGMENT_MIN_SAMPLES to avoid noisy per-segment models.
         """
-        from apps.ml_engine.services.segmentation import (
+        from apps.ml_engine.services.scoring.segmentation import (
             SEGMENT_FILTERS,
             SEGMENT_MIN_SAMPLES,
             SEGMENT_UNIFIED,
@@ -1374,7 +1374,7 @@ class ModelTrainer:
         errors = []
 
         # 1. Categorical cols match between trainer and predictor
-        from apps.ml_engine.services.predictor import ModelPredictor
+        from apps.ml_engine.services.scoring.predictor import ModelPredictor
 
         if set(self.CATEGORICAL_COLS) != set(ModelPredictor.CATEGORICAL_COLS):
             errors.append(

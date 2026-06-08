@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 
-from apps.ml_engine.services import credit_policy as _policy
+from apps.ml_engine.services.scoring import credit_policy as _policy
 
 __all__ = ["apply_policy_overlay"]
 

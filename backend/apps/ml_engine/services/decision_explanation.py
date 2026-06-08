@@ -18,7 +18,7 @@ run against either a saved `LoanDecision` or a live `prediction_result` dict.
 from __future__ import annotations
 
 from apps.ml_engine.services.adm_disclosure import resolve_adm_disclosure
-from apps.ml_engine.services.reason_codes import (
+from apps.ml_engine.services.scoring.reason_codes import (
     generate_adverse_action_reasons,
     generate_reapplication_guidance,
 )

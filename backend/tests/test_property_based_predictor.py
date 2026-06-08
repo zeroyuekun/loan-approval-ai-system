@@ -18,7 +18,7 @@ from apps.ml_engine.services.feature_engineering import (
     compute_derived_features,
     impute_missing_values,
 )
-from apps.ml_engine.services.predictor import (
+from apps.ml_engine.services.scoring.predictor import (
     FEATURE_BOUNDS,
     ModelPredictor,
     compute_risk_grade,
@@ -229,8 +229,8 @@ class TestFeatureBoundsValidation:
         """Values within FEATURE_BOUNDS should pass validation."""
         bundle = _make_fake_bundle()
         with (
-            patch("apps.ml_engine.services.predictor._load_bundle", return_value=bundle),
-            patch("apps.ml_engine.services.predictor.ModelPredictor.__init__", return_value=None),
+            patch("apps.ml_engine.services.scoring.predictor._load_bundle", return_value=bundle),
+            patch("apps.ml_engine.services.scoring.predictor.ModelPredictor.__init__", return_value=None),
         ):
             predictor = ModelPredictor.__new__(ModelPredictor)
             predictor.feature_bounds = {}

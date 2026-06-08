@@ -13,10 +13,6 @@ import numpy as np
 import pandas as pd
 from prometheus_client import Counter, Histogram
 
-from apps.ml_engine.services.consistency import DataConsistencyChecker
-from apps.ml_engine.services.decision_assembly import (
-    assemble_decision as _assemble_decision_helper,
-)
 from apps.ml_engine.services.feature_prep import (
     FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
 )
@@ -29,13 +25,17 @@ from apps.ml_engine.services.feature_prep import (
 from apps.ml_engine.services.governance.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
 )
-from apps.ml_engine.services.policy_overlay import (
+from apps.ml_engine.services.scoring.consistency import DataConsistencyChecker
+from apps.ml_engine.services.scoring.decision_assembly import (
+    assemble_decision as _assemble_decision_helper,
+)
+from apps.ml_engine.services.scoring.policy_overlay import (
     apply_policy_overlay as _apply_policy_overlay_helper,
 )
-from apps.ml_engine.services.policy_recompute import (
+from apps.ml_engine.services.scoring.policy_recompute import (
     recompute_lvr_driven_policy_vars as _recompute_lvr_driven_policy_vars,  # noqa: F401 — re-export for test
 )
-from apps.ml_engine.services.prediction_cache import (  # noqa: F401 — re-export for external patches
+from apps.ml_engine.services.scoring.prediction_cache import (  # noqa: F401 — re-export for external patches
     _CACHE_TTL_SECONDS,
     _MAX_CACHE_ENTRIES,
     _cache_lock,
@@ -45,25 +45,25 @@ from apps.ml_engine.services.prediction_cache import (  # noqa: F401 — re-expo
     _verify_model_hash,
     clear_model_cache,
 )
-from apps.ml_engine.services.prediction_diagnostics import (
+from apps.ml_engine.services.scoring.prediction_diagnostics import (
     check_feature_drift as _check_feature_drift_helper,
 )
-from apps.ml_engine.services.prediction_diagnostics import (
+from apps.ml_engine.services.scoring.prediction_diagnostics import (
     run_stress_scenarios as _run_stress_scenarios_helper,
 )
-from apps.ml_engine.services.prediction_explanations import (
+from apps.ml_engine.services.scoring.prediction_explanations import (
     compute_conformal_interval as _compute_conformal_interval_helper,
 )
-from apps.ml_engine.services.prediction_explanations import (
+from apps.ml_engine.services.scoring.prediction_explanations import (
     search_counterfactuals as _search_counterfactuals_helper,
 )
-from apps.ml_engine.services.prediction_features import (
+from apps.ml_engine.services.scoring.prediction_features import (
     build_prediction_features as _build_prediction_features_helper,
 )
-from apps.ml_engine.services.prediction_features import (
+from apps.ml_engine.services.scoring.prediction_features import (
     derive_underwriter_features as _derive_underwriter_features_helper,
 )
-from apps.ml_engine.services.shap_attribution import (
+from apps.ml_engine.services.scoring.shap_attribution import (
     compute_shap_attribution as _compute_shap_attribution_helper,
 )
 
@@ -137,7 +137,7 @@ class ModelPredictor:
             self.model_version = model_version
         else:
             from apps.ml_engine.services.model_selector import select_model_version
-            from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
+            from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
 
             self.model_version = select_model_version(segment=segment or SEGMENT_UNIFIED)
 
@@ -157,7 +157,7 @@ class ModelPredictor:
         self.group_thresholds = bundle.get("group_thresholds", {})
         self.conformal_scores = bundle.get("conformal_scores", np.array([]))
         self.consistency_checker = DataConsistencyChecker()
-        from .metrics import MetricsService
+        from ..metrics import MetricsService
 
         self._metrics_service = MetricsService()
 
@@ -171,7 +171,7 @@ class ModelPredictor:
         preferred entry point for scoring tasks — constructor access
         without a segment defaults to unified.
         """
-        from apps.ml_engine.services.segmentation import derive_segment
+        from apps.ml_engine.services.scoring.segmentation import derive_segment
 
         segment = derive_segment(application)
         return cls(segment=segment)
@@ -210,7 +210,7 @@ class ModelPredictor:
 
         Keeps the agents orchestrator off ``ModelPredictor`` internals (L17).
         """
-        from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+        from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 
         return CounterfactualEngine(
             model=self.model,

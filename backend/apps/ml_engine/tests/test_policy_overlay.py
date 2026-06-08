@@ -24,7 +24,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from apps.ml_engine.services.policy_overlay import apply_policy_overlay
+from apps.ml_engine.services.scoring.policy_overlay import apply_policy_overlay
 
 
 class _FakeReferralStatus:
@@ -77,7 +77,7 @@ def _mk_model_version():
 def _patch_policy(*, evaluate_result, current_mode, apply_overlay_to_decision):
     """Patch the three credit_policy module functions the overlay helper calls."""
     return patch.multiple(
-        "apps.ml_engine.services.policy_overlay._policy",
+        "apps.ml_engine.services.scoring.policy_overlay._policy",
         evaluate=MagicMock(return_value=evaluate_result),
         current_mode=MagicMock(return_value=current_mode),
         apply_overlay_to_decision=MagicMock(side_effect=apply_overlay_to_decision),
@@ -167,7 +167,7 @@ class TestApplyPolicyOverlay:
                 current_mode="shadow",
                 apply_overlay_to_decision=_overlay,
             ),
-            patch("apps.ml_engine.services.policy_overlay.logger") as log,
+            patch("apps.ml_engine.services.scoring.policy_overlay.logger") as log,
         ):
             label, _review, _payload = apply_policy_overlay(
                 application=app,
@@ -257,7 +257,7 @@ class TestApplyPolicyOverlay:
         mv = _mk_model_version()
 
         with patch(
-            "apps.ml_engine.services.policy_overlay._policy.evaluate",
+            "apps.ml_engine.services.scoring.policy_overlay._policy.evaluate",
             side_effect=RuntimeError("policy engine broken"),
         ):
             label, review, payload = apply_policy_overlay(
@@ -290,7 +290,7 @@ class TestApplyPolicyOverlay:
                 current_mode="shadow",
                 apply_overlay_to_decision=_overlay,
             ),
-            patch("apps.ml_engine.services.policy_overlay.logger") as log,
+            patch("apps.ml_engine.services.scoring.policy_overlay.logger") as log,
         ):
             apply_policy_overlay(
                 application=app,

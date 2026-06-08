@@ -64,7 +64,7 @@ def test_task_applies_decision_not_review_when_flag_off(django_user_model):
     }
     predictor = MagicMock()
     predictor.predict.return_value = fake
-    with patch("apps.ml_engine.services.predictor.ModelPredictor.for_application", return_value=predictor):
+    with patch("apps.ml_engine.services.scoring.predictor.ModelPredictor.for_application", return_value=predictor):
         from apps.ml_engine.tasks import run_prediction_task
 
         run_prediction_task.run(str(app.id))  # synchronous, no Celery broker

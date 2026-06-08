@@ -169,7 +169,7 @@ class ModelDriftView(APIView):
         """Compute PSI for recent applications vs training distribution."""
         from apps.ml_engine.services.governance.drift_monitor import compute_on_demand_feature_psi
         from apps.ml_engine.services.model_selector import select_model_version
-        from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
+        from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
 
         # Resolve the active ModelVersion directly — avoids constructing a full
         # ModelPredictor (which joblib.load-s the model bundle) only to throw

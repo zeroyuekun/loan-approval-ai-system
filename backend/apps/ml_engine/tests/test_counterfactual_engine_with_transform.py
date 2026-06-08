@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier
 
-from apps.ml_engine.services.counterfactual_engine import CounterfactualEngine
+from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 
 
 def _make_transforming_model():
