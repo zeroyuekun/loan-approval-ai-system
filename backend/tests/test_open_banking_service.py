@@ -3,7 +3,7 @@
 import dataclasses
 from unittest.mock import patch
 
-from apps.ml_engine.services.open_banking_service import (
+from apps.ml_engine.services.external.open_banking import (
     OpenBankingProfile,
     OpenBankingService,
     _clamp,

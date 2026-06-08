@@ -7,7 +7,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-from apps.ml_engine.services.macro_data_service import (
+from apps.ml_engine.services.external.macro_data import (
     _CACHE_TTL_HOURS,
     _FALLBACKS,
     _FEATURE_BOUNDS,
@@ -130,7 +130,7 @@ def _make_mock_client(response):
 class TestMacroDataServiceFallbacks(unittest.TestCase):
     """Each getter must return a valid float even when APIs are unreachable."""
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_rba_cash_rate_fallback(self, mock_client_cls):
         mock_client_cls.side_effect = Exception("connection refused")
         svc = MacroDataService()
@@ -138,7 +138,7 @@ class TestMacroDataServiceFallbacks(unittest.TestCase):
         self.assertIsInstance(result, float)
         self.assertEqual(result, _FALLBACKS["rba_cash_rate"])
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_unemployment_rate_fallback(self, mock_client_cls):
         mock_client_cls.side_effect = Exception("connection refused")
         svc = MacroDataService()
@@ -146,7 +146,7 @@ class TestMacroDataServiceFallbacks(unittest.TestCase):
         self.assertIsInstance(result, float)
         self.assertEqual(result, _FALLBACKS["unemployment_rate"])
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_property_growth_fallback(self, mock_client_cls):
         mock_client_cls.side_effect = Exception("timeout")
         svc = MacroDataService()
@@ -154,7 +154,7 @@ class TestMacroDataServiceFallbacks(unittest.TestCase):
         self.assertIsInstance(result, float)
         self.assertEqual(result, _FALLBACKS["property_growth_12m"])
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_consumer_confidence_fallback(self, mock_client_cls):
         mock_client_cls.side_effect = Exception("DNS failure")
         svc = MacroDataService()
@@ -162,7 +162,7 @@ class TestMacroDataServiceFallbacks(unittest.TestCase):
         self.assertIsInstance(result, float)
         self.assertEqual(result, _FALLBACKS["consumer_confidence"])
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_gdp_growth_fallback(self, mock_client_cls):
         mock_client_cls.side_effect = Exception("network error")
         svc = MacroDataService()
@@ -174,7 +174,7 @@ class TestMacroDataServiceFallbacks(unittest.TestCase):
 class TestMacroDataServiceReturnTypes(unittest.TestCase):
     """Each getter returns a float within FEATURE_BOUNDS."""
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_rba_cash_rate_within_bounds(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response(SAMPLE_FRED_RBA_RESPONSE),
@@ -187,7 +187,7 @@ class TestMacroDataServiceReturnTypes(unittest.TestCase):
         self.assertGreaterEqual(result, lo)
         self.assertLessEqual(result, hi)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_unemployment_within_bounds(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response(SAMPLE_ABS_UNEMPLOYMENT_RESPONSE),
@@ -199,7 +199,7 @@ class TestMacroDataServiceReturnTypes(unittest.TestCase):
         self.assertGreaterEqual(result, lo)
         self.assertLessEqual(result, hi)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_property_growth_within_bounds(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response(SAMPLE_ABS_RPPI_RESPONSE),
@@ -211,7 +211,7 @@ class TestMacroDataServiceReturnTypes(unittest.TestCase):
         self.assertGreaterEqual(result, lo)
         self.assertLessEqual(result, hi)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_gdp_growth_within_bounds(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response(SAMPLE_WORLD_BANK_GDP_RESPONSE),
@@ -223,7 +223,7 @@ class TestMacroDataServiceReturnTypes(unittest.TestCase):
         self.assertGreaterEqual(result, lo)
         self.assertLessEqual(result, hi)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_consumer_confidence_within_bounds(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response(SAMPLE_FRED_CCI_RESPONSE),
@@ -241,7 +241,7 @@ class TestMacroDataServiceReturnTypes(unittest.TestCase):
 class TestCaching(unittest.TestCase):
     """Second call within TTL should not hit the API again."""
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_cache_prevents_second_api_call(self, mock_client_cls):
         mock_client = _make_mock_client(
             _make_mock_response(SAMPLE_WORLD_BANK_GDP_RESPONSE),
@@ -256,7 +256,7 @@ class TestCaching(unittest.TestCase):
         # httpx.Client() should only be called once (cached on second call)
         self.assertEqual(mock_client_cls.call_count, 1)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_cache_expires_after_ttl(self, mock_client_cls):
         mock_client = _make_mock_client(
             _make_mock_response(SAMPLE_WORLD_BANK_GDP_RESPONSE),
@@ -273,7 +273,7 @@ class TestCaching(unittest.TestCase):
         # Should have fetched twice
         self.assertEqual(mock_client_cls.call_count, 2)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_stale_cache_served_on_api_failure(self, mock_client_cls):
         # First call succeeds
         mock_client = _make_mock_client(
@@ -297,7 +297,7 @@ class TestCaching(unittest.TestCase):
 class TestGetAllMacroIndicators(unittest.TestCase):
     """get_all_macro_indicators returns all expected keys."""
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_all_keys_present(self, mock_client_cls):
         # All APIs fail — should still return all keys via fallbacks
         mock_client_cls.side_effect = Exception("offline")
@@ -315,7 +315,7 @@ class TestGetAllMacroIndicators(unittest.TestCase):
         for key, val in indicators.items():
             self.assertIsInstance(val, float, f"{key} is not a float")
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_all_values_within_bounds(self, mock_client_cls):
         mock_client_cls.side_effect = Exception("offline")
         svc = MacroDataService()
@@ -377,7 +377,7 @@ class TestABSParsing(unittest.TestCase):
 class TestWorldBankParsing(unittest.TestCase):
     """Test parsing of World Bank JSON responses."""
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_world_bank_gdp_parsing(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response(SAMPLE_WORLD_BANK_GDP_RESPONSE),
@@ -386,7 +386,7 @@ class TestWorldBankParsing(unittest.TestCase):
         result = svc.get_gdp_growth()
         self.assertEqual(result, 2.3)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_world_bank_empty_data_falls_to_fallback(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response(SAMPLE_WORLD_BANK_EMPTY_RESPONSE),
@@ -395,7 +395,7 @@ class TestWorldBankParsing(unittest.TestCase):
         result = svc.get_gdp_growth()
         self.assertEqual(result, _FALLBACKS["gdp_growth"])
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_world_bank_null_values_skipped(self, mock_client_cls):
         """World Bank sometimes returns entries with value=None for future years."""
         data_with_nulls = [
@@ -416,7 +416,7 @@ class TestWorldBankParsing(unittest.TestCase):
 class TestFREDParsing(unittest.TestCase):
     """Test parsing of FRED JSON responses."""
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_fred_rba_rate_parsing(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response(SAMPLE_FRED_RBA_RESPONSE),
@@ -426,14 +426,14 @@ class TestFREDParsing(unittest.TestCase):
         result = svc.get_rba_cash_rate()
         self.assertEqual(result, 4.35)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_fred_no_api_key_falls_to_fallback(self, mock_client_cls):
         svc = MacroDataService()
         svc.fred_api_key = ""
         result = svc.get_rba_cash_rate()
         self.assertEqual(result, _FALLBACKS["rba_cash_rate"])
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_fred_empty_observations_falls_to_fallback(self, mock_client_cls):
         mock_client_cls.return_value = _make_mock_client(
             _make_mock_response({"observations": []}),
@@ -472,7 +472,7 @@ class TestClipping(unittest.TestCase):
         result = svc._clip("unknown_indicator", 999.0)
         self.assertEqual(result, 999.0)
 
-    @patch("apps.ml_engine.services.macro_data_service.httpx.Client")
+    @patch("apps.ml_engine.services.external.macro_data.httpx.Client")
     def test_extreme_api_value_gets_clipped(self, mock_client_cls):
         """Simulate an API returning an absurd value — it must be clipped."""
         extreme_response = {

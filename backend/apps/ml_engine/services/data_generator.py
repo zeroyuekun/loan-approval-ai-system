@@ -14,10 +14,10 @@ import pandas as pd
 from scipy import stats
 
 from . import data_generator_phases as _phases
-from .benchmark_resolver import BenchmarkResolver
+from .external.benchmark_resolver import BenchmarkResolver
+from .external.property_data import PropertyDataService
 from .feature_generator import BehavioralFeatureGenerator
 from .loan_performance_simulator import LoanPerformanceSimulator
-from .property_data_service import PropertyDataService
 from .underwriting_engine import UnderwritingEngine
 
 # Columns emitted by DataGenerator that encode information only available
