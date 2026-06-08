@@ -306,6 +306,23 @@ ML_STANDALONE_PREDICT_ENABLED = os.environ.get("ML_STANDALONE_PREDICT_ENABLED", 
     "yes",
 )
 
+# Two-factor authentication (PR-4 of the security gap-closure cycle —
+# spec: docs/superpowers/specs/2026-05-25-security-gap-closure-design.md).
+#
+# ENFORCE_2FA_FOR_STAFF — when "true", IsAdmin / IsAdminOrOfficer /
+# IsLoanOfficer permissions require the user to have a confirmed TOTP
+# device. Off by default so existing tests (and any pre-rollout
+# environments) keep working. Flip to "true" in production AFTER all
+# admin/officer accounts are enrolled in TOTP via /api/v1/auth/2fa/setup/.
+#
+# ALLOW_2FA_BYPASS — break-glass switch that skips the OTP check at
+# login for users who already have a TOTP device. Every bypass is
+# logged in AuditLog as `login_2fa_bypassed`. Set to "true" only during
+# documented incident response and remove from the env immediately
+# after — see docs/SECRETS_ROTATION.md (planned).
+ENFORCE_2FA_FOR_STAFF = os.environ.get("ENFORCE_2FA_FOR_STAFF", "false").lower() == "true"
+ALLOW_2FA_BYPASS = os.environ.get("ALLOW_2FA_BYPASS", "false").lower() == "true"
+
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
