@@ -37,11 +37,7 @@ def drift_status(active_model: ModelVersion | None) -> dict:
     if active_model is None:
         return {"level": "unknown", "detail": "No active model"}
 
-    report = (
-        DriftReport.objects.filter(model_version=active_model)
-        .order_by("-report_date")
-        .first()
-    )
+    report = DriftReport.objects.filter(model_version=active_model).order_by("-report_date").first()
     if report is None:
         return {"level": "unknown", "detail": "No drift reports yet"}
 

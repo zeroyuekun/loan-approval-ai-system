@@ -1,6 +1,7 @@
 """Tests for the four pure status functions feeding the dashboard
 operator status strip (PR-2 of the dashboard persona refit).
 """
+
 from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -160,9 +161,7 @@ class TestPendingReviewStatus:
         )
         run = AgentRun.objects.create(application=app, status="escalated")
         # Backdate to 30 hours ago
-        AgentRun.objects.filter(pk=run.pk).update(
-            created_at=timezone.now() - timedelta(hours=30)
-        )
+        AgentRun.objects.filter(pk=run.pk).update(created_at=timezone.now() - timedelta(hours=30))
         result = pending_review_status()
         assert result["level"] == "significant"
         assert result["sla_breach"] is True

@@ -169,16 +169,18 @@ class TestDashboardStatsStatusStrip:
     @pytest.mark.django_db
     @patch("apps.loans.views.ApiBudgetGuard")
     @patch("apps.loans.services.dashboard_status.redis.from_url")
-    def test_response_includes_status_strip(
-        self, mock_from_url, mock_budget_class, api_client, officer_user
-    ):
+    def test_response_includes_status_strip(self, mock_from_url, mock_budget_class, api_client, officer_user):
         # Wire mocks consistent with the PR-1 tests
         mock_budget_class.return_value.get_daily_stats.return_value = {
-            "calls": 0, "tokens": 0, "cost_usd": 0.0,
-            "budget_limit_usd": 5.0, "call_limit": 500,
+            "calls": 0,
+            "tokens": 0,
+            "cost_usd": 0.0,
+            "budget_limit_usd": 5.0,
+            "call_limit": 500,
             "circuit_breaker_open": False,
         }
         from unittest.mock import MagicMock as _MM
+
         mock_r = _MM()
         mock_r.hgetall.return_value = {b"status": b"healthy"}
         mock_from_url.return_value = mock_r
