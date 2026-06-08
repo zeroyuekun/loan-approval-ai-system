@@ -88,10 +88,10 @@ def _isolated_keys():
     """
     new_key = Fernet.generate_key().decode()
     old_key = Fernet.generate_key().decode()
-    encryption.get_fernet.cache_clear()
+    encryption.clear_fernet_cache()
     with override_settings(FIELD_ENCRYPTION_KEY=f"{new_key},{old_key}"):
         yield new_key, old_key
-    encryption.get_fernet.cache_clear()
+    encryption.clear_fernet_cache()
 
 
 @pytest.fixture
