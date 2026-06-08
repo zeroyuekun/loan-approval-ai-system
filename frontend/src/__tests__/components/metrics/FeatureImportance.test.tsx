@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import {
   FeatureImportance,
   buildFeatureImportanceModel,
@@ -125,5 +125,54 @@ describe('selectShownBars', () => {
     expect(charted.length).toBe(32)
     expect(charted.length).toBeGreaterThan(20)
     expect(selectShownBars(charted, false).some((b) => b.isOther)).toBe(true)
+  })
+})
+
+describe('<FeatureImportance />', () => {
+  function rankedRecord(n: number): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (let i = 0; i < n; i++) out[`feat_${i}`] = (n - i) / n
+    return out
+  }
+
+  it('renders the honest, algorithm-neutral caption', () => {
+    render(<FeatureImportance features={{ credit_score: 0.5 }} />)
+    expect(screen.getByText(/normalised tree-based importance/i)).toBeInTheDocument()
+    expect(screen.getByText(/magnitude only/i)).toBeInTheDocument()
+  })
+
+  it('discloses unused (zero-importance) features in the footer', () => {
+    render(
+      <FeatureImportance features={{ credit_score: 0.6, annual_income: 0.4, monthly_rent: 0, hem_gap: 0 }} />,
+    )
+    expect(screen.getByText(/2 features had no measurable contribution/i)).toBeInTheDocument()
+  })
+
+  it('omits the footer disclosure when every feature is used', () => {
+    render(<FeatureImportance features={{ credit_score: 0.6, annual_income: 0.4 }} />)
+    expect(screen.queryByText(/no measurable contribution/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a "Show all" toggle when >20 features, and expands to all', () => {
+    render(<FeatureImportance features={rankedRecord(25)} />)
+    const toggle = screen.getByRole('button', { name: /show all 25 features/i })
+    expect(toggle).toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: /plus an Other bar aggregating 5 more features/i }),
+    ).toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: /show fewer/i })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /all 25 grouped features/i })).toBeInTheDocument()
+  })
+
+  it('omits the toggle when 20 or fewer features', () => {
+    render(<FeatureImportance features={{ credit_score: 0.6, annual_income: 0.4 }} />)
+    expect(screen.queryByRole('button', { name: /show all|show fewer/i })).not.toBeInTheDocument()
+  })
+
+  it('keeps the synthetic "Other" bar out of the screen-reader feature list', () => {
+    render(<FeatureImportance features={rankedRecord(25)} />)
+    const srList = screen.getByRole('list', { name: 'Feature importance list' })
+    expect(srList.textContent).not.toMatch(/Other \(/)
   })
 })

@@ -1,6 +1,7 @@
 'use client'
 
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { useMemo, useState } from 'react'
+import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
@@ -198,58 +199,75 @@ export function selectShownBars(charted: FeatureBar[], expanded: boolean, topN: 
 
 export function FeatureImportance({ features, title = 'Feature Importance' }: FeatureImportanceProps) {
   const { active, hoverProps } = useChartHover()
+  const [expanded, setExpanded] = useState(false)
 
-  const data = (Array.isArray(features)
-    ? features
-        .filter((f): f is { feature: string; importance: number } =>
-          f != null && typeof f === 'object' && 'feature' in f && 'importance' in f
-        )
-        .map((f) => ({ name: formatFeatureName(f.feature), importance: f.importance }))
-    : Object.entries(features).map(([name, importance]) => ({
-        name: formatFeatureName(name),
-        importance: Number(importance),
-      }))
-  )
-    .filter((d) => Number.isFinite(d.importance) && d.importance > 0)
-    .sort((a, b) => b.importance - a.importance)
+  const { charted, unusedCount, total } = useMemo(() => buildFeatureImportanceModel(features), [features])
+  const hasOverflow = total > TOP_N
+  const shown = useMemo(() => selectShownBars(charted, expanded), [charted, expanded])
+  const realShown = shown.filter((d) => !d.isOther)
 
-  const TOP_N = 15
-  const hiddenCount = Math.max(0, data.length - TOP_N)
-  const shown = data.slice(0, TOP_N)
+  const top3 = charted
+    .slice(0, 3)
+    .map((d) => `${d.name} ${(d.importance * 100).toFixed(1)}%`)
+    .join(', ')
+  const ariaLabel =
+    expanded || !hasOverflow
+      ? `Bar chart of all ${total} grouped features by importance: ${top3}`
+      : `Bar chart of the top ${TOP_N} grouped features by importance, plus an Other bar aggregating ${total - TOP_N} more features: ${top3}`
 
   return (
     <Card>
       <CardHeader className="pb-4">
         <CardTitle className="text-base">{title}</CardTitle>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Relative contribution of each feature across all of the model&apos;s decisions (normalised
+          tree-based importance — split gain for gradient-boosted trees, impurity reduction for
+          random forests). Magnitude only — it shows how much, not which way; for the direction a
+          feature pushed a specific decision, see that application&apos;s explanation.
+        </p>
       </CardHeader>
       <CardContent>
         <ul className="sr-only" aria-label="Feature importance list">
-          {shown.map((d) => (
+          {realShown.map((d) => (
             <li key={d.name}>{d.name}</li>
           ))}
         </ul>
-        <div role="img" aria-label={`Bar chart of top ${shown.length} features by importance: ${shown.slice(0, 3).map((d) => `${d.name} ${(d.importance * 100).toFixed(1)}%`).join(', ')}`}>
-        <ResponsiveContainer width="100%" height={Math.max(280, shown.length * 36)}>
-          <BarChart data={shown} layout="vertical" margin={{ top: 5, right: 30, bottom: 5, left: 10 }} {...hoverProps}>
-            <CartesianGrid strokeDasharray="3 3" opacity={0.4} horizontal={false} />
-            <XAxis type="number" tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }} />
-            <YAxis
-              dataKey="name"
-              type="category"
-              tick={{ fontSize: 11 }}
-              width={160}
-              tickLine={false}
-              axisLine={false}
-            />
-            <Tooltip content={renderEmptyTooltip} />
-            <Bar dataKey="importance" name="Importance" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+        <div role="img" aria-label={ariaLabel}>
+          <ResponsiveContainer width="100%" height={Math.max(280, shown.length * 36)}>
+            <BarChart data={shown} layout="vertical" margin={{ top: 5, right: 30, bottom: 5, left: 10 }} {...hoverProps}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.4} horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }} />
+              <YAxis
+                dataKey="name"
+                type="category"
+                tick={{ fontSize: 11 }}
+                width={160}
+                tickLine={false}
+                axisLine={false}
+              />
+              <Tooltip content={renderEmptyTooltip} />
+              <Bar dataKey="importance" name="Importance" radius={[0, 4, 4, 0]}>
+                {shown.map((d) => (
+                  <Cell key={d.name} fill={d.isOther ? 'hsl(var(--muted-foreground))' : 'hsl(var(--primary))'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
         <ChartHoverPanel active={active} formatValue={(v) => `${(Number(v) * 100).toFixed(1)}%`} />
-        {hiddenCount > 0 && (
+        {hasOverflow && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="mx-auto mt-2 block text-xs font-medium text-primary hover:underline"
+          >
+            {expanded ? 'Show fewer' : `Show all ${total} features`}
+          </button>
+        )}
+        {unusedCount > 0 && (
           <p className="mt-2 text-center text-xs text-muted-foreground">
-            +{hiddenCount} more feature{hiddenCount === 1 ? '' : 's'} not shown
+            {unusedCount} feature{unusedCount === 1 ? '' : 's'} had no measurable contribution (never
+            used in a model split) and {unusedCount === 1 ? 'is' : 'are'} omitted.
           </p>
         )}
       </CardContent>
