@@ -25,7 +25,6 @@ export function RecentApplications({ applications }: RecentApplicationsProps) {
               <TableHead>Amount</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Date</TableHead>
-              <TableHead className="sr-only">Open</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -46,21 +45,12 @@ export function RecentApplications({ applications }: RecentApplicationsProps) {
                     <Badge className={s.color} variant="outline">{s.label}</Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{formatDate(app.created_at)}</TableCell>
-                  <TableCell className="text-right">
-                    <Link
-                      href={`/dashboard/applications/${app.id}`}
-                      aria-label={`Open application ${app.id}`}
-                      className="text-xs text-blue-600 hover:underline"
-                    >
-                      Open →
-                    </Link>
-                  </TableCell>
                 </TableRow>
               )
             })}
             {applications.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={4} className="text-center text-muted-foreground">
                   No applications yet
                 </TableCell>
               </TableRow>

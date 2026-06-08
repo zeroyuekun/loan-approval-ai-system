@@ -33,11 +33,12 @@ describe('RecentApplications', () => {
     expect(screen.getByText(/Bob/)).toBeInTheDocument()
   })
 
-  it('makes each row navigate to the application detail page', () => {
+  it('no longer renders an Open link to the application detail page', () => {
     render(<RecentApplications applications={[mockApp('a1', 'Alice')]} />)
-    // The row should expose a link to /dashboard/applications/{id}
-    const rowLink = screen.getByRole('link', { name: /open application a1/i })
-    expect(rowLink).toHaveAttribute('href', '/dashboard/applications/a1')
+    // The "Open →" link was removed; no row should link to the detail route.
+    expect(screen.queryByRole('link', { name: /open application/i })).not.toBeInTheDocument()
+    const links = screen.getAllByRole('link')
+    expect(links.every((l) => !l.getAttribute('href')?.startsWith('/dashboard/applications/'))).toBe(true)
   })
 
   it('still links applicant name to customer profile (existing behaviour)', () => {
