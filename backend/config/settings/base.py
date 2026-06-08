@@ -277,6 +277,17 @@ ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
 # in scope. See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
 ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
 
+# Pre-activation validation sign-off gate mode (Codex v1.10.7). Mirrors the
+# fairness/promotion gate pattern: "warn" (default — gate runs, decision is
+# recorded, activation proceeds even with no approved ModelValidationReport),
+# "block" (training-path candidates are demoted to is_active=False without
+# an approved sign-off; manual ModelActivateView returns 409 unless ?force=true
+# is provided), "off" (skip the check entirely). Defaults to "warn" so the
+# PR ships zero behaviour change for any deployment that doesn't set the env
+# var; flip to "block" once operators have established a sign-off cadence.
+# See docs/superpowers/specs/2026-05-07-codex-adversarial-response-v1-10-7-design.md.
+ML_VALIDATION_SIGNOFF_GATE_MODE = os.environ.get("ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
+
 # D7 — MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
 MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").lower() == "true"
