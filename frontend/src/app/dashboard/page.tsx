@@ -3,7 +3,7 @@
 import { useApplications } from '@/hooks/useApplications'
 import { useDashboardStats } from '@/hooks/useDashboardStats'
 import { StatsCards } from '@/components/dashboard/StatsCards'
-import { StatusStrip } from '@/components/dashboard/StatusStrip'
+import { ApprovalRateChart } from '@/components/dashboard/ApprovalRateChart'
 import { RecentApplications } from '@/components/dashboard/RecentApplications'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -21,12 +21,10 @@ export default function DashboardPage() {
             <Skeleton key={i} className="h-32" />
           ))}
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-14" />
-          ))}
+        <div className="grid gap-6 md:grid-cols-2">
+          <Skeleton className="h-80" />
+          <Skeleton className="h-80" />
         </div>
-        <Skeleton className="h-80" />
       </div>
     )
   }
@@ -46,9 +44,10 @@ export default function DashboardPage() {
         }}
       />
 
-      <StatusStrip strip={stats.status_strip} />
-
-      <RecentApplications applications={applications} />
+      <div className="grid gap-6 md:grid-cols-2">
+        <ApprovalRateChart approved={stats.approved_count} denied={stats.denied_count} />
+        <RecentApplications applications={applications} />
+      </div>
     </div>
   )
 }

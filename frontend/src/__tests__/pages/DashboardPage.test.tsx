@@ -114,7 +114,7 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('2.3s')).not.toBeInTheDocument()
   })
 
-  it('renders the status strip with four indicators and no approval-rate donut', async () => {
+  it('renders the approval-rate donut with the approved/denied split and no status strip', async () => {
     server.use(
       http.get(`${API_URL}/loans/dashboard-stats/`, () => HttpResponse.json(baseStats)),
       http.get(`${API_URL}/loans/`, () =>
@@ -122,15 +122,18 @@ describe('DashboardPage', () => {
       )
     )
     renderPage()
-    await waitFor(() => expect(screen.getByText('Drift')).toBeInTheDocument())
-    expect(screen.getByText('Fairness')).toBeInTheDocument()
-    expect(screen.getByText('Pending Review')).toBeInTheDocument()
-    expect(screen.getByText('Watchdog')).toBeInTheDocument()
-    // The donut component is no longer rendered. We can't grep imports in
-    // jsdom, so just assert no element with the chart's distinctive role
-    // ('img' with no name, since Recharts donut is an SVG) sneaks in.
-    // The positive Drift/Fairness/Pending Review/Watchdog assertions above
-    // already prove the strip rendered; donut absence is implicit from
-    // ApprovalRateChart.tsx being deleted in this same PR.
+    // The donut exposes an accessible role="img" whose label encodes the
+    // approved/denied split computed from approved_count / denied_count
+    // (30 / 12 → 71.4% approved, 28.6% denied). Use it to disambiguate from
+    // the StatsCards "Approval Rate" tile, which shares the same heading text.
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: /approval rate chart: 71\.4% approved, 28\.6% denied/i })).toBeInTheDocument()
+    )
+    // Donut legend labels.
+    expect(screen.getByText('Approved')).toBeInTheDocument()
+    expect(screen.getByText('Denied')).toBeInTheDocument()
+    // The operator status strip is no longer mounted on the dashboard.
+    expect(screen.queryByText('Drift')).not.toBeInTheDocument()
+    expect(screen.queryByText('Watchdog')).not.toBeInTheDocument()
   })
 })
