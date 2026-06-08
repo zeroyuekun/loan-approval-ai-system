@@ -45,9 +45,7 @@ class Command(BaseCommand):
                 )
             prior_hash = row.hash_self
 
-        self.stdout.write(
-            self.style.SUCCESS(f"Verified {count} AuditLog rows — chain OK")
-        )
+        self.stdout.write(self.style.SUCCESS(f"Verified {count} AuditLog rows — chain OK"))
 
     def _fail(self, message: str):
         """Emit the failure to stderr (so operators see it on the terminal)

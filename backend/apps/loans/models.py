@@ -80,19 +80,13 @@ class AuditLog(models.Model):
                 # inserts would order randomly under (timestamp, id)
                 # because UUIDs aren't time-sortable — breaking the
                 # chain when walked in that order.
-                prior = (
-                    AuditLog.objects.order_by("-timestamp", "-id")
-                    .only("timestamp", "hash_self")
-                    .first()
-                )
+                prior = AuditLog.objects.order_by("-timestamp", "-id").only("timestamp", "hash_self").first()
                 now = timezone.now()
                 if prior and prior.timestamp >= now:
                     self.timestamp = prior.timestamp + timedelta(microseconds=1)
                 else:
                     self.timestamp = now
-                self.hash_prev = (
-                    prior.hash_self if prior and prior.hash_self else GENESIS_HASH
-                )
+                self.hash_prev = prior.hash_self if prior and prior.hash_self else GENESIS_HASH
                 self.hash_self = compute_hash(
                     hash_prev=self.hash_prev,
                     timestamp=self.timestamp.isoformat(),
