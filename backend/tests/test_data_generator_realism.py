@@ -18,8 +18,7 @@ exists for ML tractability and is acknowledged in the manifest.
 
 import pytest
 
-from apps.ml_engine.services.data_generator import DataGenerator
-
+from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
 # Allowable band for the synthetic positive-class rate. Wide enough to
 # absorb seed-level noise (observed spread 1.62pp), narrow enough to catch
