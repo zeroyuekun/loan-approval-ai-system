@@ -65,10 +65,7 @@ def _compliance_status(mv) -> tuple[str, list[str]]:
             mode = training_meta.get("fairness_gate_mode", "warn")
             min_dir = fairness_gate.get("minimum_dir")
             if failing:
-                detail = (
-                    f"on {', '.join(sorted(failing))} "
-                    f"(min DIR={min_dir if min_dir is not None else '?'})"
-                )
+                detail = f"on {', '.join(sorted(failing))} (min DIR={min_dir if min_dir is not None else '?'})"
             else:
                 detail = "(failing attributes not recorded)"
             reasons.append(f"Fairness gate FAILED {detail} — mode={mode}")
@@ -83,17 +80,11 @@ def _compliance_status(mv) -> tuple[str, list[str]]:
     if promotion_gate and promotion_gate.get("promoted") is False:
         gate_reasons = promotion_gate.get("reasons") or []
         actionable = [
-            r
-            for r in gate_reasons
-            if isinstance(r, str)
-            and "All gates passed" not in r
-            and "auto-promotes" not in r
+            r for r in gate_reasons if isinstance(r, str) and "All gates passed" not in r and "auto-promotes" not in r
         ]
         mode = training_meta.get("promotion_gate_mode", "warn")
         if actionable:
-            reasons.append(
-                f"Promotion gate REJECTED candidate (mode={mode}): {'; '.join(actionable)}"
-            )
+            reasons.append(f"Promotion gate REJECTED candidate (mode={mode}): {'; '.join(actionable)}")
         else:
             reasons.append(f"Promotion gate REJECTED candidate (mode={mode})")
 
