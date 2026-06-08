@@ -62,8 +62,26 @@ app.conf.result_serializer = "json"
 app.conf.accept_content = ["json"]
 
 # Worker restart every N tasks to mitigate memory leaks (common with
-# ML worker processes importing large libs).
-app.conf.worker_max_tasks_per_child = 1000
+# ML worker processes importing large libs). Env-var override available for
+# tuning without a redeploy; production.py no longer duplicates this value.
+app.conf.worker_max_tasks_per_child = int(os.environ.get("CELERY_WORKER_MAX_TASKS_PER_CHILD", "1000"))
+
+# Surface broker enqueue failures instead of silently dropping (L23).
+# For the Redis transport, fail fast on publish-time connection errors so
+# .delay() raises and the outbox loop keeps the durable row rather than
+# deleting it on a phantom "success". (AMQP would instead use confirm_publish.)
+# NOTE: these flags are GLOBAL across all queues, not just the outbox path —
+# they change startup/retry behaviour everywhere, so a healthy-broker smoke
+# (docker compose up; confirm workers connect) is required before merge.
+app.conf.broker_transport_options = {
+    "socket_timeout": 5,
+    "socket_connect_timeout": 5,
+    "retry_on_timeout": False,
+}
+# Retry broker connection on startup so workers survive a brief Redis restart
+# or a race during docker compose bring-up (H27). Set CELERY_RETRY_ON_STARTUP=false
+# to disable in environments where a clean fail-fast is preferred.
+app.conf.broker_connection_retry_on_startup = os.environ.get("CELERY_RETRY_ON_STARTUP", "true").lower() != "false"
 
 app.conf.task_routes = {
     "apps.ml_engine.tasks.*": {"queue": "ml"},

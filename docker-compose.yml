@@ -66,7 +66,7 @@ services:
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.development}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
       SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       DJANGO_CACHE_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
@@ -76,7 +76,7 @@ services:
       - ./backend:/app
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120 --max-requests 1000 --max-requests-jitter 100 --access-logfile -
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/ready/", "--connect-timeout", "5"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/", "--connect-timeout", "5"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -163,7 +163,11 @@ services:
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
     volumes:
       - ./backend:/app
-    command: celery -A config worker -l info -Q email,agents,celery --concurrency 4
+    # --prefetch-multiplier 1 matches celery_worker_ml so each of the 4 IO
+    # worker threads reserves at most 1 task at a time (H28 — without this,
+    # the global worker_prefetch_multiplier=2 allows up to 8 tasks reserved
+    # by one worker, delaying fairness across queues).
+    command: celery -A config worker -l info -Q email,agents,celery --concurrency 4 --prefetch-multiplier 1
     healthcheck:
       test: ["CMD-SHELL", "celery -A config inspect ping --timeout 10"]
       interval: 30s
@@ -203,7 +207,21 @@ services:
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
     volumes:
       - ./backend:/app
-    command: celery -A config beat -l info
+    # Use Celery's default PersistentScheduler. The beat schedule is defined in
+    # code (config/celery.py -> app.conf.beat_schedule), so the DatabaseScheduler
+    # from django-celery-beat is unnecessary — and that package is NOT a dependency
+    # (requirements ships django-celery-results, a different package), so forcing
+    # the override crash-loops beat with ModuleNotFoundError. Do not re-add it
+    # without also adding django-celery-beat to requirements + INSTALLED_APPS.
+    command: >
+      celery -A config beat -l info
+        --pidfile /tmp/celerybeat.pid
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/celerybeat.pid && kill -0 $(cat /tmp/celerybeat.pid) 2>/dev/null || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
     networks:
       - internal
 
@@ -252,12 +270,11 @@ services:
       backend:
         condition: service_healthy
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
-      WATCHPACK_POLLING: "true"
       # Cap Node heap below the container mem_limit so a runaway
-      # Next.js dev-server watch cycle exits gracefully instead of
-      # being killed with code 243. See docs/runbooks/frontend-exit-243.md.
+      # Next.js process exits gracefully instead of being killed with code 243.
+      # See docs/runbooks/frontend-exit-243.md.
       NODE_OPTIONS: "--max-old-space-size=768"
     mem_limit: 1g
     volumes:
@@ -269,7 +286,9 @@ services:
       - ./frontend/postcss.config.js:/app/postcss.config.js
       - frontend_next:/app/.next
       - frontend_node_modules:/app/node_modules
-    user: root
+    # user: root moved to docker-compose.override.yml (the dev-only bind-mount
+    # workaround), so a bare `docker compose -f docker-compose.yml up` runs the
+    # frontend as the image's non-root appuser. Command unchanged from prior.
     command: sh -c "npm ci && npm run dev"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
@@ -294,6 +313,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     networks:
       - internal

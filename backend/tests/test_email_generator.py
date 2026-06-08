@@ -255,3 +255,93 @@ class TestEmailGenerator:
         # The generator should raise on first failure; it falls back after 3 consecutive
         with pytest.raises(Exception):
             gen.generate(app, "approved", confidence=0.92)
+
+
+def test_denial_prompt_has_alternative_offer_placeholder():
+    """DENIAL_EMAIL_PROMPT must accept an {alternative_offer} substitution and
+    must NOT introduce apology/emotion language in its static text."""
+    from apps.email_engine.services.prompts import DENIAL_EMAIL_PROMPT
+
+    assert "{alternative_offer}" in DENIAL_EMAIL_PROMPT
+    # Formatting with all known keys (incl. empty offer) must not raise.
+    rendered = DENIAL_EMAIL_PROMPT.format(
+        applicant_name="Jane",
+        loan_amount=20000.0,
+        purpose="Personal Loan",
+        reasons="credit_score",
+        banking_context="No banking relationship data available",
+        alternative_offer="",
+    )
+    assert "{alternative_offer}" not in rendered
+    # Locked rule: no apology/regret tokens in the verbatim TEMPLATE the model
+    # copies into the customer-facing email. (The prompt's *instructions* legitimately
+    # contain "Do NOT apologise or mention disappointment" and reference that Big-4
+    # banks use "We regret to inform you" — those forbid apology language rather
+    # than emit it, so the check targets the output template, not the guidance.)
+    template_marker = "=== TEMPLATE (USE AS-IS) ==="
+    template_block = DENIAL_EMAIL_PROMPT[DENIAL_EMAIL_PROMPT.index(template_marker) :].lower()
+    for banned in ("we apologise", "we are sorry", "we regret", "disappointment"):
+        assert banned not in template_block
+
+
+class TestDenialNboTeaser:
+    @staticmethod
+    def _render_block_app():
+        app = _make_mock_application(decision="denied", loan_amount=20000)
+        app.applicant.first_name = "Jane"
+        app.applicant.last_name = "Doe"
+        return app
+
+    def test_render_nbo_block_is_neutral_and_names_offer_and_figure(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        offer = {
+            "name": "Secured Personal Loan",
+            "amount": 15000.0,
+            "estimated_rate": 8.99,
+            "monthly_repayment": 476.5,
+            "term_months": 36,
+        }
+        block = gen._render_nbo_block(offer)
+        assert "Secured Personal Loan" in block
+        assert "$15,000" in block
+        # Locked rule: neutral/factual, no apology/emotion.
+        lowered = block.lower()
+        for banned in ("sorry", "apolog", "disappoint", "regret", "unfortunately"):
+            assert banned not in lowered
+
+    def test_render_nbo_block_empty_when_no_offer(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        assert gen._render_nbo_block(None) == ""
+        assert gen._render_nbo_block({}) == ""
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
+    @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
+    @patch("apps.agents.services.api_budget.ApiBudgetGuard")
+    def test_denial_prompt_includes_offer_and_whitelists_amount(self, mock_budget_cls, mock_anthropic_cls):
+        mock_client = MagicMock()
+        mock_anthropic_cls.return_value = mock_client
+        mock_client.messages.create.return_value = _make_mock_tool_response(
+            "Update on Your Personal Loan Application | Ref #PL-20260601-0001",
+            GOOD_DENIAL_BODY,
+        )
+        mock_budget_cls.return_value = MagicMock()
+
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        app = self._render_block_app()
+        result = gen.generate(
+            app,
+            "denied",
+            confidence=0.35,
+            profile_context={"nbo_offer": {"name": "Secured Personal Loan", "amount": 15000.0}},
+        )
+        # The figure must reach the prompt that was sent to Claude.
+        assert "Secured Personal Loan" in result["prompt_used"]
+        assert "$15,000" in result["prompt_used"]
+        # Guardrail count is unchanged (no new check added).
+        assert len(result["guardrail_results"]) == 18

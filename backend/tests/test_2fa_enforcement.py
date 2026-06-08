@@ -105,9 +105,7 @@ class LoginTwoFactorGateTests(TestCase):
         self.assertIn("access_token", response.cookies)
         self.assertTrue(response.data.get("requires_2fa_setup"))
         # Audit-logged as a distinct action
-        actions = list(
-            AuditLog.objects.filter(action__startswith="login_").values_list("action", flat=True)
-        )
+        actions = list(AuditLog.objects.filter(action__startswith="login_").values_list("action", flat=True))
         self.assertIn("login_success_no_2fa_setup", actions)
 
     def test_officer_without_totp_gets_jwt_plus_setup_flag(self):
@@ -147,9 +145,7 @@ class LoginTwoFactorGateTests(TestCase):
         # No JWT issued
         self.assertNotIn("access_token", response.cookies)
         # Audit-logged
-        self.assertTrue(
-            AuditLog.objects.filter(action="login_2fa_required").exists()
-        )
+        self.assertTrue(AuditLog.objects.filter(action="login_2fa_required").exists())
 
     def test_admin_with_totp_and_valid_otp_gets_jwt(self):
         user = CustomUser.objects.create_user(
@@ -173,9 +169,7 @@ class LoginTwoFactorGateTests(TestCase):
         self.assertNotIn("requires_2fa", response.data)
         self.assertNotIn("requires_2fa_setup", response.data)
         # Audit-logged as normal success (not the no-setup variant)
-        self.assertTrue(
-            AuditLog.objects.filter(action="login_success").exists()
-        )
+        self.assertTrue(AuditLog.objects.filter(action="login_success").exists())
 
     def test_admin_with_totp_and_invalid_otp_rejected(self):
         user = CustomUser.objects.create_user(
@@ -200,9 +194,7 @@ class LoginTwoFactorGateTests(TestCase):
         user.refresh_from_db()
         self.assertGreaterEqual(user.failed_login_attempts, 1)
         # Audit-logged
-        self.assertTrue(
-            AuditLog.objects.filter(action="login_2fa_invalid").exists()
-        )
+        self.assertTrue(AuditLog.objects.filter(action="login_2fa_invalid").exists())
 
     def test_admin_with_unconfirmed_totp_still_gets_setup_flag(self):
         """An unconfirmed device doesn't count — user needs to verify first.
@@ -244,9 +236,7 @@ class LoginTwoFactorGateTests(TestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access_token", response.cookies)
-        self.assertTrue(
-            AuditLog.objects.filter(action="login_2fa_bypassed").exists()
-        )
+        self.assertTrue(AuditLog.objects.filter(action="login_2fa_bypassed").exists())
 
 
 @override_settings(

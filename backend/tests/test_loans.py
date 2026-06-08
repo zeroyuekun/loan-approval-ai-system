@@ -13,10 +13,10 @@ from apps.accounts.models import CustomUser
 class LoanCRUDTestCase(TestCase):
     def setUp(self):
         cache.clear()
-        # Clear the Fernet lru_cache so it picks up the test encryption key
-        from apps.accounts.models import _get_fernet
+        # Clear the Fernet singleton so it picks up the test encryption key
+        from apps.accounts.utils.encryption import clear_fernet_cache
 
-        _get_fernet.cache_clear()
+        clear_fernet_cache()
         self.customer = CustomUser.objects.create_user(
             username="customer1",
             password="TestPass123!",

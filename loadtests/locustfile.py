@@ -5,7 +5,6 @@ Simulates realistic traffic patterns:
 - 50% read-heavy browsing (login, list, view)
 - 30% write-heavy applicant flow (register, apply, predict)
 """
-import json
 import random
 import string
 from locust import HttpUser, task, between, tag
@@ -20,11 +19,6 @@ class HealthCheckUser(HttpUser):
     @task(3)
     def health(self):
         self.client.get('/api/v1/health/', name='/health')
-
-    @tag('health')
-    @task(1)
-    def deep_health(self):
-        self.client.get('/api/v1/health/deep/', name='/health/deep')
 
 
 class BrowsingUser(HttpUser):

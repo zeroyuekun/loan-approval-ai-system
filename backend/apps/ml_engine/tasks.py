@@ -43,6 +43,11 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
     try:
         return _do_train(self, algorithm, data_path, lock, segment=segment)
     except Exception:
+        logger.exception(
+            "train_model_task failed for algorithm=%s version_id=%s",
+            algorithm,
+            self.request.id,
+        )
         lock.release()
         raise
 
@@ -241,6 +246,18 @@ def run_prediction_task(self, application_id):
     try:
         predictor = ModelPredictor.for_application(application)
         result = predictor.predict(application)
+    except ValueError as e:
+        # No active model available — not a transient error; do not retry.
+        # Revert to pending so the application can be processed once a model
+        # is activated, and return a structured skipped result.
+        logger.error(
+            "run_prediction_task: no active model for application %s — %s",
+            application_id,
+            e,
+        )
+        application.status = "pending"
+        application.save(update_fields=["status"])
+        return {"status": "skipped", "reason": "no_active_model", "detail": str(e)}
     except Exception:
         # Revert status so the application isn't stuck in 'processing'
         application.transition_to("pending", details={"reason": "prediction_failed"})
@@ -269,8 +286,12 @@ def run_prediction_task(self, application_id):
         },
     )
 
-    # Update application status — flag borderline cases for human review
-    if result.get("requires_human_review"):
+    # Flag borderline cases for human review ONLY when the standalone path is
+    # explicitly enabled. The standalone task creates no escalated AgentRun, so
+    # a 'review' transition here would be unresumable and would leave the ADM
+    # disclosure stale (Phase-1 Issue 1). Default: apply the raw decision.
+    standalone_enabled = getattr(settings, "ML_STANDALONE_PREDICT_ENABLED", False)
+    if standalone_enabled and result.get("requires_human_review"):
         application.transition_to("review")
     else:
         application.transition_to(result["prediction"])
@@ -366,7 +387,10 @@ def compute_weekly_drift_report(self):
     # Compute prediction distribution stats
     mean_prob = float(np.mean(probabilities))
     std_prob = float(np.std(probabilities))
-    approval_rate = float(np.mean(probabilities >= 0.5))
+    # Approval rate from the ACTUAL recorded decisions (which already encode
+    # group-adjusted thresholds + pricing-overlay denials), not a flat 0.5 cut
+    # on raw probabilities — matches the on-demand approval-rate computation.
+    approval_rate = predictions.filter(prediction="approved").count() / num_predictions
 
     # Compute PSI against training reference distribution
     training_meta = active_version.training_metadata or {}
@@ -379,9 +403,8 @@ def compute_weekly_drift_report(self):
         ref_array = np.array(reference_probs, dtype=float)
         psi_score = _compute_psi(ref_array, probabilities)
 
-        # Per-feature PSI is computed by compute_batch_drift_report (drift_monitor.py)
-        # which loads the full model bundle with reference distributions.
-        # This weekly task only computes probability-level PSI.
+        # Per-feature PSI is surfaced via the on-demand /drift/ endpoint
+        # (compute_on_demand_feature_psi); this weekly task tracks score-level PSI.
 
     # Determine alert level
     if psi_score is not None and psi_score >= 0.25:

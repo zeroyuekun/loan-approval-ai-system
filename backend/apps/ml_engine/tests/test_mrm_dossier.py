@@ -436,6 +436,97 @@ def test_compliance_status_needs_review_when_calibration_missing():
     assert any("calibration" in r for r in reasons)
 
 
+# ---------------------------------------------------------------------------
+# Gate-verdict precedence — PRs #163-#165 added pre-activation
+# fairness_gate / promotion_gate decisions to training_metadata. In `warn`
+# mode a model can activate despite a rejected gate; the §1 banner must
+# surface that even when raw evidence (fairness_metrics, psi_by_feature, ECE)
+# looks clean.
+# ---------------------------------------------------------------------------
+
+
+def test_compliance_status_marks_warn_mode_promotion_rejection_noncompliant():
+    """A `warn`-mode promotion gate rejection must flip the banner from
+    COMPLIANT to NON-COMPLIANT — otherwise the dossier silently endorses a
+    model the audit log already flagged as a regression vs the champion."""
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
+
+    mv = _make_compliant_mv(
+        training_metadata={
+            "psi_by_feature": {"credit_score": 0.05, "annual_income": 0.12, "dti": 0.18},
+            "promotion_gate_mode": "warn",
+            "promotion_gate": {
+                "promoted": False,
+                "candidate_id": "cand-1",
+                "champion_id": "champ-0",
+                "reasons": [
+                    "KS gate failed: candidate KS 0.4200 below champion KS 0.4500 − 0.015",
+                ],
+                "gates": {"ks": {"passed": False}},
+            },
+            "requires_promotion_review": True,
+        },
+    )
+    status, reasons = _compliance_status(mv)
+    assert status == "NON-COMPLIANT"
+    assert any("Promotion gate REJECTED" in r for r in reasons)
+    assert any("KS gate failed" in r for r in reasons)
+    assert any("mode=warn" in r for r in reasons)
+
+
+def test_compliance_status_marks_warn_mode_fairness_failure_noncompliant():
+    """A recorded fairness-gate verdict trumps the raw 80%-rule scan. Even
+    when fairness_metrics is clean (e.g. trainer post-processed the slice
+    after the gate ran), the recorded verdict still drives the banner."""
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
+
+    mv = _make_compliant_mv(
+        fairness_metrics={
+            "gender": {"disparate_impact_ratio": 0.92, "passes_80_percent_rule": True},
+            "age_group": {"disparate_impact_ratio": 0.88, "passes_80_percent_rule": True},
+        },
+        training_metadata={
+            "psi_by_feature": {"credit_score": 0.05, "annual_income": 0.12, "dti": 0.18},
+            "fairness_gate_mode": "warn",
+            "fairness_gate": {
+                "passed": False,
+                "threshold": 0.80,
+                "minimum_dir": 0.7421,
+                "failing_attributes": ["state"],
+            },
+            "requires_fairness_review": True,
+        },
+    )
+    status, reasons = _compliance_status(mv)
+    assert status == "NON-COMPLIANT"
+    assert any("Fairness gate FAILED" in r for r in reasons)
+    assert any("state" in r for r in reasons)
+    assert any("mode=warn" in r for r in reasons)
+
+
+def test_compliance_status_compliant_when_gate_verdict_passed():
+    """Defense — a recorded `passed=True` verdict does not flip the banner."""
+    from apps.ml_engine.services.mrm_compliance import _compliance_status
+
+    mv = _make_compliant_mv(
+        training_metadata={
+            "psi_by_feature": {"credit_score": 0.05, "annual_income": 0.12, "dti": 0.18},
+            "fairness_gate_mode": "block",
+            "fairness_gate": {
+                "passed": True,
+                "threshold": 0.80,
+                "minimum_dir": 0.91,
+                "failing_attributes": [],
+            },
+            "promotion_gate_mode": "warn",
+            "promotion_gate": {"promoted": True, "reasons": ["All gates passed"]},
+        },
+    )
+    status, reasons = _compliance_status(mv)
+    assert status == "COMPLIANT"
+    assert reasons == []
+
+
 def test_header_renders_non_compliant_status_when_fairness_fails():
     """Even with is_active=True, a failed fairness gate must surface in §1."""
     from apps.ml_engine.services.mrm_dossier import generate_dossier_markdown
@@ -486,7 +577,12 @@ def test_write_dossier_creates_file_at_expected_path():
 
     mv = _make_mv()
     with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl:
+        # The H11 path-traversal guard checks output_dir against ML_MODELS_DIR.
+        # Override ML_MODELS_DIR to the tmp directory so the check passes in tests.
+        with (
+            patch("apps.ml_engine.services.mrm_dossier._changelog_section") as _cl,
+            patch("django.conf.settings.ML_MODELS_DIR", tmpdir),
+        ):
             _cl.return_value = "## 11. Change log\n\n(stub)"
             path = write_dossier(mv, tmpdir)
 

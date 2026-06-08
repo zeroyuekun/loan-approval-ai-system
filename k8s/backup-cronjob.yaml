@@ -36,7 +36,9 @@ spec:
                     name: loan-approval-secrets
               env:
                 - name: PGHOST
-                  value: "postgres-service"
+                  # Must match the postgres Service metadata.name in k8s manifests
+                  # and POSTGRES_HOST in configmap.yaml (both are "postgres").
+                  value: "postgres"
                 - name: PGPORT
                   value: "5432"
                 - name: PGUSER

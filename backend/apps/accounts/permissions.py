@@ -37,6 +37,9 @@ class IsCustomer(BasePermission):
 
 class IsAdminOrOfficer(BasePermission):
     def has_permission(self, request, view):
-        if not (request.user.is_authenticated and request.user.role in ("admin", "officer")):
+        if not (
+            request.user.is_authenticated
+            and (getattr(request.user, "role", None) in ("admin", "officer") or request.user.is_superuser)
+        ):
             return False
         return _staff_2fa_satisfied(request.user)

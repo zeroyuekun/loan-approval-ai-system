@@ -72,6 +72,8 @@ describe('RepaymentCalculator', () => {
   it('displays comparison rate', () => {
     render(<RepaymentCalculator interestRate={6.5} />)
 
-    expect(screen.getByText(/Comparison.*% p\.a\.\*/)).toBeInTheDocument()
+    // Assert a concrete fee-inclusive value (~6.62% for a 6.5% product rate),
+    // not a loose match — the old solver diverged and rendered "NaN%".
+    expect(screen.getByText(/Comparison 6\.6[0-9]% p\.a\.\*/)).toBeInTheDocument()
   })
 })

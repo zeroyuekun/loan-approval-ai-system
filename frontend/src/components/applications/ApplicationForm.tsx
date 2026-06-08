@@ -71,7 +71,7 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
               <div>
                 <CardTitle className="text-lg">Complete Your Profile First</CardTitle>
                 <CardDescription className="text-amber-800">
-                  Under the National Consumer Credit Protection Act 2009 (NCCP), we need your personal details before processing a loan application.
+                  We need a few personal details before we can process your loan application.
                 </CardDescription>
               </div>
             </div>

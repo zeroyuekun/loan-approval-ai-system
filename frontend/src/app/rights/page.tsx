@@ -40,6 +40,35 @@ export default function ConsumerRightsPage() {
         </CardContent>
       </Card>
 
+      {/* Automated Decision-Making */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Scale className="h-5 w-5 text-blue-600" />
+            Automated Decision-Making
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm leading-relaxed">
+          <p>
+            Most decisions are made <strong>solely by an automated credit-decision model</strong>.
+            Applications flagged for potential bias, low model confidence, or significant data
+            shifts are <strong>reviewed by a lending officer</strong> (an assisted decision).
+          </p>
+          <p>The information used includes:</p>
+          <ul className="list-disc pl-6 space-y-1">
+            <li>Income and employment details you provided</li>
+            <li>Credit report and repayment history (Equifax/Illion, CCR)</li>
+            <li>Existing debts, expenses and serviceability under an interest-rate buffer</li>
+            <li>Loan amount, term and purpose</li>
+          </ul>
+          <p>
+            If your application was declined, you have the right to{' '}
+            <strong>request a human review</strong> of the decision from your application status
+            page. This is in addition to your right to lodge a complaint with AFCA.
+          </p>
+        </CardContent>
+      </Card>
+
       {/* Responsible Lending */}
       <Card>
         <CardHeader>

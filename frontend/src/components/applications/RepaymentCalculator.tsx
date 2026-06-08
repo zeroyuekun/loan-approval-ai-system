@@ -40,31 +40,42 @@ function calculateComparisonRate(
   const refPrincipal = 150000
   const refMonths = 300 // 25 years
   const totalBorrowed = refPrincipal - establishmentFee // net proceeds
-  // Solve for the rate that makes net proceeds = PV of all payments
-  // Using iterative Newton-Raphson method
-  let guess = annualRate / 100 / 12 // monthly rate guess
+  const prodR = annualRate / 100 / 12 // fixed product monthly rate
+  if (prodR <= 0) return annualRate
+
+  // The scheduled repayment is FIXED at the product rate; the comparison rate is
+  // the discount rate that equates the net proceeds to the present value of those
+  // (fee-inclusive) payments. Solve for that rate via Newton-Raphson.
+  const prodFactor = Math.pow(1 + prodR, refMonths)
+  const basePayment = (refPrincipal * prodR * prodFactor) / (prodFactor - 1)
+  const totalPayment = basePayment + monthlyFee // fixed across iterations
+
+  const pvAt = (r: number): number => {
+    const factor = Math.pow(1 + r, refMonths)
+    return (totalPayment * (factor - 1)) / (r * factor)
+  }
+
+  let guess = prodR
   for (let i = 0; i < 100; i++) {
     const r = guess
-    if (r <= 0) { guess = 0.001; continue }
-    const factor = Math.pow(1 + r, refMonths)
-    const basePayment = (refPrincipal * r * factor) / (factor - 1)
-    const totalPayment = basePayment + monthlyFee
-    // PV of all payments at rate r
-    const pv = totalPayment * (factor - 1) / (r * factor)
-    const f = pv - totalBorrowed
-    // Derivative of PV w.r.t. r (numerical approximation)
+    if (r <= 0) { guess = 0.0001; continue }
+    const f = pvAt(r) - totalBorrowed
     const dr = 0.00001
-    const r2 = r + dr
-    const factor2 = Math.pow(1 + r2, refMonths)
-    const basePayment2 = (refPrincipal * r2 * factor2) / (factor2 - 1)
-    const totalPayment2 = basePayment2 + monthlyFee
-    const pv2 = totalPayment2 * (factor2 - 1) / (r2 * factor2)
-    const fprime = (pv2 - totalBorrowed - f) / dr
-    if (Math.abs(fprime) < 1e-12) break
-    guess = r - f / fprime
+    const fprime = (pvAt(r + dr) - totalBorrowed - f) / dr
+    if (!Number.isFinite(fprime) || Math.abs(fprime) < 1e-12) break
+    const next = r - f / fprime
+    if (!Number.isFinite(next)) break
+    guess = next
     if (Math.abs(f) < 0.01) break
   }
-  return guess * 12 * 100 // Convert back to annual percentage
+
+  const result = guess * 12 * 100 // convert back to annual percentage
+  // A fee-inclusive comparison rate is always at or above the product rate.
+  // Guard against any non-convergent/overflow case so it can never render NaN.
+  if (!Number.isFinite(result) || result < annualRate || result > annualRate + 5) {
+    return annualRate
+  }
+  return result
 }
 
 export function RepaymentCalculator({

@@ -67,7 +67,9 @@ MONOTONE_CONSTRAINTS = {
     "net_monthly_surplus": POSITIVE,
     "income_source_count": POSITIVE,
     "financial_literacy_score": POSITIVE,
-    "prepayment_buffer_months": POSITIVE,
+    # prepayment_buffer_months is a POST-OUTCOME quantity (computed after
+    # disbursement) and must not appear as a model constraint.  Removed to
+    # prevent accidental inclusion if the column were ever added to NUMERIC_COLS.
     "months_since_last_default": POSITIVE,
     "is_existing_customer": POSITIVE,
     "income_per_dependant": POSITIVE,
@@ -153,7 +155,7 @@ RATIONALE = {
     "net_monthly_surplus": "Income − expenses; foundational serviceability quantity.",
     "income_source_count": "Income diversification reduces concentration risk on a single employer.",
     "financial_literacy_score": "Higher literacy = better decision making; TMD-aligned protective factor.",
-    "prepayment_buffer_months": "Months of repayments already paid ahead reduces imminent default risk.",
+    # prepayment_buffer_months removed — post-outcome quantity, not a model constraint.
     "months_since_last_default": "Longer since default = more recovery evidence; monotone in safety.",
     "is_existing_customer": "Known customer behaviour is strictly more informative than acquired-unknown.",
     "income_per_dependant": "More income per dependant = more discretionary buffer.",

@@ -3,6 +3,7 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, Label } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface ThresholdEntry {
   threshold: number
@@ -21,6 +22,7 @@ interface ThresholdChartProps {
 }
 
 export function ThresholdChart({ sweep, f1OptimalThreshold, youdenJThreshold, costOptimalThreshold }: ThresholdChartProps) {
+  const { active, hoverProps } = useChartHover()
   if (!sweep?.length) return null
 
   return (
@@ -35,7 +37,7 @@ export function ThresholdChart({ sweep, f1OptimalThreshold, youdenJThreshold, co
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={380}>
-          <LineChart data={sweep} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+          <LineChart data={sweep} margin={{ top: 10, right: 20, bottom: 30, left: 10 }} {...hoverProps}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
             <XAxis
               dataKey="threshold"
@@ -46,7 +48,7 @@ export function ThresholdChart({ sweep, f1OptimalThreshold, youdenJThreshold, co
               <Label value="Threshold" position="bottom" offset={10} style={{ fontSize: 12, fill: '#6b7280' }} />
             </XAxis>
             <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} tickLine={{ stroke: '#d1d5db' }} />
-            <Tooltip />
+            <Tooltip content={renderEmptyTooltip} />
             <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: 11, paddingBottom: 8 }} />
             <ReferenceLine x={f1OptimalThreshold} stroke="#3b82f6" strokeDasharray="5 5" />
             <ReferenceLine x={youdenJThreshold} stroke="#10b981" strokeDasharray="5 5" />
@@ -57,6 +59,7 @@ export function ThresholdChart({ sweep, f1OptimalThreshold, youdenJThreshold, co
             <Line type="monotone" dataKey="approval_rate" stroke="#6b7280" strokeWidth={1.5} dot={false} name="Approval Rate" strokeDasharray="4 4" />
           </LineChart>
         </ResponsiveContainer>
+        <ChartHoverPanel active={active} formatLabel={(l) => `Threshold ${l}`} />
       </CardContent>
     </Card>
   )

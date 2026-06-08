@@ -9,11 +9,17 @@ logger = logging.getLogger(__name__)
 @shared_task(name="apps.loans.tasks.enforce_data_retention")
 def enforce_data_retention():
     """Weekly task: enforce data retention policy per regulatory requirements."""
+    import io
+
     from django.core.management import call_command
 
-    output = call_command("enforce_retention")
-    logger.info("Data retention enforcement completed: %s", output)
-    return output
+    out = io.StringIO()
+    try:
+        call_command("enforce_retention", stdout=out)
+        logger.info("data_retention_cleanup completed: %s", out.getvalue().strip())
+    except Exception:
+        logger.exception("data_retention_cleanup task failed")
+        raise
 
 
 @shared_task(name="apps.loans.tasks.retry_failed_dispatches")
@@ -55,13 +61,28 @@ def retry_failed_dispatches() -> dict:
             failed += 1
             continue
 
-        LoanApplication.objects.filter(
+        # Only delete the durable row once the app DEMONSTRABLY left QUEUE_FAILED.
+        # .delay() not raising doesn't prove the broker enqueued the task, so we
+        # condition the delete on the guarded transition actually matching a row.
+        rows = LoanApplication.objects.filter(
             pk=application_id,
             status=LoanApplication.Status.QUEUE_FAILED,
         ).update(status=LoanApplication.Status.PENDING)
-        entry.delete()
-        logger.info("Outbox recovered dispatch for %s", application_id)
-        recovered += 1
+
+        if rows == 1:
+            entry.delete()
+            logger.info("Outbox recovered dispatch for %s", application_id)
+            recovered += 1
+        else:
+            # App was not in QUEUE_FAILED (already moved, or the dispatch did not
+            # take) — keep the durable row and count it as a non-recovery so the
+            # exhausted-alert path can still eventually fire (L23).
+            entry.attempts += 1
+            entry.last_error = "Dispatch returned but application did not leave QUEUE_FAILED"
+            entry.last_attempt_at = timezone.now()
+            entry.save(update_fields=["attempts", "last_error", "last_attempt_at"])
+            logger.warning("Outbox kept row for %s — status did not transition", application_id)
+            failed += 1
 
     exhausted = PipelineDispatchOutbox.objects.filter(
         attempts__gte=PipelineDispatchOutbox.MAX_DISPATCH_ATTEMPTS
