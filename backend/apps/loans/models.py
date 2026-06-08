@@ -408,6 +408,7 @@ class LoanApplication(SoftDeleteModel):
         "review": ["approved", "denied", "processing", "pending"],  # pending = regenerate, processing = retry
         "approved": ["processing"],  # allow pipeline re-run
         "denied": ["processing"],  # allow pipeline re-run
+        "queue_failed": ["pending"],  # allow retry after queue dispatch failure
     }
 
     class InvalidStateTransition(Exception):
@@ -486,6 +487,18 @@ class LoanDecision(models.Model):
         help_text="ML model version that produced this decision",
     )
     reasoning = models.TextField(blank=True)
+
+    class HumanInvolvement(models.TextChoices):
+        NONE = "none", "Solely automated"
+        ASSISTED = "assisted", "Automated assessment, human review"
+        OVERRIDDEN = "overridden", "Human officer override"
+
+    human_involvement = models.CharField(
+        max_length=20,
+        choices=HumanInvolvement.choices,
+        default=HumanInvolvement.NONE,
+        help_text="Whether a human was involved in this decision (Privacy Act ADM disclosure, APP 1.7-1.9)",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -593,3 +606,50 @@ class PipelineDispatchOutbox(models.Model):
 
     def __str__(self):
         return f"outbox<{self.application_id}> attempts={self.attempts}"
+
+
+class DecisionReview(models.Model):
+    """Customer-initiated request for human review of an automated decision.
+
+    Implements the ADM "right to human review" (Privacy Act APP, Voluntary AI
+    Safety Standard contestability guardrail). Deliberately ORTHOGONAL to:
+      * the bias-detection escalation queue (model-triggered, bias-only), and
+      * `Complaint` (RG 271 grievance + AFCA escalation).
+    On `UPHELD` the customer is pointed to the existing Complaint->AFCA path;
+    on `OVERTURNED` an officer override re-decides via the locked service in
+    `loans/services/decision_review.py`.
+    """
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        UNDER_REVIEW = "under_review", "Under review"
+        UPHELD = "upheld", "Decision upheld"
+        OVERTURNED = "overturned", "Decision overturned"
+        WITHDRAWN = "withdrawn", "Withdrawn by applicant"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="decision_reviews")
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="decision_reviews"
+    )
+    reason = models.TextField(help_text="Why the applicant believes the decision is wrong")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.REQUESTED, db_index=True)
+    assigned_officer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_decision_reviews",
+    )
+    resolution_note = models.TextField(blank=True)
+    outcome_decision = models.CharField(max_length=20, blank=True, default="")
+    sla_deadline = models.DateTimeField(null=True, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+        indexes = [models.Index(fields=["status", "-requested_at"], name="decisionreview_status_req")]
+
+    def __str__(self):
+        return f"DecisionReview {self.id} - {self.get_status_display()}"

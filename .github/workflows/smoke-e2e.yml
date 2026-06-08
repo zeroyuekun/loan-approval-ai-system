@@ -2,6 +2,9 @@ name: smoke-e2e
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
 
 permissions:
   contents: read
@@ -29,12 +32,24 @@ jobs:
 
       - name: Migrate + seed minimal dataset
         run: |
+          # The backend runs as non-root appuser, but /app/.tmp (generate_data CSV)
+          # and /app/ml_models (train_model .joblib) are bind-mounted from the
+          # host — pre-create them world-writable on the runner or the writes fail
+          # with PermissionError.
+          mkdir -p backend/.tmp backend/ml_models && chmod 777 backend/.tmp backend/ml_models
           docker compose exec -T backend python manage.py migrate
-          docker compose exec -T backend python manage.py generate_data --count 500
+          # 500 records trains a working model fast. NOTE: the strong fixture
+          # applicant routes to "review" in CI regardless of training size — a
+          # freshly-trained synthetic model has no drift baseline, so the
+          # orchestrator cautiously escalates to the human-review queue
+          # (requires_human_review). That is correct behaviour, and the smoke test
+          # verifies the full pipeline through that escalation path. Exercising the
+          # approved/denied email branch in CI is a documented follow-up.
+          docker compose exec -T backend python manage.py generate_data --num-records 500
           docker compose exec -T backend python manage.py train_model --algorithm xgb
 
       - name: Run smoke script
-        run: tools/smoke_e2e.sh --keep-up
+        run: bash tools/smoke_e2e.sh --keep-up  # invoke via bash; the script isn't marked +x
 
       - name: Print backend + celery logs on failure
         if: failure()

@@ -86,10 +86,10 @@ class DecisionWaterfallTestCase(TestCase):
     """Verify LoanDecision.decision_waterfall is populated by the orchestrator."""
 
     def setUp(self):
-        from apps.accounts.models import _get_fernet
+        from apps.accounts.utils.encryption import clear_fernet_cache
         from apps.ml_engine.models import ModelVersion
 
-        _get_fernet.cache_clear()
+        clear_fernet_cache()
         self.user = CustomUser.objects.create_user(
             username="waterfall_test",
             password="TestPass123!",

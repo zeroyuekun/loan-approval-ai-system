@@ -10,8 +10,8 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrOfficer
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
+from apps.agents.serializers import AgentRunSerializer
 from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
-from apps.email_engine.services.html_renderer import render_html
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 from apps.loans.permissions import check_loan_access
 
@@ -78,73 +78,9 @@ class AgentRunListView(APIView):
         offset = (page - 1) * page_size
         runs = queryset[offset : offset + page_size]
 
-        results = []
-        for agent_run in runs:
-            bias_reports = [
-                {
-                    "id": str(br.id),
-                    "report_type": br.report_type,
-                    "bias_score": br.bias_score,
-                    "deterministic_score": br.deterministic_score,
-                    "score_source": br.score_source,
-                    "categories": br.categories,
-                    "analysis": br.analysis,
-                    "flagged": br.flagged,
-                    "requires_human_review": br.requires_human_review,
-                    "ai_review_approved": br.ai_review_approved,
-                    "ai_review_reasoning": br.ai_review_reasoning,
-                    "created_at": br.created_at.isoformat(),
-                }
-                for br in agent_run.bias_reports.all()
-            ]
-
-            next_best_offers = [
-                {
-                    "id": str(nbo.id),
-                    "offers": nbo.offers,
-                    "analysis": nbo.analysis,
-                    "customer_retention_score": nbo.customer_retention_score,
-                    "loyalty_factors": nbo.loyalty_factors,
-                    "personalized_message": nbo.personalized_message,
-                    "marketing_message": nbo.marketing_message,
-                    "created_at": nbo.created_at.isoformat(),
-                }
-                for nbo in agent_run.next_best_offers.all()
-            ]
-
-            marketing_emails = [
-                {
-                    "id": str(me.id),
-                    "subject": me.subject,
-                    "body": me.body,
-                    "html_body": render_html(me.body, email_type="marketing"),
-                    "passed_guardrails": me.passed_guardrails,
-                    "guardrail_results": me.guardrail_results,
-                    "generation_time_ms": me.generation_time_ms,
-                    "attempt_number": me.attempt_number,
-                    "created_at": me.created_at.isoformat(),
-                }
-                for me in agent_run.marketing_emails.all()
-            ]
-
-            applicant = agent_run.application.applicant
-            results.append(
-                {
-                    "id": str(agent_run.id),
-                    "application_id": str(agent_run.application_id),
-                    "applicant_id": applicant.id,
-                    "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
-                    "status": agent_run.status,
-                    "steps": agent_run.steps,
-                    "total_time_ms": agent_run.total_time_ms,
-                    "error": agent_run.error,
-                    "bias_reports": bias_reports,
-                    "next_best_offers": next_best_offers,
-                    "marketing_emails": marketing_emails,
-                    "created_at": agent_run.created_at.isoformat(),
-                    "updated_at": agent_run.updated_at.isoformat(),
-                }
-            )
+        # List endpoint drops marketing html_body to avoid re-rendering the
+        # large regex HTML renderer per row in this paginated hot path (L14).
+        results = AgentRunSerializer(runs, many=True, context={"include_html": False}).data
 
         # Build next/previous URLs preserving all filter params
         base_url = request.build_absolute_uri(request.path)
@@ -252,16 +188,15 @@ class BatchOrchestrateView(APIView):
         recheck = request.query_params.get("recheck", "").lower() == "true"
 
         if recheck:
-            reviewable_qs = (
-                LoanApplication.objects.filter(
-                    status__in=[
-                        LoanApplication.Status.REVIEW,
-                        LoanApplication.Status.PROCESSING,
-                    ]
-                )
-                .exclude(status=LoanApplication.Status.PROCESSING)
-                .order_by("created_at")
-            )
+            # Query applications in REVIEW status that are eligible for re-processing.
+            # Previous code used filter(status__in=[REVIEW, PROCESSING]).exclude(PROCESSING)
+            # which is logically identical to filter(status=REVIEW) — the PROCESSING
+            # inclusion was immediately negated by the .exclude() call.
+            # Stuck-PROCESSING recovery is out of scope here; that belongs in a
+            # dedicated dead-letter / recovery task.
+            reviewable_qs = LoanApplication.objects.filter(
+                status=LoanApplication.Status.REVIEW,
+            ).order_by("created_at")
             total_eligible = reviewable_qs.count()
             candidates = reviewable_qs[:BATCH_ORCHESTRATE_MAX]
             pending_ids = []
@@ -354,71 +289,8 @@ class AgentRunView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        bias_reports = [
-            {
-                "id": str(br.id),
-                "report_type": br.report_type,
-                "bias_score": br.bias_score,
-                "deterministic_score": br.deterministic_score,
-                "score_source": br.score_source,
-                "categories": br.categories,
-                "analysis": br.analysis,
-                "flagged": br.flagged,
-                "requires_human_review": br.requires_human_review,
-                "ai_review_approved": br.ai_review_approved,
-                "ai_review_reasoning": br.ai_review_reasoning,
-                "created_at": br.created_at.isoformat(),
-            }
-            for br in agent_run.bias_reports.all()
-        ]
-
-        next_best_offers = [
-            {
-                "id": str(nbo.id),
-                "offers": nbo.offers,
-                "analysis": nbo.analysis,
-                "customer_retention_score": nbo.customer_retention_score,
-                "loyalty_factors": nbo.loyalty_factors,
-                "personalized_message": nbo.personalized_message,
-                "marketing_message": nbo.marketing_message,
-                "created_at": nbo.created_at.isoformat(),
-            }
-            for nbo in agent_run.next_best_offers.all()
-        ]
-
-        marketing_emails = [
-            {
-                "id": str(me.id),
-                "subject": me.subject,
-                "body": me.body,
-                "html_body": render_html(me.body, email_type="marketing"),
-                "passed_guardrails": me.passed_guardrails,
-                "guardrail_results": me.guardrail_results,
-                "generation_time_ms": me.generation_time_ms,
-                "attempt_number": me.attempt_number,
-                "created_at": me.created_at.isoformat(),
-            }
-            for me in agent_run.marketing_emails.all()
-        ]
-
-        applicant = agent_run.application.applicant
-        return Response(
-            {
-                "id": str(agent_run.id),
-                "application_id": str(agent_run.application_id),
-                "applicant_id": applicant.id,
-                "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
-                "status": agent_run.status,
-                "steps": agent_run.steps,
-                "total_time_ms": agent_run.total_time_ms,
-                "error": agent_run.error,
-                "bias_reports": bias_reports,
-                "next_best_offers": next_best_offers,
-                "marketing_emails": marketing_emails,
-                "created_at": agent_run.created_at.isoformat(),
-                "updated_at": agent_run.updated_at.isoformat(),
-            }
-        )
+        # Detail endpoint includes the rendered marketing html_body.
+        return Response(AgentRunSerializer(agent_run, context={"include_html": True}).data)
 
 
 class HumanReviewView(APIView):

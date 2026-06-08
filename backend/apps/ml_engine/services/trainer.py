@@ -73,7 +73,11 @@ class _CalibratedModel:
             self._calibrator.fit(val_probs.reshape(-1, 1), y_val)
 
     def predict(self, X):
-        return self.estimator.predict(X)
+        # Delegate through predict_proba so the calibrated probabilities drive
+        # the binary decision (threshold 0.5). The raw estimator's predict()
+        # uses the uncalibrated threshold and would disagree with the calibrated
+        # probabilities returned by predict_proba.
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
 
     def predict_proba(self, X):
         raw_probs = self.estimator.predict_proba(X)[:, 1]
@@ -237,8 +241,18 @@ class ModelTrainer:
         self._reference_distribution = None  # saved for PSI drift detection
         self._imputation_values = {}  # stored in model bundle for predictor alignment
 
-    def add_derived_features(self, df):
-        """Impute missing values and compute derived features via shared module."""
+    def add_derived_features(self, df, fit: bool = False):
+        """Impute missing values and compute derived features via shared module.
+
+        Args:
+            df: DataFrame to process.
+            fit: When True (training only), compute and store data-dependent
+                 imputation medians from *this* DataFrame.  When False (val/test),
+                 reuse the already-stored ``_imputation_values`` so that
+                 val/test statistics never overwrite the training distribution.
+                 Callers that haven't called ``fit_preprocess`` yet will still
+                 get sensible defaults from ``DEFAULT_IMPUTATION_VALUES``.
+        """
         from .feature_engineering import (
             DEFAULT_IMPUTATION_VALUES,
             compute_derived_features,
@@ -247,13 +261,17 @@ class ModelTrainer:
 
         df = df.copy()
 
-        # Compute data-dependent imputation values: use training data medians
-        # for all numeric columns, with shared defaults as fallback.
-        data_medians = {}
-        for col in self.NUMERIC_COLS:
-            if col in df.columns and df[col].notna().any():
-                data_medians[col] = float(df[col].median())
-        self._imputation_values = {**DEFAULT_IMPUTATION_VALUES, **data_medians}
+        if fit:
+            # Compute data-dependent imputation values: use training data medians
+            # for all numeric columns, with shared defaults as fallback.
+            data_medians = {}
+            for col in self.NUMERIC_COLS:
+                if col in df.columns and df[col].notna().any():
+                    data_medians[col] = float(df[col].median())
+            self._imputation_values = {**DEFAULT_IMPUTATION_VALUES, **data_medians}
+        elif not self._imputation_values:
+            # No training run yet (e.g. standalone transform) — use defaults only.
+            self._imputation_values = dict(DEFAULT_IMPUTATION_VALUES)
 
         df = impute_missing_values(df, self._imputation_values)
         df = compute_derived_features(df)
@@ -263,8 +281,9 @@ class ModelTrainer:
         """Fit encoders/scaler on training data. Returns (transformed df, feature cols)."""
         df = df.copy()
 
-        # Add derived features before encoding/scaling
-        df = self.add_derived_features(df)
+        # Add derived features before encoding/scaling — fit=True so training
+        # medians are stored in _imputation_values for later val/test reuse.
+        df = self.add_derived_features(df, fit=True)
 
         # One-hot encode categorical columns
         df = pd.get_dummies(df, columns=self.CATEGORICAL_COLS, dtype=float)
@@ -286,8 +305,9 @@ class ModelTrainer:
 
         df = df.copy()
 
-        # Add derived features before encoding/scaling
-        df = self.add_derived_features(df)
+        # Add derived features before encoding/scaling — fit=False so val/test
+        # data reuses the training imputation values stored in _imputation_values.
+        df = self.add_derived_features(df, fit=False)
 
         # One-hot encode categorical columns
         df = pd.get_dummies(df, columns=self.CATEGORICAL_COLS, dtype=float)
@@ -747,6 +767,12 @@ class ModelTrainer:
                 {g: round(w, 3) for g, w in weight_map.items()},
             )
 
+        # Snapshot y_train length BEFORE reject-inference augmentation so the
+        # temporal CV alignment check (below) can compare against the pre-augmented
+        # size. After augmentation len(y_train) grows, which would cause the check
+        # to always fail and silently skip temporal CV.
+        _y_train_pre_ri_len = len(y_train)
+
         # ------------------------------------------------------------------
         # Reject-inference-aware training: include denied applications at
         # reduced weight to mitigate selection bias (only training on
@@ -865,7 +891,7 @@ class ModelTrainer:
         # augmentation (below) happens AFTER this block for the XGB path, so we
         # run the temporal CV on pre-augmented indices; but X_train may still
         # have been trimmed by preprocessing earlier, so guard on length.
-        if train_quarters_snapshot is not None and len(train_quarters_snapshot) == len(y_train):
+        if train_quarters_snapshot is not None and len(train_quarters_snapshot) == _y_train_pre_ri_len:
             try:
                 temporal_cv_auc_mean, temporal_cv_folds_used = self._compute_temporal_cv_auc(
                     X_train, y_train, train_quarters_snapshot
@@ -884,9 +910,9 @@ class ModelTrainer:
                 logger.warning("Temporal CV failed: %s", exc)
         else:
             logger.info(
-                "Temporal CV skipped — quarter snapshot unavailable or length mismatch (snapshot=%s, y_train=%d)",
+                "Temporal CV skipped — quarter snapshot unavailable or length mismatch (snapshot=%s, y_train_pre_ri=%d)",
                 "None" if train_quarters_snapshot is None else len(train_quarters_snapshot),
-                len(y_train),
+                _y_train_pre_ri_len,
             )
 
         if algorithm == "xgb":
@@ -1010,6 +1036,17 @@ class ModelTrainer:
             "iv_features_selected": len(getattr(self, "_iv_result", {}).get("selected_features", [])),
             "iv_features_excluded_weak": len(getattr(self, "_iv_result", {}).get("excluded_weak", [])),
             "iv_features_excluded_leakage": len(getattr(self, "_iv_result", {}).get("excluded_leakage", [])),
+            # Per-feature PSI (test vs train) — consumed by the MRM dossier and
+            # compliance banner, which read it from training_metadata.
+            "psi_by_feature": metrics.get("psi_by_feature", {}),
+            # Score-distribution reference for the weekly drift monitor's PSI.
+            # Downsampled via quantiles to bound JSONField size while preserving
+            # the distribution shape the PSI binning needs.
+            "reference_probabilities": (
+                np.quantile(y_train_pred_prob, np.linspace(0.0, 1.0, 2000)).round(6).tolist()
+                if len(y_train_pred_prob) > 2000
+                else np.round(y_train_pred_prob, 6).tolist()
+            ),
             **split_meta,
         }
 
@@ -1018,6 +1055,20 @@ class ModelTrainer:
         for col in ["employment_type", "applicant_type", "state"]:
             if col in df.columns:
                 test_indices = test_original_indices
+                # Guard against index mismatch: segment filtering or other
+                # DataFrame operations may have removed rows from df after the
+                # test split, leaving some test_original_indices absent.  Using
+                # df.loc[missing_idx] would silently return NaN-filled rows and
+                # corrupt the fairness statistics.
+                missing_idx = set(test_indices) - set(df.index)
+                if missing_idx:
+                    logger.warning(
+                        "Fairness metrics: %d test indices not in df after segment "
+                        "filter — skipping '%s' fairness segment",
+                        len(missing_idx),
+                        col,
+                    )
+                    continue
                 original_vals = df.loc[test_indices, col] if col in df.columns else pd.Series()
                 if len(original_vals) > 0:
                     fairness_result = self.metrics_service.compute_fairness_metrics(
@@ -1068,10 +1119,11 @@ class ModelTrainer:
 
         # WOE/IV analysis on RAW (unscaled) data so bin edges are in
         # interpretable units (credit_score 650-750, not z-scores).
+        # Use _original_numeric_cols (pre-IV-selection) so WOE is computed on
+        # all candidate features — not just the subset that survived IV pruning.
+        _woe_cols = getattr(self, "_original_numeric_cols", None) or list(self.NUMERIC_COLS)
         try:
-            woe_iv = self.metrics_service.compute_all_woe_iv(
-                df_test_raw[self.NUMERIC_COLS], y_test, self.NUMERIC_COLS, n_bins=10
-            )
+            woe_iv = self.metrics_service.compute_all_woe_iv(df_test_raw[_woe_cols], y_test, _woe_cols, n_bins=10)
             metrics["woe_iv"] = {
                 col: {"iv": v["iv"], "interpretation": v["iv_interpretation"]}
                 for col, v in woe_iv.items()
@@ -1084,11 +1136,11 @@ class ModelTrainer:
         # WOE logistic regression scorecard on RAW data with out-of-sample AUC.
         try:
             _, _, scorecard = self.metrics_service.build_woe_scorecard(
-                df_train_raw[self.NUMERIC_COLS],
+                df_train_raw[_woe_cols],
                 y_train,
-                self.NUMERIC_COLS,
+                _woe_cols,
                 n_bins=10,
-                X_test=df_test_raw[self.NUMERIC_COLS],
+                X_test=df_test_raw[_woe_cols],
                 y_test=y_test,
             )
             if scorecard:
@@ -1231,7 +1283,20 @@ class ModelTrainer:
             if sample_weights is not None:
                 cv_fit_params["sample_weight"] = sample_weights
 
-            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
+            # `params=` kwarg for cross_val_score was added in scikit-learn 1.4.
+            # On older environments every Optuna trial silently crashes without it.
+            import sklearn as _sklearn
+
+            if cv_fit_params and _sklearn.__version__ >= "1.4":
+                scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
+            else:
+                # sklearn <1.4: pass sample_weight via fit_params (deprecated in 1.4)
+                if cv_fit_params:
+                    scores = cross_val_score(
+                        model, X_train, y_train, cv=cv, scoring="roc_auc", fit_params=cv_fit_params
+                    )
+                else:
+                    scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc")
             return scores.mean()
 
         study = optuna.create_study(

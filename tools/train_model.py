@@ -17,7 +17,6 @@ import sys
 from datetime import datetime
 
 import joblib
-import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
@@ -30,8 +29,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
-
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 # Feature definitions (must match DataGenerator output columns)
 NUMERIC_FEATURES = [
@@ -229,8 +227,11 @@ def train_xgboost(X_train, y_train, preprocessor) -> Pipeline:
     pos_count = (y_train == 1).sum()
     scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1.0
 
-    # Preprocess training data once
-    X_train_processed = preprocessor.transform(X_train)
+    # Preprocess training data once. fit_transform (not transform): the
+    # ColumnTransformer arrives unfitted in the XGBoost path (the RF path fits it
+    # via the Pipeline during grid search), so a bare transform() raises
+    # NotFittedError. The returned Pipeline reuses this now-fitted transformer.
+    X_train_processed = preprocessor.fit_transform(X_train)
 
     from sklearn.model_selection import StratifiedKFold, cross_val_score
 

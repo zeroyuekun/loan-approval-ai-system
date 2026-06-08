@@ -20,12 +20,18 @@ spec:
         app.kubernetes.io/component: web
         app.kubernetes.io/part-of: aussieloanai
     spec:
+      # Dockerfile: Alpine adduser -S appuser (no explicit UID — typically 100).
+      # runAsUser is omitted here so the image's USER directive applies directly.
+      securityContext:
+        runAsNonRoot: true
       containers:
         - name: frontend
           image: ghcr.io/OWNER/loan-approval-ai-system/frontend:latest
           ports:
             - containerPort: 3000
               protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
           livenessProbe:
             httpGet:
               path: /

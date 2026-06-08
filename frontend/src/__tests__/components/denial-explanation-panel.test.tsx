@@ -8,7 +8,7 @@ const mockDenialReasons = [
   { code: 'D002', reason: 'Insufficient employment history', feature: 'employment_length' },
 ]
 
-const mockCounterfactuals = [
+const mockCounterfactuals: Array<{ changes: Record<string, number>; statement: string }> = [
   {
     changes: { debt_to_income: -0.15 },
     statement: 'If your debt-to-income ratio were 15% lower, the outcome may have been different.',
