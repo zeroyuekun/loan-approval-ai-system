@@ -15,9 +15,9 @@ from scipy import stats
 
 from . import data_generator_phases as _phases
 from .external.benchmark_resolver import BenchmarkResolver
+from .external.property_data import PropertyDataService
 from .feature_generator import BehavioralFeatureGenerator
 from .loan_performance_simulator import LoanPerformanceSimulator
-from .external.property_data import PropertyDataService
 from .underwriting_engine import UnderwritingEngine
 
 # Columns emitted by DataGenerator that encode information only available

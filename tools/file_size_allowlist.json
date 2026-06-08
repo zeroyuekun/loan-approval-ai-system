@@ -9,10 +9,10 @@
         "trainer.py": 1399,
         "metrics.py": 1050,
         "underwriting_engine.py": 974,
-        "property_data_service.py": 765,
-        "macro_data_service.py": 579,
         "calibration_validator.py": 536,
-        "credit_bureau_service.py": 506
+        "external/property_data.py": 765,
+        "external/macro_data.py": 579,
+        "external/credit_bureau.py": 506
       }
     }
   }
