@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from apps.agents.models import AgentRun
 from apps.ml_engine.models import DriftReport, ModelVersion
-from apps.ml_engine.services.fairness_gate import check_fairness_gate
+from apps.ml_engine.services.governance.fairness_gate import check_fairness_gate
 
 logger = logging.getLogger(__name__)
 

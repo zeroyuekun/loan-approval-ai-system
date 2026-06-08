@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from apps.ml_engine.services import drift_monitor
+from apps.ml_engine.services.governance import drift_monitor
 from apps.ml_engine.services.metrics import (
     MetricsService,
     brier_decomposition,

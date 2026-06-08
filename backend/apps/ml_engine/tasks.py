@@ -59,11 +59,11 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
     from apps.ml_engine.services.governance.fairness_gate_mode import (
         evaluate_fairness_gate_for_activation,
     )
-    from apps.ml_engine.services.model_selector import promote_if_eligible
-    from apps.ml_engine.services.predictor import clear_model_cache
     from apps.ml_engine.services.governance.promotion_gate_mode import (
         evaluate_promotion_gates_for_activation,
     )
+    from apps.ml_engine.services.model_selector import promote_if_eligible
+    from apps.ml_engine.services.predictor import clear_model_cache
     from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.trainer import ModelTrainer
     from apps.ml_engine.services.validation_gate_mode import (

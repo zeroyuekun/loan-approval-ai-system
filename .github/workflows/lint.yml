@@ -107,6 +107,6 @@ jobs:
             apps/ml_engine/services/prediction_diagnostics.py \
             apps/ml_engine/services/prediction_explanations.py \
             apps/ml_engine/services/prediction_features.py \
-            apps/ml_engine/services/shadow_scoring.py \
+            apps/ml_engine/services/governance/shadow_scoring.py \
             apps/ml_engine/services/shap_attribution.py \
             apps/ml_engine/services/decision_assembly.py
