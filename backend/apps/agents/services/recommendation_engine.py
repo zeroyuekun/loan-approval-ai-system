@@ -591,6 +591,9 @@ class RecommendationEngine:
 
         rate = _get_rate_for_tier(catalog["rate_tiers"], s.credit_score)
 
+        # Initial max_amount sizing uses 60 months (longest term) to find the
+        # upper bound. After selecting the actual term below we re-size so the
+        # quoted amount is correct for the chosen repayment horizon (M19).
         max_amount = min(
             _max_serviceable_amount(s.monthly_surplus, rate, 60),
             catalog["max_amount"],
@@ -600,13 +603,33 @@ class RecommendationEngine:
         if max_amount < 3000:
             return None
 
-        # Pick the longest term that keeps it reasonable
-        term = 60
-        for t in sorted(catalog["terms"], reverse=True):
-            rep = _monthly_repayment(max_amount, rate, t)
-            if rep > 0:
+        # Affordability constraint: choose the SHORTEST term whose repayment fits
+        # the cap (pay it off faster when affordable). Fall back to the longest
+        # available term — smallest repayment — when no shorter term fits.
+        # The cap is the customer's demonstrated serviceable surplus (the SAME
+        # basis that sized max_amount), not just 15% of gross — teasing a shorter
+        # term whose repayment exceeds their surplus is an NCCP serviceability
+        # smell. 15%-of-gross is kept as an additional ceiling.
+        monthly_income = s.annual_income / 12
+        target_repayment = min(monthly_income * 0.15, s.monthly_surplus)
+
+        terms = catalog["terms"]  # [12, 24, 36, 60]
+        term = max(terms)  # longest = most affordable fallback
+        for t in sorted(terms):
+            if _monthly_repayment(max_amount, rate, t) <= target_repayment:
                 term = t
                 break
+
+        # Re-size max_amount using the ACTUAL selected term, not the 60-month
+        # ceiling used for initial sizing above (M19 — previously hardcoded 60).
+        max_amount = min(
+            _max_serviceable_amount(s.monthly_surplus, rate, term),
+            catalog["max_amount"],
+        )
+        max_amount = math.floor(max_amount / 1000) * 1000
+
+        if max_amount < 3000:
+            return None
 
         repayment = _monthly_repayment(max_amount, rate, term)
         fortnightly = repayment / 2

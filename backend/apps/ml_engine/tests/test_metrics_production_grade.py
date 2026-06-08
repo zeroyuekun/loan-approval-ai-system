@@ -19,7 +19,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from apps.ml_engine.services import drift_monitor
 from apps.ml_engine.services.metrics import (
+    MetricsService,
     brier_decomposition,
     ks_statistic,
     psi,
@@ -90,6 +92,23 @@ def test_psi_by_feature_skips_missing_cols():
     assert "a" in out
     assert "b" not in out
     assert "missing_everywhere" not in out
+
+
+def test_metricsservice_psi_matches_canonical():
+    """M1: MetricsService.compute_psi routes its scalar through the canonical
+    drift_monitor primitive, so the numbers agree (single source of truth)."""
+    rng = np.random.default_rng(3)
+    a = rng.normal(0, 1, 2000)
+    b = rng.normal(0.4, 1, 2000)
+    assert MetricsService().compute_psi(a, b)["psi"] == pytest.approx(drift_monitor.compute_psi(a, b), abs=1e-4)
+
+
+def test_module_psi_matches_canonical():
+    """M1: module-level psi() is a thin wrapper over the canonical primitive."""
+    rng = np.random.default_rng(5)
+    a = rng.normal(0, 1, 2000)
+    b = rng.normal(0.6, 1, 2000)
+    assert psi(a, b) == pytest.approx(drift_monitor.compute_psi(a, b), abs=1e-9)
 
 
 # ===========================================================================
@@ -257,3 +276,26 @@ def test_promote_accepts_first_model_when_no_champion(monkeypatch):
     result = ms.promote_if_eligible(candidate)
     assert result.promoted
     assert result.champion_id is None
+
+
+def test_ece_is_population_weighted():
+    """ECE must weight each bin by its sample count, not average bins equally.
+
+    90 samples at p=0.05 (10% positive -> gap 0.05) and 10 samples at p=0.85
+    (50% positive -> gap 0.35). Unweighted mean of gaps = 0.20; population-
+    weighted ECE = 0.9*0.05 + 0.1*0.35 = 0.08.
+    """
+    svc = MetricsService()
+    y_prob = np.concatenate([np.full(90, 0.05), np.full(10, 0.85)])
+    y_true = np.concatenate(
+        [
+            np.array([1] * 9 + [0] * 81),  # 9/90 positive in low bin
+            np.array([1] * 5 + [0] * 5),  # 5/10 positive in high bin
+        ]
+    )
+
+    result = svc.compute_calibration_data(y_true, y_prob, n_bins=10)
+
+    assert result["ece"] == 0.08
+    assert result["mean_predicted_value"] == [0.05, 0.85]
+    assert result["fraction_of_positives"] == [0.1, 0.5]

@@ -204,4 +204,69 @@ describe('ModelMetricsPage', () => {
       expect(screen.getByText('Failed to load model metrics')).toBeInTheDocument()
     })
   })
+
+  it('defaults to the Performance tab and switches to Diagnostics on click', async () => {
+    const richMetrics = {
+      ...mockMetrics,
+      decile_analysis: { deciles: [{ decile: 1, count: 10, actual_rate: 0.1, cumulative_rate: 0.1, lift: 0.5 }] },
+      training_metadata: { split_strategy: 'temporal', train_size: 8000 },
+    }
+    server.use(
+      http.get(`${API_URL}/ml/models/active/metrics/`, () => HttpResponse.json(richMetrics)),
+      http.get(`${API_URL}/ml/models/active/drift-reports/`, () => HttpResponse.json([])),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument())
+
+    // Performance tab is active by default → Confusion Matrix visible
+    expect(screen.getByText('Confusion Matrix')).toBeInTheDocument()
+    // Diagnostics content is NOT in the DOM yet (inactive tab unmounts)
+    expect(screen.queryByText('Training Metadata')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Diagnostics' }))
+
+    expect(await screen.findByText('Training Metadata')).toBeInTheDocument()
+    expect(screen.getByText('Split Strategy')).toBeInTheDocument()
+    // Confusion Matrix (Performance tab) is now unmounted
+    expect(screen.queryByText('Confusion Matrix')).not.toBeInTheDocument()
+  })
+
+  it('hides the Drift tab when there are no drift reports', async () => {
+    server.use(
+      http.get(`${API_URL}/ml/models/active/metrics/`, () => HttpResponse.json(mockMetrics)),
+      http.get(`${API_URL}/ml/models/active/drift-reports/`, () => HttpResponse.json([])),
+    )
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Drift' })).not.toBeInTheDocument()
+  })
+
+  it('shows the Drift tab when drift reports exist and reveals the drift panel on click', async () => {
+    const driftReports = [
+      {
+        id: 'd1', report_date: '2026-06-01', psi_score: 0.07, psi_per_feature: {},
+        mean_probability: 0.42, std_probability: 0.2, approval_rate: 0.55,
+        drift_detected: false, alert_level: 'none', num_predictions: 1200,
+        period_start: '2026-05-01', period_end: '2026-06-01',
+      },
+    ]
+    server.use(
+      http.get(`${API_URL}/ml/models/active/metrics/`, () => HttpResponse.json(mockMetrics)),
+      http.get(`${API_URL}/ml/models/active/drift-reports/`, () => HttpResponse.json(driftReports)),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument())
+
+    const driftTab = await screen.findByRole('button', { name: 'Drift' })
+    expect(driftTab).toBeInTheDocument()
+
+    await user.click(driftTab)
+    expect(await screen.findByText('Data Drift (PSI)')).toBeInTheDocument()
+  })
 })

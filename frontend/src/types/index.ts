@@ -206,6 +206,25 @@ export interface LoanApplication {
   decision?: LoanDecision;
 }
 
+export interface AdmDisclosure {
+  mode: 'solely_automated' | 'assisted' | 'human'
+  summary: string
+  info_used: string[]
+  human_review_right: boolean
+  review_request_path: string
+}
+
+export interface DecisionReview {
+  id: string
+  application: string
+  reason: string
+  status: 'requested' | 'under_review' | 'upheld' | 'overturned' | 'withdrawn'
+  resolution_note: string
+  outcome_decision: string
+  requested_at: string
+  resolved_at: string | null
+}
+
 export interface LoanDecision {
   id: string;
   decision: 'approved' | 'denied';
@@ -228,6 +247,7 @@ export interface LoanDecision {
     estimated_review_months: number;
     message: string;
   };
+  adm_disclosure?: AdmDisclosure;
 }
 
 export interface ModelMetrics {
@@ -275,7 +295,9 @@ export interface GeneratedEmail {
   applicant_name?: string;
   decision: string;
   subject: string;
-  body: string;
+  /** Only present in the RETRIEVE (single-email) response; absent from list. */
+  body?: string;
+  /** Only present in the RETRIEVE (single-email) response; absent from list. */
   html_body?: string;
   model_used: string;
   passed_guardrails: boolean;
@@ -476,4 +498,70 @@ export interface PaginatedResponse<T> {
   next: string | null;
   previous: string | null;
   results: T[];
+}
+
+export type StatusLevel = 'none' | 'moderate' | 'significant' | 'unknown'
+
+export interface StatusIndicator {
+  level: StatusLevel
+  detail: string
+}
+
+export interface PendingReviewStatus extends StatusIndicator {
+  count: number
+  oldest_age_hours: number | null
+  sla_breach: boolean
+}
+
+export interface WatchdogStatus extends StatusIndicator {
+  last_check?: string | null
+}
+
+export interface DashboardStatusStrip {
+  drift: StatusIndicator
+  fairness: StatusIndicator
+  pending_review: PendingReviewStatus
+  watchdog: WatchdogStatus
+}
+
+// Dashboard stats — response shape of GET /loans/dashboard-stats/.
+// Fields added in PR-1 of the dashboard persona refit are marked.
+export interface DashboardStats {
+  total_applications: number
+  approval_rate: number
+  // PR-1 additions:
+  approved_count: number
+  denied_count: number
+  avg_processing_seconds: number | null
+  decision_latency_p50_ms_24h: number | null
+  decision_latency_p95_ms_24h: number | null
+  decisions_24h_count: number
+  llm_spend_today_usd: number
+  llm_spend_cap_usd: number
+  // end PR-1 additions
+  active_model: {
+    name: string | null
+    auc: number | null
+  } | null
+  daily_volume: Array<{ date: string; count: number }>
+  approval_trend: Array<{ date: string; rate: number }>
+  pipeline: {
+    total: number
+    completed: number
+    failed: number
+    escalated: number
+    success_rate: number
+  }
+  status_strip: DashboardStatusStrip
+}
+
+export interface AuditLogEntry {
+  id: number;
+  timestamp: string;
+  username: string | null;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  ip_address: string | null;
+  details: Record<string, unknown> | null;
 }

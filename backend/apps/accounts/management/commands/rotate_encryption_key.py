@@ -16,6 +16,9 @@ class Command(BaseCommand):
     help = "Re-encrypt all PII fields with the current primary Fernet key."
 
     def handle(self, *args, **options):
+        from apps.accounts.utils.encryption import clear_fernet_cache
+
+        clear_fernet_cache()
         encrypted_fields = [
             "primary_id_number",
             "secondary_id_number",

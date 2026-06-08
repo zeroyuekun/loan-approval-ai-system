@@ -8,8 +8,18 @@ from .base import *  # noqa: F401, F403
 
 DEBUG = False
 
-_hosts = os.environ.get("ALLOWED_HOSTS", "")
+# Must match the env var name used in base.py (DJANGO_ALLOWED_HOSTS).
+# production.py previously read "ALLOWED_HOSTS" which silently returned an
+# empty list when only DJANGO_ALLOWED_HOSTS was set (H29).
+_hosts = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
 ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()]
+if not ALLOWED_HOSTS:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "DJANGO_ALLOWED_HOSTS must be set to a non-empty comma-separated list in production. "
+        "Example: DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com"
+    )
 
 # Security settings
 SECURE_BROWSER_XSS_FILTER = True
@@ -34,7 +44,8 @@ CSRF_COOKIE_HTTPONLY = False
 # Celery task limits
 CELERY_TASK_TIME_LIMIT = 600
 CELERY_TASK_SOFT_TIME_LIMIT = 540
-CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+# worker_max_tasks_per_child is set canonically in celery.py with env-var override;
+# remove duplicate here to avoid the Django CELERY_* setting shadowing it.
 CELERY_RESULT_EXPIRES = 3600
 
 # Enforce Content Security Policy in production (base.py has REPORT_ONLY=True for dev)
@@ -79,7 +90,7 @@ LOGGING = {
     },
     "root": {
         "handlers": ["console"],
-        "level": "WARNING",
+        "level": os.environ.get("LOG_LEVEL", "WARNING"),
     },
     "loggers": {
         "django": {

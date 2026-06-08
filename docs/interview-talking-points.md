@@ -37,17 +37,17 @@
 
 ## Card 4 — XGBoost with monotonic constraints
 
-**Say it:** "XGBoost over a logistic scorecard for lift, but with 21 monotonic constraints — higher income always reduces risk, lower DTI always reduces risk, etc. Monotonicity is what makes the model defensible to a regulator: I can point at the constraints and show that the model cannot produce a perverse decision where a better applicant scores worse."
+**Say it:** "XGBoost over a logistic scorecard for lift, but with 76 monotonic constraints — higher income always reduces risk, lower DTI always reduces risk, etc. Monotonicity is what makes the model defensible to a regulator: I can point at the constraints and show that the model cannot produce a perverse decision where a better applicant scores worse."
 
 **Follow-ups to expect:**
 - *How much lift?* → Measured, not assumed. Every training run fits a logistic baseline on four core features and records `baseline_auc` plus `xgb_lift_over_baseline` in training metadata. ADR 002.
-- *What else?* → IV feature selection, isotonic calibration, conformal prediction intervals for high-stakes cases, SHAP-mapped to 70 adverse-action reason codes, APRA +3% stress buffer, parcelling-based reject inference.
+- *What else?* → IV feature selection, isotonic calibration, conformal prediction intervals for high-stakes cases, SHAP-mapped to 76 adverse-action reason codes, APRA +3% stress buffer, parcelling-based reject inference.
 
 ---
 
 ## Card 5 — Emails: template-first, Claude narrowly scoped
 
-**Say it:** "Claude doesn't write denial letters from scratch. It would be expensive, slow, inconsistent, and regulatorially dangerous. Every email starts from an audited template. Claude is invoked only to personalise the reason-code section. Then 15 deterministic guardrails run before send — prohibited language, hallucinated dollar amounts, overly formal phrasing, apology language, word count, required AFCA reference, and so on."
+**Say it:** "Claude doesn't write denial letters from scratch. It would be expensive, slow, inconsistent, and regulatorially dangerous. Every email starts from an audited template. Claude is invoked only to personalise the reason-code section. Then 18 deterministic guardrails run before send (19 for marketing emails) — prohibited language, hallucinated dollar amounts, overly formal phrasing, apology language, word count, required AFCA reference, and so on."
 
 **Follow-ups to expect:**
 - *Why is apology language banned?* → Australian banking guidance interprets it as admission of wrongdoing. There's an explicit guardrail, a test, and a persistent note in the project so it can't come back.
@@ -131,16 +131,16 @@
 
 **Numbers worth remembering:**
 - Test AUC 0.87–0.88 Optuna-tuned, 0.84–0.85 default hyperparameters (synthetic), ~0.82 real-world estimate (TSTR).
-- 71 input fields, 21 monotonic constraints, 31 engineered interactions.
-- 15 deterministic email guardrails. Three regeneration attempts then human review.
-- 70 SHAP-mapped adverse-action reason codes.
+- 71 input fields, 76 monotonic constraints, 31 engineered interactions.
+- 18 deterministic email guardrails on a decision email (19 on a marketing email). Up to three regeneration attempts, then the email is withheld and flagged to operations — the human-review queue is reserved for bias escalations only.
+- 76 SHAP-mapped adverse-action reason codes.
 - <$5/day Claude API cap.
 - 30s watchdog poll, 5-minute stuck threshold.
-- 60% backend test coverage floor, ~1000 tests across 66 files.
+- 63% backend test coverage floor, 1,932 backend tests across 158 files, plus 341 frontend tests.
 
 **Things you shouldn't oversell:**
 - No production users. No licensed compliance sign-off. Synthetic data only.
 - No paging. No multi-region. No Vault — secrets are in `.env`.
 - Model card is honest, not audited.
 
-*Last updated: 2026-04-17.*
+*Last updated: 2026-06-08.*

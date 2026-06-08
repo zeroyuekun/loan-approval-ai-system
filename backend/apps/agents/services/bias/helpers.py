@@ -7,7 +7,7 @@ import httpx
 
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
-from ..api_budget import guarded_api_call
+from ..api_budget import BudgetExhausted, CircuitOpen, guarded_api_call
 
 logger = logging.getLogger("agents.bias_detector")
 
@@ -58,57 +58,43 @@ def _format_flag_detail(prescreen):
 
 
 def _call_with_retry(client, fallback, service_name, final_failure_suffix, **api_kwargs):
-    """Call the Anthropic API with the shared 3-attempt retry/backoff policy.
+    """Call the Anthropic API with a single-attempt policy.
 
-    Mirrors the original retry loop across all four bias agents: authentication
-    errors are not retried, rate limits back off longer than transient errors,
-    4xx client errors are not retried, 5xx server errors are. On exhaustion or
-    a non-retryable failure, returns the supplied fallback dict.
+    time.sleep() inside a Celery worker blocks the thread and prevents other
+    tasks from running, so retry backoff inside the worker has been removed.
+    The caller (bias detector) already handles transient failures gracefully
+    by returning the supplied ``fallback`` dict, which is scored as the worst-
+    case (high-risk) bias result.  Non-transient (4xx) errors are not retried.
+    BudgetExhausted / CircuitOpen propagate so callers can invoke
+    _handle_bias_unavailable.
+
+    If a single attempt raises a transient error (RateLimit, Timeout, Connection,
+    5xx), the function returns ``fallback`` immediately without sleeping.
     """
-    result = fallback
-    for attempt in range(3):
-        try:
-            response = guarded_api_call(client, **api_kwargs)
-            return _extract_tool_result(response, fallback)
-        except anthropic.AuthenticationError as e:
-            logger.error("%s auth error (not retryable): %s", service_name, e)
-            result = fallback
-            break
-        except anthropic.RateLimitError as e:
-            logger.warning("%s attempt %d rate limited: %s", service_name, attempt + 1, e)
-            if attempt < 2:
-                import time as _time
-
-                _time.sleep(2 ** (attempt + 1))  # longer backoff for rate limits
-            else:
-                logger.error("%s failed after 3 attempts (rate limit) — %s", service_name, final_failure_suffix)
-                result = fallback
-        except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
-            logger.warning("%s attempt %d failed: %s", service_name, attempt + 1, e)
-            if attempt < 2:
-                import time as _time
-
-                _time.sleep(2**attempt)
-            else:
-                logger.error("%s failed after 3 attempts — %s", service_name, final_failure_suffix)
-                result = fallback
-        except anthropic.APIStatusError as e:
-            if e.status_code >= 500:
-                logger.warning("%s attempt %d server error (%d): %s", service_name, attempt + 1, e.status_code, e)
-                if attempt < 2:
-                    import time as _time
-
-                    _time.sleep(2**attempt)
-                else:
-                    logger.error("%s failed after 3 attempts (server error) — %s", service_name, final_failure_suffix)
-                    result = fallback
-            else:
-                logger.error("%s client error (%d, not retryable): %s", service_name, e.status_code, e)
-                result = fallback
-                break
-        except Exception as e:
-            logger.critical("%s UNEXPECTED failure attempt %d: %s", service_name, attempt + 1, e, exc_info=True)
-            result = fallback
-            break
-
-    return result
+    try:
+        response = guarded_api_call(client, **api_kwargs)
+        return _extract_tool_result(response, fallback)
+    except anthropic.AuthenticationError as e:
+        logger.error("%s auth error (not retryable): %s", service_name, e)
+        return fallback
+    except anthropic.RateLimitError as e:
+        logger.warning("%s rate limited — returning fallback (no sleep): %s", service_name, e)
+        logger.error("%s failed (rate limit) — %s", service_name, final_failure_suffix)
+        return fallback
+    except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
+        logger.warning("%s connection/timeout — returning fallback (no sleep): %s", service_name, e)
+        logger.error("%s failed — %s", service_name, final_failure_suffix)
+        return fallback
+    except anthropic.APIStatusError as e:
+        if e.status_code >= 500:
+            logger.warning("%s server error (%d) — returning fallback (no sleep): %s", service_name, e.status_code, e)
+            logger.error("%s failed (server error) — %s", service_name, final_failure_suffix)
+            return fallback
+        else:
+            logger.error("%s client error (%d, not retryable): %s", service_name, e.status_code, e)
+            return fallback
+    except (BudgetExhausted, CircuitOpen):
+        raise  # let callers invoke _handle_bias_unavailable
+    except Exception as e:
+        logger.critical("%s UNEXPECTED failure: %s", service_name, e, exc_info=True)
+        return fallback

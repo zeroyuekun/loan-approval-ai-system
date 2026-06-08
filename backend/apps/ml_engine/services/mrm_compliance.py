@@ -30,11 +30,19 @@ def _compliance_status(mv) -> tuple[str, list[str]]:
     recorded on the ModelVersion. Returns (status, reasons).
 
     Status decision (first match wins):
-      1. Any fairness gate `passes_80_percent_rule == False` → NON-COMPLIANT
-      2. Any feature PSI ≥ PSI_FAIL_THRESHOLD                → NON-COMPLIANT
-      3. ECE > ECE_FAIL_THRESHOLD                            → NON-COMPLIANT
-      4. Fairness / PSI / calibration evidence missing       → NEEDS REVIEW
-      5. Otherwise                                           → COMPLIANT
+      1. Recorded fairness/promotion gate verdicts say `failed`   → NON-COMPLIANT
+      2. Any fairness `passes_80_percent_rule == False` (no gate) → NON-COMPLIANT
+      3. Any feature PSI ≥ PSI_FAIL_THRESHOLD                     → NON-COMPLIANT
+      4. ECE > ECE_FAIL_THRESHOLD                                 → NON-COMPLIANT
+      5. Fairness / PSI / calibration evidence missing            → NEEDS REVIEW
+      6. Otherwise                                                → COMPLIANT
+
+    Gate verdicts trump the raw-evidence checks. PRs #163-#165 added pre-
+    activation `fairness_gate` + `promotion_gate` records to
+    `training_metadata`; in `warn` mode a model can activate despite a gate
+    rejection. Without surfacing the verdict here the §1 Header banner would
+    falsely report "COMPLIANT" while the operator audit trail says
+    "REJECTED — flagged for human review".
 
     The reasons list is empty for COMPLIANT; for the other two it carries one
     bullet per failure or missing-evidence reason so §1 Header can render the
@@ -43,16 +51,42 @@ def _compliance_status(mv) -> tuple[str, list[str]]:
     reasons: list[str] = []
 
     fairness = mv.fairness_metrics or {}
-    psi_map = (mv.training_metadata or {}).get("psi_by_feature") or {}
+    training_meta = mv.training_metadata or {}
+    psi_map = training_meta.get("psi_by_feature") or {}
     calibration = mv.calibration_data or {}
     deciles = calibration.get("deciles") or calibration.get("decile_analysis") or []
 
-    failed_attrs: list[str] = []
-    for attr, data in fairness.items():
-        if isinstance(data, dict) and data.get("passes_80_percent_rule") is False:
-            failed_attrs.append(attr)
-    if failed_attrs:
-        reasons.append(f"Fairness 80%-rule fails on: {', '.join(sorted(failed_attrs))}")
+    fairness_gate = training_meta.get("fairness_gate") or {}
+    promotion_gate = training_meta.get("promotion_gate") or {}
+
+    if fairness_gate:
+        if fairness_gate.get("passed") is False:
+            failing = fairness_gate.get("failing_attributes") or []
+            mode = training_meta.get("fairness_gate_mode", "warn")
+            min_dir = fairness_gate.get("minimum_dir")
+            if failing:
+                detail = f"on {', '.join(sorted(failing))} (min DIR={min_dir if min_dir is not None else '?'})"
+            else:
+                detail = "(failing attributes not recorded)"
+            reasons.append(f"Fairness gate FAILED {detail} — mode={mode}")
+    else:
+        failed_attrs: list[str] = []
+        for attr, data in fairness.items():
+            if isinstance(data, dict) and data.get("passes_80_percent_rule") is False:
+                failed_attrs.append(attr)
+        if failed_attrs:
+            reasons.append(f"Fairness 80%-rule fails on: {', '.join(sorted(failed_attrs))}")
+
+    if promotion_gate and promotion_gate.get("promoted") is False:
+        gate_reasons = promotion_gate.get("reasons") or []
+        actionable = [
+            r for r in gate_reasons if isinstance(r, str) and "All gates passed" not in r and "auto-promotes" not in r
+        ]
+        mode = training_meta.get("promotion_gate_mode", "warn")
+        if actionable:
+            reasons.append(f"Promotion gate REJECTED candidate (mode={mode}): {'; '.join(actionable)}")
+        else:
+            reasons.append(f"Promotion gate REJECTED candidate (mode={mode})")
 
     breached_psi: list[tuple[str, float]] = []
     for feat, value in psi_map.items():

@@ -43,6 +43,11 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
     try:
         return _do_train(self, algorithm, data_path, lock, segment=segment)
     except Exception:
+        logger.exception(
+            "train_model_task failed for algorithm=%s version_id=%s",
+            algorithm,
+            self.request.id,
+        )
         lock.release()
         raise
 
@@ -61,6 +66,10 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
     )
     from apps.ml_engine.services.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.trainer import ModelTrainer
+    from apps.ml_engine.services.validation_gate_mode import (
+        ValidationSignoffBlocked,
+        evaluate_validation_signoff_gate,
+    )
 
     if data_path is None:
         data_path = str(settings.BASE_DIR / ".tmp" / "synthetic_loans.csv")
@@ -158,6 +167,34 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
             next_review_date=(timezone.now() + timedelta(days=90)).date(),
         )
 
+    # Validation sign-off gate (Codex v1.10.7 finding 2). The candidate now
+    # has a real PK so the gate can query ModelValidationReport. In `block`
+    # mode the gate raises — at training time there is by construction no
+    # approved sign-off (the row was just created), so block mode demotes
+    # the candidate to is_active=False rather than re-raising past the
+    # already-completed activation transaction. Operators then create +
+    # sign off a report and manually activate via ModelActivateView.
+    validation_mode = getattr(settings, "ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
+    validation_blocked_demoted = False
+    try:
+        validation_gate_decision = evaluate_validation_signoff_gate(mv, validation_mode)
+    except ValidationSignoffBlocked as exc:
+        logger.warning(
+            "Model %s training-path activation blocked by validation gate: %s. "
+            "Candidate retained as is_active=False; manual activation required after sign-off.",
+            mv.id,
+            exc,
+        )
+        ModelVersion.objects.filter(pk=mv.pk).update(is_active=False, traffic_percentage=0)
+        mv.refresh_from_db()
+        validation_gate_decision = {
+            "action": "blocked_demoted",
+            "decision": exc.payload,
+            "mode": "block",
+            "bypass": False,
+        }
+        validation_blocked_demoted = True
+
     # Record the gate decisions (mode + result) on the activated mv so the
     # MRM dossier §1 banner has the audit trail for both gates. In `warn`
     # mode a failed gate is logged + flagged; activation already happened.
@@ -165,7 +202,17 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
         **(mv.training_metadata or {}),
         "fairness_gate_mode": gate_decision["mode"],
         "promotion_gate_mode": promotion_gate_decision["mode"],
+        "validation_gate_mode": validation_gate_decision["mode"],
     }
+    validation_decision_payload = validation_gate_decision.get("decision")
+    if validation_decision_payload is not None:
+        gate_meta["validation_gate"] = (
+            validation_decision_payload.to_dict()
+            if hasattr(validation_decision_payload, "to_dict")
+            else validation_decision_payload
+        )
+    if validation_blocked_demoted:
+        gate_meta["validation_gate_blocked_demoted"] = True
     gate_result = gate_decision["gate_result"]
     if gate_result is not None:
         gate_meta["fairness_gate"] = gate_result
@@ -241,6 +288,18 @@ def run_prediction_task(self, application_id):
     try:
         predictor = ModelPredictor.for_application(application)
         result = predictor.predict(application)
+    except ValueError as e:
+        # No active model available — not a transient error; do not retry.
+        # Revert to pending so the application can be processed once a model
+        # is activated, and return a structured skipped result.
+        logger.error(
+            "run_prediction_task: no active model for application %s — %s",
+            application_id,
+            e,
+        )
+        application.status = "pending"
+        application.save(update_fields=["status"])
+        return {"status": "skipped", "reason": "no_active_model", "detail": str(e)}
     except Exception:
         # Revert status so the application isn't stuck in 'processing'
         application.transition_to("pending", details={"reason": "prediction_failed"})
@@ -269,8 +328,12 @@ def run_prediction_task(self, application_id):
         },
     )
 
-    # Update application status — flag borderline cases for human review
-    if result.get("requires_human_review"):
+    # Flag borderline cases for human review ONLY when the standalone path is
+    # explicitly enabled. The standalone task creates no escalated AgentRun, so
+    # a 'review' transition here would be unresumable and would leave the ADM
+    # disclosure stale (Phase-1 Issue 1). Default: apply the raw decision.
+    standalone_enabled = getattr(settings, "ML_STANDALONE_PREDICT_ENABLED", False)
+    if standalone_enabled and result.get("requires_human_review"):
         application.transition_to("review")
     else:
         application.transition_to(result["prediction"])
@@ -366,7 +429,10 @@ def compute_weekly_drift_report(self):
     # Compute prediction distribution stats
     mean_prob = float(np.mean(probabilities))
     std_prob = float(np.std(probabilities))
-    approval_rate = float(np.mean(probabilities >= 0.5))
+    # Approval rate from the ACTUAL recorded decisions (which already encode
+    # group-adjusted thresholds + pricing-overlay denials), not a flat 0.5 cut
+    # on raw probabilities — matches the on-demand approval-rate computation.
+    approval_rate = predictions.filter(prediction="approved").count() / num_predictions
 
     # Compute PSI against training reference distribution
     training_meta = active_version.training_metadata or {}
@@ -379,9 +445,8 @@ def compute_weekly_drift_report(self):
         ref_array = np.array(reference_probs, dtype=float)
         psi_score = _compute_psi(ref_array, probabilities)
 
-        # Per-feature PSI is computed by compute_batch_drift_report (drift_monitor.py)
-        # which loads the full model bundle with reference distributions.
-        # This weekly task only computes probability-level PSI.
+        # Per-feature PSI is surfaced via the on-demand /drift/ endpoint
+        # (compute_on_demand_feature_psi); this weekly task tracks score-level PSI.
 
     # Determine alert level
     if psi_score is not None and psi_score >= 0.25:

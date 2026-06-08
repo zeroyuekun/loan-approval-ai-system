@@ -4,9 +4,12 @@ Pattern tables live in `.patterns`. Class-attr aliases below re-export every
 name so `self.PATTERN` and `GuardrailChecker.PATTERN` both keep working.
 """
 
+import logging
 import re
 
 from . import patterns
+
+logger = logging.getLogger("email_engine.guardrails")
 
 
 class GuardrailChecker:
@@ -131,6 +134,40 @@ class GuardrailChecker:
         nbo_amounts_list = context.get("nbo_amounts", [])
         has_nbo = len(nbo_amounts_list) > 0
 
+        # Pre-compute plausible derived values from each NBO offer principal.
+        # We allow annual interest (principal × rate ≤ 30%), monthly interest,
+        # fortnightly repayment, and the offer amount itself ÷ term.
+        # This replaces the previous blanket "< $5,000 is always fine" which
+        # disabled hallucination detection for the entire sub-$5k range.
+        _nbo_derived: set[float] = set()
+        if has_nbo:
+            _MAX_RATE = 0.30  # upper bound for realistic interest rates
+            for _nbo_raw in nbo_amounts_list:
+                try:
+                    _nbo = float(_nbo_raw)
+                except (TypeError, ValueError):
+                    continue
+                # Annual interest at maximum plausible rate
+                _annual_interest = _nbo * _MAX_RATE
+                _nbo_derived.add(_annual_interest)
+                # Monthly interest
+                _nbo_derived.add(_annual_interest / 12)
+                # Fortnightly interest (26 periods/year)
+                _nbo_derived.add(_annual_interest / 26)
+                # Monthly principal ÷ 12 (first-year simplified)
+                _nbo_derived.add(_nbo / 12)
+                # Fortnightly principal ÷ 26
+                _nbo_derived.add(_nbo / 26)
+
+        def _is_nbo_derived(val: float) -> bool:
+            """Return True if val is within ±10 % of any NBO-derived amount."""
+            if not _nbo_derived:
+                return False
+            for ref in _nbo_derived:
+                if ref > 0 and abs(val - ref) / ref <= 0.10:
+                    return True
+            return False
+
         for found in found_amounts:
             cleaned = found.replace(",", "").replace("$", "")
             try:
@@ -140,11 +177,12 @@ class GuardrailChecker:
                     abs(val - float(str(va).replace(",", "").replace("$", ""))) < 1.0 for va in valid_amounts
                 )
 
-                # For NBO marketing emails: allow small derived amounts (interest,
-                # savings targets, etc.) that are plausible calculations from offers.
-                # Amounts under $5,000 in NBO emails are typically computed values
-                # like annual interest ($1,625 = $32,500 × 5%) or monthly targets.
-                if not is_valid and has_nbo and val < 5000:
+                # For NBO marketing emails: allow small derived amounts ONLY when
+                # the value is plausibly derivable (within ±10 %) from a real NBO
+                # offer figure (principal × rate, ÷ 12, ÷ 26, etc.).
+                # A fabricated figure like $4,999 with no offer to derive it from
+                # is now flagged rather than silently whitelisted.
+                if not is_valid and has_nbo and _is_nbo_derived(val):
                     is_valid = True
 
                 if not is_valid:
@@ -368,6 +406,18 @@ class GuardrailChecker:
             )
             if not has_afca:
                 missing.append("AFCA dispute resolution reference")
+
+        if not (email_type == "marketing" or decision in ("approved", "denied")):
+            # Unknown decision type — surface this as a failed check so the
+            # caller can see it rather than silently receiving a vacuous pass.
+            return {
+                "check_name": "Required Elements",
+                "passed": False,
+                "details": (
+                    f"Unknown decision type {decision!r} — required elements check could not run. "
+                    "Expected 'approved', 'denied', or email_type='marketing'."
+                ),
+            }
 
         passed = len(missing) == 0
         details = f"Missing required elements: {', '.join(missing)}" if not passed else "All required elements present"
@@ -794,9 +844,13 @@ class GuardrailChecker:
         # Template mode: skip LLM-specific checks since static templates are
         # pre-vetted and contain known-good regulatory text (e.g. $150,000
         # comparison rate benchmark) that would trip the hallucination detector.
+        # Regulatory compliance checks (check_required_elements) MUST still run
+        # — they verify AFCA reference, credit report notice, and cooling-off
+        # period which are statutory requirements regardless of email source.
         if template_mode:
             checks = [
                 (self.check_prohibited_language, (email_text,), 15),
+                (self.check_required_elements, (email_text, decision, email_type), 10),
                 (self.check_tone, (email_text,), 8),
                 (self.check_contextual_dignity, (email_text,), 8),
                 (self.check_sign_off_structure, (email_text,), 2),
@@ -845,6 +899,18 @@ class GuardrailChecker:
 
         for r in results:
             r["quality_score"] = quality_score
+
+        # Log high-weight guardrail violations so operators can monitor rates
+        # without resorting to DB queries.
+        email_id = context.get("email_id")
+        for result in results:
+            if result.get("passed") is False and result.get("weight", 0) >= 8:
+                logger.warning(
+                    "Guardrail check failed: check=%s email_id=%s details=%s",
+                    result.get("check_name"),
+                    email_id,
+                    result.get("details", ""),
+                )
 
         return results
 

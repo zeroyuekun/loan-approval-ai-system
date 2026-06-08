@@ -113,13 +113,13 @@ export default function () {
   jar.set(BASE_URL, 'csrftoken', '');
 
   group('Health check', () => {
-    const res = http.get(`${API}/health/ready/`);
+    const res = http.get(`${API}/health/`);
     healthCheckDuration.add(res.timings.duration);
     check(res, {
       'health returns 200': (r) => r.status === 200,
-      'health status healthy': (r) => {
+      'health status ok': (r) => {
         try {
-          return JSON.parse(r.body).status === 'healthy';
+          return JSON.parse(r.body).status === 'ok';
         } catch {
           return false;
         }

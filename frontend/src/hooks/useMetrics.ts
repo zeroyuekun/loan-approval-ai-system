@@ -92,6 +92,7 @@ export function useTrainModel() {
       return { ...data, algorithm }
     },
     onSuccess: (data) => {
+      pollCountRef.current = 0  // reset backoff for new job so first poll is 2s, not up to 30s
       setTaskId(data.task_id)
       setTrainingAlgorithm(data.algorithm)
       setTrainingStatus('training')

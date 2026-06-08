@@ -41,7 +41,7 @@ It is also run automatically in CI on pushes to `master` (see `.github/workflows
 
 | Group | Endpoint | Method | Auth | Description |
 |-------|----------|--------|------|-------------|
-| Health check | `/api/v1/health/ready/` | GET | No | Readiness probe |
+| Health check | `/api/v1/health/` | GET | No | Liveness probe |
 | Authentication | `/api/v1/auth/login/` | POST | No | JWT/session login |
 | List applications | `/api/v1/loans/applications/?page=1` | GET | Yes | Paginated loan list (read-heavy) |
 | Trigger pipeline | `/api/v1/agents/orchestrate/{id}/` | POST | Yes | Queue orchestration pipeline (ML + LLM) |

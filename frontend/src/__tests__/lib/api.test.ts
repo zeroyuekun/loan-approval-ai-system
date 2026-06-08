@@ -11,6 +11,7 @@ async function getApi() {
   return mod.default
 }
 
+
 describe('api interceptors', () => {
   it('injects X-CSRFToken header on POST requests when cookie exists', async () => {
     // Set a CSRF cookie
@@ -83,5 +84,36 @@ describe('api interceptors', () => {
 
     const api = await getApi()
     await expect(api.get('/loans/')).rejects.toThrow()
+  })
+
+  it('clears sessionStorage user and calls window.location.assign(/login) when refresh fails', async () => {
+    // Seed sessionStorage with a user so we can verify it is cleared
+    sessionStorage.setItem('user', JSON.stringify({ role: 'admin', username: 'admin' }))
+
+    // jsdom does not support real navigation; spy on window.location.assign.
+    // Object.defineProperty is needed because jsdom's location is not fully writable.
+    const assignSpy = vi.fn()
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, assign: assignSpy },
+      writable: true,
+      configurable: true,
+    })
+
+    server.use(
+      http.get(`${API_URL}/loans/`, () => {
+        return HttpResponse.json({ detail: 'Unauthorized' }, { status: 401 })
+      }),
+      http.post(`${API_URL}/auth/refresh/`, () => {
+        return HttpResponse.json({ detail: 'Refresh token expired' }, { status: 401 })
+      })
+    )
+
+    const api = await getApi()
+    await expect(api.get('/loans/')).rejects.toThrow()
+
+    // sessionStorage 'user' key must be removed
+    expect(sessionStorage.getItem('user')).toBeNull()
+    // window.location.assign('/login') must have been called
+    expect(assignSpy).toHaveBeenCalledWith('/login')
   })
 })

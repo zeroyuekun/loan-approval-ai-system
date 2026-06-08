@@ -560,6 +560,7 @@ flip to enforcing modes only after confirming the prerequisites below.
 | `ML_FAIRNESS_GATE_MODE` | `warn` | `block` | `train_model_task` refuses activation if the EEOC 80% rule fails for any protected attribute, or if `metrics["fairness"]` is empty. Old segment models keep `is_active=True`; no zero-model gap. |
 | `ML_PROMOTION_GATE_MODE` | `warn` | `block` | `train_model_task` refuses activation if `model_selector.promote_if_eligible` reports any of the four champion-challenger gates failed (KS regression, PSI stability, ECE calibration, AUC regression). |
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` | `enforce` | `apply_overlay_to_decision` overrides the model verdict on every prediction when policy rules trigger (P-codes in `services/credit_policy.py`). Shadow mode logs the would-be override but returns the model verdict; enforce mode actually applies it. |
+| `DECISION_OVERTURN_GATE_MODE` | `off` | `2fa` / `second_approver` | Maker/checker control on officer overturns of denials at/above `DECISION_OVERTURN_THRESHOLD` (default `$100,000`). `2fa` requires the acting officer to hold a verified TOTP device (returns HTTP 403 otherwise); `second_approver` blocks high-value overturns at the API pending an out-of-band dual-approval process. Below-threshold overturns are never gated. Residual accepted risk in `off` mode: any officer-role account can self-overturn any denial within throttle limits (detective AuditLog only). |
 
 The first two gate `train_model_task` (rare event — runs on retraining
 cadence). The third gates **every prediction** that hits the policy overlay,
@@ -663,6 +664,7 @@ services (see step 3 above):
 | `ML_FAIRNESS_GATE_MODE` | `warn` |
 | `ML_PROMOTION_GATE_MODE` | `warn` |
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` |
+| `DECISION_OVERTURN_GATE_MODE` | `off` |
 
 Currently-active models with failed gates remain active across the flip —
 the rollback path is symmetric with the enablement path. There is no
