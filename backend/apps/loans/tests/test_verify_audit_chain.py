@@ -13,7 +13,6 @@ from django.core.management.base import CommandError
 from django.db import connection
 
 from apps.loans.models import AuditLog
-from apps.loans.services.audit_chain import GENESIS_HASH
 
 
 @pytest.mark.django_db
@@ -40,12 +39,8 @@ def test_verify_passes_on_clean_chain():
 def test_verify_detects_tampered_action():
     """An attacker rewrites the 'action' field directly via SQL — the
     command must detect the hash mismatch and report which row broke."""
-    log1 = AuditLog.objects.create(
-        action="login", resource_type="User", resource_id="alice"
-    )
-    AuditLog.objects.create(
-        action="login", resource_type="User", resource_id="bob"
-    )
+    log1 = AuditLog.objects.create(action="login", resource_type="User", resource_id="alice")
+    AuditLog.objects.create(action="login", resource_type="User", resource_id="bob")
 
     # Tamper: rewrite action without recomputing hash_self
     with connection.cursor() as cur:
@@ -68,10 +63,7 @@ def test_verify_detects_tampered_action():
 def test_verify_detects_deleted_row():
     """Deleting a middle row breaks the chain because the next row's
     hash_prev no longer matches the new prior row's hash_self."""
-    rows = [
-        AuditLog.objects.create(action="evt", resource_type="R", resource_id=str(i))
-        for i in range(3)
-    ]
+    rows = [AuditLog.objects.create(action="evt", resource_type="R", resource_id=str(i)) for i in range(3)]
     # Delete the middle row (raw SQL — bypasses Django since AuditLog
     # has delete permissions removed)
     with connection.cursor() as cur:

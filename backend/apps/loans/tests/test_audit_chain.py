@@ -25,7 +25,6 @@ from apps.loans.services.audit_chain import (
     compute_hash,
 )
 
-
 # ---------------------------------------------------------------------------
 # compute_hash — pure function
 # ---------------------------------------------------------------------------
@@ -90,9 +89,7 @@ def test_compute_hash_changes_if_any_field_changes():
         ("details", {"ip": "5.6.7.8"}),
     ]:
         mutated_kw = {**base, field: mutated}
-        assert compute_hash(**mutated_kw) != base_hash, (
-            f"hash must change when '{field}' changes"
-        )
+        assert compute_hash(**mutated_kw) != base_hash, f"hash must change when '{field}' changes"
 
 
 def test_compute_hash_details_dict_key_order_does_not_matter():
@@ -130,9 +127,7 @@ def test_compute_hash_matches_expected_canonical_form():
         "resource_id": "abc-123",
         "details": {"ip": "1.2.3.4"},
     }
-    expected = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    expected = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     actual = compute_hash(**payload)
     assert actual == expected
 
@@ -246,8 +241,7 @@ def test_concurrent_inserts_produce_valid_linear_chain():
     # Each subsequent row's hash_prev must equal the prior row's hash_self
     for i in range(1, N):
         assert rows[i].hash_prev == rows[i - 1].hash_self, (
-            f"Chain break at row {i}: "
-            f"hash_prev={rows[i].hash_prev!r} != prior.hash_self={rows[i - 1].hash_self!r}"
+            f"Chain break at row {i}: hash_prev={rows[i].hash_prev!r} != prior.hash_self={rows[i - 1].hash_self!r}"
         )
 
     # Every hash_self is unique — no two rows are the same link
@@ -256,9 +250,7 @@ def test_concurrent_inserts_produce_valid_linear_chain():
 
     # Every hash_prev (except genesis) is some other row's hash_self
     prev_set = {r.hash_prev for r in rows} - {GENESIS_HASH}
-    assert prev_set.issubset(hash_selfs), (
-        "Some hash_prev values don't link to any row's hash_self — fork detected"
-    )
+    assert prev_set.issubset(hash_selfs), "Some hash_prev values don't link to any row's hash_self — fork detected"
 
 
 @pytest.mark.django_db

@@ -23,7 +23,7 @@ import hashlib
 import json
 import threading
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any
 
 from django.db import connection
 
@@ -45,7 +45,7 @@ def compute_hash(
     *,
     hash_prev: str,
     timestamp: str,
-    user_id: Optional[str],
+    user_id: str | None,
     action: str,
     resource_type: str,
     resource_id: str,
@@ -102,11 +102,7 @@ def latest_hash_self() -> str:
     # Avoid circular import — AuditLog imports from this module.
     from apps.loans.models import AuditLog
 
-    prior = (
-        AuditLog.objects.order_by("-timestamp", "-id")
-        .only("hash_self")
-        .first()
-    )
+    prior = AuditLog.objects.order_by("-timestamp", "-id").only("hash_self").first()
     return prior.hash_self if prior and prior.hash_self else GENESIS_HASH
 
 
