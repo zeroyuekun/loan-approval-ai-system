@@ -500,6 +500,36 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
+// Dashboard stats — response shape of GET /loans/dashboard-stats/.
+// Fields added in PR-1 of the dashboard persona refit are marked.
+export interface DashboardStats {
+  total_applications: number
+  approval_rate: number
+  // PR-1 additions:
+  approved_count: number
+  denied_count: number
+  avg_processing_seconds: number | null
+  decision_latency_p50_ms_24h: number | null
+  decision_latency_p95_ms_24h: number | null
+  decisions_24h_count: number
+  llm_spend_today_usd: number
+  llm_spend_cap_usd: number
+  // end PR-1 additions
+  active_model: {
+    name: string | null
+    auc: number | null
+  } | null
+  daily_volume: Array<{ date: string; count: number }>
+  approval_trend: Array<{ date: string; rate: number }>
+  pipeline: {
+    total: number
+    completed: number
+    failed: number
+    escalated: number
+    success_rate: number
+  }
+}
+
 export interface AuditLogEntry {
   id: number;
   timestamp: string;
