@@ -6,7 +6,7 @@ the DataGenerator and produce more realistic synthetic loan data.
 
 import pytest
 
-from apps.ml_engine.services.data_generator import DataGenerator
+from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
 
 @pytest.fixture(scope="module")

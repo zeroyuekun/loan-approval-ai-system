@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 
-from apps.ml_engine.services.underwriting_engine import UnderwritingEngine
+from apps.ml_engine.services.datagen.underwriting_engine import UnderwritingEngine
 
 __all__ = ["build_prediction_features", "derive_underwriter_features"]
 

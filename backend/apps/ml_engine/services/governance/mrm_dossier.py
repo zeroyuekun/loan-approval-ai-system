@@ -170,7 +170,7 @@ def _data_lineage_section(mv) -> str:
 def _monotone_section(mv) -> str:
     """§4 — Monotonicity constraint table."""
     try:
-        from apps.ml_engine.services.monotone_constraints import (
+        from apps.ml_engine.services.training.monotone_constraints import (
             MONOTONE_CONSTRAINTS,
             RATIONALE,
         )

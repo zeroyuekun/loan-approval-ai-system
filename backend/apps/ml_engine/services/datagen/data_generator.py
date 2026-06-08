@@ -13,9 +13,9 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from . import data_generator_phases as _phases
-from .external.benchmark_resolver import BenchmarkResolver
-from .external.property_data import PropertyDataService
+from .. import data_generator_phases as _phases
+from ..external.benchmark_resolver import BenchmarkResolver
+from ..external.property_data import PropertyDataService
 from .feature_generator import BehavioralFeatureGenerator
 from .loan_performance_simulator import LoanPerformanceSimulator
 from .underwriting_engine import UnderwritingEngine

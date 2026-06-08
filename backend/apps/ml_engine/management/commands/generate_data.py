@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand
 
 from apps.accounts.models import CustomerProfile, CustomUser
 from apps.loans.models import LoanApplication
-from apps.ml_engine.services.data_generator import DataGenerator
+from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
 # Realistic Australian demo customers
 DEMO_CUSTOMERS = [

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from apps.ml_engine.services.data_generator import DataGenerator
+from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
 
 @pytest.fixture(scope="module")
@@ -310,7 +310,7 @@ class TestAustralianFeatures:
 
     @pytest.fixture
     def generated_data(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         return gen.generate(num_records=3000)
@@ -395,7 +395,7 @@ class TestBehavioralRealism:
 
     @pytest.fixture
     def generated_data(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         return gen.generate(num_records=5000, random_seed=42)
@@ -485,7 +485,7 @@ class TestOutcomeTracking:
 
     @pytest.fixture
     def generated_data(self):
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         gen = DataGenerator()
         return gen.generate(num_records=5000)

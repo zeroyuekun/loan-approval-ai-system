@@ -4,9 +4,9 @@
   "packages": {
     "backend/apps/ml_engine/services": {
       "files": {
-        "data_generator.py": 1485,
-        "trainer.py": 1399,
-        "underwriting_engine.py": 974,
+        "datagen/data_generator.py": 1485,
+        "datagen/underwriting_engine.py": 974,
+        "training/trainer.py": 1399,
         "governance/calibration_validator.py": 536,
         "metrics/compute.py": 1050,
         "metrics/real_world_benchmarks.py": 1378,
