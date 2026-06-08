@@ -34,14 +34,27 @@ export function StatsCards({
   todayDecisions,
   llmSpend,
 }: StatsCardsProps) {
-  const spendPct = Math.min(100, (llmSpend.spentUsd / llmSpend.capUsd) * 100)
+  // Defensive coercion. Production data is always complete (DashboardStatsView
+  // returns every field), but during dev Fast Refresh a prop can momentarily be
+  // undefined mid-render — and because the dashboard route has an error.tsx
+  // boundary, a single `undefined.toLocaleString()` here hard-crashes the whole
+  // page into the error screen until a manual reload. Falling back keeps the
+  // dashboard resilient instead of all-or-nothing.
+  const totalApps = totalApplications ?? 0
+  const apprRate = approvalRate ?? 0
+  const todayCount = todayDecisions?.count ?? 0
+  const p95Ms = todayDecisions?.p95LatencyMs ?? null
+  const spentUsd = llmSpend?.spentUsd ?? 0
+  const capUsd = llmSpend?.capUsd ?? 0
+
+  const spendPct = capUsd > 0 ? Math.min(100, (spentUsd / capUsd) * 100) : 0
   const spendWarning = spendPct >= 80
 
   const stats = [
     {
       kind: 'plain' as const,
       title: 'Total Applications',
-      value: totalApplications.toLocaleString('en-AU'),
+      value: totalApps.toLocaleString('en-AU'),
       subtitle: undefined,
       icon: FileText,
       gradient: 'from-blue-500 via-blue-600 to-indigo-600',
@@ -50,7 +63,7 @@ export function StatsCards({
     {
       kind: 'plain' as const,
       title: 'Approval Rate',
-      value: `${approvalRate.toFixed(1)}%`,
+      value: `${apprRate.toFixed(1)}%`,
       subtitle: undefined,
       icon: CheckCircle,
       gradient: 'from-emerald-500 via-emerald-500 to-teal-600',
@@ -59,8 +72,8 @@ export function StatsCards({
     {
       kind: 'plain' as const,
       title: "Today's Decisions",
-      value: todayDecisions.count.toLocaleString('en-AU'),
-      subtitle: formatLatencySeconds(todayDecisions.p95LatencyMs),
+      value: todayCount.toLocaleString('en-AU'),
+      subtitle: formatLatencySeconds(p95Ms),
       icon: Clock,
       gradient: 'from-amber-500 via-orange-500 to-red-400',
       shadowColor: 'shadow-amber-500/25',
@@ -68,8 +81,8 @@ export function StatsCards({
     {
       kind: 'spend' as const,
       title: 'LLM Spend',
-      value: formatUsd(llmSpend.spentUsd),
-      subtitle: `/ ${formatUsd(llmSpend.capUsd)} cap`,
+      value: formatUsd(spentUsd),
+      subtitle: `/ ${formatUsd(capUsd)} cap`,
       progressPct: spendPct,
       warning: spendWarning,
       icon: DollarSign,
