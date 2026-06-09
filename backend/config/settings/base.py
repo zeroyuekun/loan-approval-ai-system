@@ -15,6 +15,36 @@ APP_VERSION = "1.11.1"
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int env var, tolerant of a malformed value (warn + fall back)
+    rather than crashing every process with a ValueError at import time."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        import warnings
+
+        warnings.warn(f"Invalid integer for {name}={raw!r}; using default {default}.", stacklevel=2)
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """float counterpart of _env_int — tolerant of malformed values."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        import warnings
+
+        warnings.warn(f"Invalid float for {name}={raw!r}; using default {default}.", stacklevel=2)
+        return default
+
+
 _secret_key = os.environ.get("DJANGO_SECRET_KEY", "")
 if not _secret_key and not DEBUG:
     raise ValueError(
@@ -260,7 +290,7 @@ ML_XGB_N_JOBS = 2
 # Rows the training task auto-generates when .tmp/synthetic_loans.csv is missing
 # (fresh clone / cleared .tmp). Smaller than the 50k canonical seed so the
 # self-heal stays fast while still producing a usable model. Env-overridable.
-ML_AUTO_SEED_ROWS = int(os.environ.get("ML_AUTO_SEED_ROWS", "20000"))
+ML_AUTO_SEED_ROWS = _env_int("ML_AUTO_SEED_ROWS", 20000)
 
 # Hard credit policy overlay (D3). Modes: "off" (not applied), "shadow"
 # (evaluated + logged, model verdict stands), "enforce" (hard-fails override
@@ -319,7 +349,7 @@ DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lowe
 # "second_approver" blocks such overturns at the API pending dual approval.
 # Unknown values collapse to "off" (see overturn_policy.normalize_overturn_mode).
 DECISION_OVERTURN_GATE_MODE = os.environ.get("DECISION_OVERTURN_GATE_MODE", "off")
-DECISION_OVERTURN_THRESHOLD = float(os.environ.get("DECISION_OVERTURN_THRESHOLD", "100000"))
+DECISION_OVERTURN_THRESHOLD = _env_float("DECISION_OVERTURN_THRESHOLD", 100000)
 
 # Standalone single-application prediction endpoint (/ml/predict/<id>/).
 # The agent orchestrator is the production decision path; the standalone task
@@ -388,7 +418,7 @@ if not FIELD_ENCRYPTION_KEY and not DEBUG:
 # See docs/superpowers/specs/2026-05-25-security-gap-closure-design.md.
 KMS_BACKEND = os.environ.get("KMS_BACKEND", "env").lower()
 AWS_KMS_KEY_ID = os.environ.get("AWS_KMS_KEY_ID", "")
-KMS_DEK_TTL = int(os.environ.get("KMS_DEK_TTL", "3600"))
+KMS_DEK_TTL = _env_int("KMS_DEK_TTL", 3600)
 
 # Email — use Gmail SMTP when credentials are set, otherwise log to console
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
@@ -398,13 +428,13 @@ if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
+EMAIL_PORT = _env_int("EMAIL_PORT", 587)
 EMAIL_USE_TLS = True
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "aussieloanai@gmail.com")
 
 # AI Budget Controls
-AI_DAILY_CALL_LIMIT = int(os.environ.get("AI_DAILY_CALL_LIMIT", "500"))
-AI_DAILY_BUDGET_LIMIT_USD = float(os.environ.get("AI_DAILY_BUDGET_LIMIT_USD", "5.0"))
+AI_DAILY_CALL_LIMIT = _env_int("AI_DAILY_CALL_LIMIT", 500)
+AI_DAILY_BUDGET_LIMIT_USD = _env_float("AI_DAILY_BUDGET_LIMIT_USD", 5.0)
 AI_CIRCUIT_BREAKER_THRESHOLD = 3  # consecutive failures before circuit opens
 AI_CIRCUIT_BREAKER_COOLDOWN = 600  # seconds to keep circuit open (10 min)
 
@@ -427,7 +457,7 @@ AI_TEMPERATURE_MARKETING = 0.2  # Marketing/retention content (slight variance f
 # documentation + audit.
 EMAIL_LLM_BACKEND = os.environ.get("EMAIL_LLM_BACKEND", "anthropic")
 EMAIL_LLM_MODEL = os.environ.get("EMAIL_LLM_MODEL", "")  # blank -> backend default
-EMAIL_LLM_SEED = int(os.environ.get("EMAIL_LLM_SEED", "0"))  # reproducibility (best-effort)
+EMAIL_LLM_SEED = _env_int("EMAIL_LLM_SEED", 0)  # reproducibility (best-effort; Groq + Ollama)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434/v1")
@@ -496,6 +526,33 @@ if _sentry_dsn:
         send_default_pii=False,
         environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
     )
+
+# Logging — wire the PII masking filter on the console in BASE settings so
+# development and Docker (which inherit these) also redact PII from logs, not
+# just production. production.py overrides LOGGING with its JSON/correlation-id
+# variant (which also installs mask_pii). disable_existing_loggers=False keeps
+# third-party + pytest log capture intact.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {"format": "{levelname} {asctime} {name} {message}", "style": "{"},
+    },
+    "filters": {
+        "mask_pii": {"()": "config.logging_filters.PiiMaskingFilter"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "filters": ["mask_pii"],
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": os.environ.get("LOG_LEVEL", "INFO"),
+    },
+}
 
 # Validate environment variables on startup (fail fast if required vars are missing).
 # Skipped during tests and when SKIP_ENV_VALIDATION=1.

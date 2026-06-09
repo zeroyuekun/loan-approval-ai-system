@@ -38,10 +38,13 @@ class PiiMaskingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = self._redact(str(record.msg))
         if record.args:
+            # Redact ONLY string args — coercing numbers to str (the old
+            # behaviour) corrupted them so a "%d"/"%f" format string then raised
+            # TypeError at emit time. PII only ever appears in string args.
             if isinstance(record.args, dict):
-                record.args = {k: self._redact(str(v)) for k, v in record.args.items()}
+                record.args = {k: (self._redact(v) if isinstance(v, str) else v) for k, v in record.args.items()}
             elif isinstance(record.args, tuple):
-                record.args = tuple(self._redact(str(a)) for a in record.args)
+                record.args = tuple(self._redact(a) if isinstance(a, str) else a for a in record.args)
         # Structured-logging extras land as custom record attributes; redact any
         # string-valued ones without disturbing the standard LogRecord fields.
         for key, value in list(record.__dict__.items()):

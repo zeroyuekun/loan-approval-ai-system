@@ -68,3 +68,18 @@ class TestExtrasRedaction:
 
 def test_email_still_redacted():
     assert "[EMAIL_REDACTED]" in _redact("contact applicant@example.com")
+
+
+def test_numeric_log_args_are_not_corrupted():
+    # The filter must NOT coerce numeric args to strings — doing so makes a
+    # "%d"/"%f" format string raise TypeError at emit time. (Regression guard for
+    # the dev-logging wiring that surfaced this; PII only appears in string args.)
+    record = logging.LogRecord("svc", logging.INFO, "/p", 1, "Excluded %d weak features (IV < %.2f)", (19, 0.02), None)
+    PiiMaskingFilter().filter(record)
+    assert record.getMessage() == "Excluded 19 weak features (IV < 0.02)"
+
+
+def test_string_args_are_still_redacted():
+    record = logging.LogRecord("svc", logging.INFO, "/p", 1, "applicant %s", ("0412 345 678",), None)
+    PiiMaskingFilter().filter(record)
+    assert "[PHONE_REDACTED]" in record.getMessage()

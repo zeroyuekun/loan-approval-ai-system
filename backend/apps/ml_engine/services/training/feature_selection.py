@@ -63,7 +63,7 @@ def compute_woe_iv(df, feature, target, bins=10):
     return {"feature": feature, "iv": round(iv, 4), "woe_table": grouped}
 
 
-def select_features_by_iv(df, features, target, iv_min=0.02, iv_max=0.5, bins=10):
+def select_features_by_iv(df, features, target, iv_min=0.02, iv_max=0.5, bins=10, leakage_warn_threshold=0.5):
     """Select features based on Information Value thresholds.
 
     Args:
@@ -94,6 +94,15 @@ def select_features_by_iv(df, features, target, iv_min=0.02, iv_max=0.5, bins=10
     excluded_weak = iv_table[iv_table["iv"] < iv_min]["feature"].tolist()
     excluded_leakage = iv_table[iv_table["iv"] > iv_max]["feature"].tolist()
 
+    # Honest leakage signal at the INDUSTRY-STANDARD threshold (0.5), separate
+    # from the (deliberately higher) iv_max used for actual exclusion. These
+    # features are KEPT but flagged: IV above the standard "suspiciously strong /
+    # possible leakage" line yet at/below iv_max. On synthetic data this is
+    # expected for core credit features the generator uses directly — surfacing
+    # it keeps the leakage picture honest, rather than letting a rarely-triggered
+    # excluded_leakage count imply leakage was screened at 0.5 when iv_max is 1.5.
+    elevated_iv = iv_table[(iv_table["iv"] > leakage_warn_threshold) & (iv_table["iv"] <= iv_max)]["feature"].tolist()
+
     if excluded_weak:
         logger.info("Excluded %d weak features (IV < %.2f): %s", len(excluded_weak), iv_min, excluded_weak[:5])
     if excluded_leakage:
@@ -104,11 +113,20 @@ def select_features_by_iv(df, features, target, iv_min=0.02, iv_max=0.5, bins=10
             excluded_leakage,
         )
 
+    if elevated_iv:
+        logger.info(
+            "Elevated-IV features KEPT but flagged (IV in (%.2f, %.2f]): %s",
+            leakage_warn_threshold,
+            iv_max,
+            elevated_iv,
+        )
+
     logger.info("IV feature selection: %d/%d features selected", len(selected), len(features))
 
     return {
         "selected_features": selected,
         "excluded_weak": excluded_weak,
         "excluded_leakage": excluded_leakage,
+        "elevated_iv": elevated_iv,
         "iv_table": iv_table,
     }
