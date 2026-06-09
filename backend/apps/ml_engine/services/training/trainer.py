@@ -940,12 +940,17 @@ class ModelTrainer:
         y_val_prob = model.predict_proba(X_val)[:, 1]
         self._conformal_scores = np.sort(np.abs(y_val_prob - y_val.values))
 
-        # Evaluate on test set only (val was used for calibration and early stopping)
-        y_pred = model.predict(X_test)
+        # Evaluate on the test set at the OPERATING threshold the system deploys
+        # (the cost-optimal threshold the per-group fairness search is anchored
+        # to), NOT the model's 0.5 cutoff — which would describe a classifier the
+        # serving path never runs. AUC/Gini/KS/Brier/ECE are threshold-independent.
         y_prob = model.predict_proba(X_test)[:, 1]
+        y_pred = (y_prob >= optimal_threshold).astype(int)
 
         metrics = self.metrics_service.compute_metrics(y_test, y_pred, y_prob)
         metrics["confusion_matrix"] = self.metrics_service.confusion_matrix_data(y_test, y_pred)
+        # Tag the threshold these metrics were computed at (honest dashboard label).
+        metrics["classification_threshold"] = round(float(optimal_threshold), 4)
         metrics["roc_curve"] = self.metrics_service.roc_curve_data(y_test, y_prob)
         metrics["feature_importances"] = self.metrics_service.feature_importance_data(model, feature_cols)
         metrics["training_params"] = best_params

@@ -14,7 +14,7 @@ export function PerformanceTab({ metrics }: { metrics: ModelMetrics }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-6 md:grid-cols-2">
-        {hasConfusion && <ConfusionMatrix matrix={metrics.confusion_matrix} />}
+        {hasConfusion && <ConfusionMatrix matrix={metrics.confusion_matrix} threshold={metrics.optimal_threshold} />}
         {hasRoc && <ROCCurve fpr={metrics.roc_curve_data.fpr!} tpr={metrics.roc_curve_data.tpr!} auc={metrics.auc_roc ?? 0} />}
       </div>
       {hasFeatures && <FeatureImportance features={features} />}
