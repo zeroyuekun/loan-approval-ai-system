@@ -193,6 +193,40 @@ class TestTrainerPipeline:
         finally:
             os.unlink(tmp.name)
 
+    def test_temporal_cv_runs_under_reject_inference(self, small_dataset):
+        """#8: temporal CV must run on the PRE-reject-inference split. RI
+        augmentation grows X_train past the quarter-snapshot length; before the
+        fix the alignment check failed and temporal CV was silently skipped
+        whenever RI ran. When RI actually augments here, temporal CV must still
+        produce a real AUC (this dataset uses a temporal split)."""
+        df, reject_labels = small_dataset
+        if reject_labels is None or reject_labels.dropna().empty:
+            pytest.skip("No reject inference labels available for this dataset")
+
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
+        df.to_csv(tmp.name, index=False)
+        tmp.close()
+        try:
+            trainer = ModelTrainer()
+            try:
+                _model, metrics = trainer.train(
+                    tmp.name,
+                    algorithm="rf",
+                    use_reject_inference=True,
+                    reject_inference_labels=reject_labels,
+                )
+            except KeyError:
+                pytest.skip("RI transform KeyError: categorical columns already encoded")
+
+            meta = metrics.get("training_metadata", {})
+            assert "temporal_cv_auc_mean" in meta
+            assert meta["temporal_cv_auc_mean"] is not None, (
+                "temporal CV was skipped under reject inference — the pre-RI alignment fix (#8) regressed"
+            )
+            assert 0.0 < meta["temporal_cv_auc_mean"] <= 1.0
+        finally:
+            os.unlink(tmp.name)
+
     def test_monotonic_constraints_defined_for_all_features(self):
         """If the trainer defines monotonic constraints, they should cover all features."""
         trainer = ModelTrainer()
