@@ -94,9 +94,7 @@ def test_do_train_self_heals_before_training(settings, monkeypatch):
     # with the default BASE_DIR path BEFORE invoking the trainer. A refactor that
     # drops or reorders the guard must turn this test red.
     calls = []
-    monkeypatch.setattr(
-        tasks_mod, "_ensure_training_data", lambda p, *a, **k: calls.append(("ensure", p)) or False
-    )
+    monkeypatch.setattr(tasks_mod, "_ensure_training_data", lambda p, *a, **k: calls.append(("ensure", p)) or False)
 
     class _Boom(Exception):
         pass
@@ -105,9 +103,7 @@ def test_do_train_self_heals_before_training(settings, monkeypatch):
         calls.append(("train",))
         raise _Boom()
 
-    monkeypatch.setattr(
-        "apps.ml_engine.services.training.trainer.ModelTrainer.train", _boom_train
-    )
+    monkeypatch.setattr("apps.ml_engine.services.training.trainer.ModelTrainer.train", _boom_train)
 
     with pytest.raises(_Boom):
         tasks_mod._do_train(None, "xgb", None, MagicMock())
