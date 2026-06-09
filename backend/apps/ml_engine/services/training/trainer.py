@@ -767,11 +767,16 @@ class ModelTrainer:
                 {g: round(w, 3) for g, w in weight_map.items()},
             )
 
-        # Snapshot y_train length BEFORE reject-inference augmentation so the
-        # temporal CV alignment check (below) can compare against the pre-augmented
-        # size. After augmentation len(y_train) grows, which would cause the check
-        # to always fail and silently skip temporal CV.
+        # Snapshot the length AND the pre-augmentation X_train/y_train BEFORE
+        # reject-inference augmentation. RI (below) REASSIGNS X_train/y_train to a
+        # larger concatenated set; the temporal CV further down aligns row-for-row
+        # with train_quarters_snapshot (the original split), so it must run on
+        # these pre-RI copies. Running it on the augmented set misaligns against
+        # the snapshot and the diagnostic gets silently skipped/failed whenever
+        # reject inference runs (#8).
         _y_train_pre_ri_len = len(y_train)
+        _X_train_pre_ri = X_train
+        _y_train_pre_ri = y_train
 
         # ------------------------------------------------------------------
         # Reject-inference-aware training: include denied applications at
@@ -887,14 +892,16 @@ class ModelTrainer:
         temporal_cv_auc_mean = None
         temporal_cv_folds_used = 0
         cv_drift_signal = None
-        # Align the quarter snapshot to the current X_train rows. Reject-inference
-        # augmentation (below) happens AFTER this block for the XGB path, so we
-        # run the temporal CV on pre-augmented indices; but X_train may still
-        # have been trimmed by preprocessing earlier, so guard on length.
+        # Align the quarter snapshot to the PRE-reject-inference split. RI
+        # augmentation above reassigned X_train/y_train to a larger set, but the
+        # snapshot is row-aligned only to the original split — so temporal CV runs
+        # on the pre-RI copies (#8: previously it used the augmented X_train and
+        # was silently skipped/failed whenever RI ran). Guard on length in case
+        # preprocessing trimmed rows before the snapshot.
         if train_quarters_snapshot is not None and len(train_quarters_snapshot) == _y_train_pre_ri_len:
             try:
                 temporal_cv_auc_mean, temporal_cv_folds_used = self._compute_temporal_cv_auc(
-                    X_train, y_train, train_quarters_snapshot
+                    _X_train_pre_ri, _y_train_pre_ri, train_quarters_snapshot
                 )
                 if temporal_cv_auc_mean is not None:
                     cv_drift_signal = round(cv_mean - temporal_cv_auc_mean, 4)
@@ -1041,6 +1048,9 @@ class ModelTrainer:
             "iv_features_selected": len(getattr(self, "_iv_result", {}).get("selected_features", [])),
             "iv_features_excluded_weak": len(getattr(self, "_iv_result", {}).get("excluded_weak", [])),
             "iv_features_excluded_leakage": len(getattr(self, "_iv_result", {}).get("excluded_leakage", [])),
+            # Kept-but-flagged: IV above the standard 0.5 leakage line but <= the
+            # (higher) iv_max used for exclusion — the honest leakage signal (#13).
+            "iv_features_elevated": len(getattr(self, "_iv_result", {}).get("elevated_iv", [])),
             # Per-feature PSI (test vs train) — consumed by model_selector._max_psi,
             # the MRM dossier, and mrm_compliance._compliance_status via training_metadata.
             "psi_by_feature": metrics.get("psi_by_feature", {}),

@@ -14,6 +14,22 @@ import pytest
 from tests.conftest import skip_without_redis
 
 
+def _assert_payload_json_serializable(args=(), kwargs=None):
+    """Genuinely exercise the broker serialization that ``.apply()`` SKIPS.
+
+    ``.apply()`` runs a task eagerly and hands it the live Python objects
+    in-process — it does NOT serialise, so on its own it never proves the
+    payload would survive a real broker hop. Round-trip the (args, kwargs)
+    through Celery's configured JSON serializer to prove that explicitly.
+    """
+    from kombu.serialization import dumps, loads
+
+    kwargs = kwargs or {}
+    content_type, content_encoding, data = dumps([list(args), kwargs], serializer="json")
+    restored = loads(data, content_type, content_encoding)
+    assert restored == [list(args), kwargs], "task payload is not JSON-serialisable for the broker"
+
+
 @skip_without_redis
 @pytest.mark.django_db(transaction=True)
 class TestCeleryTaskExecution:
@@ -35,8 +51,9 @@ class TestCeleryTaskExecution:
                 "processing_time_ms": 100,
                 "model_version": "test-v1",
             }
-            # Use .apply() to execute synchronously but still go through
-            # the full serialization path (args must be JSON-serializable).
+            # Prove the payload is broker-serialisable (the part .apply() skips),
+            # then .apply() to exercise the eager execution path past the DB lookup.
+            _assert_payload_json_serializable(args=[999])
             result = run_prediction_task.apply(args=[999])
 
         # Task must have actually executed past serialisation and hit the DB.
@@ -52,7 +69,8 @@ class TestCeleryTaskExecution:
         from apps.email_engine.tasks import generate_email_task
         from apps.loans.models import LoanApplication
 
-        # apply() runs synchronously but exercises serialization.
+        # .apply() runs eagerly (no serialisation); prove serialisability explicitly.
+        _assert_payload_json_serializable(args=[999, "approved"])
         result = generate_email_task.apply(args=[999, "approved"])
 
         assert result.failed(), "Task must actually execute (not just be constructed)"
@@ -66,8 +84,9 @@ class TestCeleryTaskExecution:
         from apps.agents.tasks import orchestrate_pipeline_task
         from apps.loans.models import LoanApplication
 
-        # apply() runs synchronously and exercises serialization. The task
-        # itself will fail inside on DB lookup (app_id=999 doesn't exist).
+        # .apply() runs eagerly (no serialisation); prove serialisability explicitly.
+        # The task then fails inside on the DB lookup (app_id=999 doesn't exist).
+        _assert_payload_json_serializable(args=[999])
         result = orchestrate_pipeline_task.apply(args=[999])
 
         assert result.failed(), "Task must actually execute (not just be constructed)"
@@ -100,9 +119,12 @@ class TestCeleryTaskExecution:
 
         from apps.ml_engine.tasks import train_model_task
 
-        # apply() exercises full serialization; the task will fail inside trainer
-        # logic (missing csv) — we're testing the transport layer. Make the body
-        # deterministic regardless of environment:
+        # Prove the kwargs survive the broker's JSON serializer — .apply() below
+        # runs eagerly and does NOT serialise, so this is the real transport check.
+        _assert_payload_json_serializable(kwargs={"algorithm": "xgb", "data_path": "/tmp/nonexistent.csv"})
+
+        # .apply() then exercises eager execution; the task fails inside the trainer
+        # (missing csv). Make the body deterministic regardless of environment:
         #  - mock the Redis train lock so a real concurrent training run can't
         #    short-circuit the task to "skipped" (lock contention),
         #  - no-op the self-heal guard so the missing path stays missing and the
@@ -133,6 +155,9 @@ class TestCeleryTaskExecution:
         from apps.agents.models import AgentRun
         from apps.agents.tasks import resume_pipeline_task
 
+        _assert_payload_json_serializable(
+            args=[999], kwargs={"reviewer": "test-officer", "note": "Approved after manual review"}
+        )
         result = resume_pipeline_task.apply(
             args=[999],
             kwargs={
