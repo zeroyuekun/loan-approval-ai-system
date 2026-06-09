@@ -11,7 +11,7 @@
 
 ## 1. Project origin and framing
 
-The brief was a three-level AI system in the shape of Sajjaad Khader's loan approval demo: ML scoring, LLM email generation, and an agentic pipeline on top. The interesting engineering question wasn't the demo shape — it was whether the system could hold up to the regulatory load that a real Australian lender carries: NCCP responsible lending, Privacy Act APP obligations, APRA serviceability buffers, Banking Code transparency on denials. If that layer is thin, nothing else matters for the role it's targeted at.
+The brief was a three-level AI lending system: ML scoring, LLM email generation, and an agentic pipeline on top. The interesting engineering question wasn't the three-level shape — it was whether the system could hold up to the regulatory load that a real Australian lender carries: NCCP responsible lending, Privacy Act APP obligations, APRA serviceability buffers, Banking Code transparency on denials. If that layer is thin, nothing else matters for the role it's targeted at.
 
 That reframing drove every subsequent decision. The ML model is useful but not the point. The email generation is impressive but not the point. The point is: can this thing defend the decision it just made, in the language a regulator expects, with an audit trail that holds up?
 
@@ -193,3 +193,19 @@ The 8.9 → 9.5 polish pass landed v1.9.0. Over the next forty-eight hours the p
 **What's left.** HTML-escape parity between the Python and TypeScript email renderers (deferred since v1.10.3 — needs coordinated regen of fifteen byte-for-byte parity snapshots), and an unsubscribe-URL protocol allowlist that bundles with it. Both are scoped for a single coordinated future PR rather than a panicked spot-fix.
 
 *Reviewed: 2026-04-19.*
+
+---
+
+## Making the email LLM swappable — a free backend, chosen on data-safety grounds (2026-06-10)
+
+The email writer started as the paid Claude API. For a demonstrator that should run end-to-end with no spend, that's friction, so I made the backend pluggable and added a free option. The interesting part wasn't the plumbing — it was *which* free option, and saying why.
+
+The naive move is to point the email prompt at whatever free AI endpoint is cheapest. For a lending system that's the wrong instinct, and it's worth being explicit about why: most *free* consumer AI tiers train on the prompts you send them, and some have humans review them. Several of the big free tiers (Google Gemini's free tier, Mistral's free Experiment plan) do exactly that by default. Routing real borrower information to a tier like that is precisely what a real lender must not do — it's an APP 6 use-and-disclosure problem and an APP 8 cross-border problem rolled together.
+
+So the backend defaults to Claude, and the free option is **Groq specifically — chosen because its free tier does not train on submitted prompts**, not because it was the first free key I could get. Free tiers that train on prompts are deliberately excluded. On top of that the existing safety story still does the heavy lifting: the system runs entirely on synthetic data (there's no real PII anywhere in the repo), the email prompt already sends only anonymised feature summaries and model scores, and every cloud call is logged with its provider and destination country for APP 8 audit.
+
+The implementation kept the blast radius small. A thin adapter (`llm_client.py`) duck-types the Anthropic client — same `.messages.create` surface — so the single budget-guarded call site, the 18 guardrails, the retry loop, and the deterministic template fallback are all untouched. It's built on `httpx`, which was already a dependency, so the swap added zero new packages. One deliberate non-decision: I did **not** route the safety-critical bias detection through the free model. The free model writes prose; the compliance gate stays on the deterministic rules (ADR 003), so the safety floor remains auditable and model-independent. Putting a weaker model in charge of the bias check to save nothing would have been a bad trade.
+
+Honest limits: `llama-3.1-8b-instant` is weaker than Claude at forced tool calls and exact-figure reproduction — the guardrail + retry + template-fallback chain absorbs that, but more emails will fall back or retry than on Claude. Groq's `seed` is best-effort, so reproducibility is "near-identical," not bitwise. And for a real production deployment this free tier is not the endpoint to use — you'd point the same toggle at a no-train paid tier or a self-hosted model. That swap is a config change, not a rewrite, which was the whole point of making it pluggable. Full reasoning in ADR 010.
+
+*Reviewed: 2026-06-10.*

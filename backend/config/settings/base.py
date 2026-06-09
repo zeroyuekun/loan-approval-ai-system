@@ -401,6 +401,19 @@ AI_TEMPERATURE_ANALYSIS = 0.0  # Bias detection, reviews, structured analysis
 AI_TEMPERATURE_DECISION_EMAIL = 0.0  # Approval/denial emails (regulatory documents)
 AI_TEMPERATURE_MARKETING = 0.2  # Marketing/retention content (slight variance for anti-spam)
 
+# Email LLM backend — which provider writes the decision emails.
+#   "anthropic" (default): paid Claude API (claude-sonnet-4-6).
+#   "groq": free, OpenAI-compatible Groq (llama-3.1-8b-instant) — chosen because
+#           its free tier does NOT train on prompts. See ADR 010.
+# Either way the lending DECISION stays deterministic ML, and a missing key
+# degrades cleanly to the deterministic template fallback. EmailGenerator reads
+# these from the environment directly; declared here for documentation + audit.
+EMAIL_LLM_BACKEND = os.environ.get("EMAIL_LLM_BACKEND", "anthropic")
+EMAIL_LLM_MODEL = os.environ.get("EMAIL_LLM_MODEL", "")  # blank -> backend default
+EMAIL_LLM_SEED = int(os.environ.get("EMAIL_LLM_SEED", "0"))  # reproducibility (Groq best-effort)
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+
 # Bias detection thresholds (used by orchestrator pipeline)
 BIAS_THRESHOLD_PASS = 30  # 0-30: compliant, email can be sent
 BIAS_THRESHOLD_REVIEW = 60  # 31-60: moderate bias, LLM reviews for false positives

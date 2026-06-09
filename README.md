@@ -151,6 +151,7 @@ terraform/          # AWS infra-as-code — EKS, RDS Postgres, ElastiCache Redis
 | Template-first email with $5/day Claude budget cap | [006](backend/docs/adr/006-template-first-email-with-cost-cap.md) |
 | WAT architecture (workflows, agents, tools) | [007](backend/docs/adr/007-wat-architecture.md) |
 | Security architecture | [008](backend/docs/adr/008-security-architecture.md) |
+| Pluggable email LLM backend + free-tier data-safety (no real client data to a training cloud AI) | [010](backend/docs/adr/010-pluggable-email-llm-backend-data-safety.md) |
 
 <details>
 <summary><strong>ML model details</strong> (click to expand)</summary>

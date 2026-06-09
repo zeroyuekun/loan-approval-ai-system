@@ -345,3 +345,78 @@ class TestDenialNboTeaser:
         assert "$15,000" in result["prompt_used"]
         # Guardrail count is unchanged (no new check added).
         assert len(result["guardrail_results"]) == 18
+
+
+class TestEmailBackendSelection:
+    """The email writer is backend-selectable; the default and the free Groq
+    backend must both keep the budget guard, guardrails, and template fallback
+    intact, and a missing key must degrade to the deterministic template."""
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_default_backend_is_anthropic(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        assert gen.provider == "anthropic"
+        assert gen._model == "claude-sonnet-4-6"
+        # No ANTHROPIC_API_KEY in a cleared env -> template fallback path.
+        assert gen.client is None
+
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "groq", "GROQ_API_KEY": "gsk-test"}, clear=True)
+    @patch("apps.email_engine.services.llm_client.GroqLLMClient")
+    def test_groq_backend_builds_groq_client(self, mock_groq_cls):
+        mock_groq_cls.return_value = MagicMock()
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        assert gen.provider == "groq"
+        assert gen._model == "llama-3.1-8b-instant"
+        assert gen.client is mock_groq_cls.return_value
+        # Constructed with the configured key + reproducibility seed.
+        _, kwargs = mock_groq_cls.call_args
+        assert kwargs["api_key"] == "gsk-test"
+        assert kwargs["model"] == "llama-3.1-8b-instant"
+
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "groq", "GROQ_API_KEY": ""}, clear=True)
+    @patch("apps.agents.services.api_budget.ApiBudgetGuard")
+    def test_groq_without_key_falls_back_to_template(self, mock_budget_cls):
+        mock_budget_cls.return_value = MagicMock()
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        assert gen.provider == "groq"
+        assert gen.client is None
+
+        app = _make_mock_application(decision="approved")
+        result = gen.generate(app, "approved", confidence=0.92)
+        assert result["template_fallback"] is True
+
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "groq", "GROQ_API_KEY": "gsk-test"}, clear=True)
+    @patch("apps.email_engine.services.llm_client.GroqLLMClient")
+    @patch("apps.agents.services.api_budget.ApiBudgetGuard")
+    def test_generate_denial_email_via_groq(self, mock_budget_cls, mock_groq_cls):
+        """A denial email written through the Groq backend still runs the full
+        guardrail battery and honours the locked no-apology rule."""
+        mock_client = MagicMock()
+        mock_client.provider = "groq"
+        mock_groq_cls.return_value = mock_client
+        mock_client.messages.create.return_value = _make_mock_tool_response(
+            "Update on Your Personal Loan Application",
+            GOOD_DENIAL_BODY,
+        )
+        mock_budget_cls.return_value = MagicMock()
+
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        app = _make_mock_application(decision="denied", loan_amount=20000)
+        app.applicant.first_name = "Jane"
+        app.applicant.last_name = "Doe"
+        result = gen.generate(app, "denied", confidence=0.35)
+
+        assert result["template_fallback"] is False
+        assert result["body"]
+        assert len(result["guardrail_results"]) == 18
+        lowered = result["body"].lower()
+        for banned in ("sorry", "apologis", "disappoint"):
+            assert banned not in lowered
