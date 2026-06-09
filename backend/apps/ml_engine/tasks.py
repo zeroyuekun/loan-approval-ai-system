@@ -190,7 +190,10 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
             ks_statistic=metrics.get("ks_statistic"),
             log_loss_value=metrics.get("log_loss"),
             ece=metrics.get("calibration_data", {}).get("ece"),
-            optimal_threshold=metrics.get("threshold_analysis", {}).get("youden_j_threshold"),
+            # Persist the SAME operating threshold the per-group fairness search
+            # is anchored to (cost-optimal), so the disparate-impact guarantee
+            # holds at serving and the reported metrics match deployment.
+            optimal_threshold=metrics.get("optimal_threshold"),
             confusion_matrix=metrics["confusion_matrix"],
             feature_importances=metrics["feature_importances"],
             roc_curve_data=metrics["roc_curve"],

@@ -7,9 +7,12 @@ interface ConfusionMatrixProps {
     tp?: number; fp?: number; tn?: number; fn?: number;
     true_positives?: number; false_positives?: number; true_negatives?: number; false_negatives?: number;
   }
+  /** The operating threshold these counts were computed at. Surfaced so the
+   *  matrix is never mistaken for a 0.5-cutoff classifier the system never runs. */
+  threshold?: number | null
 }
 
-export function ConfusionMatrix({ matrix: raw }: ConfusionMatrixProps) {
+export function ConfusionMatrix({ matrix: raw, threshold }: ConfusionMatrixProps) {
   const matrix = {
     tp: raw.tp ?? raw.true_positives ?? 0,
     fp: raw.fp ?? raw.false_positives ?? 0,
@@ -74,6 +77,9 @@ export function ConfusionMatrix({ matrix: raw }: ConfusionMatrixProps) {
           </div>
           <p className="text-center text-xs text-muted-foreground mt-2">
             Total: {total} samples
+            {typeof threshold === 'number' && (
+              <> · at operating threshold {threshold.toFixed(2)}</>
+            )}
           </p>
         </div>
       </CardContent>
