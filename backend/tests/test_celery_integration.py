@@ -96,16 +96,31 @@ class TestCeleryTaskExecution:
 
     def test_train_model_task_serializes_kwargs(self):
         """Verify train_model_task kwargs (algorithm, data_path) serialize."""
+        from unittest.mock import MagicMock, patch
+
         from apps.ml_engine.tasks import train_model_task
 
-        # apply() exercises full serialization; the task will fail inside
-        # trainer logic (missing csv) — we're testing the transport layer.
-        result = train_model_task.apply(
-            kwargs={
-                "algorithm": "xgb",
-                "data_path": "/tmp/nonexistent.csv",
-            }
-        )
+        # apply() exercises full serialization; the task will fail inside trainer
+        # logic (missing csv) — we're testing the transport layer. Make the body
+        # deterministic regardless of environment:
+        #  - mock the Redis train lock so a real concurrent training run can't
+        #    short-circuit the task to "skipped" (lock contention),
+        #  - no-op the self-heal guard so the missing path stays missing and the
+        #    trainer raises on read instead of generating 20k rows + a real train.
+        fake_lock = MagicMock()
+        fake_lock.acquire.return_value = True
+        fake_redis = MagicMock()
+        fake_redis.lock.return_value = fake_lock
+        with (
+            patch("redis.from_url", return_value=fake_redis),
+            patch("apps.ml_engine.tasks._ensure_training_data", return_value=False),
+        ):
+            result = train_model_task.apply(
+                kwargs={
+                    "algorithm": "xgb",
+                    "data_path": "/tmp/nonexistent.csv",
+                }
+            )
 
         assert result.failed(), "Task must actually execute (not just be constructed)"
         assert isinstance(result.result, Exception), (

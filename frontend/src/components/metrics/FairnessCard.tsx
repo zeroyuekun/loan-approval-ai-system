@@ -2,7 +2,6 @@
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Label } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface FairnessCardProps {
@@ -29,13 +28,11 @@ function FairnessAttributeCard({ attribute, data }: { attribute: string; data: a
   const groups = data.groups as Record<string, GroupStats>
   // The backend emits disparate_impact_ratio / passes_80_percent_rule as null when
   // fewer than two groups are large enough to assess (or there are no approvals at
-  // all). Surface that as "Not assessable" rather than coercing it to a green
-  // DI 1.000 PASS — an un-measurable fairness result must never read as a clean pass
-  // on a regulated lending dashboard.
+  // all). When that's the case we hide the Equalized Odds figure rather than show a
+  // coerced 0.0000 — an un-measurable fairness result must never read as a clean
+  // pass on a regulated lending dashboard.
   const assessable: boolean =
     typeof data.disparate_impact_ratio === 'number' && typeof data.passes_80_percent_rule === 'boolean'
-  const disparateImpact: number | null = assessable ? data.disparate_impact_ratio : null
-  const passes80: boolean = data.passes_80_percent_rule === true
   const eqOddsDiff: number | null =
     assessable && typeof data.equalized_odds_difference === 'number' ? data.equalized_odds_difference : null
   const minGroupSize: number = data.min_group_size ?? 30
@@ -55,25 +52,10 @@ function FairnessAttributeCard({ attribute, data }: { attribute: string; data: a
   return (
     <Card>
       <CardHeader className="pb-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <CardTitle className="text-base">Fairness: {label}</CardTitle>
-            <CardDescription className="mt-1.5">
-              Equalized Odds Diff: {eqOddsDiff !== null ? eqOddsDiff.toFixed(4) : '—'}
-            </CardDescription>
-          </div>
-          <Badge
-            className={`shrink-0 ${!assessable
-              ? 'bg-gray-100 text-gray-700 border-gray-200'
-              : passes80
-                ? 'bg-green-100 text-green-800 border-green-200'
-                : 'bg-red-100 text-red-800 border-red-200'
-            }`}
-            variant="outline"
-          >
-            {assessable ? `DI: ${disparateImpact!.toFixed(3)} ${passes80 ? 'PASS' : 'FAIL'}` : 'DI: — Not assessable'}
-          </Badge>
-        </div>
+        <CardTitle className="text-base">Fairness: {label}</CardTitle>
+        <CardDescription className="mt-1.5">
+          Equalized Odds Diff: {eqOddsDiff !== null ? eqOddsDiff.toFixed(4) : '—'}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={320}>

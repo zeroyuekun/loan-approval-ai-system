@@ -52,6 +52,46 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
         raise
 
 
+def _ensure_training_data(data_path, num_records=None):
+    """Generate a synthetic training CSV at ``data_path`` if it is missing.
+
+    "Train Model" reads the disposable .tmp/synthetic_loans.csv, which is
+    gitignored and absent on a fresh clone or after .tmp is cleared. Rather than
+    letting the trainer die with a cryptic FileNotFoundError, self-heal by
+    generating a synthetic dataset on demand. Synthetic only — no live data or
+    network calls. Callers hold the training lock, so there is no generation
+    race. Returns True if a dataset was generated, False if one already existed.
+
+    A 0-byte file is treated as missing: a torn/interrupted write would otherwise
+    be trusted by an existence-only check and break every future run. The write
+    itself is atomic (temp file + os.replace) so a partial CSV is never visible.
+    """
+    import os
+
+    data_path = os.path.abspath(data_path)
+    if os.path.exists(data_path) and os.path.getsize(data_path) > 0:
+        return False
+
+    from apps.ml_engine.services.datagen.data_generator import DataGenerator
+
+    rows = num_records if num_records is not None else getattr(settings, "ML_AUTO_SEED_ROWS", 20000)
+    logger.warning(
+        "Training data %s not found — auto-generating %d synthetic rows (self-heal)",
+        data_path,
+        rows,
+    )
+    generator = DataGenerator()
+    df = generator.generate(num_records=rows)
+    # Atomic publish: write to a temp file in the same directory, then replace,
+    # so an interrupted write never leaves a partial CSV the existence check
+    # above would wrongly trust on the next run.
+    tmp_path = f"{data_path}.tmp.{os.getpid()}"
+    generator.save_to_csv(df, tmp_path)
+    os.replace(tmp_path, data_path)
+    logger.info("Auto-generated training dataset: %d rows -> %s", len(df), data_path)
+    return True
+
+
 def _do_train(task, algorithm, data_path, lock, *, segment=None):
     """Inner training logic — called with lock held."""
     from types import SimpleNamespace
@@ -73,6 +113,10 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
 
     if data_path is None:
         data_path = str(settings.BASE_DIR / ".tmp" / "synthetic_loans.csv")
+
+    # Self-heal: a fresh clone or cleared .tmp has no training CSV. Generate one
+    # rather than failing the run with a cryptic FileNotFoundError.
+    _ensure_training_data(data_path)
 
     segment = segment or SEGMENT_UNIFIED
     trainer = ModelTrainer()

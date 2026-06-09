@@ -24,10 +24,17 @@ const metricsWithSmallGroup = {
 }
 
 describe('FairnessCard', () => {
-  it('renders the per-attribute card with a PASS badge', () => {
+  it('renders the per-attribute card with its Equalized Odds figure', () => {
     render(<FairnessCard fairnessMetrics={metricsWithSmallGroup} />)
     expect(screen.getByText('Fairness: State')).toBeInTheDocument()
-    expect(screen.getByText(/DI: 0\.970 PASS/)).toBeInTheDocument()
+    expect(screen.getByText(/Equalized Odds Diff: 0\.0200/)).toBeInTheDocument()
+  })
+
+  it('does not render a PASS/FAIL disparate-impact badge', () => {
+    render(<FairnessCard fairnessMetrics={metricsWithSmallGroup} />)
+    expect(screen.queryByText(/\bPASS\b/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\bFAIL\b/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/DI:/)).not.toBeInTheDocument()
   })
 
   it('notes small groups excluded from the ratio, with the threshold', () => {
@@ -52,7 +59,7 @@ describe('FairnessCard', () => {
     expect(screen.queryByText(/excluded from the/i)).not.toBeInTheDocument()
   })
 
-  it('shows "Not assessable" instead of a green PASS when the ratio is null', () => {
+  it('hides the Equalized Odds figure (shows "—") when the ratio is null', () => {
     // Backend emits null DI / null pass when fewer than two groups are assessable.
     const notAssessable = {
       state: {
@@ -68,10 +75,9 @@ describe('FairnessCard', () => {
       },
     }
     render(<FairnessCard fairnessMetrics={notAssessable} />)
-    expect(screen.getByText(/Not assessable/i)).toBeInTheDocument()
-    // Must NOT coerce an un-measurable result into a clean pass.
-    expect(screen.queryByText(/PASS/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/DI: 1\.000/)).not.toBeInTheDocument()
+    // Must NOT coerce an un-measurable result into a clean 0.0000.
+    expect(screen.getByText(/Equalized Odds Diff: —/)).toBeInTheDocument()
+    expect(screen.queryByText(/\bPASS\b/)).not.toBeInTheDocument()
   })
 
   it('renders nothing when there are no fairness metrics', () => {
