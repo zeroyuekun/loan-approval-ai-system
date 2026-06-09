@@ -6,7 +6,7 @@
 
 ## Card 1 — Framing: why the compliance layer is the product
 
-**Say it:** "The demo this was based on is a three-level AI system: ML, LLM emails, agent pipeline. What's interesting about building that in the Australian lending space isn't the AI — it's whether the system can hold up to NCCP responsible lending, APRA serviceability, Privacy Act APPs, and the Banking Code of Practice. If the compliance layer is thin, nothing else matters. So I reframed the project around that."
+**Say it:** "It's a three-level AI lending system: ML scoring, LLM emails, an agent pipeline. What's interesting about building that in the Australian lending space isn't the AI — it's whether the system can hold up to NCCP responsible lending, APRA serviceability, Privacy Act APPs, and the Banking Code of Practice. If the compliance layer is thin, nothing else matters. So I built the project around that."
 
 **Follow-ups to expect:**
 - *Which obligation was hardest to implement?* → APP 11 field-level encryption + retention — Fernet at rest, rotation command, enforce_retention management command that hard-deletes at the policy horizon.
@@ -121,6 +121,17 @@
 
 ---
 
+## Card 12 — Free AI without the data-safety mistake
+
+**Say it:** "I made the email LLM backend pluggable so it can run free, but the careful part is *which* free option. The lazy move is to point applicant data at whatever free AI is cheapest — and most free AI tiers train on your prompts, some with human review. So I default to Claude and the free option is Groq specifically, because its free tier doesn't train on prompts. Free Gemini and Mistral, which do, are deliberately excluded. On top of that the demo runs on synthetic data and the prompt only ever sends anonymised feature summaries, never raw PII."
+
+**Follow-ups to expect:**
+- *How big was the change?* → A thin adapter that duck-types the Anthropic client — same call surface — so the $5/day budget guard, the 18 guardrails, the retry loop, and the deterministic template fallback are all untouched. Zero new dependencies; built on httpx, which was already there. ADR 010.
+- *Did you put the free model on the bias check too?* → No, deliberately. The free model writes prose; the safety-critical bias gate stays on the deterministic rules so it's auditable and model-independent. Putting a weaker model on the compliance gate to save nothing is a bad trade.
+- *What about real production?* → This free tier isn't the production endpoint — you'd switch the same toggle to a no-train paid tier or a self-hosted model. It's a config change, not a rewrite. That's the point of making it pluggable.
+
+---
+
 ## Pre-screen cheat sheet
 
 **One-line pitches:**
@@ -134,7 +145,7 @@
 - 71 input fields, 76 monotonic constraints, 31 engineered interactions.
 - 18 deterministic email guardrails on a decision email (19 on a marketing email). Up to three regeneration attempts, then the email is withheld and flagged to operations — the human-review queue is reserved for bias escalations only.
 - 76 SHAP-mapped adverse-action reason codes.
-- <$5/day Claude API cap.
+- <$5/day LLM API cap (Claude by default; optional free Groq backend, selectable via `EMAIL_LLM_BACKEND`, chosen because its free tier doesn't train on prompts).
 - 30s watchdog poll, 5-minute stuck threshold.
 - 63% backend test coverage floor, 1,932 backend tests across 158 files, plus 341 frontend tests.
 
@@ -143,4 +154,4 @@
 - No paging. No multi-region. No Vault — secrets are in `.env`.
 - Model card is honest, not audited.
 
-*Last updated: 2026-06-08.*
+*Last updated: 2026-06-10.*

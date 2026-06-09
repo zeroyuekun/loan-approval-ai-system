@@ -56,14 +56,14 @@ class EmailGenerator:
     MAX_RETRIES = 3
 
     def __init__(self):
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if api_key:
-            self.client = anthropic.Anthropic(
-                api_key=api_key,
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
-        else:
-            self.client = None
+        # Email LLM backend is selectable so the (low-stakes) email writer can
+        # run on a free, OpenAI-compatible provider instead of the paid Claude
+        # API. The lending DECISION is deterministic ML and never uses this.
+        # Default "anthropic" keeps existing behaviour unchanged.
+        backend = (os.environ.get("EMAIL_LLM_BACKEND", "anthropic") or "anthropic").lower()
+        configured_model = os.environ.get("EMAIL_LLM_MODEL", "") or ""
+        self.client, self.provider, self._model = self._build_client(backend, configured_model)
+
         self.guardrail_checker = GuardrailChecker()
         # Initialize retry-state attributes here so they are always defined,
         # regardless of which attempt number generate() is first called with.
@@ -74,6 +74,46 @@ class EmailGenerator:
         # per-instance breaker here duplicated that state and did not reset
         # the failure counter after cooldown expired — a buggy shadow of the
         # real one. All breaker logic now flows through guarded_api_call.
+
+    @staticmethod
+    def _build_client(backend, configured_model):
+        """Construct the LLM client for the configured email backend.
+
+        Returns ``(client_or_None, provider_name, model_id)``. A missing API key
+        yields a ``None`` client, which routes ``generate()`` to the
+        deterministic template fallback — the system never depends on any API to
+        produce a compliant, sendable email.
+        """
+        if backend == "groq":
+            from .llm_client import DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, GroqLLMClient
+
+            model = configured_model or DEFAULT_GROQ_MODEL
+            api_key = os.environ.get("GROQ_API_KEY", "")
+            if not api_key:
+                return None, "groq", model
+            try:
+                seed = int(os.environ.get("EMAIL_LLM_SEED", "0") or "0")
+            except ValueError:
+                seed = 0
+            client = GroqLLMClient(
+                api_key=api_key,
+                base_url=os.environ.get("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
+                model=model,
+                seed=seed,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+            return client, "groq", model
+
+        # Default: Anthropic Claude (unchanged behaviour).
+        model = configured_model or "claude-sonnet-4-6"
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            return None, "anthropic", model
+        client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
+        return client, "anthropic", model
 
     # Map ML feature names to plain-language denial reasons
     DENIAL_REASON_MAP = {
@@ -374,7 +414,7 @@ class EmailGenerator:
 
         input_tokens = 0
         output_tokens = 0
-        _model = "claude-sonnet-4-6"
+        _model = self._model
         try:
             # A single guarded API call. Backoff on rate limits no longer happens
             # here with time.sleep (which blocked the worker inside a hard

@@ -99,16 +99,26 @@ transparent, explainable governance arrangements.
 
 ## Third-Party AI Provider Governance
 
-This system uses Anthropic's Claude API for email generation and bias analysis.
-Under APRA CPS 230 (effective 1 July 2025), entities remain responsible for managing
-risks associated with service providers.
+This system uses an external LLM for email generation and bias analysis —
+Anthropic's Claude API by default, with an optional free, OpenAI-compatible Groq
+backend selectable via `EMAIL_LLM_BACKEND` (see ADR 010). Under APRA CPS 230
+(effective 1 July 2025), entities remain responsible for managing risks
+associated with service providers.
 
 **Controls in place:**
-- API call budget limits ($50/day, 500 calls/day)
+- API call budget limits ($5/day, 500 calls/day) — applies to whichever backend is active
 - Circuit breaker (3 failures -> 600s cooldown)
-- Template fallback when LLM is unavailable
-- No customer PII sent to Claude API — only anonymised financial context
-- Audit logging of all LLM interactions
+- Template fallback when the LLM is unavailable or no key is configured
+- No customer PII sent to the LLM — only anonymised financial context
+- Audit logging of all LLM interactions, including `provider` and `destination_country` (APP 8)
+
+**Provider-selection governance (ADR 010):** the free Groq backend was chosen
+because its free tier does **not** train on submitted prompts — free tiers that
+train on prompts (e.g. Gemini/Mistral free) are deliberately excluded. The whole
+system also runs on synthetic data (no real borrower PII anywhere), and the
+toggle/budget-guard/guardrail/template-fallback chain is identical across
+backends, so moving real production to a no-train paid tier or a self-hosted
+model is a config change.
 
 **Note:** CPS 230 is technology-agnostic and does not specifically mention AI/ML.
 However, material service providers require formal agreements and monitoring.

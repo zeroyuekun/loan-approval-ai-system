@@ -40,6 +40,10 @@ MODEL_PRICING = {
     "claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-20250514": {"input": 0.25, "output": 1.25},
+    # Free Groq backend for email generation — $0/token. The budget guard still
+    # reserves the per-call floor and counts the call against the daily call
+    # limit, but no dollar spend accrues.
+    "llama-3.1-8b-instant": {"input": 0.00, "output": 0.00},
 }
 
 # Fallback: assume Sonnet pricing for unknown models
@@ -494,7 +498,7 @@ def guarded_api_call(client, **kwargs):
             loan_application_id=loan_application_id,
             agent_run_id=agent_run_id,
             service=service,
-            provider="anthropic",
+            provider=getattr(client, "provider", "anthropic"),
             model_used=model,
             pii_categories=_detect_pii_categories(prompt_text),
             prompt_hash=hashlib.sha256(prompt_text.encode()).hexdigest(),
