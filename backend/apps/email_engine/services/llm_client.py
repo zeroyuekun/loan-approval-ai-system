@@ -35,6 +35,8 @@ import logging
 import anthropic
 import httpx
 
+from .exceptions import EmailBackendError
+
 logger = logging.getLogger("email_engine.llm_client")
 
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
@@ -139,14 +141,16 @@ class GroqLLMClient:
                 json=payload,
             )
         except httpx.HTTPError as exc:
-            # Transport-level failure — surface so guarded_api_call records the
-            # failure, releases the reservation, and the caller falls back.
-            raise RuntimeError(f"Groq request failed: {exc}") from exc
+            # Transport-level failure — surface as a backend error so the caller
+            # degrades to the deterministic template instead of crashing.
+            raise EmailBackendError(f"Groq request failed: {exc}") from exc
 
         if resp.status_code == 429:
             raise self._rate_limit_error(resp)
         if resp.status_code >= 400:
-            raise RuntimeError(f"Groq API error {resp.status_code}: {resp.text[:300]}")
+            # 4xx (e.g. 413 request-too-large on a small free tier) / 5xx →
+            # degrade to the template rather than hard-error.
+            raise EmailBackendError(f"Groq API error {resp.status_code}: {resp.text[:300]}")
 
         return self._normalise(resp.json())
 

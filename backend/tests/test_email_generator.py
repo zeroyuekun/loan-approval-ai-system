@@ -420,3 +420,51 @@ class TestEmailBackendSelection:
         lowered = result["body"].lower()
         for banned in ("sorry", "apologis", "disappoint"):
             assert banned not in lowered
+
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "groq", "GROQ_API_KEY": "gsk-test"}, clear=True)
+    @patch("apps.email_engine.services.llm_client.GroqLLMClient")
+    @patch("apps.agents.services.api_budget.ApiBudgetGuard")
+    def test_backend_error_falls_back_to_template(self, mock_budget_cls, mock_groq_cls):
+        """A provider error (e.g. a free-tier 413 surfacing as EmailBackendError)
+        must degrade to the deterministic template, not crash email generation."""
+        from apps.email_engine.services.exceptions import EmailBackendError
+
+        mock_client = MagicMock()
+        mock_client.provider = "groq"
+        mock_groq_cls.return_value = mock_client
+        mock_client.messages.create.side_effect = EmailBackendError("Groq API error 413: request too large")
+        mock_budget_cls.return_value = MagicMock()
+
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        app = _make_mock_application(decision="approved")
+        result = gen.generate(app, "approved", confidence=0.92)
+        assert result["template_fallback"] is True
+        assert result["passed_guardrails"] is True
+        assert result["body"]
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"}, clear=True)
+    @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
+    @patch("apps.agents.services.api_budget.ApiBudgetGuard")
+    def test_anthropic_api_error_falls_back_to_template(self, mock_budget_cls, mock_anthropic_cls):
+        """The same graceful degradation applies to the default Claude backend:
+        a connection/5xx error falls back to the template instead of propagating."""
+        import anthropic
+        import httpx
+
+        mock_client = MagicMock()
+        mock_anthropic_cls.return_value = mock_client
+        req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        mock_client.messages.create.side_effect = anthropic.APIConnectionError(request=req)
+        mock_budget_cls.return_value = MagicMock()
+
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        app = _make_mock_application(decision="denied", loan_amount=20000)
+        app.applicant.first_name = "Jane"
+        app.applicant.last_name = "Doe"
+        result = gen.generate(app, "denied", confidence=0.35)
+        assert result["template_fallback"] is True
+        assert result["passed_guardrails"] is True
