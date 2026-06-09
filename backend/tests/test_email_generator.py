@@ -468,3 +468,69 @@ class TestEmailBackendSelection:
         result = gen.generate(app, "denied", confidence=0.35)
         assert result["template_fallback"] is True
         assert result["passed_guardrails"] is True
+
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "ollama"}, clear=True)
+    @patch("apps.email_engine.services.llm_client.OpenAICompatibleLLMClient")
+    def test_ollama_backend_builds_client_without_explicit_key(self, mock_cls):
+        """Ollama needs no real key, so a client is built from the dummy default
+        — the opposite of the groq missing-key -> template path."""
+        mock_cls.return_value = MagicMock()
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        assert gen.provider == "ollama"
+        assert gen._model == "loan-email"
+        assert gen.client is mock_cls.return_value
+        _, kwargs = mock_cls.call_args
+        assert kwargs["provider"] == "ollama"
+        assert kwargs["base_url"] == "http://ollama:11434/v1"
+        assert kwargs["api_key"] == "ollama"  # dummy default
+
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "ollama"}, clear=True)
+    @patch("apps.email_engine.services.llm_client.OpenAICompatibleLLMClient")
+    @patch("apps.agents.services.api_budget.ApiBudgetGuard")
+    def test_ollama_unreachable_falls_back_to_template(self, mock_budget_cls, mock_cls):
+        """An unreachable local Ollama server (ConnectError -> EmailBackendError)
+        degrades to the deterministic template, not a crash."""
+        from apps.email_engine.services.exceptions import EmailBackendError
+
+        client = MagicMock()
+        client.provider = "ollama"
+        mock_cls.return_value = client
+        client.messages.create.side_effect = EmailBackendError("ollama request failed: ConnectError")
+        mock_budget_cls.return_value = MagicMock()
+
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        app = _make_mock_application(decision="approved")
+        result = gen.generate(app, "approved", confidence=0.92)
+        assert result["template_fallback"] is True
+
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "ollama"}, clear=True)
+    @patch("apps.email_engine.services.llm_client.OpenAICompatibleLLMClient")
+    @patch("apps.agents.services.api_budget.ApiBudgetGuard")
+    def test_generate_denial_email_via_ollama(self, mock_budget_cls, mock_cls):
+        """A denial email written through the local Ollama backend still runs the
+        full guardrail battery and honours the locked no-apology rule."""
+        client = MagicMock()
+        client.provider = "ollama"
+        mock_cls.return_value = client
+        client.messages.create.return_value = _make_mock_tool_response(
+            "Update on Your Personal Loan Application",
+            GOOD_DENIAL_BODY,
+        )
+        mock_budget_cls.return_value = MagicMock()
+
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        app = _make_mock_application(decision="denied", loan_amount=20000)
+        app.applicant.first_name = "Jane"
+        app.applicant.last_name = "Doe"
+        result = gen.generate(app, "denied", confidence=0.35)
+        assert result["template_fallback"] is False
+        assert len(result["guardrail_results"]) == 18
+        lowered = result["body"].lower()
+        for banned in ("sorry", "apologis", "disappoint"):
+            assert banned not in lowered

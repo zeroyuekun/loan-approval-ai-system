@@ -105,6 +105,33 @@ class EmailGenerator:
             )
             return client, "groq", model
 
+        if backend == "ollama":
+            from .llm_client import DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_MODEL, OpenAICompatibleLLMClient
+
+            model = configured_model or DEFAULT_OLLAMA_MODEL
+            # Ollama's /v1 ignores the bearer header, so a dummy default key means
+            # the client is always built (local inference needs no secret). An
+            # unreachable local server is handled at RUNTIME — httpx.ConnectError
+            # -> EmailBackendError -> deterministic template fallback — not by
+            # nulling the client here.
+            api_key = os.environ.get("OLLAMA_API_KEY", "ollama")
+            try:
+                seed = int(os.environ.get("EMAIL_LLM_SEED", "0") or "0")
+            except ValueError:
+                seed = 0
+            client = OpenAICompatibleLLMClient(
+                api_key=api_key,
+                base_url=os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
+                model=model,
+                seed=seed,
+                # Local CPU inference of a ~9k-token prompt can take tens of
+                # seconds; allow a long read timeout so a slow (not failed)
+                # generation isn't mistaken for an outage and bounced to template.
+                timeout=httpx.Timeout(180.0, connect=10.0),
+                provider="ollama",
+            )
+            return client, "ollama", model
+
         # Default: Anthropic Claude (unchanged behaviour).
         model = configured_model or "claude-sonnet-4-6"
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")

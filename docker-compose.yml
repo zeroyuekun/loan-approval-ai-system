@@ -299,6 +299,56 @@ services:
     networks:
       - internal
 
+  # --- Local LLM for free, private email generation (opt-in) ---
+  # Start with: docker compose --profile ollama up -d ollama ollama-init
+  # When EMAIL_LLM_BACKEND=ollama but these aren't running, email generation
+  # degrades cleanly to the deterministic template (ConnectError -> fallback),
+  # so the default stack is unaffected.
+  ollama:
+    image: ollama/ollama:latest  # pin a version for reproducibility, e.g. ollama/ollama:0.5.7
+    profiles: ["ollama"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'      # inference is CPU-bound; give it threads
+          memory: 8G       # qwen2.5:7b Q4 ~5GB weights + 16k KV-cache headroom
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"        # keep the model warm between emails
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - internal
+
+  # One-shot: pull the base model and bake the 16k-context `loan-email` model,
+  # then exit. Re-runs are cheap (model cached in the named volume).
+  ollama-init:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "ollama pull qwen2.5:7b &&
+       ollama create loan-email -f /models/Modelfile &&
+       echo 'ollama loan-email model ready'"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - ./ollama:/models:ro
+    restart: "no"
+    networks:
+      - internal
+
   # --- Monitoring stack (opt-in via: docker compose --profile monitoring up) ---
   prometheus:
     image: prom/prometheus:v3.1.0
@@ -428,3 +478,4 @@ volumes:
   # grafana_data is declared in docker-compose.monitoring.yml
   frontend_next:
   frontend_node_modules:
+  ollama_models:  # pulled Ollama models persist here (opt-in `ollama` profile)

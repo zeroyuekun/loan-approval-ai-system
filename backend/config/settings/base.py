@@ -447,14 +447,22 @@ AI_TEMPERATURE_MARKETING = 0.2  # Marketing/retention content (slight variance f
 #   "anthropic" (default): paid Claude API (claude-sonnet-4-6).
 #   "groq": free, OpenAI-compatible Groq (llama-3.1-8b-instant) — chosen because
 #           its free tier does NOT train on prompts. See ADR 010.
-# Either way the lending DECISION stays deterministic ML, and a missing key
-# degrades cleanly to the deterministic template fallback. EmailGenerator reads
-# these from the environment directly; declared here for documentation + audit.
+#   "ollama": free, LOCAL/on-prem Ollama — no per-minute token cap (so it fits
+#           the ~9k-token compliance prompts that overran Groq's free tier) and
+#           nothing leaves the host, so it is NOT an APP 8 cross-border
+#           disclosure. Requires the `ollama` compose service. See ADR 010.
+# Either way the lending DECISION stays deterministic ML, and a missing key /
+# unreachable backend degrades cleanly to the deterministic template fallback.
+# EmailGenerator reads these from the environment directly; declared here for
+# documentation + audit.
 EMAIL_LLM_BACKEND = os.environ.get("EMAIL_LLM_BACKEND", "anthropic")
 EMAIL_LLM_MODEL = os.environ.get("EMAIL_LLM_MODEL", "")  # blank -> backend default
-EMAIL_LLM_SEED = _env_int("EMAIL_LLM_SEED", 0)  # reproducibility (Groq best-effort)
+EMAIL_LLM_SEED = _env_int("EMAIL_LLM_SEED", 0)  # reproducibility (best-effort; Groq + Ollama)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434/v1")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")  # blank -> backend default (loan-email)
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "ollama")  # dummy; Ollama ignores auth
 
 # Bias detection thresholds (used by orchestrator pipeline)
 BIAS_THRESHOLD_PASS = 30  # 0-30: compliant, email can be sent
