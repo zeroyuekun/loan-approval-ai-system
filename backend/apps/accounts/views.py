@@ -74,6 +74,10 @@ def _clear_jwt_cookies(response):
 
 
 class RefreshRateThrottle(AnonRateThrottle):
+    # Distinct scope so this limit doesn't share AnonRateThrottle's "anon" cache
+    # key with the login/register throttles — without it all three count against
+    # the same per-IP bucket and interfere with each other's limits.
+    scope = "token_refresh"
     rate = "30/min"
 
 
@@ -140,10 +144,14 @@ class CookieTokenRefreshView(generics.GenericAPIView):
 
 
 class LoginRateThrottle(AnonRateThrottle):
+    # Distinct scope (see RefreshRateThrottle) — login, register and refresh must
+    # each own their per-IP bucket rather than sharing AnonRateThrottle's "anon".
+    scope = "login"
     rate = "5/min"
 
 
 class RegisterRateThrottle(AnonRateThrottle):
+    scope = "register"
     rate = "3/min"
 
 

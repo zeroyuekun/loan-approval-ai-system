@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 
 from apps.agents.exceptions import LLMServiceError
 from apps.agents.models import BiasReport, MarketingEmail, NextBestOffer
@@ -19,6 +20,22 @@ class MarketingPipelineService:
 
     def __init__(self, step_tracker: StepTracker):
         self.tracker = step_tracker
+
+    @staticmethod
+    def _has_marketing_consent(application) -> bool:
+        """True only if the applicant's profile exists AND granted marketing
+        consent. The reverse accessor is ``.profile`` — CustomerProfile.user sets
+        ``related_name="profile"``, so ``.customerprofile`` does not exist and
+        raised AttributeError on every call, which the old bare ``except
+        Exception`` swallowed → consent always read as absent → every marketing
+        email was silently blocked as "no_marketing_consent". Catch only a
+        genuinely missing profile so a future typo surfaces loudly instead.
+        """
+        try:
+            profile = application.applicant.profile
+        except ObjectDoesNotExist:
+            return False
+        return bool(profile and profile.marketing_consent)
 
     def run(self, application, agent_run, steps, denial_reasons, profile_context):
         """Run the full NBO + marketing email pipeline. Returns updated steps list."""
@@ -184,13 +201,8 @@ class MarketingPipelineService:
                     try:
                         from apps.email_engine.services.sender import send_decision_email
 
-                        # Check marketing consent before sending
-                        try:
-                            profile = application.applicant.customerprofile
-                        except Exception:
-                            profile = None
-
-                        if not profile or not profile.marketing_consent:
+                        # Gate on marketing consent before sending.
+                        if not self._has_marketing_consent(application):
                             logger.info(
                                 "Marketing email blocked: customer %s has not given marketing consent",
                                 application.applicant_id,
