@@ -249,18 +249,22 @@ class MetricsService:
         expected_counts = np.histogram(expected, bins=bin_edges)[0]
         actual_counts = np.histogram(actual, bins=bin_edges)[0]
 
-        # Convert to proportions; epsilon smoothing to avoid log(0)
-        eps = 1e-4
-        expected_pct = (expected_counts + eps) / (len(expected) + eps * len(expected_counts))
-        actual_pct = (actual_counts + eps) / (len(actual) + eps * len(actual_counts))
-        # Re-normalize so proportions sum to 1
-        expected_pct = expected_pct / expected_pct.sum()
-        actual_pct = actual_pct / actual_pct.sum()
+        # Convert to proportions using the SAME scheme as the canonical
+        # drift_monitor.compute_psi: epsilon REPLACES zeros only, with NO
+        # re-normalisation. The previous 1e-4 + re-normalise scheme made the
+        # per-bin breakdown fail to sum to the headline psi_value (#14); the
+        # bins share the identical edges with drift_monitor, so matching the
+        # smoothing makes sum(psi_components) reconcile to psi_value.
+        eps = 1e-8
+        expected_pct = expected_counts / len(expected)
+        actual_pct = actual_counts / len(actual)
+        expected_pct = np.where(expected_pct == 0, eps, expected_pct)
+        actual_pct = np.where(actual_pct == 0, eps, actual_pct)
 
-        # PSI = sum((actual% - expected%) * ln(actual% / expected%))
-        # Route the scalar through the canonical primitive so every PSI
-        # consumer reports the same number (single source of truth, M1).
-        # The per-bin breakdown below is presentation-only.
+        # PSI = sum((actual% - expected%) * ln(actual% / expected%)). The scalar
+        # routes through the canonical primitive (single source of truth, M1);
+        # the per-bin components now use identical bins + smoothing so they SUM
+        # to it (a presentation breakdown that reconciles to the headline).
         psi_components = (actual_pct - expected_pct) * np.log(actual_pct / expected_pct)
         psi_value = drift_monitor.compute_psi(expected, actual, bins=n_bins)
 

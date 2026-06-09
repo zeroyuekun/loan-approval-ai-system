@@ -44,10 +44,23 @@ MODEL_PRICING = {
     # reserves the per-call floor and counts the call against the daily call
     # limit, but no dollar spend accrues.
     "llama-3.1-8b-instant": {"input": 0.00, "output": 0.00},
+    # Free LOCAL Ollama backend — $0/token (runs on-prem, no API billing).
+    # "loan-email" is our 16k-context Modelfile build; the rest are common
+    # Ollama tags. Add a row here if you deploy a different OLLAMA_MODEL, else it
+    # falls back to Sonnet pricing and would wrongly accrue spend.
+    "loan-email": {"input": 0.00, "output": 0.00},
+    "qwen2.5:7b": {"input": 0.00, "output": 0.00},
+    "llama3.2:3b": {"input": 0.00, "output": 0.00},
+    "llama3.1:8b": {"input": 0.00, "output": 0.00},
 }
 
 # Fallback: assume Sonnet pricing for unknown models
 _DEFAULT_PRICING = {"input": 3.00, "output": 15.00}
+
+# Where each provider physically processes the prompt — drives the APICallLog
+# cross-border (Privacy Act APP 8) record. Local Ollama runs on-prem in
+# Australia, so it is NOT a cross-border disclosure; hosted providers are US.
+_PROVIDER_DESTINATION = {"anthropic": "US", "groq": "US", "ollama": "AU"}
 
 
 def estimate_cost_usd(input_tokens, output_tokens, model=""):
@@ -494,17 +507,18 @@ def guarded_api_call(client, **kwargs):
         from apps.agents.models import APICallLog
 
         prompt_text = _extract_prompt_text(kwargs)
+        provider = getattr(client, "provider", "anthropic")
         APICallLog.objects.create(
             loan_application_id=loan_application_id,
             agent_run_id=agent_run_id,
             service=service,
-            provider=getattr(client, "provider", "anthropic"),
+            provider=provider,
             model_used=model,
             pii_categories=_detect_pii_categories(prompt_text),
             prompt_hash=hashlib.sha256(prompt_text.encode()).hexdigest(),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            destination_country="US",
+            destination_country=_PROVIDER_DESTINATION.get(provider, "US"),
         )
     except Exception as e:
         logger.warning("Failed to create APICallLog: %s", e)

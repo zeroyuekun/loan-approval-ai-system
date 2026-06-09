@@ -1,12 +1,18 @@
-"""Provider adapter for a free, OpenAI-compatible LLM email backend (Groq).
+"""Provider adapter for OpenAI-compatible LLM email backends (Groq, Ollama).
 
 Why this exists
 ---------------
 Decision emails are written by an LLM, but the lending *decision* itself is
 deterministic ML — so the email writer is a low-stakes, swappable component.
-This adapter lets the email path run on a **free** Groq model instead of the
-paid Claude API, without touching the budget guard, the guardrail battery, or
-the deterministic template fallback.
+This adapter lets the email path run on any OpenAI-/chat-completions-compatible
+endpoint instead of the paid Claude API:
+
+  * **Groq** — a free hosted tier (no per-token cost), or
+  * **Ollama** — a free, *local/on-prem* model (no per-minute token cap, and no
+    data leaves the host — see ADR 010),
+
+without touching the budget guard, the guardrail battery, or the deterministic
+template fallback.
 
 It deliberately duck-types ``anthropic.Anthropic`` so the single call site in
 ``api_budget.guarded_api_call`` (``client.messages.create(**kwargs)``) and the
@@ -21,12 +27,20 @@ structural change. The adapter:
     caller reads (``.content[].type/.input/.text``, ``.usage.input_tokens/
     output_tokens``, ``.stop_reason``),
   * raises ``anthropic.RateLimitError`` on HTTP 429 so the existing retry seam
-    in ``EmailGenerator`` is reused unchanged.
+    in ``EmailGenerator`` is reused unchanged,
+  * raises ``EmailBackendError`` on 4xx/5xx/transport failures so the caller
+    degrades to the deterministic template.
 
-Data-safety note: Groq's free tier does not train on prompts, the email prompt
-carries only anonymised feature summaries (no raw PII — see
-docs/compliance/australia.md), and the whole system runs on synthetic data.
-See backend/docs/adr/010-groq-free-email-backend-data-safety.md.
+Ollama notes (see ADR 010 + the research that drove this):
+  * Ollama's OpenAI ``/v1`` endpoint *ignores* forced ``tool_choice``, so a
+    small local model may answer in plain text. The adapter already emits a text
+    block alongside any tool block, so ``_parse_tool_response``'s text fallback
+    covers it; if that fails, guardrails + the template fallback are the floor.
+  * Ollama's ``/v1`` endpoint also ignores a per-request context window, so the
+    ~9k-token compliance prompt must be served by a model whose context window
+    is baked in (a Modelfile ``PARAMETER num_ctx 16384`` — done in the compose
+    ``ollama-init`` step, exposed as the ``loan-email`` model). Nothing extra is
+    sent in the payload for that reason.
 """
 
 import json
@@ -41,6 +55,11 @@ logger = logging.getLogger("email_engine.llm_client")
 
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+
+# Local Ollama defaults. ``loan-email`` is the custom model baked with a 16k
+# context window (Modelfile) by the compose ``ollama-init`` service.
+DEFAULT_OLLAMA_BASE_URL = "http://ollama:11434/v1"
+DEFAULT_OLLAMA_MODEL = "loan-email"
 
 
 class _Block:
@@ -108,23 +127,34 @@ def _map_finish_reason(finish_reason):
     return finish_reason
 
 
-class GroqLLMClient:
-    """Minimal OpenAI-compatible client for Groq, duck-typed as anthropic.Anthropic.
+class OpenAICompatibleLLMClient:
+    """Minimal OpenAI-compatible chat client, duck-typed as anthropic.Anthropic.
 
-    Only the surface ``EmailGenerator`` + ``guarded_api_call`` actually use is
-    implemented: ``.messages.create(**anthropic_shaped_kwargs)`` returning an
-    object exposing ``.content`` / ``.usage`` / ``.stop_reason``.
+    Works against any OpenAI-/chat-completions-compatible endpoint (Groq's free
+    hosted tier or a local Ollama server). Only the surface ``EmailGenerator`` +
+    ``guarded_api_call`` actually use is implemented:
+    ``.messages.create(**anthropic_shaped_kwargs)`` returning an object exposing
+    ``.content`` / ``.usage`` / ``.stop_reason``.
+
+    ``provider`` is recorded on each APICallLog (Privacy Act APP 8 audit) — e.g.
+    ``"groq"`` / ``"ollama"`` — and drives the logged destination country.
     """
 
-    #: Recorded on each APICallLog for Privacy Act APP 8 cross-border audit.
-    provider = "groq"
-
-    def __init__(self, api_key, base_url=DEFAULT_GROQ_BASE_URL, model=DEFAULT_GROQ_MODEL, seed=0, timeout=None):
+    def __init__(
+        self,
+        api_key,
+        base_url=DEFAULT_GROQ_BASE_URL,
+        model=DEFAULT_GROQ_MODEL,
+        seed=0,
+        timeout=None,
+        provider="groq",
+    ):
         self._api_key = api_key
         self._base_url = (base_url or DEFAULT_GROQ_BASE_URL).rstrip("/")
         self._default_model = model or DEFAULT_GROQ_MODEL
         self._seed = seed
         self._http = httpx.Client(timeout=timeout or httpx.Timeout(60.0, connect=10.0))
+        self.provider = provider
         self.messages = _Messages(self)
 
     # -- internal -----------------------------------------------------------
@@ -141,16 +171,17 @@ class GroqLLMClient:
                 json=payload,
             )
         except httpx.HTTPError as exc:
-            # Transport-level failure — surface as a backend error so the caller
-            # degrades to the deterministic template instead of crashing.
-            raise EmailBackendError(f"Groq request failed: {exc}") from exc
+            # Transport-level failure (e.g. a local Ollama server that isn't up)
+            # — surface as a backend error so the caller degrades to the
+            # deterministic template instead of crashing.
+            raise EmailBackendError(f"{self.provider} request failed: {exc}") from exc
 
         if resp.status_code == 429:
             raise self._rate_limit_error(resp)
         if resp.status_code >= 400:
             # 4xx (e.g. 413 request-too-large on a small free tier) / 5xx →
             # degrade to the template rather than hard-error.
-            raise EmailBackendError(f"Groq API error {resp.status_code}: {resp.text[:300]}")
+            raise EmailBackendError(f"{self.provider} API error {resp.status_code}: {resp.text[:300]}")
 
         return self._normalise(resp.json())
 
@@ -158,8 +189,8 @@ class GroqLLMClient:
         payload = {
             "model": kwargs.get("model") or self._default_model,
             "messages": kwargs.get("messages", []),
-            # AI_TEMPERATURE_DECISION_EMAIL is 0.0; seed makes Groq best-effort
-            # reproducible for the same prompt.
+            # AI_TEMPERATURE_DECISION_EMAIL is 0.0; seed makes the model
+            # best-effort reproducible for the same prompt.
             "temperature": kwargs.get("temperature", 0.0),
             "seed": self._seed,
         }
@@ -174,6 +205,8 @@ class GroqLLMClient:
         tool_choice = kwargs.get("tool_choice")
         if isinstance(tool_choice, dict) and tool_choice.get("name"):
             # Anthropic {"type":"tool","name":X} -> OpenAI forced function call.
+            # (Groq honours this; Ollama's /v1 ignores it and may answer in plain
+            # text — handled by the text block emitted in _normalise.)
             payload["tool_choice"] = {"type": "function", "function": {"name": tool_choice["name"]}}
         return payload
 
@@ -182,9 +215,9 @@ class GroqLLMClient:
         ``except anthropic.RateLimitError`` seam is reused. Falls back to a
         generic error if the SDK signature differs."""
         try:
-            return anthropic.RateLimitError("Groq API rate limited", response=resp, body=None)
+            return anthropic.RateLimitError(f"{self.provider} API rate limited", response=resp, body=None)
         except Exception:  # noqa: BLE001 — defensive against SDK signature drift
-            return RuntimeError("Groq API rate limited (429)")
+            return EmailBackendError(f"{self.provider} API rate limited (429)")
 
     def _normalise(self, data):
         """Convert an OpenAI chat-completion dict into the Anthropic-ish shape."""
@@ -201,13 +234,14 @@ class GroqLLMClient:
             try:
                 parsed = json.loads(raw_args)
             except (TypeError, ValueError):
-                logger.warning("Groq tool_call arguments were not valid JSON — relying on text fallback")
+                logger.warning("tool_call arguments were not valid JSON — relying on text fallback")
                 continue
             blocks.append(_Block(type="tool_use", input=parsed))
 
         # Always also expose any plain text so the caller's text-parse fallback
         # (EmailGenerator._parse_tool_response) can recover if the tool call was
-        # malformed or empty — smaller models are less reliable at tool use.
+        # malformed or empty — smaller / local models are less reliable at tool
+        # use, and Ollama's /v1 endpoint ignores forced tool_choice entirely.
         text = message.get("content")
         if text:
             blocks.append(_Block(type="text", text=text))
@@ -219,3 +253,9 @@ class GroqLLMClient:
         )
         stop_reason = _map_finish_reason(choice.get("finish_reason"))
         return _Response(content=blocks, usage=usage, stop_reason=stop_reason)
+
+
+# Back-compat alias: the original Groq-specific name. ``provider`` defaults to
+# "groq", so existing call sites and tests that import/patch ``GroqLLMClient``
+# keep working unchanged.
+GroqLLMClient = OpenAICompatibleLLMClient
