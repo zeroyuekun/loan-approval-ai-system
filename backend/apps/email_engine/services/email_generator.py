@@ -8,6 +8,7 @@ import httpx
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from .documentation import build_documentation_checklist
+from .exceptions import EmailBackendError
 from .guardrails import GuardrailChecker
 from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
@@ -442,6 +443,17 @@ class EmailGenerator:
             from .exceptions import RateLimited
 
             raise RateLimited(retry_after=30) from exc
+        except (anthropic.APIError, EmailBackendError) as exc:
+            # A provider error (timeout, connection drop, 4xx/5xx — e.g. a free
+            # tier returning 413 "request too large") must NOT leave a customer
+            # without a compliant email. Degrade to the deterministic template,
+            # exactly like the budget-exhausted path. 429 is handled above as
+            # RateLimited (Celery backoff); programming bugs are not APIError /
+            # EmailBackendError, so they still surface.
+            logging.getLogger("email_engine.generator").warning(
+                "email LLM backend error (%s) — falling back to template", type(exc).__name__
+            )
+            return self._generate_fallback(application, decision, context, start_time)
         # Failure accounting (record_failure, circuit-breaker tripping) happens
         # inside guarded_api_call. Any other exception here propagates to the caller.
 

@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 from apps.email_engine.services.email_generator import EMAIL_SUBMIT_TOOL
+from apps.email_engine.services.exceptions import EmailBackendError
 from apps.email_engine.services.llm_client import (
     GroqLLMClient,
     _map_finish_reason,
@@ -144,16 +145,24 @@ class TestGroqErrorHandling:
         with pytest.raises(anthropic.RateLimitError):
             c.messages.create(messages=[{"role": "user", "content": "x"}])
 
-    def test_500_raises_runtime_error(self):
+    def test_413_request_too_large_raises_email_backend_error(self):
+        # Free-tier TPM/context ceiling → must be a backend error so the caller
+        # degrades to the deterministic template, not a hard crash.
         c = _client()
-        c._http.post.return_value = _http_response(status_code=500, text_body="upstream boom")
-        with pytest.raises(RuntimeError):
+        c._http.post.return_value = _http_response(status_code=413, payload={"error": {"message": "Request too large"}})
+        with pytest.raises(EmailBackendError):
             c.messages.create(messages=[{"role": "user", "content": "x"}])
 
-    def test_transport_error_raises_runtime_error(self):
+    def test_500_raises_email_backend_error(self):
+        c = _client()
+        c._http.post.return_value = _http_response(status_code=500, text_body="upstream boom")
+        with pytest.raises(EmailBackendError):
+            c.messages.create(messages=[{"role": "user", "content": "x"}])
+
+    def test_transport_error_raises_email_backend_error(self):
         c = _client()
         c._http.post.side_effect = httpx.ConnectError("no route")
-        with pytest.raises(RuntimeError):
+        with pytest.raises(EmailBackendError):
             c.messages.create(messages=[{"role": "user", "content": "x"}])
 
     def test_provider_attribute_is_groq(self):
