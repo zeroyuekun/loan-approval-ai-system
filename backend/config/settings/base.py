@@ -464,6 +464,12 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434/v1")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")  # blank -> backend default (loan-email)
 OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "ollama")  # dummy; Ollama ignores auth
 
+# Model for the senior bias reviewer (Head of Compliance — holistic email review).
+# Blank/unset -> Opus 4.8 (the free same-price upgrade over the now-legacy Opus
+# 4.7: ~4x less likely to miss a flaw). Sampling-param handling for adaptive-only
+# models lives in guarded_api_call.
+BIAS_REVIEWER_MODEL = os.environ.get("BIAS_REVIEWER_MODEL", "") or "claude-opus-4-8"
+
 # Bias detection thresholds (used by orchestrator pipeline)
 BIAS_THRESHOLD_PASS = 30  # 0-30: compliant, email can be sent
 BIAS_THRESHOLD_REVIEW = 60  # 31-60: moderate bias, LLM reviews for false positives
