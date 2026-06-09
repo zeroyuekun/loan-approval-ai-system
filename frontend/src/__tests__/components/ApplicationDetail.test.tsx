@@ -36,6 +36,9 @@ vi.mock('@/components/emails/BiasScoreBadge', () => ({
 vi.mock('@/components/metrics/FeatureImportance', () => ({
   FeatureImportance: () => <div data-testid="feature-importance">Feature chart</div>,
 }))
+vi.mock('@/components/metrics/ShapWaterfall', () => ({
+  ShapWaterfall: () => <div data-testid="shap-waterfall">SHAP chart</div>,
+}))
 
 const mockApplication: LoanApplication = {
   id: 'loan-123',
@@ -135,20 +138,68 @@ describe('ApplicationDetail', () => {
     expect(screen.getByText('Loan Term')).toBeInTheDocument()
   })
 
-  it('renders ML decision when present', () => {
+  it('defaults to the Repayment Estimator tab when there is no email', () => {
     renderComponent()
-    expect(screen.getByText('ML Decision')).toBeInTheDocument()
-    expect(screen.getByText('APPROVED')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Repayment Estimator' })).toBeInTheDocument()
+    // The default tab's content is visible without any interaction.
+    expect(screen.getByText('Monthly Repayment')).toBeInTheDocument()
+  })
+
+  it('folds the decision summary into the header instead of a standalone box', () => {
+    renderComponent()
+    // The standalone "ML Decision" card is gone...
+    expect(screen.queryByText('ML Decision')).not.toBeInTheDocument()
+    // ...but its details now live in the Application Information card.
+    expect(screen.getByText('Model Confidence')).toBeInTheDocument()
+    expect(screen.getByText('Model Reasoning')).toBeInTheDocument()
     expect(screen.getByText('Strong credit profile with stable income.')).toBeInTheDocument()
   })
 
-  it('renders email preview when email prop is provided', () => {
+  it('reveals Feature Importance only after selecting its tab', async () => {
+    const user = userEvent.setup()
+    renderComponent()
+    // Inactive tab content is not mounted until selected.
+    expect(screen.queryByTestId('feature-importance')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Feature Importance' }))
+    expect(screen.getByTestId('feature-importance')).toBeInTheDocument()
+  })
+
+  it('reveals SHAP values only after selecting its tab', async () => {
+    const user = userEvent.setup()
+    renderComponent({
+      application: {
+        ...mockApplication,
+        decision: { ...mockApplication.decision!, shap_values: { income: 0.12, credit_score: -0.05 } },
+      },
+    })
+    expect(screen.queryByTestId('shap-waterfall')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'SHAP Values' }))
+    expect(screen.getByTestId('shap-waterfall')).toBeInTheDocument()
+  })
+
+  it('hides the SHAP tab when the decision has no SHAP values', () => {
+    renderComponent()
+    expect(screen.queryByRole('button', { name: 'SHAP Values' })).not.toBeInTheDocument()
+  })
+
+  it('shows the Decision Email tab first and selects it by default when an email exists', () => {
     renderComponent({ email: mockEmail })
+    expect(screen.getByRole('button', { name: 'Decision Email' })).toBeInTheDocument()
+    // Decision Email tab is active by default, so its content renders without interaction.
     expect(screen.getByTestId('email-preview')).toBeInTheDocument()
   })
 
-  it('does not render email preview when no email', () => {
+  it('places the Decision Email tab to the left of the Repayment Estimator tab', () => {
+    renderComponent({ email: mockEmail })
+    const emailTab = screen.getByRole('button', { name: 'Decision Email' })
+    const repaymentTab = screen.getByRole('button', { name: 'Repayment Estimator' })
+    // Decision Email precedes Repayment Estimator in document order (i.e. it is first / leftmost).
+    expect(emailTab.compareDocumentPosition(repaymentTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('does not render the Decision Email tab or its preview when there is no email', () => {
     renderComponent()
+    expect(screen.queryByRole('button', { name: 'Decision Email' })).not.toBeInTheDocument()
     expect(screen.queryByTestId('email-preview')).not.toBeInTheDocument()
   })
 
