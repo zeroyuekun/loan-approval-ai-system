@@ -79,6 +79,36 @@ grounds, not just price.
   model writes prose; it is not put in charge of the safety-critical compliance
   gate (ADR 003). That keeps the safety floor auditable and model-independent.
 
+### Update (2026-06-10): a local Ollama backend
+
+End-to-end testing of the Groq backend on a real key surfaced a hard limit:
+Groq's free tier caps at **6,000 tokens/min**, but the compliance email prompts
+are ~9k tokens (they embed the full verbatim template), so **every** email
+returned HTTP 413. Free Groq is therefore unusable for *these* prompts. A
+**local Ollama** backend was added because local inference has **no per-minute
+token cap** and the data never leaves the host.
+
+- The adapter was generalized to `OpenAICompatibleLLMClient` (with a
+  `GroqLLMClient` back-compat alias) — Groq and Ollama share one client; only
+  `base_url`, `model`, auth, and `provider` differ.
+- Selected by `EMAIL_LLM_BACKEND=ollama` (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`, a
+  *dummy* `OLLAMA_API_KEY` since Ollama ignores auth). The `ollama` service is an
+  **opt-in compose profile**; if it isn't running, the email path degrades to
+  the template (a connection error → `EmailBackendError` → fallback), so the
+  default stack is unaffected.
+- **Context window:** Ollama's OpenAI `/v1` endpoint cannot set `num_ctx` per
+  request, so the 16k window is **baked into a Modelfile** (`ollama/Modelfile`,
+  built as the `loan-email` model by the `ollama-init` service). Without it, the
+  default 4k context would silently truncate the 9k prompt.
+- **Forced tool calls:** Ollama's `/v1` *ignores* `tool_choice`, so a small
+  local model may answer in plain text — covered by the adapter's text block +
+  the existing text-parse / guardrail / template-fallback chain.
+- **APP 8 correctness:** local inference is on-prem (Australia), so it is **not**
+  a cross-border disclosure. `destination_country` is now **derived per
+  provider** (`ollama` → `AU`; `anthropic`/`groq` → `US`), fixing a previously
+  hardcoded `"US"` that would have logged a false cross-border record for local
+  inference.
+
 ## Consequences
 
 ### Positive
@@ -99,6 +129,11 @@ grounds, not just price.
   bitwise — acceptable given temperature 0 and the constrained prompt.
 - Two providers' response shapes to keep in parity (mitigated by the adapter and
   its unit tests).
+- The local Ollama backend is **slow on CPU** (~20–60s per email, dominated by
+  prompt ingestion) and **heavy** (~5GB model + ~8GB-RAM container), and a small
+  local model trips the structured-output guardrails more often (→ more template
+  fallbacks). It is an opt-in capability, not the recommended default over
+  templates for a demo.
 
 ### Production note
 

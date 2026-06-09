@@ -16,6 +16,7 @@ from apps.email_engine.services.email_generator import EMAIL_SUBMIT_TOOL
 from apps.email_engine.services.exceptions import EmailBackendError
 from apps.email_engine.services.llm_client import (
     GroqLLMClient,
+    OpenAICompatibleLLMClient,
     _map_finish_reason,
     _to_openai_tool,
 )
@@ -169,3 +170,9 @@ class TestGroqErrorHandling:
         # guarded_api_call reads getattr(client, "provider", "anthropic") for the
         # cross-border audit log.
         assert GroqLLMClient(api_key="x").provider == "groq"
+
+    def test_provider_is_configurable_for_ollama(self):
+        # The generalized client records whatever provider it's told (drives the
+        # APICallLog provider + destination country); the Groq alias defaults to "groq".
+        assert OpenAICompatibleLLMClient(api_key="x", provider="ollama").provider == "ollama"
+        assert OpenAICompatibleLLMClient(api_key="x").provider == "groq"

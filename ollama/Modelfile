@@ -1,0 +1,19 @@
+# Custom Ollama model for loan decision emails.
+#
+# WHY: the ~9k-token compliance prompt would be silently truncated at Ollama's
+# CPU default context window (4096 tokens), mangling the email. Ollama's OpenAI
+# /v1 endpoint cannot set num_ctx per request, so the larger window must be
+# BAKED into the model. A Modelfile PARAMETER also takes precedence over the
+# OLLAMA_CONTEXT_LENGTH env var (which is unreliable), so this is the robust fix.
+#
+# Built once by the compose `ollama-init` service:
+#   ollama create loan-email -f /models/Modelfile
+# and selected via EMAIL_LLM_BACKEND=ollama (OLLAMA_MODEL defaults to loan-email).
+#
+# Swap the base model for a lighter one on a low-RAM host, e.g. `FROM llama3.2:3b`
+# (~2GB, faster, slightly less reliable at the structured tool call — the
+# guardrail + template fallback covers that). Keep num_ctx >= 12288 to fit the
+# ~9k input + ~4k output.
+FROM qwen2.5:7b
+PARAMETER num_ctx 16384
+PARAMETER temperature 0
