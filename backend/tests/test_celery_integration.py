@@ -166,19 +166,22 @@ def test_train_lock_release_failure_does_not_mask_training_error():
     fake_redis = MagicMock()
     fake_redis.lock.return_value = fake_lock
 
-    class _TrainBoom(Exception):
-        pass
-
+    # Use a built-in exception for the training error — a locally-defined class
+    # can't be serialised, so Celery would wrap it and obscure the type. Assert
+    # on the message so the test is robust to any Celery result-wrapping.
     with (
         patch("redis.from_url", return_value=fake_redis),
-        patch("apps.ml_engine.tasks._do_train", side_effect=_TrainBoom("training failed")),
+        patch("apps.ml_engine.tasks._do_train", side_effect=ValueError("training failed")),
     ):
         result = train_model_task.apply(kwargs={"algorithm": "xgb"})
 
     assert result.failed()
-    assert isinstance(result.result, _TrainBoom), (
-        f"the original training error must propagate, not the lock-release error; "
-        f"got {type(result.result).__name__}: {result.result}"
+    msg = str(result.result)
+    assert "training failed" in msg, (
+        f"the original training error must propagate, not the lock-release error; got {result.result!r}"
+    )
+    assert "lock already expired" not in msg, (
+        f"the lock-release error masked the real training error: {result.result!r}"
     )
 
 
