@@ -89,6 +89,17 @@ class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"password": "Password must contain at least one digit."})
         return data
 
+    def validate_email(self, value):
+        # Email is a login identifier (LoginSerializer resolves an "@"-style
+        # login to a username via CustomUser.objects.get(email=...)). CustomUser
+        # inherits AbstractUser's non-unique email, so without this check a second
+        # registration could reuse a victim's email and break their email login
+        # with an unhandled MultipleObjectsReturned (500 / account DoS). Enforce
+        # case-insensitive uniqueness for non-empty emails.
+        if value and CustomUser.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value
+
     def create(self, validated_data):
         validated_data.pop("password2")
         password = validated_data.pop("password")
@@ -111,6 +122,13 @@ class LoginSerializer(serializers.Serializer):
                 username_or_email = user_obj.username
             except CustomUser.DoesNotExist as err:
                 raise serializers.ValidationError("Invalid credentials.") from err
+            except CustomUser.MultipleObjectsReturned:
+                # Legacy duplicate emails (predating the registration-time
+                # uniqueness check) must never 500. Resolve to the ORIGINAL owner
+                # (oldest account) so the victim can still log in by email; a
+                # wrong password still fails authenticate() below.
+                user_obj = CustomUser.objects.filter(email=username_or_email).order_by("id").first()
+                username_or_email = user_obj.username
         user = authenticate(username=username_or_email, password=data["password"])
         if not user:
             raise serializers.ValidationError("Invalid credentials.")

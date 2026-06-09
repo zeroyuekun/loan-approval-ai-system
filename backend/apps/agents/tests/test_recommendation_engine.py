@@ -69,3 +69,42 @@ class TestUnsecuredPersonalTermSelection:
         rec = eng._evaluate_unsecured_personal(s)
         if rec is not None:
             assert rec.term_months == 60
+
+
+class TestSecuredPersonalServiceability:
+    """Guards the M19-parity fix for secured personal loans (review #3). The
+    secured offer used to size max_amount for a 60-month horizon but quote the
+    repayment at the chosen (possibly shorter) term, so the quote could exceed
+    the customer's demonstrated serviceable surplus. After the fix max_amount is
+    re-sized at the selected term, so repayment <= surplus in every case."""
+
+    def test_repayment_never_exceeds_serviceable_surplus(self):
+        eng = RecommendationEngine()
+        # High income (a short term fits the 15%-of-gross ceiling) + ample
+        # savings (the savings cap doesn't bind) — the exact shape that made the
+        # old code quote a short-term repayment above the demonstrated surplus.
+        s = _snapshot(
+            annual_income=240000.0,
+            monthly_expenses=2000.0,
+            savings_balance=120000.0,
+            credit_score=780,
+        )
+        rec = eng._evaluate_secured_personal(s)
+        assert rec is not None
+        assert rec.monthly_repayment <= s.monthly_surplus + 0.01, (
+            f"quoted ${rec.monthly_repayment:,.0f}/mo exceeds serviceable surplus ${s.monthly_surplus:,.0f}/mo"
+        )
+
+    def test_quoted_repayment_is_internally_consistent_with_amount_and_term(self):
+        eng = RecommendationEngine()
+        s = _snapshot(
+            annual_income=300000.0,
+            monthly_expenses=2000.0,
+            savings_balance=200000.0,
+            credit_score=800,
+        )
+        rec = eng._evaluate_secured_personal(s)
+        assert rec is not None
+        recomputed = _monthly_repayment(rec.amount, rec.estimated_rate, rec.term_months)
+        assert abs(recomputed - rec.monthly_repayment) < 0.01
+        assert rec.monthly_repayment <= s.monthly_surplus + 0.01

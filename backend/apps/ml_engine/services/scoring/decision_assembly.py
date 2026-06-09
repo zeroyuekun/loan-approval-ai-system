@@ -92,8 +92,15 @@ def assemble_decision(
             )
             prediction_label = "denied"
     except Exception:
-        logger.warning("Pricing tier computation failed", exc_info=True)
-        pricing_payload = {"tier": "unavailable", "approved": True}
+        # Fail-safe: the pricing tier is a hard risk gate that can DECLINE a
+        # model-approved application (PD above the bank's writeable cutoff). A
+        # transient failure must NOT read as a clean approve — flag the decision
+        # for human review and never report the gate as approved. (Routing here
+        # mirrors how requires_human_review already handles drift/borderline; it
+        # is not the bias-detection queue.)
+        logger.warning("Pricing tier computation failed — flagging for human review (fail-safe)", exc_info=True)
+        pricing_payload = {"tier": "unavailable", "approved": False}
+        requires_human_review = True
 
     return {
         "probability": probability,

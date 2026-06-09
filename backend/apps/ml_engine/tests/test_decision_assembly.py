@@ -172,7 +172,7 @@ class TestAssembleDecision:
 
         assert result["prediction_label"] == "denied"
 
-    def test_pricing_failure_returns_unavailable_payload_without_crashing(self):
+    def test_pricing_failure_is_failsafe_and_flags_review(self):
         mv = _mk_version(optimal_threshold=0.5)
         with patch(
             "apps.ml_engine.services.scoring.decision_assembly.get_tier",
@@ -187,9 +187,13 @@ class TestAssembleDecision:
                 segment="personal",
             )
 
-        # Model approves; pricing failed fail-open so label stays approved.
+        # Fail-SAFE (review G2): the pricing tier is a hard risk gate that can
+        # decline a model approval, so a transient failure must NOT read as a
+        # clean approve. The model's own label is preserved, but the gate is
+        # reported not-approved and the decision is flagged for human review.
         assert result["prediction_label"] == "approved"
-        assert result["pricing_payload"] == {"tier": "unavailable", "approved": True}
+        assert result["pricing_payload"] == {"tier": "unavailable", "approved": False}
+        assert result["requires_human_review"] is True
 
     def test_probability_rounded_to_four_places(self):
         mv = _mk_version(optimal_threshold=0.5)
