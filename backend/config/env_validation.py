@@ -74,9 +74,7 @@ def validate_env():
         # When the email backend is set to Groq, warn (don't block) on a missing
         # key — a missing key degrades cleanly to the deterministic template path.
         if os.environ.get("EMAIL_LLM_BACKEND", "").lower() == "groq":
-            optional_warned["GROQ_API_KEY"] = (
-                "Groq email generation will fall back to deterministic templates"
-            )
+            optional_warned["GROQ_API_KEY"] = "Groq email generation will fall back to deterministic templates"
 
         for var, consequence in optional_warned.items():
             if not os.environ.get(var):

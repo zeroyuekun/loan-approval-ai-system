@@ -36,9 +36,7 @@ def _client(seed=7):
 def _completion(*, tool_args=None, text=None, finish_reason="tool_calls", usage=None):
     message = {"content": text}
     if tool_args is not None:
-        message["tool_calls"] = [
-            {"function": {"name": "submit_email", "arguments": tool_args}}
-        ]
+        message["tool_calls"] = [{"function": {"name": "submit_email", "arguments": tool_args}}]
     return {
         "choices": [{"message": message, "finish_reason": finish_reason}],
         "usage": usage or {"prompt_tokens": 12, "completion_tokens": 34},
