@@ -124,10 +124,13 @@ class EmailGenerator:
                 base_url=os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
                 model=model,
                 seed=seed,
-                # Local CPU inference of a ~9k-token prompt can take tens of
-                # seconds; allow a long read timeout so a slow (not failed)
-                # generation isn't mistaken for an outage and bounced to template.
-                timeout=httpx.Timeout(180.0, connect=10.0),
+                # Local CPU inference is slow: a warm attempt on the ~4.5k-token
+                # prompt takes ~2 min, and a COLD first call also pays model-load
+                # time. 180s bounced cold starts to the template fallback; 300s
+                # lets a slow (not failed) generation finish instead of looking
+                # like an outage. Email runs in the async Celery queue, so the
+                # extra wall-clock is invisible to the request path.
+                timeout=httpx.Timeout(300.0, connect=10.0),
                 provider="ollama",
             )
             return client, "ollama", model
