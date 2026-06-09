@@ -8,7 +8,6 @@ import { usePipelineOrchestration } from '@/hooks/usePipelineOrchestration'
 import { ApplicationHeader } from '@/components/applications/ApplicationHeader'
 import { FinancialDetails } from '@/components/applications/FinancialDetails'
 import { CreditProfile } from '@/components/applications/CreditProfile'
-import { DecisionSection } from '@/components/applications/DecisionSection'
 import { PipelineControls } from '@/components/applications/PipelineControls'
 import { WorkflowTimeline } from '@/components/agents/WorkflowTimeline'
 import { NextBestOfferCard } from '@/components/agents/NextBestOfferCard'
@@ -18,7 +17,7 @@ import { BiasScoreBadge } from '@/components/emails/BiasScoreBadge'
 import { RepaymentCalculator } from '@/components/applications/RepaymentCalculator'
 import { FeatureImportance } from '@/components/metrics/FeatureImportance'
 import { ShapWaterfall } from '@/components/metrics/ShapWaterfall'
-import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 
 interface ApplicationDetailProps {
   application: LoanApplication
@@ -46,6 +45,17 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
   }
 
   const decision = application.decision
+  const featureImportances = decision?.feature_importances
+  const hasFeatureImportance =
+    !!featureImportances &&
+    (Array.isArray(featureImportances)
+      ? featureImportances.length > 0
+      : Object.keys(featureImportances).length > 0)
+  const shapValues = decision?.shap_values
+  const hasShapValues = !!shapValues && Object.keys(shapValues).length > 0
+  // The "Decision Email" tab bundles the whole pipeline output (decision/approval
+  // email, bias analysis, alternative offers, marketing email, agent timeline).
+  const hasEmailTab = !!email || !!agentRun
 
   return (
     <div className="space-y-6">
@@ -73,136 +83,140 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
         onDeleteConfirmToggle={onDeleteConfirmToggle}
       />
 
-      {/* Generated Email */}
-      {email && <EmailPreview email={email} />}
+      {/* Tabbed content — pulled up here so the tabs are easy to cycle through.
+          The Decision Email tab bundles the full pipeline output (email → bias →
+          offers → marketing → timeline); the rest are the estimator & explanations. */}
+      <Tabs defaultValue={hasEmailTab ? 'email' : 'repayment'}>
+        <TabsList className="flex-wrap">
+          {hasEmailTab && <TabsTrigger value="email">Decision Email</TabsTrigger>}
+          <TabsTrigger value="repayment">Repayment Estimator</TabsTrigger>
+          {hasFeatureImportance && (
+            <TabsTrigger value="feature-importance">Feature Importance</TabsTrigger>
+          )}
+          {hasShapValues && <TabsTrigger value="shap">SHAP Values</TabsTrigger>}
+        </TabsList>
 
-      {/* Bias Report */}
-      {agentRun?.bias_reports && agentRun.bias_reports.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Bias Analysis</CardTitle>
-            <CardDescription>
-              Compliance checks run on each generated email. A score of 0 means all deterministic checks passed
-              with no prohibited language, tone issues, or bias detected. Non-zero scores appear when
-              pattern-matching flags potential violations (e.g. discriminatory language, pressure tactics).
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {agentRun.bias_reports.map((report) => (
-              <div key={report.id} className="rounded-lg border p-4 space-y-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge variant="outline" className={
-                    report.report_type === 'decision'
-                      ? 'bg-blue-50 text-blue-700 border-blue-200'
-                      : 'bg-purple-50 text-purple-700 border-purple-200'
-                  }>
-                    {report.report_type === 'decision' ? 'Decision Email' : 'Marketing Email'}
-                  </Badge>
-                  {report.score_source && (
-                    <span className="text-xs text-muted-foreground">
-                      Source: {report.score_source.replace(/_/g, ' ')}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-start gap-4">
-                  <BiasScoreBadge score={report.bias_score} categories={report.categories} />
-                  <div className="flex-1">
-                    <p className="text-sm">{report.analysis}</p>
-                    {report.deterministic_score != null && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Deterministic score: {report.deterministic_score}/100
-                      </p>
-                    )}
-                    {report.requires_human_review && (
-                      <Badge variant="destructive" className="mt-2">Requires Human Review</Badge>
-                    )}
-                    {report.ai_review_approved !== null && (
-                      <div className="mt-2 space-y-1">
-                        <Badge variant={report.ai_review_approved ? 'default' : 'destructive'}>
-                          AI Review: {report.ai_review_approved ? 'Approved' : 'Flagged for Human Review'}
-                        </Badge>
-                        {report.ai_review_reasoning && (
-                          <p className="text-xs text-muted-foreground">{report.ai_review_reasoning}</p>
-                        )}
+        {hasEmailTab && (
+          <TabsContent value="email">
+            <div className="space-y-6">
+              {/* Generated Email */}
+              {email && <EmailPreview email={email} />}
+
+              {/* Bias Report */}
+              {agentRun?.bias_reports && agentRun.bias_reports.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Bias Analysis</CardTitle>
+                    <CardDescription>
+                      Compliance checks run on each generated email. A score of 0 means all deterministic checks passed
+                      with no prohibited language, tone issues, or bias detected. Non-zero scores appear when
+                      pattern-matching flags potential violations (e.g. discriminatory language, pressure tactics).
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {agentRun.bias_reports.map((report) => (
+                      <div key={report.id} className="rounded-lg border p-4 space-y-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge variant="outline" className={
+                            report.report_type === 'decision'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : 'bg-purple-50 text-purple-700 border-purple-200'
+                          }>
+                            {report.report_type === 'decision' ? 'Decision Email' : 'Marketing Email'}
+                          </Badge>
+                          {report.score_source && (
+                            <span className="text-xs text-muted-foreground">
+                              Source: {report.score_source.replace(/_/g, ' ')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-start gap-4">
+                          <BiasScoreBadge score={report.bias_score} categories={report.categories} />
+                          <div className="flex-1">
+                            <p className="text-sm">{report.analysis}</p>
+                            {report.deterministic_score != null && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Deterministic score: {report.deterministic_score}/100
+                              </p>
+                            )}
+                            {report.requires_human_review && (
+                              <Badge variant="destructive" className="mt-2">Requires Human Review</Badge>
+                            )}
+                            {report.ai_review_approved !== null && (
+                              <div className="mt-2 space-y-1">
+                                <Badge variant={report.ai_review_approved ? 'default' : 'destructive'}>
+                                  AI Review: {report.ai_review_approved ? 'Approved' : 'Flagged for Human Review'}
+                                </Badge>
+                                {report.ai_review_reasoning && (
+                                  <p className="text-xs text-muted-foreground">{report.ai_review_reasoning}</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    )}
-                  </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Next Best Offers */}
+              {agentRun?.next_best_offers && agentRun.next_best_offers.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Alternative Offers</h3>
+                  {agentRun.next_best_offers.map((nbo) => (
+                    <NextBestOfferCard key={nbo.id} offer={nbo} />
+                  ))}
                 </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+              )}
 
-      {/* Next Best Offers */}
-      {agentRun?.next_best_offers && agentRun.next_best_offers.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Alternative Offers</h3>
-          {agentRun.next_best_offers.map((nbo) => (
-            <NextBestOfferCard key={nbo.id} offer={nbo} />
-          ))}
-        </div>
-      )}
+              {/* Marketing Follow-up Email */}
+              {agentRun?.marketing_emails && agentRun.marketing_emails.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Marketing Email</h3>
+                  {agentRun.marketing_emails.map((me) => (
+                    <MarketingEmailCard key={me.id} email={me} />
+                  ))}
+                </div>
+              )}
 
-      {/* Marketing Follow-up Email */}
-      {agentRun?.marketing_emails && agentRun.marketing_emails.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Marketing Email</h3>
-          {agentRun.marketing_emails.map((me) => (
-            <MarketingEmailCard key={me.id} email={me} />
-          ))}
-        </div>
-      )}
+              {/* Agent Timeline */}
+              {agentRun && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Agent Workflow Timeline</CardTitle>
+                    <CardDescription>
+                      Total time: {agentRun.total_time_ms ? `${(agentRun.total_time_ms / 1000).toFixed(1)}s` : 'In progress'}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <WorkflowTimeline steps={agentRun.steps} />
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+        )}
 
-      {/* Agent Timeline */}
-      {agentRun && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Agent Workflow Timeline</CardTitle>
-            <CardDescription>
-              Total time: {agentRun.total_time_ms ? `${(agentRun.total_time_ms / 1000).toFixed(1)}s` : 'In progress'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <WorkflowTimeline steps={agentRun.steps} />
-          </CardContent>
-        </Card>
-      )}
+        <TabsContent value="repayment">
+          <RepaymentCalculator
+            loanAmount={application.loan_amount}
+            loanTermMonths={application.loan_term_months}
+          />
+        </TabsContent>
 
-      {/* Repayment Estimator */}
-      <RepaymentCalculator
-        loanAmount={application.loan_amount}
-        loanTermMonths={application.loan_term_months}
-      />
+        {hasFeatureImportance && (
+          <TabsContent value="feature-importance">
+            <FeatureImportance features={featureImportances!} />
+          </TabsContent>
+        )}
 
-      {/* ML Decision */}
-      {decision && <DecisionSection decision={decision} />}
-
-      {/* Feature Importance */}
-      {decision?.feature_importances && (Array.isArray(decision.feature_importances) ? decision.feature_importances.length > 0 : Object.keys(decision.feature_importances).length > 0) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Feature Importance</CardTitle>
-            <CardDescription>Top factors that influenced the ML decision</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FeatureImportance features={decision.feature_importances} />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* SHAP Values */}
-      {decision?.shap_values && Object.keys(decision.shap_values).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">SHAP Values</CardTitle>
-            <CardDescription>How each feature pushed the prediction towards approval or denial</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ShapWaterfall shapValues={decision.shap_values} />
-          </CardContent>
-        </Card>
-      )}
+        {hasShapValues && (
+          <TabsContent value="shap">
+            <ShapWaterfall shapValues={shapValues!} />
+          </TabsContent>
+        )}
+      </Tabs>
 
       {/* Notes */}
       {application.notes && (
