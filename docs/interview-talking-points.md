@@ -41,7 +41,7 @@
 
 **Follow-ups to expect:**
 - *How much lift?* → Measured, not assumed. Every training run fits a logistic baseline on four core features and records `baseline_auc` plus `xgb_lift_over_baseline` in training metadata. ADR 002.
-- *What else?* → IV feature selection, isotonic calibration, conformal prediction intervals for high-stakes cases, SHAP-mapped to 76 adverse-action reason codes, APRA +3% stress buffer, parcelling-based reject inference.
+- *What else?* → IV feature selection, isotonic calibration, conformal prediction intervals for high-stakes cases, SHAP-mapped to 70 adverse-action reason codes, APRA +3% stress buffer, parcelling-based reject inference.
 
 ---
 
@@ -144,10 +144,10 @@
 - Test AUC 0.87–0.88 Optuna-tuned, 0.84–0.85 default hyperparameters (synthetic), ~0.82 real-world estimate (TSTR).
 - 71 input fields, 76 monotonic constraints, 31 engineered interactions.
 - 18 deterministic email guardrails on a decision email (19 on a marketing email). Up to three regeneration attempts, then the email is withheld and flagged to operations — the human-review queue is reserved for bias escalations only.
-- 76 SHAP-mapped adverse-action reason codes.
+- 70 SHAP-mapped adverse-action reason codes.
 - <$5/day LLM API cap (Claude by default; optional free Groq backend, selectable via `EMAIL_LLM_BACKEND`, chosen because its free tier doesn't train on prompts).
 - 30s watchdog poll, 5-minute stuck threshold.
-- 63% backend test coverage floor, 1,932 backend tests across 158 files, plus 341 frontend tests.
+- 63% backend test coverage floor, 1,900+ backend tests across 180+ files, plus 370+ frontend tests.
 
 **Things you shouldn't oversell:**
 - No production users. No licensed compliance sign-off. Synthetic data only.

@@ -58,6 +58,15 @@ function FairnessAttributeCard({ attribute, data }: { attribute: string; data: a
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {/* Text alternative for screen readers — the BarChart is otherwise
+            inaccessible (consistent with the sibling metrics charts). */}
+        <ul className="sr-only">
+          {chartData.map((d) => (
+            <li key={d.group}>
+              {`${d.group}: actual approval ${d['Actual Approval']}%, predicted approval ${d['Predicted Approval']}%, true positive rate ${d.TPR}%, false positive rate ${d.FPR}%`}
+            </li>
+          ))}
+        </ul>
         <ResponsiveContainer width="100%" height={320}>
           <BarChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }} {...hoverProps}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.4} />

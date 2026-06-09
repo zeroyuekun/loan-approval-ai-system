@@ -48,7 +48,13 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
             algorithm,
             self.request.id,
         )
-        lock.release()
+        # Guard the release: after a long train the 30-min lock may already have
+        # expired, and releasing an expired/unowned redis lock raises — which
+        # would mask the real training error this except block is re-raising.
+        try:
+            lock.release()
+        except Exception:
+            logger.warning("train_model lock release failed (likely expired); ignoring")
         raise
 
 

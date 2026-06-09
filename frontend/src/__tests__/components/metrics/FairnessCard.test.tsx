@@ -30,6 +30,16 @@ describe('FairnessCard', () => {
     expect(screen.getByText(/Equalized Odds Diff: 0\.0200/)).toBeInTheDocument()
   })
 
+  it('exposes a screen-reader text alternative listing each group (review #12)', () => {
+    render(<FairnessCard fairnessMetrics={metricsWithSmallGroup} />)
+    // The BarChart is otherwise inaccessible; an sr-only list carries the data.
+    expect(
+      screen.getByText(
+        /actual approval 60%, predicted approval 62%, true positive rate 80%, false positive rate 20%/,
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('does not render a PASS/FAIL disparate-impact badge', () => {
     render(<FairnessCard fairnessMetrics={metricsWithSmallGroup} />)
     expect(screen.queryByText(/\bPASS\b/)).not.toBeInTheDocument()

@@ -151,6 +151,37 @@ class TestCeleryTaskExecution:
         )
 
 
+@pytest.mark.django_db
+def test_train_lock_release_failure_does_not_mask_training_error():
+    """If training raises AND the (possibly expired) redis lock's release() also
+    raises, the ORIGINAL training error must propagate — the release failure must
+    not mask it (review #17). Fully mocks redis, so it needs no broker."""
+    from unittest.mock import MagicMock
+
+    from apps.ml_engine.tasks import train_model_task
+
+    fake_lock = MagicMock()
+    fake_lock.acquire.return_value = True
+    fake_lock.release.side_effect = RuntimeError("lock already expired")
+    fake_redis = MagicMock()
+    fake_redis.lock.return_value = fake_lock
+
+    class _TrainBoom(Exception):
+        pass
+
+    with (
+        patch("redis.from_url", return_value=fake_redis),
+        patch("apps.ml_engine.tasks._do_train", side_effect=_TrainBoom("training failed")),
+    ):
+        result = train_model_task.apply(kwargs={"algorithm": "xgb"})
+
+    assert result.failed()
+    assert isinstance(result.result, _TrainBoom), (
+        f"the original training error must propagate, not the lock-release error; "
+        f"got {type(result.result).__name__}: {result.result}"
+    )
+
+
 @skip_without_redis
 class TestCeleryBrokerHealth:
     """Verify the Redis broker connection is healthy."""

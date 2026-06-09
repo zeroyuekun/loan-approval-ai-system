@@ -232,7 +232,7 @@ A separate `watchdog` service runs in the core stack at all times. It polls ever
 
 ## Testing
 
-1,750+ backend tests and 327 frontend tests. 63% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
+1,900+ backend tests and 370+ frontend tests. 63% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
 
 <details>
 <summary><strong>Verifying the build</strong> (click to expand)</summary>

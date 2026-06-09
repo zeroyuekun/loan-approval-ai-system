@@ -176,6 +176,18 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_CREDENTIALS = True
 
+# A missing CORS_ALLOWED_ORIGINS in production silently falls back to localhost,
+# which blocks the real deployed frontend with no obvious error. Surface it loudly
+# at startup rather than letting it manifest as opaque CORS failures in the browser.
+if not DEBUG and not os.environ.get("CORS_ALLOWED_ORIGINS"):
+    import warnings
+
+    warnings.warn(
+        "CORS_ALLOWED_ORIGINS is not set with DEBUG=False — defaulting to localhost; "
+        "the deployed frontend's requests will be blocked until it is configured.",
+        stacklevel=2,
+    )
+
 # Content Security Policy (django-csp 4.0+)
 # Uses CONTENT_SECURITY_POLICY dict format.
 # Start in report-only mode to avoid breaking existing functionality.

@@ -106,10 +106,12 @@ class FraudDetectionService:
         }
 
     def _check_velocity(self, application):
-        """Flag if the applicant submitted more than 3 applications in 7 days.
+        """Flag if the applicant has 10 or more in-pipeline applications in 7 days.
 
         Only counts applications still in the intake pipeline (pending/processing)
-        — already-decided applications are legitimate prior submissions.
+        — already-decided applications are legitimate prior submissions. The
+        threshold is `recent_count >= 10` (the +1 in messages includes the
+        current application).
         """
         from apps.loans.models import LoanApplication
 
