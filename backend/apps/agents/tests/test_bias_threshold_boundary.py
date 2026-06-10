@@ -37,7 +37,7 @@ def test_marketing_score_exactly_at_review_threshold_blocks():
     }
     with patch.object(det.prescreener, "prescreen_marketing_email", return_value=fake_prescreen):
         # If the boundary were exclusive, this would call the LLM; assert it does NOT.
-        with patch("apps.agents.services.bias.marketing._call_with_retry") as mock_llm:
+        with patch("apps.agents.services.bias.marketing._call_with_fallback") as mock_llm:
             result = det.analyze("body text", {"loan_amount": 10000, "purpose": "personal"})
             mock_llm.assert_not_called()
 
@@ -64,7 +64,7 @@ def test_flagged_high_score_always_requires_human_review():
     with (
         patch.object(det.prescreener, "prescreen_decision_email", return_value=fake_prescreen),
         patch(
-            "apps.agents.services.bias.core._call_with_retry",
+            "apps.agents.services.bias.core._call_with_fallback",
             return_value={"score": 90, "categories": ["gender"], "analysis": "confirmed"},
         ),
     ):

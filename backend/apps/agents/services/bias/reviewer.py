@@ -4,7 +4,7 @@ from django.conf import settings as django_settings
 
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
-from .helpers import _call_with_retry, _make_anthropic_client, _reviewer_model
+from .helpers import _call_with_fallback, _make_anthropic_client, _reviewer_model
 from .tools import EMAIL_REVIEW_TOOL
 
 logger = logging.getLogger("agents.bias_detector")
@@ -116,7 +116,7 @@ Use the record_review_decision tool to submit your decision."""
             "reasoning": "Unable to parse senior review response, defaulting to human escalation.",
         }
 
-        result = _call_with_retry(
+        result = _call_with_fallback(
             self.client,
             fallback,
             "Senior review",

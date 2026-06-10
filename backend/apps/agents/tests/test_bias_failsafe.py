@@ -166,11 +166,11 @@ class BiasFailSafeTestCase(TestCase):
 
     @override_settings(BIAS_FAILURE_MODE="block")
     def test_budget_exhausted_triggers_failsafe(self):
-        """BudgetExhausted inside _call_with_retry must activate the block-mode
+        """BudgetExhausted inside _call_with_fallback must activate the block-mode
         fail-safe — C8 regression guard.
 
         The test patches guarded_api_call at the helpers module so the
-        BudgetExhausted propagation path through _call_with_retry → BiasDetector
+        BudgetExhausted propagation path through _call_with_fallback → BiasDetector
         → email_pipeline._handle_bias_unavailable is exercised end-to-end,
         rather than short-circuiting at the BiasDetector.analyze boundary.
 
@@ -232,7 +232,7 @@ class BiasFailSafeTestCase(TestCase):
                 return_value=moderate_prescreen,
             ),
             # Patch guarded_api_call — the innermost integration point — to raise
-            # BudgetExhausted, exercising the re-raise in _call_with_retry.
+            # BudgetExhausted, exercising the re-raise in _call_with_fallback.
             patch(
                 "apps.agents.services.bias.helpers.guarded_api_call",
                 side_effect=BudgetExhausted("daily budget exhausted"),

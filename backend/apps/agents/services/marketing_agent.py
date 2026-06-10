@@ -5,7 +5,7 @@ from datetime import date
 import anthropic
 import httpx
 
-from apps.agents.services.api_budget import BudgetExhausted, guarded_api_call
+from apps.agents.services.api_budget import BudgetExhausted, CircuitOpen, guarded_api_call
 from apps.email_engine.services.guardrails import GuardrailChecker
 
 # Use the hardened shared sanitizer (NFKC + zero-width strip + broader
@@ -117,6 +117,9 @@ class MarketingAgent:
             self.client = anthropic.Anthropic(
                 api_key=api_key,
                 timeout=httpx.Timeout(60.0, connect=10.0),
+                # Pin the SDK's transient-error retry policy (connect errors,
+                # 408/429/5xx with backoff) so the relied-upon default can't drift.
+                max_retries=2,
             )
         else:
             self.client = None
@@ -196,13 +199,14 @@ class MarketingAgent:
 
         _logger = _logging.getLogger("agents.marketing_agent")
 
-        # Single API attempt — no in-worker sleep/retry loop.
+        # Single in-worker API attempt — no sleep/retry loop here, because
         # time.sleep() in a Celery worker blocks the thread and prevents other
-        # tasks from running.  Transient errors (RateLimit, Timeout, Connection,
-        # 5xx) fall back to the template immediately; non-transient errors
-        # propagate so Celery's autoretry / task-level error handling owns them.
-        # Budget / auth failures also take the template path (unchanged behaviour).
-        response = None
+        # tasks from running.  Transient-error retry lives inside the anthropic
+        # SDK client (max_retries=2 with backoff for connect errors and
+        # 408/429/5xx).  If the attempt still terminates with a transient error
+        # (RateLimit, Timeout, Connection, 5xx) we fall back to the template
+        # immediately; budget/circuit/auth failures also take the template path.
+        # Unexpected errors raise and fail the marketing_email_generation step.
         try:
             response = guarded_api_call(
                 self.client,
@@ -211,8 +215,8 @@ class MarketingAgent:
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
                 messages=[{"role": "user", "content": current_prompt}],
             )
-        except BudgetExhausted:
-            _logger.info("Marketing email API budget exhausted or no API key — using template")
+        except (BudgetExhausted, CircuitOpen):
+            _logger.info("Marketing email API budget exhausted, circuit open, or no API key — using template")
             return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
         except anthropic.AuthenticationError as api_err:
             _logger.error("Marketing email API auth error (not retryable): %s", api_err)

@@ -5,7 +5,7 @@ from django.conf import settings as django_settings
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..deterministic_prescreen import DeterministicBiasPreScreen
-from .helpers import _call_with_retry, _format_flag_detail, _make_anthropic_client
+from .helpers import _call_with_fallback, _format_flag_detail, _make_anthropic_client
 from .thresholds import is_severe
 from .tools import BIAS_ANALYSIS_TOOL
 
@@ -165,7 +165,7 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             "analysis": "LLM interpretation unavailable — using deterministic score.",
         }
 
-        result = _call_with_retry(
+        result = _call_with_fallback(
             self.client,
             fallback,
             "LLM bias interpretation",

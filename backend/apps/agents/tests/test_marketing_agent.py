@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import anthropic
 import pytest
 
-from apps.agents.services.api_budget import BudgetExhausted
+from apps.agents.services.api_budget import BudgetExhausted, CircuitOpen
 from apps.agents.services.marketing_agent import (
     MARKETING_EMAIL_PROMPT,
     MarketingAgent,
@@ -477,6 +477,20 @@ class TestGenerate:
     def test_budget_exhausted_falls_back_to_template(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
         mock_call.side_effect = BudgetExhausted("daily cap hit")
+        agent = MarketingAgent()
+        app = _make_mock_application()
+        result = agent.generate(app, _sample_nbo_result())
+        assert result["template_fallback"] is True
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
+    @patch("apps.agents.services.marketing_agent.anthropic.Anthropic")
+    @patch("apps.agents.services.marketing_agent.guarded_api_call")
+    def test_circuit_open_falls_back_to_template(self, mock_call, mock_anthropic_cls):
+        """CircuitOpen from guarded_api_call's reserve_budget must take the
+        template-fallback path (parity with email_generator), not hard-fail
+        the marketing_email_generation step."""
+        mock_anthropic_cls.return_value = MagicMock()
+        mock_call.side_effect = CircuitOpen("circuit breaker open after consecutive failures")
         agent = MarketingAgent()
         app = _make_mock_application()
         result = agent.generate(app, _sample_nbo_result())

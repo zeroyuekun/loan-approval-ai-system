@@ -41,6 +41,9 @@ def _make_anthropic_client():
         return anthropic.Anthropic(
             api_key=api_key,
             timeout=httpx.Timeout(60.0, connect=10.0),
+            # Pin the SDK's transient-error retry policy (connect errors,
+            # 408/429/5xx with backoff) so the relied-upon default can't drift.
+            max_retries=2,
         )
     return None
 
@@ -69,42 +72,47 @@ def _format_flag_detail(prescreen):
     return "\n".join(lines)
 
 
-def _call_with_retry(client, fallback, service_name, final_failure_suffix, **api_kwargs):
-    """Call the Anthropic API with a single-attempt policy.
+def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **api_kwargs):
+    """Call the Anthropic API once, returning ``fallback`` on terminal failure.
 
+    Retry for transient errors lives inside the anthropic SDK client: it
+    retries connect errors and 408/429/5xx responses internally with
+    exponential backoff (max_retries=2, pinned in _make_anthropic_client).
+    This helper makes a single in-worker attempt on top of that —
     time.sleep() inside a Celery worker blocks the thread and prevents other
-    tasks from running, so retry backoff inside the worker has been removed.
-    The caller (bias detector) already handles transient failures gracefully
-    by returning the supplied ``fallback`` dict, which is scored as the worst-
-    case (high-risk) bias result.  Non-transient (4xx) errors are not retried.
+    tasks from running, so there is no worker-level retry loop.
+
+    If the (SDK-retried) attempt still terminates with a transient error
+    (RateLimit, Timeout, Connection, 5xx) or a non-retryable 4xx, the
+    supplied ``fallback`` dict is returned immediately; the bias-detector
+    callers score it as the worst-case (high-risk) result.
     BudgetExhausted / CircuitOpen propagate so callers can invoke
     _handle_bias_unavailable.
-
-    If a single attempt raises a transient error (RateLimit, Timeout, Connection,
-    5xx), the function returns ``fallback`` immediately without sleeping.
     """
     try:
         response = guarded_api_call(client, **api_kwargs)
         return _extract_tool_result(response, fallback)
     except anthropic.AuthenticationError as e:
-        logger.error("%s auth error (not retryable): %s", service_name, e)
+        logger.error("%s failed (auth error, not retryable: %s) — %s", service_name, e, final_failure_suffix)
         return fallback
     except anthropic.RateLimitError as e:
-        logger.warning("%s rate limited — returning fallback (no sleep): %s", service_name, e)
-        logger.error("%s failed (rate limit) — %s", service_name, final_failure_suffix)
+        logger.error("%s failed (rate limited: %s) — %s", service_name, e, final_failure_suffix)
         return fallback
     except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
-        logger.warning("%s connection/timeout — returning fallback (no sleep): %s", service_name, e)
-        logger.error("%s failed — %s", service_name, final_failure_suffix)
+        logger.error("%s failed (connection/timeout: %s) — %s", service_name, e, final_failure_suffix)
         return fallback
     except anthropic.APIStatusError as e:
         if e.status_code >= 500:
-            logger.warning("%s server error (%d) — returning fallback (no sleep): %s", service_name, e.status_code, e)
-            logger.error("%s failed (server error) — %s", service_name, final_failure_suffix)
-            return fallback
+            logger.error("%s failed (server error %d: %s) — %s", service_name, e.status_code, e, final_failure_suffix)
         else:
-            logger.error("%s client error (%d, not retryable): %s", service_name, e.status_code, e)
-            return fallback
+            logger.error(
+                "%s failed (client error %d, not retryable: %s) — %s",
+                service_name,
+                e.status_code,
+                e,
+                final_failure_suffix,
+            )
+        return fallback
     except (BudgetExhausted, CircuitOpen):
         raise  # let callers invoke _handle_bias_unavailable
     except Exception as e:
