@@ -569,9 +569,13 @@ class RecommendationEngine:
         # Re-size max_amount at the ACTUAL selected term (M19). The secured path
         # previously sized for 60mo but quoted the repayment at the chosen
         # shorter term, so the quote could exceed the surplus the sizing assumed.
+        # Size against target_repayment (NOT raw surplus) so the quote honours
+        # the same min(15%-of-gross, surplus) cap the term loop enforced —
+        # raw surplus let an 84-month re-size breach the 15%-of-gross leg
+        # (delta-sweep S1-F2).
         max_amount = min(
             s.savings_balance * 0.90,
-            _max_serviceable_amount(s.monthly_surplus, rate, term),
+            _max_serviceable_amount(target_repayment, rate, term),
             catalog["max_amount"],
         )
         max_amount = math.floor(max_amount / 1000) * 1000
