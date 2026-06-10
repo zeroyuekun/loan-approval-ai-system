@@ -46,14 +46,13 @@ def _loan_type(purpose):
 
 
 def _loan_label(purpose):
-    """Display label ending in exactly one "Loan" — subjects append nothing.
+    """Return a display label ending in exactly one "Loan".
 
-    _loan_type values may legitimately end in "Loan" (product names like
-    "Green Loan", or display-form purposes such as "Personal Loan"); appending
-    a literal " Loan" to those rendered "Loan Loan" in subjects.
+    "Auto Loan" is the primary real get_purpose_display() value already ending in Loan;
+    hypothetical product names like "green_loan" → "Green Loan" are also preserved.
     """
     loan_type = _loan_type(purpose)
-    return loan_type if loan_type.lower().endswith("loan") else f"{loan_type} Loan"
+    return loan_type if loan_type.lower().endswith(" loan") or loan_type.lower() == "loan" else f"{loan_type} Loan"
 
 
 def _first_name(applicant_name):
@@ -451,7 +450,7 @@ def generate_approval_template(
     today = date.today()
     sign_by = (today + timedelta(days=30)).strftime("%d %B %Y")
 
-    subject = f"Congratulations! Your {_loan_label(purpose)} is Approved"
+    subject = f"Congratulations! Your {loan_label} is Approved"
 
     # Pricing section
     pricing_block = ""
@@ -572,7 +571,7 @@ def generate_denial_template(
     first = _first_name(applicant_name)
     ref = _ref_number(purpose, applicant_name)
 
-    subject = f"Update on Your {_loan_label(purpose)} Application | Ref #{ref}"
+    subject = f"Update on Your {loan_label} Application | Ref #{ref}"
 
     # Build assessment factor bullets
     reason_list = []

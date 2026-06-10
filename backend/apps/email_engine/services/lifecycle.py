@@ -43,7 +43,7 @@ def send_application_received(application):
     subject = f"We've Received Your {_loan_label(purpose)} Application | Ref #{ref_code}"
     body = f"""Dear {name},
 
-Thank you for your {purpose} loan application with AussieLoanAI. We have everything we need to get started.
+Thank you for your {_loan_label(purpose)} application with AussieLoanAI. We have everything we need to get started.
 
 Application summary:
 
