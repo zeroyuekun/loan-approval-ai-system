@@ -31,6 +31,14 @@ def _record_email_metric(decision: str, source: str, passed_guardrails: bool) ->
         _metrics_logger.debug("email_generation_total emission failed: %s", exc)
 
 
+# Memoized LLM clients, keyed by the full construction config per backend.
+# EmailGenerator() is built per Celery task; without this, every task created a
+# fresh httpx.Client/anthropic.Anthropic (no connection reuse, never closed).
+# httpx.Client and anthropic.Anthropic are thread-safe, and Celery prefork gives
+# each child process its own module state, so a module-level cache is safe.
+_CLIENT_CACHE = {}
+
+
 EMAIL_SUBMIT_TOOL = {
     "name": "submit_email",
     "description": "Submit the generated email with subject and body.",
@@ -84,6 +92,10 @@ class EmailGenerator:
         yields a ``None`` client, which routes ``generate()`` to the
         deterministic template fallback — the system never depends on any API to
         produce a compliant, sendable email.
+
+        Clients are memoized in ``_CLIENT_CACHE`` keyed by their full
+        construction config, so per-task EmailGenerator() instances reuse one
+        connection pool instead of churning an unclosed httpx.Client each call.
         """
         if backend == "groq":
             from .llm_client import DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, GroqLLMClient
@@ -96,13 +108,18 @@ class EmailGenerator:
                 seed = int(os.environ.get("EMAIL_LLM_SEED", "0") or "0")
             except ValueError:
                 seed = 0
-            client = GroqLLMClient(
-                api_key=api_key,
-                base_url=os.environ.get("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
-                model=model,
-                seed=seed,
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
+            base_url = os.environ.get("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL)
+            cache_key = ("groq", api_key, base_url, model, seed)
+            client = _CLIENT_CACHE.get(cache_key)
+            if client is None:
+                client = GroqLLMClient(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    seed=seed,
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                )
+                _CLIENT_CACHE[cache_key] = client
             return client, "groq", model
 
         if backend == "ollama":
@@ -119,20 +136,25 @@ class EmailGenerator:
                 seed = int(os.environ.get("EMAIL_LLM_SEED", "0") or "0")
             except ValueError:
                 seed = 0
-            client = OpenAICompatibleLLMClient(
-                api_key=api_key,
-                base_url=os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
-                model=model,
-                seed=seed,
-                # Local CPU inference is slow: a warm attempt on the ~4.5k-token
-                # prompt takes ~2 min, and a COLD first call also pays model-load
-                # time. 180s bounced cold starts to the template fallback; 300s
-                # lets a slow (not failed) generation finish instead of looking
-                # like an outage. Email runs in the async Celery queue, so the
-                # extra wall-clock is invisible to the request path.
-                timeout=httpx.Timeout(300.0, connect=10.0),
-                provider="ollama",
-            )
+            base_url = os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
+            cache_key = ("ollama", api_key, base_url, model, seed)
+            client = _CLIENT_CACHE.get(cache_key)
+            if client is None:
+                client = OpenAICompatibleLLMClient(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    seed=seed,
+                    # Local CPU inference is slow: a warm attempt on the ~4.5k-token
+                    # prompt takes ~2 min, and a COLD first call also pays model-load
+                    # time. 180s bounced cold starts to the template fallback; 300s
+                    # lets a slow (not failed) generation finish instead of looking
+                    # like an outage. Email runs in the async Celery queue, so the
+                    # extra wall-clock is invisible to the request path.
+                    timeout=httpx.Timeout(300.0, connect=10.0),
+                    provider="ollama",
+                )
+                _CLIENT_CACHE[cache_key] = client
             return client, "ollama", model
 
         # Default: Anthropic Claude (unchanged behaviour).
@@ -140,10 +162,16 @@ class EmailGenerator:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             return None, "anthropic", model
-        client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        # The SDK client itself is config-stable per api_key (the model is a
+        # per-request kwarg), so the key alone identifies the client.
+        cache_key = ("anthropic", api_key)
+        client = _CLIENT_CACHE.get(cache_key)
+        if client is None:
+            client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+            _CLIENT_CACHE[cache_key] = client
         return client, "anthropic", model
 
     # Map ML feature names to plain-language denial reasons
@@ -472,6 +500,9 @@ class EmailGenerator:
         except (BudgetExhausted, CircuitOpen):
             return self._generate_fallback(application, decision, context, start_time)
         except anthropic.RateLimitError as exc:
+            # Anthropic-backend seam only: the OpenAI-compatible adapter raises
+            # RateLimited directly (with the provider's Retry-After), which is
+            # not caught here and propagates to the Celery task by design.
             from .exceptions import RateLimited
 
             raise RateLimited(retry_after=30) from exc

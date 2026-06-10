@@ -8,12 +8,11 @@ guarded_api_call read — without any network calls (httpx client is mocked).
 import json
 from unittest.mock import MagicMock
 
-import anthropic
 import httpx
 import pytest
 
 from apps.email_engine.services.email_generator import EMAIL_SUBMIT_TOOL
-from apps.email_engine.services.exceptions import EmailBackendError
+from apps.email_engine.services.exceptions import EmailBackendError, RateLimited
 from apps.email_engine.services.llm_client import (
     GroqLLMClient,
     OpenAICompatibleLLMClient,
@@ -22,11 +21,11 @@ from apps.email_engine.services.llm_client import (
 )
 
 
-def _http_response(status_code=200, payload=None, text_body=""):
+def _http_response(status_code=200, payload=None, text_body="", headers=None):
     req = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
     if payload is not None:
-        return httpx.Response(status_code, request=req, json=payload)
-    return httpx.Response(status_code, request=req, text=text_body)
+        return httpx.Response(status_code, request=req, json=payload, headers=headers)
+    return httpx.Response(status_code, request=req, text=text_body, headers=headers)
 
 
 def _client(seed=7):
@@ -138,13 +137,88 @@ class TestGroqRequestPayload:
         # Auth header carries the bearer key.
         assert c._http.post.call_args.kwargs["headers"]["Authorization"] == "Bearer test-key"
 
+    def test_system_string_kwarg_becomes_leading_system_message(self):
+        # api_budget._extract_prompt_text hashes kwargs["system"] into the APP 8
+        # audit record — so the adapter must actually SEND it, not drop it.
+        c = _client()
+        c._http.post.return_value = _http_response(
+            payload=_completion(tool_args=json.dumps({"subject": "S", "body": "B"}))
+        )
+
+        c.messages.create(
+            system="You are a compliance email writer.",
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+        sent = c._http.post.call_args.kwargs["json"]
+        assert sent["messages"][0] == {"role": "system", "content": "You are a compliance email writer."}
+        assert sent["messages"][1] == {"role": "user", "content": "hello"}
+
+    def test_system_block_list_is_joined_into_system_message(self):
+        # Anthropic also allows system as a list of text blocks.
+        c = _client()
+        c._http.post.return_value = _http_response(
+            payload=_completion(tool_args=json.dumps({"subject": "S", "body": "B"}))
+        )
+
+        c.messages.create(
+            system=[{"type": "text", "text": "Line one."}, {"type": "text", "text": "Line two."}],
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+        sent = c._http.post.call_args.kwargs["json"]
+        assert sent["messages"][0] == {"role": "system", "content": "Line one.\nLine two."}
+
+    def test_unknown_kwarg_warns_but_call_proceeds(self, caplog):
+        # Silent kwarg drops are an audit-integrity hazard; future drops must be
+        # loudly visible in logs while the call still succeeds.
+        c = _client()
+        c._http.post.return_value = _http_response(
+            payload=_completion(tool_args=json.dumps({"subject": "S", "body": "B"}))
+        )
+
+        with caplog.at_level("WARNING", logger="email_engine.llm_client"):
+            resp = c.messages.create(
+                messages=[{"role": "user", "content": "hello"}],
+                metadata={"user_id": "u1"},
+            )
+
+        assert any("metadata" in rec.message for rec in caplog.records)
+        sent = c._http.post.call_args.kwargs["json"]
+        assert "metadata" not in sent
+        assert resp.content  # call proceeded and normalised normally
+
 
 class TestGroqErrorHandling:
-    def test_429_raises_anthropic_rate_limit_error(self):
+    def test_429_raises_rate_limited_with_retry_after_header(self):
+        # The adapter raises the typed RateLimited signal DIRECTLY (no counterfeit
+        # anthropic.RateLimitError) so tasks.py can self.retry(countdown=...).
+        c = _client()
+        c._http.post.return_value = _http_response(
+            status_code=429, payload={"error": "rate limited"}, headers={"Retry-After": "7"}
+        )
+        with pytest.raises(RateLimited) as excinfo:
+            c.messages.create(messages=[{"role": "user", "content": "x"}])
+        assert excinfo.value.retry_after == 7
+
+    def test_429_without_retry_after_defaults_to_30(self):
         c = _client()
         c._http.post.return_value = _http_response(status_code=429, payload={"error": "rate limited"})
-        with pytest.raises(anthropic.RateLimitError):
+        with pytest.raises(RateLimited) as excinfo:
             c.messages.create(messages=[{"role": "user", "content": "x"}])
+        assert excinfo.value.retry_after == 30
+
+    def test_429_with_non_numeric_retry_after_defaults_to_30(self):
+        # HTTP allows an http-date Retry-After; don't crash on it.
+        c = _client()
+        c._http.post.return_value = _http_response(
+            status_code=429,
+            payload={"error": "rate limited"},
+            headers={"Retry-After": "Wed, 10 Jun 2026 07:28:00 GMT"},
+        )
+        with pytest.raises(RateLimited) as excinfo:
+            c.messages.create(messages=[{"role": "user", "content": "x"}])
+        assert excinfo.value.retry_after == 30
 
     def test_413_request_too_large_raises_email_backend_error(self):
         # Free-tier TPM/context ceiling → must be a backend error so the caller
@@ -176,3 +250,37 @@ class TestGroqErrorHandling:
         # APICallLog provider + destination country); the Groq alias defaults to "groq".
         assert OpenAICompatibleLLMClient(api_key="x", provider="ollama").provider == "ollama"
         assert OpenAICompatibleLLMClient(api_key="x").provider == "groq"
+
+
+class TestClientMemoization:
+    """EmailGenerator is constructed per Celery task — the underlying LLM client
+    (and its httpx connection pool) must be reused, not rebuilt per task."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_cache_and_env(self, monkeypatch):
+        from apps.email_engine.services import email_generator as eg
+
+        eg._CLIENT_CACHE.clear()
+        monkeypatch.setenv("EMAIL_LLM_BACKEND", "groq")
+        monkeypatch.setenv("GROQ_API_KEY", "test-key")
+        monkeypatch.setenv("EMAIL_LLM_MODEL", "llama-3.1-8b-instant")
+        yield
+        eg._CLIENT_CACHE.clear()
+
+    def test_same_config_reuses_the_same_client_instance(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        g1 = EmailGenerator()
+        g2 = EmailGenerator()
+        assert g1.client is not None
+        assert g1.client is g2.client
+
+    def test_changed_model_builds_a_fresh_client(self, monkeypatch):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        g1 = EmailGenerator()
+        monkeypatch.setenv("EMAIL_LLM_MODEL", "llama-3.3-70b-versatile")
+        g2 = EmailGenerator()
+        assert g1.client is not None
+        assert g2.client is not None
+        assert g1.client is not g2.client
