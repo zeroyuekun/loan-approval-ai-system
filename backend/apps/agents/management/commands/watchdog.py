@@ -99,6 +99,8 @@ class Command(BaseCommand):
             self.max_idle_minutes,
             self.max_failures,
         )
+        if not getattr(settings, "HEALTH_CHECK_TOKEN", ""):
+            logger.info("HEALTH_CHECK_TOKEN is unset — deep health checks will be skipped; set it to enable them")
 
         while self._running:
             try:
@@ -134,13 +136,32 @@ class Command(BaseCommand):
         try:
             resp = httpx.get(backend_url, timeout=10, headers=headers)
             if resp.status_code == 403:
-                # Deep health is ops-gated (require_ops_auth). A 403 means the
-                # HEALTH_CHECK_TOKEN is unset/invalid — typical in local dev — not a
-                # health failure. Skip this cycle without penalising consecutive_failures.
-                logger.info(
-                    "Deep health gated (HTTP 403): set HEALTH_CHECK_TOKEN to enable "
-                    "watchdog deep checks. Skipping cycle (not a health failure)."
+                # Deep health is ops-gated (require_ops_auth). Two distinct cases:
+                if not token:
+                    # HEALTH_CHECK_TOKEN unset — typical local dev. Not a health
+                    # failure; skip the cycle without penalising consecutive_failures.
+                    logger.info(
+                        "Deep health gated (HTTP 403): set HEALTH_CHECK_TOKEN to enable "
+                        "watchdog deep checks. Skipping cycle (not a health failure)."
+                    )
+                    return
+                # Token configured but rejected — rotation/drift (this process holds
+                # a stale env copy), not dev. Count it and write watchdog:health so
+                # the 120s-TTL Redis key doesn't expire and kill observability while
+                # every cycle 403s.
+                self.consecutive_failures += 1
+                logger.warning(
+                    "Deep health rejected our HEALTH_CHECK_TOKEN (HTTP 403, failure %d/%d) "
+                    "— token drift? Restart watchdog after rotating the token.",
+                    self.consecutive_failures,
+                    self.max_failures,
                 )
+                self._record_health("auth_rejected", {"error": "403 with token configured"})
+                if self.consecutive_failures >= self.max_failures:
+                    logger.critical(
+                        "ALERT: %d consecutive health failures — system requires attention",
+                        self.consecutive_failures,
+                    )
                 return
             data = resp.json()
 
