@@ -134,14 +134,25 @@ class GuardrailChecker:
         nbo_amounts_list = context.get("nbo_amounts", [])
         has_nbo = len(nbo_amounts_list) > 0
 
-        # Pre-compute plausible derived values from each NBO offer principal.
-        # We allow annual interest (principal × rate ≤ 30%), monthly interest,
-        # fortnightly repayment, and the offer amount itself ÷ term.
-        # This replaces the previous blanket "< $5,000 is always fine" which
-        # disabled hallucination detection for the entire sub-$5k range.
+        # Pre-compute plausible derived values from each NBO offer principal,
+        # derived at each offer's ACTUAL rate when the caller provides
+        # `nbo_rate_derived` (principal × estimated_rate annual/monthly/
+        # fortnightly figures, computed upstream by the marketing agent).
+        # The 30%-rate band derivations are kept as a fallback for contexts
+        # without rates. This replaces the previous blanket "< $5,000 is
+        # always fine" which disabled hallucination detection for the entire
+        # sub-$5k range.
         _nbo_derived: set[float] = set()
         if has_nbo:
-            _MAX_RATE = 0.30  # upper bound for realistic interest rates
+            # Real-rate-derived references (e.g. $20,000 at 4.90% → $980/yr):
+            # correct interest figures at the offer's actual rate would
+            # otherwise false-positive against the 30%-band-only derivations.
+            for _rate_derived_raw in context.get("nbo_rate_derived") or []:
+                try:
+                    _nbo_derived.add(float(_rate_derived_raw))
+                except (TypeError, ValueError):
+                    continue
+            _MAX_RATE = 0.30  # fallback upper bound for realistic interest rates
             for _nbo_raw in nbo_amounts_list:
                 try:
                     _nbo = float(_nbo_raw)

@@ -756,6 +756,90 @@ class TestPromptInjectionSanitizationLLMFields:
 
 
 # ---------------------------------------------------------------------------
+# Delta-sweep S1-F1: rate-derived references passed to guardrails
+# ---------------------------------------------------------------------------
+
+
+class TestRateDerivedGuardrailContext:
+    """The guardrail context must carry `nbo_rate_derived` (principal ×
+    actual estimated_rate, annual/monthly/fortnightly) so correct interest
+    figures at the offer's real rate are not flagged as hallucinated."""
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
+    @patch("apps.agents.services.marketing_agent.anthropic.Anthropic")
+    @patch("apps.agents.services.marketing_agent.guarded_api_call")
+    def test_generate_context_contains_nbo_rate_derived(self, mock_call, mock_anthropic_cls):
+        mock_anthropic_cls.return_value = MagicMock()
+        mock_call.return_value = _make_mock_text_response(
+            "Subject: Next steps for your AussieLoanAI loan application\n\nDear Jane,\n\nContact me at 1300 000 000."
+        )
+        agent = MarketingAgent()
+        app = _make_mock_application()
+
+        captured = {}
+        real_run_all_checks = agent.guardrail_checker.run_all_checks
+
+        def spy(body, context, **kwargs):
+            captured["context"] = context
+            return real_run_all_checks(body, context, **kwargs)
+
+        agent.guardrail_checker.run_all_checks = spy
+        agent.generate(app, _sample_nbo_result())
+
+        derived = captured["context"]["nbo_rate_derived"]
+        # Offer 1: $15,000 at 8.99% → annual interest $1,348.50
+        annual = 15000.0 * 8.99 / 100
+        assert any(abs(d - annual) < 0.01 for d in derived), derived
+        assert any(abs(d - annual / 12) < 0.01 for d in derived), derived
+        assert any(abs(d - annual / 26) < 0.01 for d in derived), derived
+        # Offer 2 (savings) has a rate but no amount → contributes nothing
+        assert len(derived) == 3, derived
+
+    def test_template_fallback_context_contains_nbo_rate_derived(self):
+        with patch.dict(os.environ, {}, clear=True):
+            agent = MarketingAgent()
+        app = _make_mock_application()
+        nbo = _sample_nbo_result()
+
+        captured = {}
+        from apps.email_engine.services.guardrails import GuardrailChecker
+
+        real_run_all_checks = GuardrailChecker.run_all_checks
+
+        def spy(self, body, context, **kwargs):
+            captured["context"] = context
+            return real_run_all_checks(self, body, context, **kwargs)
+
+        with patch.object(GuardrailChecker, "run_all_checks", spy):
+            agent._marketing_template_fallback(app, nbo_amounts=[15000.0, 476.50], start_time=0.0, nbo_result=nbo)
+
+        derived = captured["context"]["nbo_rate_derived"]
+        annual = 15000.0 * 8.99 / 100
+        assert any(abs(d - annual) < 0.01 for d in derived), derived
+
+    def test_rate_derived_amounts_helper_skips_offers_without_rate_or_amount(self):
+        with patch.dict(os.environ, {}, clear=True):
+            agent = MarketingAgent()
+        offers = {
+            "offers": [
+                {"name": "A", "amount": 10000.0, "estimated_rate": 5.0},
+                {"name": "B", "amount": 2000.0},  # no rate
+                {"name": "C", "estimated_rate": 4.75},  # no amount
+                {"name": "D", "amount": "bad", "estimated_rate": "data"},
+            ]
+        }
+        derived = agent._rate_derived_amounts(offers)
+        assert derived == [500.0, 500.0 / 12, 500.0 / 26]
+
+    def test_rate_derived_amounts_helper_handles_none_and_empty(self):
+        with patch.dict(os.environ, {}, clear=True):
+            agent = MarketingAgent()
+        assert agent._rate_derived_amounts(None) == []
+        assert agent._rate_derived_amounts({}) == []
+        assert agent._rate_derived_amounts({"offers": []}) == []
+
+
+# ---------------------------------------------------------------------------
 # Prompt template constants
 # ---------------------------------------------------------------------------
 

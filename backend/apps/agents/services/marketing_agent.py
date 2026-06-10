@@ -185,6 +185,29 @@ class MarketingAgent:
             application, prompt, start_time, nbo_amounts=nbo_amounts, nbo_result=nbo_result
         )
 
+    @staticmethod
+    def _rate_derived_amounts(nbo_result):
+        """Per-offer references derived at each offer's ACTUAL estimated_rate.
+
+        For every offer carrying both an amount and an estimated_rate (percent),
+        return [annual interest, monthly interest, fortnightly interest] so the
+        guardrail hallucinated-numbers check can whitelist correct interest
+        figures (e.g. $20,000 at 4.90% → $980/yr) instead of false-positiving
+        against its 30%-rate fallback band.
+        """
+        derived = []
+        for offer in (nbo_result or {}).get("offers", []):
+            amount = offer.get("amount")
+            rate = offer.get("estimated_rate")
+            if not amount or not rate:
+                continue
+            try:
+                annual_interest = float(amount) * float(rate) / 100.0
+            except (TypeError, ValueError):
+                continue
+            derived.extend([annual_interest, annual_interest / 12, annual_interest / 26])
+        return derived
+
     def _generate_with_retries(self, application, prompt, start_time, attempt=1, nbo_amounts=None, nbo_result=None):
         """Generate the email with guardrail retry logic."""
         from django.conf import settings as django_settings
@@ -260,6 +283,7 @@ class MarketingAgent:
             "decision": "denied",
             "loan_amount": float(application.loan_amount) if application.loan_amount else None,
             "nbo_amounts": nbo_amounts or [],
+            "nbo_rate_derived": self._rate_derived_amounts(nbo_result),
             "annual_income": float(application.annual_income) if application.annual_income else None,
         }
         try:
@@ -404,6 +428,7 @@ class MarketingAgent:
             "decision": "denied",
             "loan_amount": float(application.loan_amount) if application.loan_amount else None,
             "nbo_amounts": nbo_amounts or [],
+            "nbo_rate_derived": self._rate_derived_amounts(nbo_result),
         }
         guardrail_results = checker.run_all_checks(body, context, email_type="marketing")
         all_passed = all(r["passed"] for r in guardrail_results if r.get("severity") != "warning")
