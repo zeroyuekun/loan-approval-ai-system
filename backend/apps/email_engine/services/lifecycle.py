@@ -21,6 +21,7 @@ from datetime import datetime
 
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.sender import send_decision_email
+from apps.email_engine.services.template_fallback import _loan_label
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def send_application_received(application):
         f"{application.purpose.upper()[:3]}-{datetime.now().strftime('%Y%m%d')}-{str(application.id)[:4].upper()}"
     )
 
-    subject = f"We've Received Your {purpose.title()} Loan Application | Ref #{ref_code}"
+    subject = f"We've Received Your {_loan_label(purpose)} Application | Ref #{ref_code}"
     body = f"""Dear {name},
 
 Thank you for your {purpose} loan application with AussieLoanAI. We have everything we need to get started.
