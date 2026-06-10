@@ -4,7 +4,7 @@ from django.conf import settings as django_settings
 
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
-from .helpers import _call_with_retry, _make_anthropic_client
+from .helpers import _call_with_retry, _make_anthropic_client, _reviewer_model
 from .tools import EMAIL_REVIEW_TOOL
 
 logger = logging.getLogger("agents.bias_detector")
@@ -29,11 +29,9 @@ class AIEmailReviewer:
     decision carries more weight — if the senior approves, the email ships.
     """
 
-    # Use Opus for the senior reviewer — tougher model, harder to fool
-    MODEL = "claude-opus-4-7"
-
     def __init__(self):
         self.client = _make_anthropic_client()
+        self.model = _reviewer_model()
 
     def review(self, email_text, bias_result, application_context):
         """Review a flagged email as the senior compliance authority.
@@ -123,7 +121,7 @@ Use the record_review_decision tool to submit your decision."""
             fallback,
             "Senior review",
             "defaulting to human escalation",
-            model=self.MODEL,
+            model=self.model,
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
             messages=[{"role": "user", "content": prompt}],

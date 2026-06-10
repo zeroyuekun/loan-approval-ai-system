@@ -5,7 +5,7 @@ from django.conf import settings as django_settings
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..deterministic_prescreen import DeterministicBiasPreScreen
-from .helpers import _call_with_retry, _format_flag_detail, _make_anthropic_client
+from .helpers import _call_with_retry, _format_flag_detail, _make_anthropic_client, _reviewer_model
 from .thresholds import is_severe
 from .tools import MARKETING_BIAS_TOOL, MARKETING_REVIEW_TOOL
 
@@ -224,10 +224,9 @@ class MarketingEmailReviewer:
     judgment that a pattern-matching system or junior analyst cannot provide.
     """
 
-    MODEL = "claude-opus-4-7"
-
     def __init__(self):
         self.client = _make_anthropic_client()
+        self.model = _reviewer_model()
 
     def review(self, email_text, bias_result, application_context):
         """Senior review of a flagged marketing email.
@@ -300,7 +299,7 @@ Use the record_marketing_review_decision tool to submit your decision."""
             fallback,
             "Marketing senior review",
             "defaulting to human escalation",
-            model=self.MODEL,
+            model=self.model,
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
             messages=[{"role": "user", "content": prompt}],

@@ -430,12 +430,14 @@ class EmailGenerator:
         # Call Claude API with tool_use for structured output (with budget check)
         from django.conf import settings as django_settings
 
-        from apps.agents.services.api_budget import ApiBudgetGuard, BudgetExhausted, guarded_api_call
+        from apps.agents.services.api_budget import ApiBudgetGuard, BudgetExhausted, CircuitOpen, guarded_api_call
 
         budget = ApiBudgetGuard()
         try:
             budget.check_budget()
-        except BudgetExhausted:
+        except (BudgetExhausted, CircuitOpen):
+            # CircuitOpen: the shared breaker may have been tripped by ANOTHER
+            # AI service's failures — the customer still gets a template email.
             return self._generate_fallback(application, decision, context, start_time)
 
         # Approval emails are much longer (loan details, next steps, documentation,
@@ -467,7 +469,7 @@ class EmailGenerator:
             if usage:
                 input_tokens = getattr(usage, "input_tokens", 0)
                 output_tokens = getattr(usage, "output_tokens", 0)
-        except BudgetExhausted:
+        except (BudgetExhausted, CircuitOpen):
             return self._generate_fallback(application, decision, context, start_time)
         except anthropic.RateLimitError as exc:
             from .exceptions import RateLimited

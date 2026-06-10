@@ -45,6 +45,18 @@ def _make_anthropic_client():
     return None
 
 
+# Default for the senior compliance reviewers (Opus 4.8 — free same-price
+# upgrade over legacy 4.7). Configurable via BIAS_REVIEWER_MODEL.
+DEFAULT_REVIEWER_MODEL = "claude-opus-4-8"
+
+
+def _reviewer_model():
+    """Resolve the senior-reviewer model; blank or unset falls back to the default."""
+    from django.conf import settings as django_settings
+
+    return getattr(django_settings, "BIAS_REVIEWER_MODEL", "") or DEFAULT_REVIEWER_MODEL
+
+
 def _format_flag_detail(prescreen):
     """Format each individual flag with its details for the junior analyst."""
     if not prescreen["findings"]:

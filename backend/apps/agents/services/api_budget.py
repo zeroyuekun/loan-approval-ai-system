@@ -31,6 +31,8 @@ logger = logging.getLogger("agents.api_budget")
 # Legacy IDs retained so historical APICallLog records resolve correctly.
 MODEL_PRICING = {
     # Current models
+    "claude-fable-5": {"input": 10.00, "output": 50.00},
+    "claude-opus-4-8": {"input": 5.00, "output": 25.00},
     "claude-opus-4-7": {"input": 5.00, "output": 25.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00},
@@ -56,6 +58,24 @@ MODEL_PRICING = {
 
 # Fallback: assume Sonnet pricing for unknown models
 _DEFAULT_PRICING = {"input": 3.00, "output": 15.00}
+
+# Model families that REMOVED the sampling parameters — sending temperature/
+# top_p/top_k returns HTTP 400 (these are adaptive-thinking-only: Opus 4.7+,
+# Fable 5). Steer them with the `effort` parameter instead. We strip these
+# kwargs centrally in guarded_api_call so a call site that passes temperature=0
+# (valid for Sonnet/Haiku and the Groq/Ollama backends) does not 400 on an
+# adaptive-only model. Matched as substrings so dated snapshots
+# ("claude-opus-4-8-20260301") and platform-prefixed IDs
+# ("anthropic.claude-opus-4-8" on Bedrock) are covered too.
+# Add future adaptive-only model families here.
+_SAMPLING_PARAMS_REMOVED_FAMILIES = ("claude-opus-4-7", "claude-opus-4-8", "claude-fable-5")
+_REMOVED_SAMPLING_KWARGS = ("temperature", "top_p", "top_k")
+
+
+def _sampling_params_removed(model):
+    """True when ``model`` belongs to a family that rejects sampling params."""
+    return any(family in model for family in _SAMPLING_PARAMS_REMOVED_FAMILIES)
+
 
 # Where each provider physically processes the prompt — drives the APICallLog
 # cross-border (Privacy Act APP 8) record. Local Ollama runs on-prem in
@@ -479,6 +499,13 @@ def guarded_api_call(client, **kwargs):
     agent_run_id = kwargs.pop("_agent_run_id", None)
 
     model = kwargs.get("model", "")
+    # See _SAMPLING_PARAMS_REMOVED_FAMILIES: adaptive-only models 400 on
+    # temperature/top_p/top_k, so they never reach the API.
+    if _sampling_params_removed(model):
+        stripped = {p: kwargs.pop(p) for p in _REMOVED_SAMPLING_KWARGS if p in kwargs}
+        if stripped:
+            logger.debug("Stripped sampling params %s for adaptive-only model %s", stripped, model)
+
     budget = ApiBudgetGuard()
     # Authoritative atomic gate (M5): reserve a conservative worst-case before the
     # call so concurrent workers cannot collectively overshoot the daily cap.

@@ -80,5 +80,16 @@ def validate_env():
             if not os.environ.get(var):
                 logger.warning("Environment variable %s is not set — %s.", var, consequence)
 
+        # The senior bias reviewer always calls the Anthropic API; a non-Claude
+        # model ID (e.g. an Ollama tag) would 404 every senior review, silently
+        # degrading to human escalation and feeding the shared circuit breaker.
+        reviewer_model = os.environ.get("BIAS_REVIEWER_MODEL", "")
+        if reviewer_model and not reviewer_model.startswith(("claude-", "anthropic.", "us.anthropic.")):
+            logger.warning(
+                "BIAS_REVIEWER_MODEL=%r does not look like an Anthropic model ID — "
+                "senior bias reviews will fail and fall back to human escalation.",
+                reviewer_model,
+            )
+
 
 validate_env()
