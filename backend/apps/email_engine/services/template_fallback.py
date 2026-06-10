@@ -446,7 +446,7 @@ def generate_approval_template(
     has_cosigner=False,
 ):
     """Generate an approval email matching the Claude-generated format exactly."""
-    loan_type = _loan_type(purpose)
+    loan_label = _loan_label(purpose)
     first = _first_name(applicant_name)
     today = date.today()
     sign_by = (today + timedelta(days=30)).strftime("%d %B %Y")
@@ -505,12 +505,12 @@ Please review the attached loan agreement, which outlines all terms and conditio
 
     opening = (
         f"We are pleased to advise that your application for a "
-        f"{loan_type} Loan with AussieLoanAI has been approved. Congratulations!"
+        f"{loan_label} with AussieLoanAI has been approved. Congratulations!"
     )
     if conditions:
         opening = (
             f"We are pleased to advise that your application for a "
-            f"{loan_type} Loan with AussieLoanAI has been conditionally approved. "
+            f"{loan_label} with AussieLoanAI has been conditionally approved. "
             f"Congratulations!"
         )
 
@@ -543,7 +543,7 @@ Email: aussieloanai@gmail.com
 
 Attachments:
   1. Loan Contract \u2013 {applicant_name}.pdf
-  2. Key Facts Sheet \u2013 {loan_type} Loan.pdf
+  2. Key Facts Sheet \u2013 {loan_label}.pdf
   3. Credit Guide \u2013 AussieLoanAI Pty Ltd.pdf
 
 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -568,7 +568,7 @@ def generate_denial_template(
     employment_type=None,
 ):
     """Generate a denial email matching the Claude-generated format exactly."""
-    loan_type = _loan_type(purpose)
+    loan_label = _loan_label(purpose)
     first = _first_name(applicant_name)
     ref = _ref_number(purpose, applicant_name)
 
@@ -616,7 +616,7 @@ def generate_denial_template(
 
     body = f"""Dear {first},
 
-Thank you for giving us the opportunity to review your application for a ${loan_amount:,.2f} {loan_type} Loan with AussieLoanAI.
+Thank you for giving us the opportunity to review your application for a ${loan_amount:,.2f} {loan_label} with AussieLoanAI.
 
 We have carefully reviewed your application and are unable to approve it at this time. Here is what we looked at and what you can do from here.
 

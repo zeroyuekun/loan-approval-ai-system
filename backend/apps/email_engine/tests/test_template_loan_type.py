@@ -2,7 +2,11 @@
 ("personal") and as display-form values ("Personal Loan", "Auto Loan"), and
 product names like "Green Loan" carry an integral "Loan"."""
 
-from apps.email_engine.services.template_fallback import _loan_label, generate_approval_template
+from apps.email_engine.services.template_fallback import (
+    _loan_label,
+    generate_approval_template,
+    generate_denial_template,
+)
 
 
 def test_loan_label_appends_loan_to_bare_types():
@@ -21,6 +25,16 @@ def test_approval_subject_has_single_loan_word():
     subject = result["subject"]
     assert "Loan Loan" not in subject
     assert subject == "Congratulations! Your Personal Loan is Approved"
+
+
+def test_approval_body_has_single_loan_word():
+    result = generate_approval_template("Alex Chen", 20000.0, "Personal Loan")
+    assert "Loan Loan" not in result["body"]
+
+
+def test_denial_body_has_single_loan_word():
+    result = generate_denial_template("Alex Chen", 20000.0, "Personal Loan")
+    assert "Loan Loan" not in result["body"]
 
 
 def test_loan_label_lifecycle_display_form_no_double_loan():
