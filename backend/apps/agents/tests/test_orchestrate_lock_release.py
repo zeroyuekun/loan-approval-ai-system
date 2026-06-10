@@ -132,3 +132,128 @@ class TestOrchestrateTaskOnFailure:
         _invoke_on_failure(retries=0, max_retries=3, args=[app_id], kwargs={})
 
         assert cache.get(lock_key) is not None
+
+
+class TestOnFailureStuckCleanup:
+    """Terminal failure must also reset the stuck-PROCESSING application (S1-F4).
+
+    Before the fix on_failure only deleted the dedup lock; the application
+    stayed PROCESSING forever because the designed cleanup path was never
+    invoked on terminal failure.
+    """
+
+    @CACHE_OVERRIDE
+    def test_terminal_failure_calls_stuck_cleanup_and_releases_lock(self):
+        from django.core.cache import cache
+
+        app_id = "CleanupApp-001"
+        lock_key = f"orchestrate_lock:{app_id}"
+        cache.add(lock_key, "task-c", 600)
+
+        with patch("apps.agents.tasks._cleanup_stuck_application") as mock_cleanup:
+            _invoke_on_failure(retries=3, max_retries=3, args=[app_id], kwargs={})
+
+        mock_cleanup.assert_called_once_with(app_id, clear_lock=True)
+        assert cache.get(lock_key) is None, "Lock must be released on terminal failure"
+
+    @CACHE_OVERRIDE
+    def test_cleanup_error_never_masks_failure_and_lock_still_released(self):
+        from django.core.cache import cache
+
+        app_id = "CleanupBoomApp-001"
+        lock_key = f"orchestrate_lock:{app_id}"
+        cache.add(lock_key, "task-cb", 600)
+
+        with patch(
+            "apps.agents.tasks._cleanup_stuck_application",
+            side_effect=RuntimeError("cleanup boom"),
+        ):
+            # Must not raise: a cleanup error never masks the original failure.
+            _invoke_on_failure(retries=3, max_retries=3, args=[app_id], kwargs={})
+
+        assert cache.get(lock_key) is None, "Lock release must survive a cleanup error"
+
+    @CACHE_OVERRIDE
+    def test_mid_retry_failure_does_not_run_stuck_cleanup(self):
+        with patch("apps.agents.tasks._cleanup_stuck_application") as mock_cleanup:
+            _invoke_on_failure(retries=1, max_retries=3, args=["MidRetryApp-001"], kwargs={})
+
+        mock_cleanup.assert_not_called()
+
+
+class TestOrchestrateRetryReentrancy:
+    """A Celery autoretry re-executes the body with the SAME task id (S1-F4).
+
+    The dedup lock is deliberately kept across infrastructure-error retries
+    (M22), so the retry's own ``cache.add`` fails.  The body must recognise
+    its own task id in the lock value and proceed instead of returning a
+    bogus ``dedup_lock_held`` success that strands the app in PROCESSING.
+    """
+
+    def _run_task(self, app_id, task_id):
+        """Execute the task body eagerly with mocked DB/orchestrator deps."""
+        from apps.agents.tasks import orchestrate_pipeline_task
+
+        agent_run = MagicMock()
+        agent_run.id = "run-001"
+        agent_run.status = "completed"
+        agent_run.total_time_ms = 123
+        agent_run.steps = []
+
+        with (
+            patch("apps.agents.models.AgentRun") as mock_run_model,
+            patch("apps.agents.services.orchestrator.PipelineOrchestrator") as mock_orch,
+            patch("apps.loans.models.AuditLog"),
+        ):
+            mock_run_model.objects.filter.return_value.exists.return_value = False
+            mock_orch.return_value.orchestrate.return_value = agent_run
+            result = orchestrate_pipeline_task.apply(args=[app_id], task_id=task_id)
+        return result.result, mock_orch
+
+    @CACHE_OVERRIDE
+    def test_own_retry_reenters_lock_and_runs_pipeline(self):
+        """Lock held by OUR OWN task id (autoretry re-entry) → pipeline runs."""
+        from django.core.cache import cache
+
+        app_id = "ReentryApp-001"
+        task_id = "reentry-task-001"
+        lock_key = f"orchestrate_lock:{app_id}"
+        cache.set(lock_key, task_id, 600)
+
+        result, mock_orch = self._run_task(app_id, task_id)
+
+        assert result.get("skipped") is not True, "Own retry must not skip itself"
+        assert result.get("agent_run_id") == "run-001"
+        mock_orch.return_value.orchestrate.assert_called_once_with(app_id)
+        # Success path releases the lock as usual.
+        assert cache.get(lock_key) is None
+
+    @CACHE_OVERRIDE
+    def test_foreign_lock_holder_still_skips(self):
+        """Lock held by ANOTHER task id → still dedup-skips, lock untouched."""
+        from django.core.cache import cache
+
+        app_id = "ForeignLockApp-001"
+        lock_key = f"orchestrate_lock:{app_id}"
+        cache.set(lock_key, "someone-elses-task", 600)
+
+        result, mock_orch = self._run_task(app_id, "my-task-001")
+
+        assert result == {"skipped": True, "reason": "dedup_lock_held"}
+        mock_orch.return_value.orchestrate.assert_not_called()
+        assert cache.get(lock_key) == "someone-elses-task"
+
+    @CACHE_OVERRIDE
+    def test_uncontended_lock_acquired_and_pipeline_runs(self):
+        """No lock held → normal acquisition path keeps working."""
+        from django.core.cache import cache
+
+        app_id = "FreshApp-001"
+        lock_key = f"orchestrate_lock:{app_id}"
+        assert cache.get(lock_key) is None
+
+        result, mock_orch = self._run_task(app_id, "fresh-task-001")
+
+        assert result.get("agent_run_id") == "run-001"
+        mock_orch.return_value.orchestrate.assert_called_once_with(app_id)
+        assert cache.get(lock_key) is None

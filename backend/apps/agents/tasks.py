@@ -7,6 +7,11 @@ from django.db import transaction
 logger = logging.getLogger("agents.tasks")
 
 
+def _lock_key(application_id):
+    """Single source of truth for the orchestrate dedup-lock cache key."""
+    return f"orchestrate_lock:{application_id}"
+
+
 class _OrchestrateTask(Task):
     """Custom Task base that releases the dedup lock on terminal failure.
 
@@ -25,8 +30,20 @@ class _OrchestrateTask(Task):
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         application_id = args[0] if args else kwargs.get("application_id")
         if application_id and self.request.retries >= self.max_retries:
-            lock_key = f"orchestrate_lock:{application_id}"
-            cache.delete(lock_key)
+            # Terminal failure: reset the stuck-PROCESSING application and
+            # release the dedup lock.  _cleanup_stuck_application swallows its
+            # own errors, but guard it anyway and guarantee the lock release in
+            # a finally — a cleanup bug must never mask the original failure or
+            # starve future runs behind a held lock (S1-F4).
+            try:
+                _cleanup_stuck_application(application_id, clear_lock=True)
+            except Exception:
+                logger.exception(
+                    "Application %s: stuck-application cleanup failed in terminal on_failure",
+                    application_id,
+                )
+            finally:
+                cache.delete(_lock_key(application_id))
             logger.warning(
                 "Application %s: dedup lock released after max_retries exhausted (terminal failure)",
                 application_id,
@@ -86,7 +103,7 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
             )
 
         if clear_lock:
-            cache.delete(f"orchestrate_lock:{application_id}")
+            cache.delete(_lock_key(application_id))
 
         logger.warning("Application %s: cleaned up stuck processing status", application_id)
     except Exception as e:
@@ -125,12 +142,19 @@ def orchestrate_pipeline_task(self, application_id, force=False):
                 logger.warning("Application %s: failed to restore status: %s", application_id, e)
             return {"status": "already_completed", "application_id": str(application_id)}
 
-    # Redis dedup lock: prevent concurrent runs for the same application
-    lock_key = f"orchestrate_lock:{application_id}"
+    # Redis dedup lock: prevent concurrent runs for the same application.
+    # A Celery autoretry re-executes this body with the SAME task id while the
+    # lock is deliberately kept alive across infrastructure-error retries
+    # (M22), so a failed cache.add must be re-checked against the holder's
+    # task id — our own retry re-entering must proceed, not dedup-skip (S1-F4).
+    lock_key = _lock_key(application_id)
     acquired = cache.add(lock_key, self.request.id, _DEDUP_LOCK_TTL)
-    if not acquired:
+    if not acquired and cache.get(lock_key) != self.request.id:
         logger.info("Application %s: dedup lock already held, skipping", application_id)
         return {"skipped": True, "reason": "dedup_lock_held"}
+    if not acquired:
+        # Our own retry re-entering: refresh the TTL and proceed.
+        cache.set(lock_key, self.request.id, _DEDUP_LOCK_TTL)
 
     try:
         orchestrator = PipelineOrchestrator()
