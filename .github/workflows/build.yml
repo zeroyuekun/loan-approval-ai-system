@@ -23,7 +23,7 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build backend image
         run: docker build -t loan-backend ./backend
@@ -72,7 +72,7 @@ jobs:
       POSTGRES_PASSWORD: testpass
       REDIS_PASSWORD: testpass
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Generate ephemeral Fernet key for CI
         # Fernet keys for CI test stacks don't need to be secret — they
@@ -148,7 +148,7 @@ jobs:
       POSTGRES_PASSWORD: testpass
       REDIS_PASSWORD: testpass
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Generate ephemeral Fernet key for CI
         run: |
@@ -241,7 +241,7 @@ jobs:
     # required-checks list.
     if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.docker-build.result == 'success' && needs.dast-scan.result == 'success' && needs.load-test.result != 'failure'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
