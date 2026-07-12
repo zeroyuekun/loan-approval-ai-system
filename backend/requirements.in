@@ -1,7 +1,7 @@
-Django[argon2]>=5.2,<5.3
+Django[argon2]>=6.0.7,<6.1
 djangorestframework>=3.16
 django-cors-headers>=4.7
-django-filter>=25.1
+django-filter>=26.1
 djangorestframework-simplejwt>=5.5
 psycopg[binary]>=3.2
 celery[redis]>=5.5
