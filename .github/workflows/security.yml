@@ -58,7 +58,7 @@ jobs:
           pip install pip-audit
           pip-audit --strict --desc on -r backend/requirements.txt
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Install frontend deps
