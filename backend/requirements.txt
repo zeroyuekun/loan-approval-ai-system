@@ -23,14 +23,14 @@ cloudpickle==3.1.2
 colorlog==6.10.1
 cryptography==46.0.7
 distro==1.9.0
-django[argon2]==5.2.15
+django[argon2]==6.0.8
 django-celery-results==2.6.0
 django-cors-headers==4.9.0
 django-csp==4.0
-django-filter==25.2
+django-filter==26.1
 django-otp==1.7.0
 django-prometheus==2.5.0
-djangorestframework==3.17.1
+djangorestframework==3.17.2
 djangorestframework-simplejwt==5.5.1
 docstring-parser==0.18.0
 drf-spectacular==0.29.0
