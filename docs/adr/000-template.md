@@ -1,4 +1,4 @@
-# NNN — [Short decision title]
+# NNN: [Short decision title]
 
 - **Status:** Proposed | Accepted | Superseded by [NNN](NNN-other.md)
 - **Date:** YYYY-MM-DD
@@ -14,18 +14,18 @@ What did we choose?
 
 ## Consequences
 
-What follows from this choice? Both the good and the costs. Be honest about trade-offs.
+What follows from this choice? Cover both the benefits and the costs, and be honest about trade-offs.
 
 ## Alternatives considered
 
 What else was on the table?
 
-### Option A — [name]
+### Option A: [name]
 - Pros: ...
 - Cons: ...
 - Why we didn't pick this: ...
 
-### Option B — [name]
+### Option B: [name]
 - Pros: ...
 - Cons: ...
 - Why we didn't pick this: ...

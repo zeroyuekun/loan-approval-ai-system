@@ -1,6 +1,6 @@
-# Service Level Indicators & Objectives
+# Service level indicators & objectives
 
-SLIs (what we measure) and SLOs (what we promise). These are realistic targets for the current system, not aspirational — aspirational targets get ignored.
+SLIs (what we measure) and SLOs (what we promise). These are realistic targets for the current system, not aspirational ones. Aspirational targets get ignored.
 
 ## SLI catalogue
 
@@ -20,7 +20,7 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 ### Application submission latency
 
-**SLI:** p95 latency of `POST /api/v1/applications/` (time from request start to 202 response — queueing is async, this is just the API part).
+**SLI:** p95 latency of `POST /api/v1/applications/` (time from request start to the 202 response; queueing is async, so this covers only the API part).
 
 **Measurement:** `django_http_requests_latency_seconds_by_view_method` filtered to the applications view.
 
@@ -34,7 +34,7 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 **SLI:** time from application submission to decision persisted (all 6 pipeline stages).
 
-**Measurement:** custom histogram `pipeline_e2e_seconds{status,decision}` — observed in `apps.agents.services.step_tracker.StepTracker.finalize_run` on every terminal run (completed / failed / escalated). Buckets: 1 – 120 s.
+**Measurement:** custom histogram `pipeline_e2e_seconds{status,decision}`, observed in `apps.agents.services.step_tracker.StepTracker.finalize_run` on every terminal run (completed / failed / escalated). Buckets: 1-120 s.
 
 **SLO target:** p95 < 30 s, p99 < 60 s.
 
@@ -50,7 +50,7 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 **SLO target:** 98.0%.
 
-**Error budget:** 2% per month — roughly 1 in 50 applications can fall back to human review without burning the budget.
+**Error budget:** 2% per month, so roughly 1 in 50 applications can fall back to human review without burning the budget.
 
 ---
 
@@ -58,7 +58,7 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 **SLI:** % of prediction tasks that return a probability without exception.
 
-**Measurement:** counter `ml_predictions_total{decision,model_version}` + histogram `ml_prediction_latency_seconds{algorithm}` — both emitted in `apps.ml_engine.services.predictor.ModelPredictor`. `algorithm` label lets the Grafana latency panel segment xgboost / rf / logistic models separately.
+**Measurement:** counter `ml_predictions_total{decision,model_version}` + histogram `ml_prediction_latency_seconds{algorithm}`, both emitted in `apps.ml_engine.services.predictor.ModelPredictor`. The `algorithm` label lets the Grafana latency panel show xgboost / rf / logistic models separately.
 
 **SLO target:** 99.9%.
 
@@ -70,21 +70,21 @@ SLIs (what we measure) and SLOs (what we promise). These are realistic targets f
 
 **Measurement:** counter `bias_review_total{outcome}` + histogram `bias_review_ttr_seconds{decision}` (time-to-resolution for escalated applications). Emitted from `apps.agents.services.human_review_handler.HumanReviewHandler.resume_after_review`.
 
-**SLO target:** not a latency/error SLO — tracked as a business quality signal. Alert on > 15% weekly (indicates the pre-screen or the model are drifting).
+**SLO target:** not a latency/error SLO; tracked as a business quality signal. Alert on > 15% weekly (a sign that the pre-screen or the model is drifting).
 
 ---
 
-## What's NOT an SLO yet
+## What's not an SLO yet
 
-- **Cost per decision** — tracked internally but no SLO. Claude API pricing dominates; template-first strategy caps at $5/day.
-- **Model AUC** — tracked per `ModelVersion`; rollback threshold is AUC < 0.82 but not SLO-enforced in prod.
-- **Disk / memory utilisation** — covered by infra alerting, not customer-facing SLO.
+- **Cost per decision:** tracked internally, but no SLO. Claude API pricing dominates; the template-first strategy caps at $5/day.
+- **Model AUC:** tracked per `ModelVersion`; the rollback threshold is AUC < 0.82, but it is not SLO-enforced in prod.
+- **Disk / memory utilisation:** covered by infra alerting, not a customer-facing SLO.
 
 ## How targets get set or moved
 
 1. Measure actual performance for 4 weeks.
 2. Set the target at p95 of observed performance, not worst case.
-3. Review targets quarterly. Missed targets become engineering work, not target adjustments — unless the target was wrong, in which case document why in a new revision of this file.
+3. Review targets quarterly. Missed targets become engineering work, not target adjustments. The exception is a target that was wrong; in that case, document why in a new revision of this file.
 
 ## Alert routing
 

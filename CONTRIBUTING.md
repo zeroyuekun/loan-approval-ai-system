@@ -6,7 +6,7 @@
 - Node.js 22 (for frontend development outside Docker)
 - Python 3.13 (for backend development outside Docker)
 
-## Quick Start
+## Quick start
 
 ```bash
 git clone <repo-url>
@@ -32,9 +32,9 @@ pip install pre-commit
 pre-commit install
 ```
 
-Hooks run on staged files before commit. Run manually against everything with `pre-commit run --all-files`.
+Hooks run on staged files before each commit. To run them against every file, use `pre-commit run --all-files`.
 
-## Running Tests
+## Running tests
 
 ```bash
 # Backend (pytest, requires 80% coverage)
@@ -54,14 +54,14 @@ cd frontend && npm run test:ci
 cd frontend && npx playwright test
 ```
 
-## Linting and Formatting
+## Linting and formatting
 
 ```bash
 make lint       # Ruff (backend) + ESLint (frontend)
 make format     # Auto-format backend with Ruff
 ```
 
-## Project Structure
+## Project structure
 
 | Django App | Purpose |
 |------------|---------|
@@ -81,24 +81,24 @@ Other directories:
 | `workflows/` | Markdown SOPs (WAT Layer 1) |
 | `monitoring/` | Prometheus and Grafana configuration |
 
-## Code Conventions
+## Code conventions
 
-- **Service layer pattern:** views call services, services call external APIs. Keep views thin and logic in testable service modules (`backend/apps/*/services/`).
+- **Service layer pattern:** views call services, and services call external APIs. Keep views thin and put logic in testable service modules (`backend/apps/*/services/`).
 - **Separate Celery queues:** `ml` for CPU-heavy work (training, prediction), `email` for IO-bound email generation, `agents` for IO-bound orchestration and bias detection.
 - **Secrets in `.env` only.** Never hardcode credentials or API keys.
 - **No apology language in denial emails.** Do not add "sorry", "apologise", or "disappointment" to email prompts or templates. This is a firm project convention.
-- **Model versioning:** `ModelVersion.is_active` flag controls which model serves predictions. `save()` atomically deactivates other versions.
-- **Frontend polling:** Async task results are polled via `/api/v1/tasks/{id}/status/` every 2 seconds.
+- **Model versioning:** the `ModelVersion.is_active` flag controls which model serves predictions, and `save()` atomically deactivates the other versions.
+- **Frontend polling:** the frontend polls `/api/v1/tasks/{id}/status/` every 2 seconds for async task results.
 
-## Pull Request Conventions
+## Pull request conventions
 
 1. **Branch naming:** `feat/description`, `fix/description`, `docs/description`
-2. **Commits:** Descriptive messages. Prefix with `feat:`, `fix:`, `docs:`, `refactor:`, `test:` as appropriate.
-3. **CI must pass:** Backend tests (80% coverage), frontend tests (30% coverage), Ruff lint, ESLint, TypeScript type check, Bandit SAST scan, dependency audit, Docker build.
-4. **One concern per PR.** Keep changes focused and reviewable.
+2. **Commits:** write descriptive messages, prefixed with `feat:`, `fix:`, `docs:`, `refactor:` or `test:` as appropriate.
+3. **CI must pass:** backend tests (80% coverage), frontend tests (30% coverage), Ruff lint, ESLint, TypeScript type check, Bandit SAST scan, dependency audit, Docker build.
+4. **One concern per PR.** Keep changes focused and easy to review.
 
 ## References
 
-- [`CLAUDE.md`](CLAUDE.md) — AI agent conventions and WAT architecture
-- [`backend/docs/RUNBOOK.md`](backend/docs/RUNBOOK.md) — Operations runbook and incident response
-- [`SECURITY.md`](SECURITY.md) — Security policy and responsible disclosure
+- [`CLAUDE.md`](CLAUDE.md): AI agent conventions and WAT architecture
+- [`backend/docs/RUNBOOK.md`](backend/docs/RUNBOOK.md): operations runbook and incident response
+- [`SECURITY.md`](SECURITY.md): security policy and responsible disclosure

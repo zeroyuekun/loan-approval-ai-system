@@ -1,11 +1,11 @@
 # Calibration sources for `DataGenerator`
 
-> **Status:** living document. Update whenever a benchmark cited in
-> `backend/apps/ml_engine/services/datagen/data_generator.py:50-67` is changed.
+> **Status:** living document. Update it whenever a benchmark cited in
+> `backend/apps/ml_engine/services/datagen/data_generator.py:50-67` changes.
 
 This system trains on **synthetic Australian retail-lending data** anchored to
 public-domain calibration sources. We do not have access to a real lender's
-loan book; instead, every distribution `DataGenerator` produces is calibrated
+loan book. Instead, every distribution `DataGenerator` produces is calibrated
 against a published Australian benchmark, and the trained model is
 independently validated against the **Kaggle GMSC** dataset (150,000 real
 borrowers).
@@ -37,9 +37,9 @@ borrowers).
 ## Derived calibration constants
 
 - **APRA serviceability buffer:** 3% above product rate (`data_generator.py:90`,
-  matches APRA 2025 9.5–10.0% assessment rate).
+  matches APRA 2025 9.5-10.0% assessment rate).
 - **Big-4 spread over RBA cash rate:** 2.15% (`data_generator.py:95`).
-- **State-level HEM multiplier:** Sydney/Melbourne ↑, regional ↓
+- **State-level HEM multiplier:** higher for Sydney/Melbourne, lower for regional
   (`underwriting_engine.STATE_HEM_MULTIPLIER`).
 - **HELP repayment thresholds:** ATO 2025-26 schedule (`data_generator.py:217`).
 - **RBA cash rate quarterly history:** actual + projected (`data_generator.py:345`).
@@ -65,15 +65,15 @@ borrowers).
 - **Synthetic positive-class rate vs real arrears.** The project deliberately
   trains at ~56% positive-class rate (the supervised label) to give the
   model tractable signal without resampling. Real AU mortgage 90+ day
-  arrears sit at 1.68% (APRA Q1 2025) — the gap is intentional for ML
+  arrears sit at 1.68% (APRA Q1 2025). The gap is intentional, for ML
   tractability. Measured on n=10000, seed=42: positive-class rate
-  0.5595 ± 0.008 (across seeds 1/42/99) — see also
+  0.5595 ± 0.008 (across seeds 1/42/99); see also
   `test_data_generator_realism.py`. A future iteration could match real
   prevalence with class weighting + focal loss.
 - **No real lender data.** Out of reach without partnerships. The Kaggle
   GMSC validation is the closest available substitute.
 - **No RBA stress-scenario simulator.** RBA April 2025's severe scenario
-  (10% unemployment, −4% GDP, −40% house prices) would be a valuable
+  (10% unemployment, −4% GDP, −40% house prices) would be a useful
   stress-test mode but is deferred.
 - **Single-snapshot calibration.** Sources are point-in-time; no longitudinal
   panel. Updating the manifest is manual.
@@ -85,6 +85,6 @@ When a benchmark in `datagen/data_generator.py:50-67` changes:
 2. Update the row in this manifest's `## Sources` table (value + publication
    date + line reference).
 3. Re-run `pytest backend/tests/test_data_generator_no_leak.py
-   backend/tests/test_data_generator_realism.py` — both must stay green.
+   backend/tests/test_data_generator_realism.py`. Both must stay green.
 4. If the change affects class balance, re-train baseline + champion in the
    same PR.

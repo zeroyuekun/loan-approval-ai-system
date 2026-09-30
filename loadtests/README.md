@@ -1,4 +1,4 @@
-# Load Testing — AussieLoanAI
+# Load testing for AussieLoanAI
 
 ## Setup
 ```bash
@@ -21,9 +21,9 @@ locust -f locustfile.py --host=http://localhost:8000 \
 ```
 
 ## User profiles
-- **HealthCheckUser** (20%): Hits health endpoints
-- **BrowsingUser** (50%): Login, list loans, view metrics
-- **ApplicantUser** (30%): Register, create application, trigger prediction
+- **HealthCheckUser** (20%): hits the health endpoints
+- **BrowsingUser** (50%): logs in, lists loans, views metrics
+- **ApplicantUser** (30%): registers, creates an application, triggers a prediction
 
 ## Performance targets
 - p95 response time < 2 seconds

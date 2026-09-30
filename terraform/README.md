@@ -1,6 +1,6 @@
-# Infrastructure -- AWS EKS Deployment
+# Infrastructure: AWS EKS deployment
 
-Terraform configuration for deploying the AussieLoanAI system to AWS. Provisions an EKS cluster, RDS PostgreSQL database, and ElastiCache Redis instance inside a private VPC.
+Terraform configuration for deploying the AussieLoanAI system to AWS. It provisions an EKS cluster, an RDS PostgreSQL database, and an ElastiCache Redis instance inside a private VPC.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ terraform plan -out=plan.tfplan
 terraform apply plan.tfplan
 ```
 
-You will be prompted for `db_password`. To avoid the prompt, create a `terraform.tfvars` file:
+Terraform prompts for `db_password`. To skip the prompt, create a `terraform.tfvars` file:
 
 ```hcl
 db_password = "your-secure-password"
@@ -50,7 +50,7 @@ aws s3api put-bucket-versioning --bucket aussieloanai-terraform-state --versioni
 terraform destroy
 ```
 
-Note: RDS has `deletion_protection = true`. Disable it in the console or set `deletion_protection = false` in `rds.tf` before destroying.
+RDS has `deletion_protection = true`. Before destroying, disable it in the console or set `deletion_protection = false` in `rds.tf`.
 
 ## Estimated costs (ap-southeast-2)
 
@@ -63,4 +63,4 @@ Note: RDS has `deletion_protection = true`. Disable it in the console or set `de
 | NAT Gateway           | ~$32        |
 | **Total (dev)**       | **~$208**   |
 
-Production with larger instances (t3.large nodes, db.t3.medium, Multi-AZ RDS): ~$500+/month.
+Production with larger instances (t3.large nodes, db.t3.medium, Multi-AZ RDS) comes to ~$500+/month.

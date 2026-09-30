@@ -5,7 +5,7 @@ Operational procedures for incidents and known failure modes. Each runbook follo
 ## How to use
 
 1. Match symptoms to a runbook title.
-2. Follow **Diagnose** to confirm the cause — don't skip this, the remediation only works if the diagnosis is right.
+2. Follow **Diagnose** to confirm the cause. Don't skip this step: the remediation only works if the diagnosis is right.
 3. Follow **Remediate** to restore service.
 4. If remediation fails, **Escalate** tells you who to tag and what data to attach.
 
@@ -17,4 +17,4 @@ Operational procedures for incidents and known failure modes. Each runbook follo
 
 ## Adding a runbook
 
-Copy an existing runbook file, replace content, and add to the index above. Keep section headings identical (`## Symptoms`, `## Diagnose`, `## Remediate`, `## Escalate`) so readers develop muscle memory.
+Copy an existing runbook file, replace its content, and add it to the index above. Keep section headings identical (`## Symptoms`, `## Diagnose`, `## Remediate`, `## Escalate`) so readers develop muscle memory.

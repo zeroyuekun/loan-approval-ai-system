@@ -1,11 +1,11 @@
-# Service Level Agreement — AussieLoanAI
+# Service level agreement: AussieLoanAI
 
 **Effective date:** 2026-03-23
 **Review cadence:** Quarterly
 
 ---
 
-## 1. Service Level Objectives (SLOs)
+## 1. Service level objectives (SLOs)
 
 | Metric | Target | Measurement Window |
 |--------|--------|--------------------|
@@ -24,7 +24,7 @@
 
 ---
 
-## 2. Error Budget
+## 2. Error budget
 
 | Parameter | Value |
 |-----------|-------|
@@ -32,18 +32,18 @@
 | Calculation | 30 days x 24 hours x 60 minutes x 0.001 |
 | Tracking | Grafana dashboard "SLO / Error Budget" |
 
-### Error Budget Policy
+### Error budget policy
 
 | Budget remaining | Action |
 |-----------------|--------|
 | > 50% | Normal development velocity. Ship features freely. |
-| 25%--50% | Increase review rigour. Require load test pass before deploy. |
-| 5%--25% | Freeze non-critical deploys. Prioritise reliability work. |
-| 0%--5% (exhausted) | **Full deployment freeze.** All engineering effort shifts to reliability until budget recovers. |
+| 25%-50% | Increase review rigour. Require load test pass before deploy. |
+| 5%-25% | Freeze non-critical deploys. Prioritise reliability work. |
+| 0%-5% (exhausted) | **Full deployment freeze.** All engineering effort shifts to reliability until budget recovers. |
 
 ---
 
-## 3. SLO-to-Alert Mapping
+## 3. SLO-to-alert mapping
 
 | SLO | Grafana Alert Name | Condition | For |
 |-----|--------------------|-----------|-----|
@@ -53,14 +53,14 @@
 | Error rate | `HighErrorRate` | `rate(http_responses_total{status=~"5.."}[2m]) / rate(http_responses_total[2m]) > 0.05` | 2 min |
 | Health check response | `SlowHealthCheck` | `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{endpoint="/api/v1/health/"}[1m])) > 0.2` | 1 min |
 
-### Notification Channels
+### Notification channels
 
 - **P1/P2**: PagerDuty on-call rotation + Slack `#incidents`
 - **P3/P4**: Slack `#alerts` only
 
 ---
 
-## 4. Incident Response Times
+## 4. Incident response times
 
 | Severity | Description | Response Time | Resolution Target | Examples |
 |----------|-------------|---------------|-------------------|----------|
@@ -69,7 +69,7 @@
 | **P3 Medium** | Minor feature issue, most users unaffected | 4 hours | 72 hours | Dashboard chart not loading, single endpoint slow |
 | **P4 Low** | Cosmetic issue or improvement request | 24 hours | 1 week | Typo in email template, non-critical log noise |
 
-### Escalation Path
+### Escalation path
 
 1. On-call engineer acknowledges alert
 2. If not resolved within 50% of resolution target, escalate to tech lead
@@ -78,7 +78,7 @@
 
 ---
 
-## 5. Secrets Rotation Schedule
+## 5. Secrets rotation schedule
 
 | Secret | Rotation Frequency | Method |
 |--------|-------------------|--------|
@@ -86,10 +86,10 @@
 | `ANTHROPIC_API_KEY` | Every 90 days | Rotate in Anthropic console, update K8s secret, restart email/agent workers |
 | `POSTGRES_PASSWORD` | On incident or annually | Update RDS master password, roll credentials in K8s, restart backend |
 | `REDIS_PASSWORD` | On incident or annually | Update ElastiCache auth token, restart Celery workers |
-| `FIELD_ENCRYPTION_KEY` | Annually | MultiFernet supports key rotation -- add new key as primary, keep old as secondary for decryption |
+| `FIELD_ENCRYPTION_KEY` | Annually | MultiFernet supports key rotation: add new key as primary, keep old as secondary for decryption |
 | JWT signing key | Derived from `DJANGO_SECRET_KEY` | Rotates with Django secret key. Existing tokens invalidated on rotation. |
 
-### Rotation Procedure
+### Rotation procedure
 
 1. Generate new secret value
 2. Update the secret in the secrets manager (K8s Secret or AWS Secrets Manager)
@@ -100,9 +100,9 @@
 
 ---
 
-## 6. Capacity Planning
+## 6. Capacity planning
 
-### Current Baseline (Development)
+### Current baseline (development)
 
 | Resource | Configuration |
 |----------|--------------|
@@ -114,17 +114,17 @@
 | Concurrent users | 50 |
 | Throughput | 50 req/s |
 
-### Production Recommendations
+### Production recommendations
 
 | Resource | Configuration | Scaling Trigger |
 |----------|--------------|-----------------|
-| Backend replicas | 2--10 via K8s HPA | CPU > 70% avg over 2 min |
-| Celery ML workers | 2--6 via KEDA | Queue depth > 10 for 1 min |
-| Celery IO workers | 3--10 via KEDA | Queue depth > 20 for 1 min |
+| Backend replicas | 2-10 via K8s HPA | CPU > 70% avg over 2 min |
+| Celery ML workers | 2-6 via KEDA | Queue depth > 10 for 1 min |
+| Celery IO workers | 3-10 via KEDA | Queue depth > 20 for 1 min |
 | Database | RDS `db.r6g.large` + read replica | Connections > 80% max |
 | Redis | ElastiCache `cache.r6g.large` | Memory > 75% |
 
-### Growth Projections
+### Growth projections
 
 | Metric | Current | 6-month target | 12-month target |
 |--------|---------|----------------|-----------------|
@@ -133,7 +133,7 @@
 | Throughput (req/s) | 50 | 200 | 500 |
 | Storage (DB) | 1 GB | 10 GB | 50 GB |
 
-### Load Test Validation
+### Load test validation
 
 Run load tests (see `/loadtests/`) before every production deploy that changes:
 - Database queries or schema
@@ -143,19 +143,19 @@ Run load tests (see `/loadtests/`) before every production deploy that changes:
 
 ---
 
-## 7. Maintenance Windows
+## 7. Maintenance windows
 
 | Window | Schedule | Impact |
 |--------|----------|--------|
-| Planned maintenance | Sundays 02:00--04:00 AEST | Rolling restarts, zero downtime target |
-| Database maintenance | First Sunday of month, 03:00--04:00 AEST | Possible brief read-only period |
+| Planned maintenance | Sundays 02:00-04:00 AEST | Rolling restarts, zero downtime target |
+| Database maintenance | First Sunday of month, 03:00-04:00 AEST | Possible brief read-only period |
 | Emergency maintenance | As needed | Communicated via status page within 5 minutes |
 
 Planned maintenance windows do **not** count against the error budget.
 
 ---
 
-## 8. Revision History
+## 8. Revision history
 
 | Date | Change | Author |
 |------|--------|--------|

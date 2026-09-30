@@ -9,14 +9,14 @@
 
 Full-stack loan approval system for Australian lending. XGBoost scores applicants, Claude writes the decision emails, and an agent pipeline checks everything for bias before it ships.
 
-**What makes it different:**
+What makes it different:
 
-- **3-layer bias detection** — regex pre-screen → Claude review → human escalation, scored 0–100 per generated email
-- **18 deterministic guardrails** on every Claude-generated decision email (19 on a marketing email; prohibited language, hallucinated dollar amounts, aggressive tone, regulatory-element presence, and more)
-- **$5/day Claude spend cap** with template-first generation — production cost control built in, not an afterthought
-- **Decision transparency & contestability** — every applicant is told how their decision was made (solely automated, assisted, or human-decided) and can request a human review; borderline, drift, and policy-"refer" cases escalate to an officer before any automated email is sent
+- Bias detection runs in 3 layers: a regex pre-screen, then a Claude review, then human escalation. Each generated email gets a bias score from 0 to 100.
+- Every Claude-generated decision email goes through 18 deterministic guardrails (19 for a marketing email). They catch prohibited language, hallucinated dollar amounts, and aggressive tone, check that the required regulatory elements are present, and more.
+- Email generation is template-first, and Claude spend is capped at $5/day, so cost control is part of the production design from the start.
+- Every applicant is told how their decision was made (solely automated, assisted, or human-decided) and can request a human review. Borderline, drift, and policy-"refer" cases go to an officer before any automated email is sent.
 
-The compliance layer — APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure, Privacy Act automated-decision (ADM) transparency — is where most of the work went.
+Most of the work went into the compliance layer: APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure, and Privacy Act automated-decision (ADM) transparency.
 
 <details>
 <summary><strong>Screenshots</strong> (click to expand)</summary>
@@ -66,19 +66,19 @@ flowchart TD
     class F,L ok
 ```
 
-Failed steps put the application into "review" with a log of where it broke. Stuck pipelines auto-recover after 5 minutes. Borderline scores, severe drift, or a policy "refer" rule route an application to human review **before** any decision email is sent — an automated message never goes out on a case that needs an officer.
+Failed steps put the application into "review" with a log of where it broke. Stuck pipelines auto-recover after 5 minutes. Borderline scores, severe drift, or a policy "refer" rule route an application to human review before any decision email is sent, so an automated message never goes out on a case that needs an officer.
 
-On a denial, alternatives reach the customer through two emails. The **decision email** itself carries one deterministic alternative-offer teaser (the best-scoring product and its headline figure, validated by the same hallucinated-number guardrail as the rest of the letter), so there is a concrete next step immediately. The **full personalised offer set** then ships as a **separate marketing follow-up email** (step 6) with its own bias and senior-review gate, keeping the regulated decision letter concise.
+On a denial, alternatives reach the customer through two emails. The decision email itself carries one deterministic alternative-offer teaser (the best-scoring product and its headline figure, validated by the same hallucinated-number guardrail as the rest of the letter), so the customer has a concrete next step straight away. The full personalised offer set follows as a separate marketing follow-up email (step 6) with its own bias and senior-review gate. Splitting it out keeps the regulated decision letter concise.
 
 ## Decision transparency & contestability
 
-Australia's Privacy Act automated-decision-making (ADM) reforms (APP 1.7–1.9) require lenders to disclose when a decision is made by automated means. Every decision carries an honest ADM disclosure:
+Australia's Privacy Act automated-decision-making (ADM) reforms (APP 1.7 to 1.9) require lenders to disclose when a decision is made by automated means. Every decision carries an honest ADM disclosure, one of:
 
-- **Solely automated** — the model decided, no human involved.
-- **Assisted** — the model assessed and a lending officer reviewed it.
-- **Human** — a lending officer made or overrode the decision.
+- Solely automated: the model decided with no human involved.
+- Assisted: the model assessed the application and a lending officer reviewed it.
+- Human: a lending officer made or overrode the decision.
 
-Applicants can **request a human review** of a declined automated decision; an officer can uphold or overturn it (override → approve), with every transition audit-logged. The disclosure is derived from a *persisted* record of human involvement, so an escalated-then-resolved or officer-overturned decision is never mislabelled "solely automated" — even after the application reaches its final state.
+Applicants can request a human review of a declined automated decision. An officer can uphold or overturn it (override → approve), and every transition is audit-logged. The disclosure comes from a persisted record of human involvement, so a decision that was escalated and then resolved, or overturned by an officer, is never mislabelled "solely automated", even after the application reaches its final state.
 
 ## Stack
 
@@ -106,9 +106,9 @@ docker compose exec backend bash scripts/seed_data.sh
 
 Then:
 
-- Dashboard → [http://localhost:3000](http://localhost:3000) — default login `admin` / `admin1234`
-- API docs → [http://localhost:8000/api/schema/swagger-ui/](http://localhost:8000/api/schema/swagger-ui/)
-- Tests → `docker compose exec backend pytest tests/ -v`
+- Dashboard at [http://localhost:3000](http://localhost:3000) (default login `admin` / `admin1234`)
+- API docs at [http://localhost:8000/api/schema/swagger-ui/](http://localhost:8000/api/schema/swagger-ui/)
+- Run the tests with `docker compose exec backend pytest tests/ -v`
 
 Something broken? See [runbooks](docs/runbooks/).
 
@@ -156,9 +156,9 @@ terraform/          # AWS infra-as-code — EKS, RDS Postgres, ElastiCache Redis
 <details>
 <summary><strong>ML model details</strong> (click to expand)</summary>
 
-XGBoost trained on synthetic Australian lending data. 71 raw applicant input fields (48 numeric + categoricals) with 31 engineered interactions, Optuna Bayesian hyperparameter optimisation, isotonic probability calibration, 76 monotonic constraints (higher income -> lower risk, etc.).
+The model is XGBoost, trained on synthetic Australian lending data. It takes 71 raw applicant input fields (48 numeric + categoricals) with 31 engineered interactions. Training uses Optuna Bayesian hyperparameter optimisation, isotonic probability calibration, and 76 monotonic constraints (higher income -> lower risk, etc.).
 
-The synthetic data is calibrated against ATO, ABS, APRA, and Equifax published statistics. It includes latent variables the model can't see (documentation quality, savings patterns, employer stability), underwriter disagreement noise, and measurement error — so the model hits realistic metrics (test AUC 0.88 per the active `ModelVersion`; reproducible benchmark on a 2,000-record subset is 0.85 with default hyperparameters — see `docs/experiments/benchmark.md`) rather than the 0.99 you get with clean synthetic labels.
+The synthetic data is calibrated against ATO, ABS, APRA, and Equifax published statistics. It includes latent variables the model can't see (documentation quality, savings patterns, employer stability), underwriter disagreement noise, and measurement error. That is why the model hits realistic metrics rather than the 0.99 you get with clean synthetic labels: test AUC is 0.88 per the active `ModelVersion`, and the reproducible benchmark on a 2,000-record subset is 0.85 with default hyperparameters (see `docs/experiments/benchmark.md`).
 
 Other ML features: IV-based feature selection, PSI/CSI drift monitoring, reject inference (parcelling method), conformal prediction intervals, SHAP-mapped adverse action reason codes (70 codes), APRA stress testing (+3% rate buffer), and a WOE scorecard built alongside XGBoost for interpretability comparison.
 
@@ -195,7 +195,7 @@ Auth: `POST /api/v1/auth/{register,login,refresh,logout}/`, `GET /api/v1/auth/me
 
 Loans: `GET /api/v1/loans/`, `POST /api/v1/loans/`, `GET /api/v1/loans/{id}/`
 
-ML: `POST /api/v1/ml/predict/{id}/` (disabled by default — gated behind `ML_STANDALONE_PREDICT_ENABLED`; the agent orchestrator pipeline is the production decision path), `GET /api/v1/ml/models/active/metrics/`
+ML: `POST /api/v1/ml/predict/{id}/` (disabled by default and gated behind `ML_STANDALONE_PREDICT_ENABLED`; the agent orchestrator pipeline is the production decision path), `GET /api/v1/ml/models/active/metrics/`
 
 Emails: `POST /api/v1/emails/generate/{id}/`, `GET /api/v1/emails/{id}/`
 
@@ -210,9 +210,9 @@ JWT with HttpOnly cookies, 60-min access / 7-day refresh with rotation and black
 <details>
 <summary><strong>Monitoring and observability</strong> (click to expand)</summary>
 
-A full monitoring stack ships behind the `monitoring` profile — Prometheus, Grafana, Loki, Promtail, Alertmanager, a Celery exporter, and a Postgres exporter. Django exposes `/metrics` via `django-prometheus` with request latencies, ORM query counts, Celery task counters, and a custom training-duration histogram. Nothing runs by default, so the core stack stays small; you opt in when you want dashboards.
+A full monitoring stack ships behind the `monitoring` profile: Prometheus, Grafana, Loki, Promtail, Alertmanager, a Celery exporter, and a Postgres exporter. Django exposes `/metrics` via `django-prometheus` with request latencies, ORM query counts, Celery task counters, and a custom training-duration histogram. Nothing runs by default, so the core stack stays small; you opt in when you want dashboards.
 
-Grafana lives in `docker-compose.monitoring.yml` so the main stack parses without a Grafana admin password. Before launching, set `GRAFANA_ADMIN_PASSWORD` in `.env` (compose refuses to start the monitoring profile without it — no silent fallback), then launch alongside the regular stack:
+Grafana lives in `docker-compose.monitoring.yml` so the main stack parses without a Grafana admin password. Before launching, set `GRAFANA_ADMIN_PASSWORD` in `.env` (compose refuses to start the monitoring profile without it instead of falling back silently), then launch alongside the regular stack:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml --profile monitoring up -d
@@ -226,7 +226,7 @@ Then:
 - Prometheus at `localhost:9090` for raw metric queries
 - Loki at `localhost:3100` as the log aggregation backend for Promtail
 
-A separate `watchdog` service runs in the core stack at all times. It polls every 30 seconds for loan applications stuck in the `pending` state for more than 5 minutes and re-queues their orchestration task — so transient worker or broker failures self-recover rather than leaving zombie applications in the queue.
+A separate `watchdog` service runs in the core stack at all times. It polls every 30 seconds for loan applications stuck in the `pending` state for more than 5 minutes and re-queues their orchestration task. Transient worker or broker failures then self-recover instead of leaving zombie applications in the queue.
 
 </details>
 
@@ -260,7 +260,7 @@ Result is written to `.tmp/smoke_result.json`:
 }
 ```
 
-The same script runs as a manually-triggered GitHub Actions job under `smoke-e2e` (see `.github/workflows/smoke-e2e.yml`). The workflow is `workflow_dispatch`-only by design — cost-conscious default; add a cron once the signal is known stable.
+The same script runs as a manually-triggered GitHub Actions job under `smoke-e2e` (see `.github/workflows/smoke-e2e.yml`). The workflow is `workflow_dispatch`-only by design, to keep costs down. A cron can be added once the signal is known to be stable.
 
 </details>
 
@@ -275,7 +275,7 @@ make clean       # FULL wipe: containers + volumes + caches (DB is wiped — use
 make clean-deep  # clean + removes node_modules and backend/.venv (forces reinstall)
 ```
 
-Day-to-day, `make clean-soft` is the right default — it reclaims several hundred MB of Python/Next.js caches without touching the Postgres volume. Reserve `make clean` for "I want a fresh-from-seed DB".
+Day-to-day, `make clean-soft` is the right default: it reclaims several hundred MB of Python/Next.js caches without touching the Postgres volume. Reserve `make clean` for "I want a fresh-from-seed DB".
 
 To prune stale trained-model `.joblib` artifacts from `backend/ml_models/` (after many training iterations):
 
@@ -293,7 +293,7 @@ docker compose exec backend python manage.py prune_model_artifacts            # 
 - **XGBoost lift over a simple scorecard is a measured number.** Every training run fits a logistic-regression baseline on `credit_score, annual_income, loan_amount, debt_to_income` and records `training_metadata.baseline_auc` + `xgb_lift_over_baseline` on the model card.
 - **Email generation is template-first.** Claude is used for creative variations only, with a $5/day spend cap on the Anthropic API. The guardrail layer runs 18 deterministic checks on every LLM-generated decision email before it ships.
 - **Compliance framing is implemented, not audited.** APRA CPG 235, NCCP Act responsible lending, Banking Code disclosure, and adverse-action language are baked into the data model, email templates, and fairness gates. None of this has been independently reviewed by a compliance professional.
-- **Reliability is prototype-grade.** Eight core services ship with healthchecks, the watchdog auto-recovers stuck pipelines, and the monitoring stack exposes Prometheus metrics + Grafana dashboards. No paging, no multi-region failover, no SLO enforcement. Good enough for a demo, not a fintech launch.
+- **Reliability is prototype-grade.** Eight core services ship with healthchecks, the watchdog auto-recovers stuck pipelines, and the monitoring stack exposes Prometheus metrics + Grafana dashboards. There is no paging, multi-region failover, or SLO enforcement. It is good enough for a demo, not for a fintech launch.
 
 ## License
 

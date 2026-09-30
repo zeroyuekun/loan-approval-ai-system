@@ -1,12 +1,12 @@
 # Migration rollback
 
-**Severity:** depends on the migration — critical if it's already partially applied in production.
+**Severity:** Depends on the migration. Critical if it's already partially applied in production.
 
 ## Symptoms
 
-- A deploy included a Django migration that caused errors / data corruption / unacceptable slowness
+- A deploy included a Django migration that caused errors, data corruption or unacceptable slowness
 - `python manage.py migrate` failed halfway
-- A new column / constraint is making existing queries blow up
+- A new column or constraint is making existing queries blow up
 
 ## Diagnose
 
@@ -22,9 +22,9 @@
    grep -n "migrations.RunPython" backend/apps/*/migrations/<NNNN>*.py
    ```
 
-   `RunPython` without a `reverse_code` function is **irreversible** — you need a forward-only compensating migration, not a rollback.
+   `RunPython` without a `reverse_code` function is **irreversible**: you need a forward-only compensating migration, not a rollback.
 
-3. **Check data changes:**
+3. **Check for data changes:**
    If the migration ran `RunPython` that modified rows, rolling back the schema won't unmodify the data. You may need a data repair migration.
 
 ## Remediate
@@ -43,7 +43,7 @@ docker compose exec backend python manage.py migrate <app_label> <previous_migra
    docker compose exec backend python manage.py makemigrations --empty <app_label>
    ```
 2. Fill in the compensating operations (drop column, re-add dropped constraint, restore data from backup).
-3. Commit via the normal PR flow — **no emergency bypass**, CI must still pass.
+3. Commit through the normal PR flow. There is **no emergency bypass**: CI must still pass.
 4. Deploy and apply the compensating migration.
 
 **For a migration that corrupted data:**
@@ -69,4 +69,4 @@ File the post-mortem under `docs/postmortems/YYYY-MM-DD-<slug>.md`.
 ## Escalate
 
 - Tag Backend owners immediately if production is affected.
-- If data loss is suspected: stop writes, notify stakeholders, do not attempt "quick fixes" against production without a plan.
+- If you suspect data loss, stop writes and notify stakeholders. Do not attempt "quick fixes" against production without a plan.

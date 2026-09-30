@@ -1,8 +1,8 @@
-# Data Generation Workflow
+# Data generation workflow
 
 ## Objective
 
-Generate 10,000 realistic synthetic loan application records for model training and system testing using Australian lending standards.
+Generate 10,000 realistic synthetic loan application records for model training and system testing, following Australian lending standards.
 
 ## Tools
 
@@ -11,9 +11,9 @@ Generate 10,000 realistic synthetic loan application records for model training 
 | Standalone generator | `tools/generate_synthetic_data.py` | CLI script for generating CSV outside Django |
 | Django service | `backend/apps/ml_engine/services/data_generator.py` | Service used by management commands and API |
 
-## Feature Specifications (Australian Standards)
+## Feature specifications (Australian standards)
 
-### Original Features
+### Original features
 
 | Feature | Type | Range / Values | Distribution |
 |---------|------|---------------|-------------|
@@ -27,7 +27,7 @@ Generate 10,000 realistic synthetic loan application records for model training 
 | `home_ownership` | categorical | own, rent, mortgage | Weighted: mortgage 45%, rent 35%, own 20% |
 | `has_cosigner` | bool | True / False | 8% True |
 
-### New Australian Lending Features
+### New Australian lending features
 
 | Feature | Type | Range / Values | Distribution / Logic |
 |---------|------|---------------|---------------------|
@@ -39,13 +39,13 @@ Generate 10,000 realistic synthetic loan application records for model training 
 | `employment_type` | categorical | payg_permanent, payg_casual, self_employed, contract | Weighted: permanent 55%, self-employed 20%, casual 15%, contract 10% |
 | `applicant_type` | categorical | single, couple | Weighted: couple 55%, single 45% |
 
-## Target Variable: `approved`
+## Target variable: `approved`
 
 The approval decision uses Australian lending rules based on APRA 2026 regulations, Big 4 bank criteria, and industry practice.
 
-### Step 1: Income Shading (by employment type)
+### Step 1: Income shading (by employment type)
 
-Banks do not accept 100% of all income types:
+Banks don't count every type of income at 100%:
 
 | Employment Type | Income Accepted |
 |----------------|----------------|
@@ -54,14 +54,14 @@ Banks do not accept 100% of all income types:
 | Self-Employed | 75% (average of last 2 years, then shaded) |
 | Contract | 85% |
 
-### Step 2: Hard Cutoffs (auto-deny)
+### Step 2: Hard cutoffs (auto-deny)
 
 1. **APRA DTI cap**: DTI >= 6.0x gross income → denied (with 15% quota pass-through for APRA's 20% allowance)
 2. **Credit score floor**: Equifax < 500 → denied. Score 500-650: 60% denial rate (borderline for Big 4)
 3. **Self-employed < 2 years**: denied (insufficient trading history)
 4. **Casual < 1 year**: denied (insufficient employment history)
 
-### Step 3: LVR Check (home loans only)
+### Step 3: LVR check (home loans only)
 
 ```
 LVR = loan_amount / property_value
@@ -70,13 +70,13 @@ LVR > 95%: denied (no lender supports without government scheme)
 LVR > 90% AND credit_score < 700: denied (need good credit for high LVR)
 ```
 
-### Step 4: Genuine Savings Check (home loans, LVR > 80%)
+### Step 4: Genuine savings check (home loans, LVR > 80%)
 
 ```
 if LVR > 80% AND deposit < 5% of property_value: denied
 ```
 
-### Step 5: HEM-Based Expense Calculation
+### Step 5: HEM-based expense calculation
 
 Banks take MAX(declared_expenses, HEM_benchmark).
 
@@ -91,7 +91,7 @@ HEM varies by applicant type, dependants, and income bracket (low/mid/high):
 | Couple, 1 dep | $2,500 | $3,000 | $3,500 |
 | Couple, 2+ dep | $2,800 | $3,400 | $3,900 |
 
-### Step 6: Serviceability Formula (APRA Buffer)
+### Step 6: Serviceability formula (APRA buffer)
 
 ```
 assessment_rate = max(product_rate + 3%, floor_rate)  # Currently 9.5%
@@ -113,16 +113,16 @@ monthly_surplus = shaded_monthly_income
 if monthly_surplus < 0: denied
 ```
 
-### Step 7: DSR Check
+### Step 7: DSR check
 
 ```
 DSR = (existing_debt_monthly + credit_card_monthly + monthly_repayment) / gross_monthly_income
 if DSR > 35%: denied
 ```
 
-### Step 8: Composite Score (borderline cases)
+### Step 8: Composite score (borderline cases)
 
-Applications passing all checks get scored:
+Applications that pass every check get a composite score:
 
 ```
 composite = 0.20 * credit_normalized    # Equifax 500-1200 → 0-1
@@ -140,22 +140,22 @@ If composite + noise < 0.35: denied
 
 ## Steps
 
-1. **Set random seed** - Use `numpy.random.seed(42)` for reproducibility (can be overridden via CLI)
-2. **Generate features** - Create each feature column according to the distributions above
-3. **Clip values** - Ensure all values fall within their specified ranges
-4. **Calculate approval** - Apply the 8-step assessment pipeline
-5. **Create DataFrame** - Assemble all columns into a pandas DataFrame
-6. **Validate** - Check for nulls, verify value ranges, confirm approval rate is reasonable
-7. **Save** - Write to CSV at the specified output path
+1. **Set the random seed.** Use `numpy.random.seed(42)` for reproducibility (the CLI can override it).
+2. **Generate features.** Create each feature column from the distributions above.
+3. **Clip values.** Make sure every value falls within its specified range.
+4. **Calculate approval.** Apply the 8-step assessment pipeline.
+5. **Create the DataFrame.** Assemble all columns into a pandas DataFrame.
+6. **Validate.** Check for nulls, verify value ranges, and confirm the approval rate is reasonable.
+7. **Save.** Write the CSV to the specified output path.
 
-## Expected Outputs
+## Expected outputs
 
 - CSV file with 10,000 rows (or `--num-records` count) and 17 columns
 - Approval rate between 45-60%
 - No null values
 - All values within specified ranges
 
-## CLI Usage
+## CLI usage
 
 ```bash
 # Generate default 10,000 records
@@ -171,6 +171,6 @@ python tools/generate_synthetic_data.py --output-path data/training_data.csv
 python tools/generate_synthetic_data.py --seed 123
 ```
 
-## Edge Cases
+## Edge cases
 
-If the output directory doesn't exist, create it with `os.makedirs(exist_ok=True)`. For disk space, 10k records is about 2.5MB and 100k is ~25MB — warn if generating over 1M. Always log the random seed used (even the default) so results can be reproduced. Non-home loans have `property_value` and `deposit_amount` set to 0, so LVR and genuine savings checks get skipped.
+If the output directory doesn't exist, create it with `os.makedirs(exist_ok=True)`. On disk, 10k records is about 2.5MB and 100k is ~25MB. Warn if generating over 1M. Always log the random seed used (even the default) so results can be reproduced. Non-home loans have `property_value` and `deposit_amount` set to 0, so the LVR and genuine savings checks are skipped.

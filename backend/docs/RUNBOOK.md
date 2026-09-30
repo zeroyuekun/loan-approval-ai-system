@@ -1,6 +1,6 @@
-# Operations Runbook — AussieLoanAI
+# Operations runbook: AussieLoanAI
 
-## Service Architecture
+## Service architecture
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────┐
@@ -26,7 +26,7 @@
                     └──────────────┘
 ```
 
-### Docker Compose Services
+### Docker Compose services
 
 | Service | Image / Build | Ports | Health Check |
 |---------|--------------|-------|-------------|
@@ -40,7 +40,7 @@
 | `prometheus` | `prom/prometheus:latest` | 9090 | None |
 | `grafana` | `grafana/grafana:latest` | 3001 | None |
 
-### Task Routing
+### Task routing
 
 | Task Pattern | Queue |
 |-------------|-------|
@@ -49,7 +49,7 @@
 | `apps.agents.tasks.*` | `agents` |
 | All others | `celery` (default) |
 
-## API Endpoints
+## API endpoints
 
 ### Health
 
@@ -84,7 +84,7 @@
 | GET | `/api/v1/loans/<id>/` | Yes | Loan application detail |
 | PUT/PATCH | `/api/v1/loans/<id>/` | Yes | Update loan application |
 
-### ML Engine (`/api/v1/ml/`)
+### ML engine (`/api/v1/ml/`)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -93,7 +93,7 @@
 | GET | `/api/v1/ml/models/active/drift/` | Yes | PSI drift analysis |
 | POST | `/api/v1/ml/models/train/` | Staff | Trigger model training |
 
-### Email Engine (`/api/v1/emails/`)
+### Email engine (`/api/v1/emails/`)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -111,13 +111,13 @@
 | GET | `/api/v1/agents/runs/<loan_id>/` | Yes | Agent run detail for a loan |
 | POST/PUT | `/api/v1/agents/review/<run_id>/` | Staff | Human review for bias-flagged runs |
 
-### Task Status
+### Task status
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | `/api/v1/tasks/<task_id>/status/` | Yes | Poll async Celery task result |
 
-## Health Check Endpoints
+## Health check endpoints
 
 | Endpoint | What It Checks | Healthy | Unhealthy |
 |----------|---------------|---------|-----------|
@@ -132,25 +132,25 @@
 | Prometheus | http://localhost:9090 | None |
 | Django metrics | http://localhost:8000/metrics | None |
 
-### Prometheus Scrape Config
+### Prometheus scrape config
 
 | Job Name | Target | Interval |
 |----------|--------|----------|
 | `django-backend` | `backend:8000/metrics` | 10s |
 | `redis` | `redis:6379` | 15s (global default) |
 
-### Alert Rules Configured
+### Alert rules configured
 
 | Alert | Condition | Severity | What It Means | What To Do |
 |-------|-----------|----------|--------------|-----------|
 | **High Error Rate (>5%)** | 5xx responses exceed 5% of total over 5 min, sustained 2 min | Critical | Backend is returning server errors at a dangerous rate | Check backend logs (`docker logs`), check deep health endpoint, look for DB or Redis connection failures |
-| **High API Latency (p95 > 2s)** | 95th percentile request latency exceeds 2 seconds over 5 min, sustained 5 min | Warning | Requests are abnormally slow — likely slow DB queries or long ML prediction times | Check for slow queries, verify ML model is loaded, check DB connection pool |
-| **Health Check Failing** | Prometheus `up{job="django-backend"}` drops below 1, sustained 1 min | Critical | Backend service is completely DOWN — Prometheus cannot reach `/metrics` | Restart backend service immediately, check container logs for crash reason |
-| **Celery Queue Backlog** | POST request rate exceeds 50 requests/5min, sustained 5 min | Warning | Unusual volume of mutations — potential queue backup or abuse | Check Celery queue lengths, verify workers are running, scale workers if legitimate traffic |
+| **High API Latency (p95 > 2s)** | 95th percentile request latency exceeds 2 seconds over 5 min, sustained 5 min | Warning | Requests are abnormally slow, likely from slow DB queries or long ML prediction times | Check for slow queries, verify ML model is loaded, check DB connection pool |
+| **Health Check Failing** | Prometheus `up{job="django-backend"}` drops below 1, sustained 1 min | Critical | Backend service is completely down: Prometheus cannot reach `/metrics` | Restart backend service immediately, check container logs for crash reason |
+| **Celery Queue Backlog** | POST request rate exceeds 50 requests/5min, sustained 5 min | Warning | Unusual volume of mutations, possibly a queue backup or abuse | Check Celery queue lengths, verify workers are running, scale workers if legitimate traffic |
 
-## Common Incidents
+## Common incidents
 
-### 1. Model Producing Bad Predictions
+### 1. Model producing bad predictions
 
 **Symptoms:** Approval rate suddenly spikes or drops; customer complaints about incorrect decisions
 
@@ -204,7 +204,7 @@ print(f'Activated: {old.algorithm} {old.version}')
 "
 ```
 
-### 2. Email Generation Failing
+### 2. Email generation failing
 
 **Symptoms:** Emails not being sent; guardrail failure rate spiking; template fallback being used
 
@@ -232,12 +232,12 @@ docker exec loan-approval-ai-system-celery_worker_io-1 celery -A config inspect 
 ```
 
 **Resolution:**
-- If circuit breaker is open: wait 10 minutes for auto-reset
-- If API budget exhausted: resets daily at midnight UTC
-- If guardrails failing: check prompt templates have not been corrupted (never add apology language to denial emails)
-- Template fallback activates automatically -- emails still go out with static template
+- If the circuit breaker is open, wait 10 minutes for it to reset automatically.
+- If the API budget is exhausted, wait for the daily reset at midnight UTC.
+- If guardrails are failing, check that the prompt templates have not been corrupted (never add apology language to denial emails).
+- Template fallback activates automatically, so emails still go out with the static template.
 
-### 3. Celery Queue Backing Up
+### 3. Celery queue backing up
 
 **Symptoms:** Tasks stuck in pending; predictions/emails delayed; `/api/v1/tasks/<id>/status/` returns PENDING for extended periods
 
@@ -263,9 +263,9 @@ docker compose restart celery_worker_ml celery_worker_io
 docker compose up -d --scale celery_worker_io=3
 ```
 
-### 4. Database Connection Failures
+### 4. Database connection failures
 
-**Symptoms:** 503 on `/api/v1/health/deep/` with `"database": "error: ..."` ; connection errors in backend logs
+**Symptoms:** 503 on `/api/v1/health/deep/` with `"database": "error: ..."`; connection errors in backend logs
 
 **Diagnosis:**
 ```bash
@@ -285,7 +285,7 @@ sleep 15
 docker compose restart backend celery_worker_ml celery_worker_io celery_beat
 ```
 
-### 5. High Error Rate Alert Firing
+### 5. High error rate alert firing
 
 **Symptoms:** Grafana alert "High Error Rate (>5%)" triggered; error rate sustained for 2+ minutes
 
@@ -303,12 +303,12 @@ curl -s http://localhost:8000/api/v1/health/deep/ | python -m json.tool
 ```
 
 **Resolution:**
-- If DB-related: see incident #4
-- If Redis-related: `docker compose restart redis`, then restart backend and workers
-- If code error: check backend logs for traceback, deploy fix
-- If resource exhaustion: check container memory/CPU with `docker stats`
+- If DB-related, see incident #4.
+- If Redis-related, run `docker compose restart redis`, then restart the backend and workers.
+- If it's a code error, find the traceback in the backend logs and deploy a fix.
+- If resources are exhausted, check container memory/CPU with `docker stats`.
 
-### 6. Redis Connection Failures
+### 6. Redis connection failures
 
 **Symptoms:** Celery tasks not executing; `"redis": "error: ..."` in deep health check
 
@@ -325,12 +325,13 @@ sleep 10
 docker compose restart backend celery_worker_ml celery_worker_io celery_beat
 ```
 
-**If loans submitted during the outage:**
+**If loans were submitted during the outage:**
 Submissions that could not reach the broker are written to
 `loans_pipelinedispatchoutbox` and the loan transitions to
-`status=queue_failed`. The beat task `retry_failed_dispatches` drains the
-outbox on a 60s cadence once Redis returns — loans auto-transition back to
-`pending`. Rows that reach `MAX_DISPATCH_ATTEMPTS` (5) are surfaced in
+`status=queue_failed`. Once Redis returns, the beat task
+`retry_failed_dispatches` drains the outbox on a 60s cadence and the loans
+move back to `pending` automatically. Rows that reach
+`MAX_DISPATCH_ATTEMPTS` (5) show up in
 `/admin/loans/pipelinedispatchoutbox/` for operator review:
 
 ```bash
@@ -339,7 +340,7 @@ docker exec loan-approval-ai-system-backend-1 python manage.py shell -c \
   "from apps.loans.tasks import retry_failed_dispatches; print(retry_failed_dispatches())"
 ```
 
-### 7. Frontend Not Loading
+### 7. Frontend not loading
 
 **Symptoms:** Blank page at http://localhost:3000; health check failing
 
@@ -357,9 +358,9 @@ docker compose restart frontend
 docker compose up -d --build frontend
 ```
 
-## Operational Commands
+## Operational commands
 
-### Data Management
+### Data management
 ```bash
 # Generate fresh synthetic data (10K records) with 100 DB records and demo customers
 docker exec loan-approval-ai-system-backend-1 python manage.py generate_data --num-records 10000 --create-db-records 100
@@ -371,7 +372,7 @@ docker exec loan-approval-ai-system-backend-1 python manage.py generate_data --n
 docker exec loan-approval-ai-system-backend-1 python manage.py generate_data --num-records 5000 --output .tmp/custom_data.csv
 ```
 
-### Model Management
+### Model management
 ```bash
 # Train new XGBoost model (default, recommended)
 docker exec loan-approval-ai-system-backend-1 python manage.py train_model --algorithm xgb
@@ -396,7 +397,7 @@ docker compose exec backend python manage.py prune_model_artifacts --dry-run
 docker compose exec backend python manage.py prune_model_artifacts --keep 2
 ```
 
-### Service Management
+### Service management
 ```bash
 # Start all services
 docker compose up -d
@@ -419,7 +420,7 @@ docker compose ps
 docker stats --no-stream
 ```
 
-### Database Management
+### Database management
 ```bash
 # Run migrations
 docker exec loan-approval-ai-system-backend-1 python manage.py migrate
@@ -434,9 +435,9 @@ docker exec -it loan-approval-ai-system-db-1 psql -U postgres -d loan_approval
 docker exec loan-approval-ai-system-backend-1 python manage.py migrate loans PREVIOUS_MIGRATION_NAME
 ```
 
-## Rollback Procedures
+## Rollback procedures
 
-### Code Rollback
+### Code rollback
 ```bash
 # Pull specific image version
 docker pull ghcr.io/OWNER/loan-approval-ai-system/backend:COMMIT_SHA
@@ -446,17 +447,17 @@ docker pull ghcr.io/OWNER/loan-approval-ai-system/frontend:COMMIT_SHA
 docker compose up -d
 ```
 
-### Model Rollback
-See [Incident #1 — Model Producing Bad Predictions](#1-model-producing-bad-predictions) above. Key point: `ModelVersion.save()` with `is_active=True` atomically deactivates all other versions. Always call `clear_model_cache()` after switching.
+### Model rollback
+See [Incident #1: Model producing bad predictions](#1-model-producing-bad-predictions) above. `ModelVersion.save()` with `is_active=True` atomically deactivates all other versions. Always call `clear_model_cache()` after switching.
 
-### Database Rollback
+### Database rollback
 ```bash
 # Reverse last migration for a specific app
 docker exec loan-approval-ai-system-backend-1 python manage.py showmigrations loans
 docker exec loan-approval-ai-system-backend-1 python manage.py migrate loans PREVIOUS_MIGRATION_NAME
 ```
 
-## Weekly Scheduled Tasks
+## Weekly scheduled tasks
 
 These are configured in Celery Beat (`config/celery.py`):
 
@@ -466,12 +467,12 @@ These are configured in Celery Beat (`config/celery.py`):
 | Guardrail Analytics | `apps.email_engine.tasks.compute_guardrail_analytics` | Monday 3:00 AM | `email` | Guardrail pass/fail rates and trends |
 | Pipeline SLA | `apps.agents.tasks.compute_pipeline_sla` | Monday 4:00 AM | `agents` | Pipeline step timing analysis |
 
-To verify beat is scheduling correctly:
+To check that beat is scheduling correctly:
 ```bash
 docker logs loan-approval-ai-system-celery_beat-1 --tail 20
 ```
 
-## Escalation Matrix
+## Escalation matrix
 
 | Severity | Condition | Action |
 |----------|-----------|--------|
@@ -480,19 +481,19 @@ docker logs loan-approval-ai-system-celery_beat-1 --tail 20
 | **P3 Medium** | Guardrail fail rate > 20%; High API Latency alert | Review prompt templates; investigate slow queries |
 | **P4 Low** | Celery Queue Backlog alert; minor email fallbacks | Monitor, scale workers if persistent |
 
-## Bias Detection Escalation
+## Bias detection escalation
 
 When the bias detection pipeline flags an email:
-1. Junior analyst (Claude Sonnet) classifies each flag
-2. Senior reviewer (Claude Opus) performs holistic review
-3. If confidence < 0.70 OR approved=False, the run enters the **human review queue**
-4. Human reviewer accesses `/dashboard/human-review` in the frontend to make the final decision
-5. Staff submits review via `POST /api/v1/agents/review/<run_id>/`
-6. Decision is logged in BiasReport with reviewer ID
+1. A junior analyst (Claude Sonnet) classifies each flag.
+2. A senior reviewer (Claude Opus) reviews the flagged email as a whole.
+3. If confidence is below 0.70 or approved=False, the run enters the human review queue.
+4. A human reviewer makes the final decision at `/dashboard/human-review` in the frontend.
+5. Staff submit the review via `POST /api/v1/agents/review/<run_id>/`.
+6. The decision is logged in BiasReport with the reviewer ID.
 
-## Environment Variables
+## Environment variables
 
-Key variables (stored in `.env` at project root, never commit):
+Main variables (stored in `.env` at the project root; never commit it):
 
 | Variable | Purpose |
 |----------|---------|
@@ -504,9 +505,9 @@ Key variables (stored in `.env` at project root, never commit):
 | `CELERY_BROKER_URL` | Auto-set in docker-compose: `redis://:$REDIS_PASSWORD@redis:6379/0` |
 | `ANTHROPIC_API_KEY` | Claude API key for email generation and bias detection |
 
-### 8. Claude API Extended Outage
+### 8. Claude API extended outage
 
-**Symptoms:** All pipeline runs fail at the `email_generation` or `bias_detection` step. Circuit breaker trips open. `AgentRun.status = 'failed'` with Claude API errors in the step log. Template fallback emails may be sending instead of AI-generated ones.
+**Symptoms:** All pipeline runs fail at the `email_generation` or `bias_detection` step. The circuit breaker trips open. `AgentRun.status = 'failed'` with Claude API errors in the step log. Template fallback emails may be going out instead of AI-generated ones.
 
 **Diagnosis:**
 ```bash
@@ -524,7 +525,7 @@ docker compose exec redis redis-cli -a $REDIS_PASSWORD GET ai_budget:circuit_bre
 ```
 
 **Impact:**
-- **Decision emails (approval/denial):** Template fallback activates automatically. Emails still go out using static templates — no customer-facing disruption for decision notifications.
+- **Decision emails (approval/denial):** Template fallback activates automatically. Emails still go out using static templates, so customers see no disruption to decision notifications.
 - **NBO and marketing pipeline:** Produces no output. Denied applicants do not receive alternative product offers until the API recovers.
 - **Bias detection:** Defaults to a score of 65 (moderate flag). Emails that would normally pass AI review are held for human review instead.
 
@@ -549,11 +550,12 @@ print(f'Steps: {run.steps}')
 "
 ```
 
-## Pre-Activation Gate Enablement
+## Pre-activation gate enablement
 
-Three opt-in env-var-driven gates control model and prediction safety. Each
-defaults to a non-blocking mode so deployments ship zero behaviour change;
-flip to enforcing modes only after confirming the prerequisites below.
+Three opt-in gates, each driven by an env var, control model and prediction
+safety. Each defaults to a non-blocking mode, so deploying them changes no
+behaviour. Flip a gate to its enforcing mode only after confirming the
+prerequisites below.
 
 | Variable | Default | Enforcing value | Effect when enforcing |
 |---|---|---|---|
@@ -562,97 +564,97 @@ flip to enforcing modes only after confirming the prerequisites below.
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` | `enforce` | `apply_overlay_to_decision` overrides the model verdict on every prediction when policy rules trigger (P-codes in `services/credit_policy.py`). Shadow mode logs the would-be override but returns the model verdict; enforce mode actually applies it. |
 | `DECISION_OVERTURN_GATE_MODE` | `off` | `2fa` / `second_approver` | Maker/checker control on officer overturns of denials at/above `DECISION_OVERTURN_THRESHOLD` (default `$100,000`). `2fa` requires the acting officer to hold a verified TOTP device (returns HTTP 403 otherwise); `second_approver` blocks high-value overturns at the API pending an out-of-band dual-approval process. Below-threshold overturns are never gated. Residual accepted risk in `off` mode: any officer-role account can self-overturn any denial within throttle limits (detective AuditLog only). |
 
-The first two gate `train_model_task` (rare event — runs on retraining
+The first two gate `train_model_task`, which runs rarely (on the retraining
 cadence). The third gates **every prediction** that hits the policy overlay,
-so its blast radius is broader and rollout deserves more care.
+so a mistake there reaches more decisions and the rollout needs more care.
 
-### Prerequisite checklist — `ML_FAIRNESS_GATE_MODE=block`
+### Prerequisite checklist: `ML_FAIRNESS_GATE_MODE=block`
 
 - [ ] Recent training runs produce `metrics["fairness"]` with all protected
       attributes recorded. Verify by inspecting
       `mv.training_metadata["fairness_gate"]` on the most recent active
       `ModelVersion` in each segment.
-- [ ] Every currently-active model passes the EEOC 80% rule. Review the
+- [ ] Every currently active model passes the EEOC 80% rule. Review the
       §1 Header `Compliance status` line in each active model's MRM
-      dossier (`python manage.py generate_mrm_dossier <model_id>`) — if
+      dossier (`python manage.py generate_mrm_dossier <model_id>`). If
       any show `NON-COMPLIANT` for fairness, retrain *before* flipping
       to `block`. The runtime gate runs on new training only and will not
-      retroactively deactivate existing failing models, but operators
-      should not be flying blind on the existing ones either.
+      retroactively deactivate existing failing models, so operators need
+      to check the existing ones themselves.
 - [ ] On-call alerting picks up `FairnessGateBlocked` Celery task
-      failures (the exception subclass is `RuntimeError` so any generic
-      Celery-failure alert catches it; you may want a dedicated alert
-      that names the env var so the on-call sees the remediation path).
+      failures. The exception subclasses `RuntimeError`, so any generic
+      Celery-failure alert catches it. Consider a dedicated alert that
+      names the env var so the on-call sees the remediation path.
 - [ ] Documented rollback acknowledged: set `ML_FAIRNESS_GATE_MODE=warn`
       and restart the `worker_ml` Celery worker.
 
-### Prerequisite checklist — `ML_PROMOTION_GATE_MODE=block`
+### Prerequisite checklist: `ML_PROMOTION_GATE_MODE=block`
 
 - [ ] Trainer emits `training_metadata.psi_by_feature` on every run
       (introduced in v1.9.9). Verify on the most recent training run.
 - [ ] `metrics["calibration_data"]["ece"]` is populated (introduced
       pre-v1.9.0; legacy models without it will fail Gate 3).
-- [ ] At least one champion exists per segment you train, OR you are
-      okay with first-model-in-segment auto-promotion after PSI+ECE
-      pass (the gate short-circuits Gates 1+4 in this case).
+- [ ] At least one champion exists per segment you train, or you accept
+      that the first model in a segment is auto-promoted once PSI and ECE
+      pass (the gate short-circuits Gates 1 and 4 in that case).
 - [ ] Documented rollback acknowledged: set `ML_PROMOTION_GATE_MODE=warn`
       and restart the `worker_ml` Celery worker.
 
-### Prerequisite checklist — `CREDIT_POLICY_OVERLAY_MODE=enforce`
+### Prerequisite checklist: `CREDIT_POLICY_OVERLAY_MODE=enforce`
 
-This one is **not** purely an ML concern — the policy overlay can flip a
-model `approved` to a hard `decline` (or vice versa for hard-pass rules).
-Customer-facing impact is real.
+This gate is **not** purely an ML concern. The policy overlay can flip a
+model `approved` to a hard `decline` (or vice versa for hard-pass rules),
+and customers see the result.
 
 - [ ] Shadow-mode telemetry has been collected for **at least four weeks**
-      (or one full training cycle, whichever is longer). Review
-      `PolicyOverlayDecision` rows or whatever observability surface the
-      shadow-mode logs land in. Confirm the per-rule trigger rate matches
-      expectations and there are no obvious false positives.
-- [ ] Each P-code in `services/credit_policy.POLICY_RULES` has been
-      reviewed by Compliance + Product for AU regulatory alignment.
+      (or one full training cycle, whichever is longer). Review the
+      `PolicyOverlayDecision` rows, or wherever the shadow-mode logs land.
+      Confirm the per-rule trigger rate matches expectations and there are
+      no obvious false positives.
+- [ ] Compliance and Product have reviewed each P-code in
+      `services/credit_policy.POLICY_RULES` for AU regulatory alignment.
       Hard-fail rules (P04 ATO tax-debt default, etc.) must be confirmed
       acceptable as decline drivers.
 - [ ] Customer-facing decline messaging is in place for blocked
-      predictions. The MRM dossier §2 wording will switch from
+      predictions. The MRM dossier §2 wording switches automatically from
       "policy overlay runs in `shadow` (observational) mode" to
-      "policy overlay runs in `enforce` mode" automatically — but the
-      *email content* sent to declined customers is owned by
-      `email_engine` and must reference policy-driven declines properly
-      (see `email_engine/services/template_fallback.py` denial templates).
+      "policy overlay runs in `enforce` mode". The *email content* sent
+      to declined customers does not: `email_engine` owns it, and it must
+      reference policy-driven declines properly (see the denial templates
+      in `email_engine/services/template_fallback.py`).
 - [ ] On-call alerting picks up an unexpected spike in policy-driven
       declines (e.g. >20% of decisions in any 1-hour window). A bad rule
-      could cause mass declines; an alert short-circuits the blast.
+      could cause mass declines, and the alert catches that early.
 - [ ] Documented rollback acknowledged: set
-      `CREDIT_POLICY_OVERLAY_MODE=shadow` and restart the backend +
-      Celery workers (or `off` if you suspect a code-level overlay bug
-      and need to bypass entirely while you investigate).
+      `CREDIT_POLICY_OVERLAY_MODE=shadow` and restart the backend and
+      Celery workers (or set `off` if you suspect a code-level overlay bug
+      and need to bypass the overlay entirely while you investigate).
 
 ### Enablement procedure
 
 1. Confirm all prerequisites for the gate you're enabling.
 2. Update the deployment env file (or your secrets manager) with the new
-   value. Do **not** edit `backend/config/settings/base.py` — the default
+   value. Do **not** edit `backend/config/settings/base.py`. The default
    stays at the safe value so a misconfigured deployment doesn't silently
    downgrade.
 3. Restart the affected services:
    - `ML_FAIRNESS_GATE_MODE` and `ML_PROMOTION_GATE_MODE`: restart `worker_ml`
      (the Celery worker that runs `train_model_task`).
-   - `CREDIT_POLICY_OVERLAY_MODE`: restart `backend` + all Celery workers
+   - `CREDIT_POLICY_OVERLAY_MODE`: restart `backend` and all Celery workers
      (the setting is read on every prediction, but workers cache the
      resolved settings module on import).
 4. Trigger a smoke test:
-   - Fairness/promotion: kick off a training run via
+   - Fairness/promotion: start a training run via
      `POST /api/v1/ml/models/train/` and verify the resulting
      `mv.training_metadata.{fairness_gate_mode,promotion_gate_mode}` reflects
-     the new mode. If `block` mode rejects the run, that is the gate working
-     as intended — review the failure reasons before flipping back.
-   - Overlay: hit a known out-of-scope application via the predictions
+     the new mode. If `block` mode rejects the run, the gate is working as
+     intended; review the failure reasons before flipping back.
+   - Overlay: send a known out-of-scope application through the predictions
      endpoint and verify the response carries the policy-overlay decision
      in the audit log.
-5. Monitor for 24 hours before considering the rollout permanent. The
-   safe rollback is a one-line env-var change — there is no DB state or
-   migration to worry about.
+5. Monitor for 24 hours before treating the rollout as permanent. Rolling
+   back is a one-line env-var change, with no DB state or migration
+   involved.
 
 ### Rollback
 
@@ -666,12 +668,12 @@ services (see step 3 above):
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` |
 | `DECISION_OVERTURN_GATE_MODE` | `off` |
 
-Currently-active models with failed gates remain active across the flip —
-the rollback path is symmetric with the enablement path. There is no
+Currently active models with failed gates remain active across the flip.
+The rollback path mirrors the enablement path, and there is no
 data-migration step.
 
 The code paths for the safe defaults are byte-identical to the pre-gate
-behaviour shipped before PRs #163 and #164, so reverting should never
-introduce new failure modes — only remove the gate's protection.
+behaviour shipped before PRs #163 and #164. Reverting should therefore
+only remove the gate's protection, never introduce new failure modes.
 
-**Prevention:** The circuit breaker auto-recovers after a 10-minute cooldown period (`AI_CIRCUIT_BREAKER_COOLDOWN = 600`). Template fallback ensures decision emails always go out regardless of API availability. The daily API budget (500 calls / $50 USD) resets at midnight UTC.
+**Prevention:** The circuit breaker recovers on its own after a 10-minute cooldown (`AI_CIRCUIT_BREAKER_COOLDOWN = 600`). Template fallback means decision emails always go out, whether or not the API is available. The daily API budget (500 calls / $50 USD) resets at midnight UTC.
