@@ -64,3 +64,9 @@ Do not open public GitHub issues for security vulnerabilities. Use responsible d
 **In scope:** Backend API, authentication and authorisation, data handling and encryption, ML prediction pipeline, email generation guardrails, bias detection pipeline, CI security scans.
 
 **Out of scope:** Third-party services (Anthropic API, Gmail SMTP), the underlying Docker/OS infrastructure, denial-of-service attacks against development environments, social engineering.
+
+## Related documents
+
+- [ADR 008: Security architecture](docs/adr/008-security-architecture.md): the design behind the controls above
+- [AI regulation and LLM provider governance](docs/compliance/ai-governance.md): regulatory deadlines for automated credit decisions and third-party LLM provider controls
+- [Secrets rotation](backend/docs/SECRETS_ROTATION.md): how to rotate keys and credentials
