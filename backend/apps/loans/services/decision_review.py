@@ -8,13 +8,37 @@ from __future__ import annotations
 
 import logging
 
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.utils import timezone
 
 from apps.loans.models import AuditLog, DecisionReview, LoanApplication, LoanDecision
 
+from .overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+
 logger = logging.getLogger(__name__)
+
+
+class OverturnGateBlocked(PermissionDenied):
+    """DECISION_OVERTURN_GATE_MODE refused this overturn (the message says why)."""
+
+
+def _enforce_overturn_gate(application, officer) -> None:
+    """Optional maker/checker gate on high-value overturns (default mode off).
+
+    Lives in the service so every caller (API resolve, Django admin action,
+    any batch job) goes through it.
+    """
+    gate = evaluate_overturn_gate(
+        amount=float(application.loan_amount or 0),
+        threshold=getattr(settings, "DECISION_OVERTURN_THRESHOLD", 100000.0),
+        mode=normalize_overturn_mode(getattr(settings, "DECISION_OVERTURN_GATE_MODE", "off")),
+        officer_has_2fa=officer.has_confirmed_totp(),
+    )
+    if not gate["allowed"]:
+        raise OverturnGateBlocked(gate["reason"])
+
 
 _TERMINAL = {DecisionReview.Status.UPHELD, DecisionReview.Status.OVERTURNED, DecisionReview.Status.WITHDRAWN}
 
@@ -96,6 +120,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
             # InvalidStateTransition (NOT a ValueError) -> uncaught 500.
             if application.status != "denied":
                 raise ValueError("Application is no longer in a declined state")
+            _enforce_overturn_gate(application, officer)
 
             locked.status = DecisionReview.Status.OVERTURNED
             locked.outcome_decision = "approved"

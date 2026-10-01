@@ -92,6 +92,37 @@ class LoanApplication(SoftDeleteModel):
     # soft-deleted row would block the get_or_create that recreates it.
     SOFT_DELETE_ON_DELETE = True
 
+    # The applicant's facts the decision is assessed on. Frozen once the
+    # pipeline has taken the application (any status but these), in the API
+    # serializer and the Django admin alike: changing them would leave the
+    # stored decision and its ADM explanation out of step with their inputs.
+    # notes / conditions / conditions_met are post-decision workflow fields.
+    DECISION_INPUT_FIELDS = (
+        "annual_income",
+        "credit_score",
+        "loan_amount",
+        "loan_term_months",
+        "debt_to_income",
+        "employment_length",
+        "property_value",
+        "deposit_amount",
+        "monthly_expenses",
+        "existing_credit_card_limit",
+        "number_of_dependants",
+        "employment_type",
+        "applicant_type",
+        "purpose",
+        "home_ownership",
+        "has_cosigner",
+        "has_hecs",
+        "has_bankruptcy",
+        "state",
+    )
+    INPUTS_EDITABLE_STATUSES = ("pending", "queue_failed")
+
+    def decision_inputs_frozen(self) -> bool:
+        return self.status not in self.INPUTS_EDITABLE_STATUSES
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         PROCESSING = "processing", "Processing"

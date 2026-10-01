@@ -33,8 +33,8 @@ from .serializers import (
     LoanApplicationCustomerUpdateSerializer,
     LoanApplicationSerializer,
 )
-from .services.decision_review import apply_review_outcome, withdraw_review
-from .services.overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+from .services.audit_diff import field_change_details, snapshot
+from .services.decision_review import OverturnGateBlocked, apply_review_outcome, withdraw_review
 from .tasks import dispatch_pipeline_or_queue_failed
 
 logger = logging.getLogger(__name__)
@@ -123,10 +123,10 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         """Every changed field is audited (before/after; free text by name).
         Decision inputs of an assessed application are refused in the
         serializer, so they never reach here."""
-        before = _snapshot(serializer.instance)
+        before = snapshot(serializer.instance)
         with transaction.atomic():
             instance = serializer.save()
-            details = _field_change_details(before, instance, names_only=("notes", "conditions"))
+            details = field_change_details(before, instance, names_only=("notes", "conditions"))
             details["status"] = instance.status
             AuditLog.objects.create(
                 user=self.request.user,
@@ -309,35 +309,6 @@ class DashboardStatsView(APIView):
         }
 
 
-def _audit_value(value):
-    """JSON-safe rendering of a model value for AuditLog details."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
-    return str(value)
-
-
-def _snapshot(instance):
-    return {f.attname: getattr(instance, f.attname) for f in instance._meta.concrete_fields}
-
-
-def _field_change_details(before, instance, *, values_for=None, names_only=()):
-    """AuditLog details for a staff edit: every changed field by name, plus
-    before/after values (all changed fields, or only ``values_for``). Fields
-    in ``names_only`` (free text) never have their values recorded."""
-    changed = [name for name, old in before.items() if name != "updated_at" and getattr(instance, name) != old]
-    details = {"changed_fields": sorted(n.removesuffix("_id") for n in changed)}
-    for name in changed:
-        if name in names_only or (values_for is not None and name not in values_for):
-            continue
-        details[name.removesuffix("_id")] = {
-            "from": _audit_value(before[name]),
-            "to": _audit_value(getattr(instance, name)),
-        }
-    return details
-
-
 class ComplaintFilingThrottle(UserRateThrottle):
     """Tight cap on complaint filing — sensitive + spam vector."""
 
@@ -375,10 +346,10 @@ class ComplaintViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         """Staff edits are audited with every changed field."""
-        before = _snapshot(serializer.instance)
+        before = snapshot(serializer.instance)
         with transaction.atomic():
             updated = serializer.save()
-            details = _field_change_details(before, updated, values_for=self._AUDITED_VALUES)
+            details = field_change_details(before, updated, values_for=self._AUDITED_VALUES)
             AuditLog.objects.create(
                 user=self.request.user,
                 action="complaint_updated",
@@ -429,27 +400,22 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
     def resolve(self, request, pk=None):
         review = self.get_object()
         outcome = request.data.get("outcome")
-        note = request.data.get("note", "")
+        note = request.data.get("note")
+        if note is None:
+            note = ""
+        if not isinstance(note, str):
+            return Response({"detail": "note must be a string"}, status=400)
         if len(note) > 4000:
             return Response({"detail": "note must be 4000 characters or fewer"}, status=400)
         if outcome not in ("upheld", "overturned"):
             return Response({"detail": "outcome must be 'upheld' or 'overturned'"}, status=400)
 
-        # Optional maker/checker gate on high-value overturns. Default mode is
-        # "off" — no behaviour change until an operator opts in.
-        if outcome == "overturned":
-            mode = normalize_overturn_mode(getattr(settings, "DECISION_OVERTURN_GATE_MODE", "off"))
-            gate = evaluate_overturn_gate(
-                amount=float(review.application.loan_amount or 0),
-                threshold=getattr(settings, "DECISION_OVERTURN_THRESHOLD", 100000.0),
-                mode=mode,
-                officer_has_2fa=request.user.has_confirmed_totp(),
-            )
-            if not gate["allowed"]:
-                return Response({"detail": gate["reason"]}, status=403)
-
+        # The overturn maker/checker gate is enforced inside
+        # apply_review_outcome, so the Django admin cannot skip it.
         try:
             updated = apply_review_outcome(review, officer=request.user, outcome=outcome, note=note)
+        except OverturnGateBlocked as exc:
+            return Response({"detail": str(exc)}, status=403)
         except (ValueError, LoanApplication.InvalidStateTransition) as exc:
             return Response({"detail": str(exc)}, status=409)
         return Response(DecisionReviewSerializer(updated, context={"request": request}).data)

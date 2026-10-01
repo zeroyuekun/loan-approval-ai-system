@@ -4,8 +4,9 @@ Any officer-role user can overturn a denial to approved and trigger an
 approval email. This optional gate adds a second control on high-value
 overturns. It mirrors the warn/block/off dispatcher pattern of
 ``fairness_gate_mode.py``: pure-functional, takes the mode + facts as
-arguments and returns a structured decision; only the view reads the
-``DECISION_OVERTURN_*`` settings and delegates here.
+arguments and returns a structured decision; only
+``decision_review.apply_review_outcome`` reads the ``DECISION_OVERTURN_*``
+settings and delegates here, so the API and the Django admin share the gate.
 
 Default mode is ``off`` — behaviour is UNCHANGED until an operator sets
 ``DECISION_OVERTURN_GATE_MODE`` (safe, reversible). The gate only fires when
