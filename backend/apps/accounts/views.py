@@ -19,6 +19,7 @@ from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.html_renderer import render_html
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 
+from .authentication import CookieJWTAuthentication
 from .models import CustomerProfile, CustomUser
 from .permissions import IsAdminOrOfficer
 from .policy import is_staff_role
@@ -98,6 +99,9 @@ class CookieTokenRefreshView(generics.GenericAPIView):
     """Refresh JWT tokens using the HttpOnly refresh cookie."""
 
     permission_classes = (AllowAny,)
+    # No authentication: a stale access cookie must not 401 the endpoint the
+    # client uses to recover from it (the refresh cookie is checked below).
+    authentication_classes = ()
     throttle_classes = (RefreshRateThrottle,)
 
     def post(self, request, *args, **kwargs):
@@ -167,6 +171,7 @@ class RegisterView(generics.CreateAPIView):
     queryset = CustomUser.objects.all()
     serializer_class = RegisterSerializer
     permission_classes = (AllowAny,)
+    authentication_classes = ()  # a stale access cookie must not 401 registration
     throttle_classes = (RegisterRateThrottle,)
 
     def create(self, request, *args, **kwargs):
@@ -192,6 +197,7 @@ class RegisterView(generics.CreateAPIView):
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = (AllowAny,)
+    authentication_classes = ()  # a stale access cookie must not 401 login
     throttle_classes = (LoginRateThrottle,)
 
     # Dummy password used to burn CPU time when the username doesn't exist,
@@ -674,15 +680,23 @@ class CustomerDataExportView(generics.GenericAPIView):
 
 
 class LogoutView(generics.GenericAPIView):
-    """Blacklist the refresh token and clear auth cookies."""
+    """Blacklist the refresh token and clear auth cookies.
 
-    permission_classes = (IsAuthenticated,)
+    Authenticated by the refresh token, not the access cookie: a stale or
+    invalid access cookie (JS cannot clear the HttpOnly cookie) must not
+    stop a user logging out. A browser request carrying the refresh cookie
+    still has to pass the CSRF check.
+    """
+
+    permission_classes = (AllowAny,)
+    authentication_classes = ()
     allow_unenrolled_staff = True
 
     def post(self, request, *args, **kwargs):
         # Try cookie first, then request body (backwards compat)
         refresh_name = getattr(django_settings, "JWT_REFRESH_COOKIE_NAME", "refresh_token")
-        refresh = request.COOKIES.get(refresh_name) or request.data.get("refresh")
+        from_cookie = request.COOKIES.get(refresh_name)
+        refresh = from_cookie or request.data.get("refresh")
         if not refresh:
             response = Response(
                 {"detail": "refresh token is required"},
@@ -690,16 +704,19 @@ class LogoutView(generics.GenericAPIView):
             )
             _clear_jwt_cookies(response)
             return response
+        if from_cookie:
+            CookieJWTAuthentication()._enforce_csrf(request)
+
+        user = None
         try:
             token = RefreshToken(refresh)
+            user = CustomUser.objects.filter(pk=token.payload.get("user_id")).first()
             token.blacklist()
         except TokenError as exc:
-            logger.debug(
-                "logout_token_already_invalid",
-                extra={"user_id": str(request.user.id), "error": type(exc).__name__},
-            )
+            logger.debug("logout_token_already_invalid", extra={"error": type(exc).__name__})
 
-        _audit_user_event(request, request.user, "logout")
+        if user is not None:
+            _audit_user_event(request, user, "logout")
 
         response = Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
         _clear_jwt_cookies(response)
