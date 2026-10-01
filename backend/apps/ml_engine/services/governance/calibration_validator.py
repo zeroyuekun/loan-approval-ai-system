@@ -13,6 +13,8 @@ References:
     - APRA Quarterly ADI Property Exposures: apra.gov.au
     - SR 11-7 (Federal Reserve, 2011): outcomes analysis requirement
     - RBA Financial Stability Review: rba.gov.au/publications/fsr/
+
+Not yet called by the application pipeline; exercised by its own tests only.
 """
 
 import logging

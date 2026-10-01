@@ -13,6 +13,8 @@ features which have the most stable attributions.
 References:
     - CFPB Circular 2022-03: consumerfinance.gov/compliance/circulars/circular-2022-03
     - NCCP Act 2009 s133: legislation.gov.au
+
+Not yet called by the application pipeline; exercised by its own tests only.
 """
 
 import logging

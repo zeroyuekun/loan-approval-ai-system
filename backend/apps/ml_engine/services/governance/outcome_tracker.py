@@ -6,6 +6,8 @@ pillars: "outcomes analysis" comparing model estimates to actual results.
 References:
     - SR 11-7: federalreserve.gov/supervisionreg/srletters/sr1107.htm
     - APRA CPG 235: data integrity and model performance monitoring
+
+Not yet called by the application pipeline; exercised by its own tests only.
 """
 
 import logging

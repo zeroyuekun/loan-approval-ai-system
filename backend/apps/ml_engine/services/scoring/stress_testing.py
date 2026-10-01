@@ -5,6 +5,8 @@ Runs batch stress tests across the entire portfolio:
 - Unemployment rises (+3%)
 - Property price declines (-20%)
 - Combined adverse scenario
+
+Not yet called by the application pipeline; exercised by its own tests only.
 """
 
 import logging

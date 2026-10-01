@@ -17,6 +17,8 @@ References:
 - AML/CTF Act 2006 (Cth) Part 2
 - AML/CTF Rules Chapter 4: Customer identification
 - AUSTRAC guidance: austrac.gov.au
+
+Not yet called by the application pipeline; exercised by its own tests only.
 """
 
 import logging

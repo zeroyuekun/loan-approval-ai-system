@@ -6,6 +6,8 @@ Sources:
 
 Validates applicant addresses against official government data and enriches
 with geographic risk features (postcode_default_rate).
+
+Not yet called by the application pipeline; exercised by its own tests only.
 """
 
 import logging

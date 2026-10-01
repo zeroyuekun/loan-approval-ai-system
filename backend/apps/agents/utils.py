@@ -1,4 +1,7 @@
-"""Retry utilities for the agents pipeline."""
+"""Retry utilities for the agents pipeline.
+
+Not yet called by the application pipeline; exercised by its own tests only.
+"""
 
 import functools
 import logging
