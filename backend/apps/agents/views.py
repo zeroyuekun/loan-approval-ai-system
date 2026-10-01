@@ -411,11 +411,15 @@ class HumanReviewView(APIView):
                 )
 
             else:  # regenerate
-                # Complete the old run before dispatching a new pipeline
+                # Close the old run as superseded, NOT completed: a COMPLETED run
+                # "owns" the application, so the orchestrate task's idempotency
+                # guard would replay the stored decision instead of running, and
+                # stuck-processing cleanup would skip the app if the new run died.
                 agent_run.steps = agent_run.steps + [review_step]
-                agent_run.status = AgentRun.Status.COMPLETED
+                agent_run.status = AgentRun.Status.FAILED
+                agent_run.error = f"Superseded by human-review regenerate ({request.user.username})"
                 agent_run.total_time_ms = agent_run.total_time_ms or 0
-                agent_run.save(update_fields=["steps", "status", "total_time_ms", "updated_at"])
+                agent_run.save(update_fields=["steps", "status", "error", "total_time_ms", "updated_at"])
 
                 # Reset application to pending so the new pipeline can process it
                 application = agent_run.application
@@ -434,7 +438,9 @@ class HumanReviewView(APIView):
                 task_holder = {}
 
                 def _dispatch_regenerate():
-                    task_holder["task"] = orchestrate_pipeline_task.delay(str(agent_run.application_id))
+                    # force=True: an earlier COMPLETED run for this application
+                    # must not short-circuit the reviewer's regenerate request.
+                    task_holder["task"] = orchestrate_pipeline_task.delay(str(agent_run.application_id), force=True)
 
                 transaction.on_commit(_dispatch_regenerate)
 
