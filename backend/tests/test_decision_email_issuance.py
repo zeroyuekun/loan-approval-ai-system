@@ -160,35 +160,76 @@ def test_orchestrator_email_step_sends_template_on_rate_limit(decided_denied):
 # ---------------------------------------------------------------------------
 
 
-@LOCMEM
-@pytest.mark.django_db
-def test_human_review_deny_sends_denial_email(escalated_agent_run, officer_user, django_capture_on_commit_callbacks):
-    from apps.email_engine.tasks import generate_email_task
-
-    app = escalated_agent_run.application
-    send = MagicMock(return_value={"sent": True})
+def _deny(run, officer_user, *, bias_result, send):
+    """POST a human-review Deny and run the resume task it queues in-process."""
+    from apps.agents.tasks import resume_pipeline_task
 
     def _run_task(*args, **kwargs):
-        return generate_email_task.apply(args=args, kwargs=kwargs)
+        return resume_pipeline_task.apply(args=args, kwargs=kwargs)
 
     client = APIClient()
     client.force_authenticate(user=officer_user)
     with (
         patch.object(EmailGenerator, "generate", return_value=_passing("denied")),
-        patch("apps.agents.views.generate_email_task.delay", side_effect=_run_task),
+        patch(f"{HUMAN_REVIEW}.BiasDetector") as bias,
+        patch(f"{HUMAN_REVIEW}.MarketingPipelineService") as mkt,
+        patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
+        patch("apps.agents.views.resume_pipeline_task.delay", side_effect=_run_task),
         patch("apps.agents.views.OrchestrationThrottle.allow_request", return_value=True),
         patch(SENDER, send),
-        django_capture_on_commit_callbacks(execute=True),
     ):
-        resp = client.post(
-            f"/api/v1/agents/review/{escalated_agent_run.id}/", {"action": "deny", "note": "n"}, format="json"
-        )
+        bias.return_value.analyze.return_value = bias_result
+        mkt.return_value.run.side_effect = lambda application, agent_run, steps, *a, **kw: steps
+        nbo.return_value.recommend.return_value = {"offers": []}
+        resp = client.post(f"/api/v1/agents/review/{run.id}/", {"action": "deny", "note": "n"}, format="json")
+    return resp, bias
+
+
+@LOCMEM
+@pytest.mark.django_db(transaction=True)
+def test_human_review_deny_sends_bias_checked_denial_email(escalated_agent_run, officer_user):
+    """A2: the reviewer's denial goes through the same issue path as every
+    other decision email: generate, bias pre-screen/check, deliver once."""
+    app = escalated_agent_run.application
+    send = MagicMock(return_value={"sent": True})
+
+    resp, bias = _deny(escalated_agent_run, officer_user, bias_result=_clean_bias(), send=send)
 
     assert resp.status_code == 200, resp.data
+    bias.return_value.analyze.assert_called_once()
+    assert bias.return_value.analyze.call_args.args[1]["decision"] == "denied"
     denial = GeneratedEmail.objects.get(application=app, decision="denied")
     assert denial.sent_at is not None
     assert send.call_count == 1
     assert send.call_args.kwargs["email_type"] == "denial"
+    app.refresh_from_db()
+    assert app.status == "denied"
+    decision = LoanDecision.objects.get(application=app)
+    assert decision.decision == "denied"
+    # The model approved; the officer denied: an override, not a review.
+    assert decision.human_involvement == LoanDecision.HumanInvolvement.OVERRIDDEN
+    escalated_agent_run.refresh_from_db()
+    assert escalated_agent_run.status == "completed"
+
+
+@LOCMEM
+@pytest.mark.django_db(transaction=True)
+def test_human_review_deny_withholds_a_bias_flagged_denial_email(escalated_agent_run, officer_user):
+    app = escalated_agent_run.application
+    send = MagicMock(return_value={"sent": True})
+    flagged = {**_clean_bias(), "score": 75, "flagged": True, "requires_human_review": True}
+
+    resp, _ = _deny(escalated_agent_run, officer_user, bias_result=flagged, send=send)
+
+    assert resp.status_code == 200, resp.data
+    send.assert_not_called()
+    app.refresh_from_db()
+    assert app.status == "review"  # back in the bias queue, not denied without a notice
+    escalated_agent_run.refresh_from_db()
+    assert escalated_agent_run.status == "escalated"
+    held = GeneratedEmail.objects.get(application=app, decision="denied")
+    assert held.sent_at is None
+    assert held.bias_reports.filter(flagged=True).exists()  # identifiable as bias-held
 
 
 def _resume(run_id):

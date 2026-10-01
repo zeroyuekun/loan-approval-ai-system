@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from apps.agents.exceptions import LLMServiceError
 from apps.agents.metrics import bias_review_total, bias_review_ttr_seconds
-from apps.agents.models import AgentRun
+from apps.agents.models import AgentRun, BiasReport
 from apps.email_engine.services.decision_email import deliver_decision_email, generate_decision_email
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
@@ -43,7 +43,13 @@ class HumanReviewHandler:
         self.tracker = step_tracker
         self.context_builder = context_builder
 
-    def resume_after_review(self, agent_run_id, reviewer="", note=""):
+    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve"):
+        """Issue the decision on record after a reviewer approved or denied.
+
+        Both outcomes take the same path: generate the decision email, run the
+        bias pre-screen/check, deliver once, then apply the decision. For a
+        deny the view has already written the denial onto the LoanDecision.
+        """
         start_time = time.time()
         logger.info("Resuming agent run %s after human review", agent_run_id)
 
@@ -87,14 +93,14 @@ class HumanReviewHandler:
         profile_context = self.context_builder.build_profile_context(application)
         steps = agent_run.steps or []
 
-        # Record the human approval
-        step = self.tracker.start_step("human_review_approved")
+        # Record the human outcome
+        step = self.tracker.start_step("human_review_denied" if action == "deny" else "human_review_approved")
         step = self.tracker.complete_step(
             step,
             result_summary={
                 "reviewer": reviewer,
                 "note": note,
-                "action": "approve",
+                "action": action,
             },
         )
         steps.append(step)
@@ -180,6 +186,20 @@ class HumanReviewHandler:
                         "purpose": application.get_purpose_display(),
                         "decision": decision,
                     },
+                )
+                # Persist the report against the email, as the pipeline does,
+                # so a withheld draft is identifiable as bias-held later.
+                BiasReport.objects.create(
+                    agent_run=agent_run,
+                    email=generated_email,
+                    bias_score=bias_result["score"],
+                    deterministic_score=bias_result.get("deterministic_score"),
+                    llm_raw_score=bias_result.get("llm_raw_score"),
+                    score_source=bias_result.get("score_source", "composite"),
+                    categories=bias_result.get("categories", []),
+                    analysis=bias_result.get("analysis", ""),
+                    flagged=bias_result["flagged"],
+                    requires_human_review=bias_result.get("requires_human_review", bias_result["flagged"]),
                 )
                 step_bias = self.tracker.complete_step(
                     step_bias,

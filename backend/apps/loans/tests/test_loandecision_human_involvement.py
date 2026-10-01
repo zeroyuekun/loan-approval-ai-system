@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
@@ -114,7 +114,17 @@ def test_resume_stamps_human_involvement_assisted(_resume_setup):
         patch("django.db.models.QuerySet.select_for_update", _noop_select_for_update),
     ):
         eg.return_value.generate.return_value = _email()
-        eps.save_generated_email.return_value = MagicMock(id="e1")
+        # A real row: the resume's bias report is persisted against the email.
+        from apps.email_engine.models import GeneratedEmail
+
+        eps.save_generated_email.return_value = GeneratedEmail.objects.create(
+            application=application,
+            decision="approved",
+            subject="Your Loan Decision",
+            body="Dear Customer, ...",
+            prompt_used="p",
+            passed_guardrails=True,
+        )
         eps.save_guardrail_logs.return_value = []
 
         from apps.agents.services.orchestrator import PipelineOrchestrator

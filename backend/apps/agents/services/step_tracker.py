@@ -34,6 +34,7 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(
         "human_escalation_severe_bias": 5_000,
         "human_escalation_low_confidence": 5_000,
         "human_review_approved": 5_000,
+        "human_review_denied": 5_000,
         "human_review_required": 5_000,
         "marketing_email_blocked": 5_000,
     },
