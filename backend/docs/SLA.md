@@ -135,7 +135,7 @@
 
 ### Load test validation
 
-Run load tests (see `/loadtests/`) before every production deploy that changes:
+Run load tests (see `tests/load/`: k6 in CI, Locust in `tests/load/locust/`) before every production deploy that changes:
 - Database queries or schema
 - Celery task logic
 - Authentication flow

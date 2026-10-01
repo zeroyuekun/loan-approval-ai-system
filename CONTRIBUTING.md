@@ -21,7 +21,7 @@ make seed       # Generate 10K synthetic records + train XGBoost model
 
 Frontend: http://localhost:3000 | Backend API: http://localhost:8000 | Grafana: http://localhost:3001
 
-Default login: `admin` / `admin1234`
+Log in as `admin` with the `DJANGO_SUPERUSER_PASSWORD` from your `.env` (the backend creates this user on start).
 
 ## One-time setup
 
@@ -76,7 +76,7 @@ Other directories:
 | Directory | Purpose |
 |-----------|---------|
 | `frontend/` | Next.js 15 dashboard (shadcn/ui, TanStack Query) |
-| `scripts/` | Shell scripts for DB init and seeding |
+| `scripts/` | Database backup/restore and the k8s placeholder check |
 | `tools/` | Standalone Python scripts (WAT Layer 3) |
 | `workflows/` | Markdown SOPs (WAT Layer 1) |
 | `monitoring/` | Prometheus and Grafana configuration |

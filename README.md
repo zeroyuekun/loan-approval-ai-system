@@ -100,13 +100,14 @@ git clone https://github.com/zeroyuekun/loan-approval-ai-system.git
 cd loan-approval-ai-system
 cp .env.example .env      # add ANTHROPIC_API_KEY
 docker compose up -d      # backend, frontend, db, redis, ml + io workers
-docker compose exec backend bash scripts/init_db.sh
-docker compose exec backend bash scripts/seed_data.sh
+                          # backend start runs migrations and creates the admin user
+docker compose exec backend python manage.py generate_data --num-records 10000
+docker compose exec backend python manage.py train_model --algorithm xgb
 ```
 
 Then:
 
-- Dashboard at [http://localhost:3000](http://localhost:3000) (default login `admin` / `admin1234`)
+- Dashboard at [http://localhost:3000](http://localhost:3000) (log in as `admin` with the `DJANGO_SUPERUSER_PASSWORD` from your `.env`)
 - API docs at [http://localhost:8000/api/schema/swagger-ui/](http://localhost:8000/api/schema/swagger-ui/)
 - Run the tests with `docker compose exec backend pytest tests/ -v`
 
@@ -130,7 +131,7 @@ frontend/src/
   components/       # shadcn/ui + domain components
   hooks/            # polling, mutations, auth
 
-scripts/            # init_db.sh, seed_data.sh
+scripts/            # database backup/restore, k8s placeholder check
 tools/              # standalone training + evaluation scripts
 workflows/          # markdown SOPs for each pipeline stage
 k8s/                # Kubernetes manifests — deployments, HPA, NetworkPolicies, PDBs, Ingress

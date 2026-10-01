@@ -24,7 +24,7 @@ migrate:                 ## Run Django migrations
 	docker compose exec backend python manage.py migrate
 
 seed:                    ## Generate synthetic data and train model
-	docker compose exec backend python manage.py generate_data --count 10000
+	docker compose exec backend python manage.py generate_data --num-records 10000
 	docker compose exec backend python manage.py train_model --algorithm xgb
 
 shell:                   ## Open Django shell

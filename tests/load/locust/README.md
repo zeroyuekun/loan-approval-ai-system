@@ -2,12 +2,12 @@
 
 ## Setup
 ```bash
-pip install -r loadtests/requirements.txt
+pip install -r tests/load/locust/requirements.txt
 ```
 
 ## Run (targeting local Docker)
 ```bash
-cd loadtests
+cd tests/load/locust
 locust -f locustfile.py --host=http://localhost:8000
 ```
 
@@ -17,7 +17,7 @@ Then open http://localhost:8089 to configure users and start the test.
 ```bash
 locust -f locustfile.py --host=http://localhost:8000 \
   --headless -u 50 -r 5 --run-time 60s \
-  --csv=results/load_test
+  --csv=../results/locust
 ```
 
 ## User profiles
