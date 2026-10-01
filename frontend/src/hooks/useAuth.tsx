@@ -2,15 +2,18 @@
 
 import { useState, useEffect, useCallback, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import { AuthContext } from '@/lib/auth'
 import api, { authApi, type RegisterPayload } from '@/lib/api'
 import { clearSession, readSessionUser, setRoleCookie, storeSessionUser } from '@/lib/session'
+import { clearForeignDraft, resetClientState } from '@/lib/clientState'
 import { User } from '@/types'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
+  const queryClient = useQueryClient()
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -47,12 +50,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Ensure we have a CSRF token before the login POST
     await authApi.getCsrfToken()
     const { data } = await authApi.login({ username, password })
+    // A new session starts with an empty cache: React Query keys are not
+    // user-scoped, so anything cached before this point belongs to whoever
+    // used this browser last.
+    queryClient.clear()
+    clearForeignDraft(data.user.username)
     // Server sets HttpOnly cookies; we keep only the non-PII render hints
     storeSessionUser(data.user)
     setUser(data.user)
     setIsLoading(false)
     router.replace(data.user.role === 'customer' ? '/apply' : '/dashboard')
-  }, [router])
+  }, [router, queryClient])
 
   const register = useCallback(async (formData: RegisterPayload) => {
     await authApi.getCsrfToken()
@@ -67,10 +75,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Logout even if the API call fails
     }
-    clearSession()
+    // Session hints, the query cache and per-user local storage (drafts)
+    resetClientState(queryClient)
     setUser(null)
     router.replace('/login')
-  }, [router])
+  }, [router, queryClient])
 
   return (
     <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>

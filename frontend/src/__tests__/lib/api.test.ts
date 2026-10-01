@@ -89,6 +89,7 @@ describe('api interceptors', () => {
   it('clears sessionStorage user and calls window.location.assign(/login) when refresh fails', async () => {
     // Seed sessionStorage with a user so we can verify it is cleared
     sessionStorage.setItem('user', JSON.stringify({ role: 'admin', username: 'admin' }))
+    localStorage.setItem('loan_application_draft', JSON.stringify({ savedAt: Date.now(), data: {} }))
 
     // jsdom does not support real navigation; spy on window.location.assign.
     // Object.defineProperty is needed because jsdom's location is not fully writable.
@@ -113,6 +114,8 @@ describe('api interceptors', () => {
 
     // sessionStorage 'user' key must be removed
     expect(sessionStorage.getItem('user')).toBeNull()
+    // per-user drafts must not survive into the next session
+    expect(localStorage.getItem('loan_application_draft')).toBeNull()
     // window.location.assign('/login') must have been called
     expect(assignSpy).toHaveBeenCalledWith('/login')
   })

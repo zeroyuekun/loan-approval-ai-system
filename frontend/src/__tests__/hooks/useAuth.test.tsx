@@ -1,6 +1,7 @@
 import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/hooks/useAuth'
 import { useAuth } from '@/lib/auth'
 import { server } from '@/test/mocks/server'
@@ -21,13 +22,20 @@ function AuthConsumer() {
   )
 }
 
+let queryClient: QueryClient
+
 function renderWithAuth() {
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <AuthProvider>
-      <AuthConsumer />
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>
+    </QueryClientProvider>
   )
 }
+
+const DRAFT_KEY = 'loan_application_draft'
 
 describe('useAuth', () => {
   it('restores session from server profile on mount', async () => {
@@ -134,5 +142,74 @@ describe('useAuth', () => {
       expect(screen.getByTestId('user')).toHaveTextContent('null')
     })
     expect(sessionStorage.getItem('user')).toBeNull()
+  })
+  it('logout clears the query cache and per-user local storage', async () => {
+    const user = userEvent.setup()
+    renderWithAuth()
+    await waitFor(() => {
+      expect(screen.getByTestId('user')).toHaveTextContent(mockUser.username)
+    })
+
+    queryClient.setQueryData(['customerProfile'], { address_line_1: '1 Private Rd' })
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), owner: mockUser.username, data: { annual_income: 1 } }))
+
+    await user.click(screen.getByText('Logout'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('user')).toHaveTextContent('null')
+    })
+    expect(queryClient.getQueryData(['customerProfile'])).toBeUndefined()
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('login clears cached data and a draft left by a different user', async () => {
+    server.use(
+      http.get(`${API_URL}/auth/me/`, () => HttpResponse.json({ detail: 'Unauthorized' }, { status: 401 })),
+      http.post(`${API_URL}/auth/refresh/`, () => HttpResponse.json({ detail: 'expired' }, { status: 401 })),
+    )
+    const user = userEvent.setup()
+    renderWithAuth()
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('false')
+    })
+
+    // Left behind by another customer on this browser
+    queryClient.setQueryData(['customerProfile'], { address_line_1: '1 Private Rd' })
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), owner: 'someone_else', data: { annual_income: 1 } }))
+
+    server.use(
+      http.post(`${API_URL}/auth/login/`, () => HttpResponse.json({ user: mockUser })),
+    )
+    await user.click(screen.getByText('Login'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('user')).toHaveTextContent(mockUser.username)
+    })
+    expect(queryClient.getQueryData(['customerProfile'])).toBeUndefined()
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('login keeps a draft owned by the user signing in', async () => {
+    server.use(
+      http.get(`${API_URL}/auth/me/`, () => HttpResponse.json({ detail: 'Unauthorized' }, { status: 401 })),
+      http.post(`${API_URL}/auth/refresh/`, () => HttpResponse.json({ detail: 'expired' }, { status: 401 })),
+    )
+    const user = userEvent.setup()
+    renderWithAuth()
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('false')
+    })
+    const ownDraft = JSON.stringify({ savedAt: Date.now(), owner: mockUser.username, data: { annual_income: 1 } })
+    localStorage.setItem(DRAFT_KEY, ownDraft)
+
+    server.use(
+      http.post(`${API_URL}/auth/login/`, () => HttpResponse.json({ user: mockUser })),
+    )
+    await user.click(screen.getByText('Login'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('user')).toHaveTextContent(mockUser.username)
+    })
+    expect(localStorage.getItem(DRAFT_KEY)).toBe(ownDraft)
   })
 })

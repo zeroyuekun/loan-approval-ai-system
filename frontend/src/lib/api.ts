@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { toast } from 'sonner'
-import { clearSession } from '@/lib/session'
+import { resetClientState } from '@/lib/clientState'
 import { resolveApiUrl } from '@/lib/csp'
 
 // API parameter and payload types
@@ -71,12 +71,13 @@ const api = axios.create({
 })
 
 /**
- * Clear the client session hints and redirect to login. Called from the
+ * Clear per-user client state and redirect to login. Called from the
  * response interceptor when a token refresh fails (interceptors run outside
- * React, so this cannot go through useAuth.logout()).
+ * React, so this cannot go through useAuth.logout()). The hard navigation
+ * drops the in-memory React Query cache; resetClientState clears the rest.
  */
 function clearAuthAndRedirect(): void {
-  clearSession()
+  resetClientState()
   if (typeof window !== 'undefined') {
     window.location.assign('/login')
   }
