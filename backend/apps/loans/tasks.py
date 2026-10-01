@@ -46,18 +46,25 @@ def dispatch_pipeline_or_queue_failed(application, *, source: str) -> None:
 
 @shared_task(name="apps.loans.tasks.enforce_data_retention")
 def enforce_data_retention():
-    """Weekly task: enforce data retention policy per regulatory requirements."""
+    """Weekly task: enforce the data retention policy.
+
+    1. enforce_retention: purge expired soft-deleted rows, archive old
+       prediction logs and drift reports.
+    2. data_retention_cleanup: de-identify customer PII 7 years after the
+       customer's last loan closed (Privacy Act APP 11.2).
+    """
     import io
 
     from django.core.management import call_command
 
-    out = io.StringIO()
-    try:
-        call_command("enforce_retention", stdout=out)
-        logger.info("data_retention_cleanup completed: %s", out.getvalue().strip())
-    except Exception:
-        logger.exception("data_retention_cleanup task failed")
-        raise
+    for command in ("enforce_retention", "data_retention_cleanup"):
+        out = io.StringIO()
+        try:
+            call_command(command, stdout=out)
+            logger.info("%s completed: %s", command, out.getvalue().strip())
+        except Exception:
+            logger.exception("%s failed", command)
+            raise
 
 
 @shared_task(name="apps.loans.tasks.retry_failed_dispatches")

@@ -440,7 +440,7 @@ Each table below maps existing system capabilities to one regulatory framework.
 | CPG 235 Requirement | System Implementation |
 |---------------------|----------------------|
 | Data quality assessment (accuracy, completeness) | Cross-field consistency checks, input validation bounds, feature imputation with training-data medians |
-| Data lifecycle management | 7-year retention (AML/CTF Act 2006), weekly `data_retention_cleanup` Celery task, soft-delete on PII tables |
+| Data lifecycle management | 7-year retention (AML/CTF Act 2006), weekly `enforce_data_retention` Celery task (runs `enforce_retention` and `data_retention_cleanup`: PII de-identified 7 years after the last loan closed), soft-delete on loan applications |
 | Data governance framework | Immutable `AuditLog` model, field-level Fernet encryption for PII, PII log masking filter |
 | Ongoing monitoring | Per-feature PSI drift detection against training reference distribution, Prometheus metrics, AlertManager rules |
 | Model documentation | This model card, ADRs, versioned model bundles with SHA-256 integrity verification |
@@ -501,7 +501,7 @@ Each table below maps existing system capabilities to one regulatory framework.
 |---------------------|----------------------|
 | Customer identification | `KYCVerification` model with 100-point ID check, identity document tracking |
 | Ongoing customer due diligence | `CustomerProfile` with OCDD fields, soft-delete tracking, encryption key rotation |
-| Record retention (7 years) | Weekly `data_retention_cleanup` task, `deleted_at` timestamps, configurable retention window |
+| Record retention (7 years) | Weekly `enforce_data_retention` task (`enforce_retention` + `data_retention_cleanup`), `deleted_at` soft delete on loan applications |
 | Suspicious transaction reporting | `FraudCheck` model with velocity checks, duplicate detection, risk scoring |
 
 ## Update history
