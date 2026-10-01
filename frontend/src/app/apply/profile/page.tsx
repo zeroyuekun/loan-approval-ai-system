@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { authApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { CustomerProfile } from '@/types'
@@ -12,8 +12,10 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectItem } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Save, Shield, UserCircle, Briefcase, Landmark, Home, CheckCircle2 } from 'lucide-react'
+import { PersonalDetailsCard } from '@/components/profile/PersonalDetailsCard'
+import { Save, Shield, Briefcase, Landmark, Home, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { CUSTOMER_PROFILE_KEY, useCustomerProfile } from '@/hooks/useCustomerProfile'
 
 export default function CustomerProfilePage() {
   const { user } = useAuth()
@@ -21,13 +23,7 @@ export default function CustomerProfilePage() {
   const queryClient = useQueryClient()
   const [saved, setSaved] = useState(false)
 
-  const { data: profile, isLoading } = useQuery<CustomerProfile>({
-    queryKey: ['customerProfile'],
-    queryFn: async () => {
-      const { data } = await authApi.getCustomerProfile()
-      return data
-    },
-  })
+  const { data: profile, isLoading } = useCustomerProfile()
 
   const [form, setForm] = useState<Partial<CustomerProfile>>({})
 
@@ -84,7 +80,7 @@ export default function CustomerProfilePage() {
       return result
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['customerProfile'] })
+      await queryClient.invalidateQueries({ queryKey: CUSTOMER_PROFILE_KEY })
       setSaved(true)
       toast.success('Profile saved successfully')
       setTimeout(() => {
@@ -134,84 +130,7 @@ export default function CustomerProfilePage() {
       )}
 
       {/* Personal Details */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <UserCircle className="h-5 w-5 text-muted-foreground" />
-            <CardTitle className="text-base">Personal Details</CardTitle>
-          </div>
-          <CardDescription>Required under the National Consumer Credit Protection Act 2009 (NCCP) for responsible lending assessment.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Full Name</Label>
-              <Input value={`${user?.first_name || ''} ${user?.last_name || ''}`} disabled />
-            </div>
-            <div>
-              <Label>Email</Label>
-              <Input value={user?.email || ''} disabled />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="date_of_birth">Date of Birth</Label>
-              <Input id="date_of_birth" name="date_of_birth" type="date" value={(form.date_of_birth as string) || ''} onChange={handleChange} />
-            </div>
-            <div>
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input id="phone" name="phone" value={(form.phone as string) || ''} onChange={handleChange} placeholder="04XX XXX XXX" />
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="marital_status">Marital Status</Label>
-            <Select id="marital_status" name="marital_status" value={(form.marital_status as string) || ''} onChange={handleChange}>
-              <SelectItem value="">Select...</SelectItem>
-              <SelectItem value="single">Single</SelectItem>
-              <SelectItem value="married">Married</SelectItem>
-              <SelectItem value="de_facto">De Facto</SelectItem>
-              <SelectItem value="divorced">Divorced</SelectItem>
-              <SelectItem value="widowed">Widowed</SelectItem>
-            </Select>
-          </div>
-
-          <div className="pt-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Residential Address</Label>
-          </div>
-          <div>
-            <Label htmlFor="address_line_1">Street Address</Label>
-            <Input id="address_line_1" name="address_line_1" value={(form.address_line_1 as string) || ''} onChange={handleChange} placeholder="123 Example Street" />
-          </div>
-          <div>
-            <Label htmlFor="address_line_2">Address Line 2</Label>
-            <Input id="address_line_2" name="address_line_2" value={(form.address_line_2 as string) || ''} onChange={handleChange} placeholder="Unit/Apartment (optional)" />
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <Label htmlFor="suburb">Suburb</Label>
-              <Input id="suburb" name="suburb" value={(form.suburb as string) || ''} onChange={handleChange} placeholder="Sydney" />
-            </div>
-            <div>
-              <Label htmlFor="state">State</Label>
-              <Select id="state" name="state" value={(form.state as string) || ''} onChange={handleChange}>
-                <SelectItem value="">Select...</SelectItem>
-                <SelectItem value="NSW">NSW</SelectItem>
-                <SelectItem value="VIC">VIC</SelectItem>
-                <SelectItem value="QLD">QLD</SelectItem>
-                <SelectItem value="WA">WA</SelectItem>
-                <SelectItem value="SA">SA</SelectItem>
-                <SelectItem value="TAS">TAS</SelectItem>
-                <SelectItem value="ACT">ACT</SelectItem>
-                <SelectItem value="NT">NT</SelectItem>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="postcode">Postcode</Label>
-              <Input id="postcode" name="postcode" value={(form.postcode as string) || ''} onChange={handleChange} placeholder="2000" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <PersonalDetailsCard user={user} form={form} onChange={handleChange} />
 
       {/* Employment & Income */}
       <Card>

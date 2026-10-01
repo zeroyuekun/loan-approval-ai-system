@@ -7,7 +7,7 @@ import { nextPollInterval } from '@/lib/polling'
 import { AgentRun } from '@/types'
 
 /** Queries that change once a pipeline run is (re)started for a loan. */
-function invalidateRunQueries(queryClient: QueryClient, loanId: string) {
+export function invalidateRunQueries(queryClient: QueryClient, loanId: string) {
   queryClient.invalidateQueries({ queryKey: ['agentRun', loanId] })
   queryClient.invalidateQueries({ queryKey: ['application', loanId] })
   queryClient.invalidateQueries({ queryKey: ['email', loanId] })

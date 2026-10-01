@@ -2,18 +2,20 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { authApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { CustomerProfile } from '@/types'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectItem } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { AU_STATES } from '@/lib/customerLabels'
 import { Save, UserCircle, Briefcase, Landmark, Home, CheckCircle2, Lock, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import { CUSTOMER_PROFILE_KEY, useCustomerProfile } from '@/hooks/useCustomerProfile'
 
 export default function EditProfilePage() {
   const { user } = useAuth()
@@ -21,13 +23,7 @@ export default function EditProfilePage() {
   const queryClient = useQueryClient()
   const [saved, setSaved] = useState(false)
 
-  const { data: profile, isLoading } = useQuery<CustomerProfile>({
-    queryKey: ['customerProfile'],
-    queryFn: async () => {
-      const { data } = await authApi.getCustomerProfile()
-      return data
-    },
-  })
+  const { data: profile, isLoading } = useCustomerProfile()
 
   const [form, setForm] = useState<Partial<CustomerProfile>>({})
 
@@ -76,7 +72,7 @@ export default function EditProfilePage() {
       return result
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['customerProfile'] })
+      await queryClient.invalidateQueries({ queryKey: CUSTOMER_PROFILE_KEY })
       setSaved(true)
       setTimeout(() => {
         router.push('/apply')
@@ -85,7 +81,7 @@ export default function EditProfilePage() {
   })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target
+    const { name, value } = e.target
     setForm(prev => ({ ...prev, [name]: value }))
   }
 
@@ -239,14 +235,9 @@ export default function EditProfilePage() {
               <Label htmlFor="state">State</Label>
               <Select id="state" name="state" value={(form.state as string) || ''} onChange={handleChange}>
                 <SelectItem value="">Select...</SelectItem>
-                <SelectItem value="NSW">NSW</SelectItem>
-                <SelectItem value="VIC">VIC</SelectItem>
-                <SelectItem value="QLD">QLD</SelectItem>
-                <SelectItem value="WA">WA</SelectItem>
-                <SelectItem value="SA">SA</SelectItem>
-                <SelectItem value="TAS">TAS</SelectItem>
-                <SelectItem value="ACT">ACT</SelectItem>
-                <SelectItem value="NT">NT</SelectItem>
+                {AU_STATES.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
               </Select>
             </div>
             <div>

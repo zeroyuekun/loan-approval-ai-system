@@ -2,14 +2,12 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useCreateApplication } from '@/hooks/useApplications'
+import { useCustomerProfile } from '@/hooks/useCustomerProfile'
 import { useAuth } from '@/lib/auth'
-import { authApi } from '@/lib/api'
-import { CustomerProfile } from '@/types'
 
 export const STEP_LABELS = ['Personal', 'Employment & Income', 'Expenses & Debts', 'Loan Details', 'Review & Submit']
 
@@ -132,15 +130,7 @@ export function useApplicationForm(onSuccessPath?: string) {
 
   const submittingRef = useRef(false)
 
-  const { data: profile, isLoading: profileLoading } = useQuery<CustomerProfile>({
-    queryKey: ['customerProfile'],
-    queryFn: async () => {
-      const { data } = await authApi.getCustomerProfile()
-      return data
-    },
-    enabled: isCustomer,
-    staleTime: 0,
-  })
+  const { data: profile, isLoading: profileLoading } = useCustomerProfile({ enabled: isCustomer, staleTime: 0 })
 
   const onSubmit = async (data: FormData) => {
     if (submittingRef.current) return

@@ -6,7 +6,7 @@ import { useApplication } from '@/hooks/useApplications'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
 import { formatCurrency, formatDate, formatPurpose } from '@/lib/utils'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
 import { DecisionReviewStatus } from '@/components/applications/DecisionReviewStatus'
@@ -186,9 +186,8 @@ export default function CustomerApplicationStatusPage() {
   const { id } = useParams<{ id: string }>()
   const { data: application, isLoading } = useApplication(id, {
     // Poll every 5s only while still being processed. Letting TanStack Query
-    // own the interval avoids stale closures / interval-leak races that the
-    // old useEffect(setInterval) pattern was prone to when the hook remounted
-    // faster than the cleanup timer fired.
+    // own the interval avoids the stale closures and interval leaks a
+    // useEffect(setInterval) is prone to when the hook remounts quickly.
     refetchInterval: (query) => {
       const status = query.state.data?.status
       return status === 'pending' || status === 'processing' ? 5000 : false
@@ -216,7 +215,6 @@ export default function CustomerApplicationStatusPage() {
     )
   }
 
-  const decision = application.decision
   const hasConditions =
     application.status === 'approved' &&
     Array.isArray(application.conditions) &&

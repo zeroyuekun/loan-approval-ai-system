@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useContext } from 'react'
+import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { authApi, loansApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
-import { StaffCustomerDetail, LoanApplication, CustomerActivity, PaginatedResponse } from '@/types'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { StaffCustomerDetail, LoanApplication, PaginatedResponse } from '@/types'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -48,6 +48,7 @@ import {
   Save,
   X,
 } from 'lucide-react'
+import { useCustomerActivity } from '@/hooks/useCustomerActivity'
 
 function BoolIndicator({ value, label }: { value: boolean; label: string }) {
   return (
@@ -165,7 +166,6 @@ function EditableField({
 
 function EditableSelect({
   label,
-  value,
   displayValue,
   field,
   editing,
@@ -174,7 +174,6 @@ function EditableSelect({
   options,
 }: {
   label: string
-  value: string
   displayValue: string
   field: keyof EditableFields
   editing: boolean
@@ -271,14 +270,7 @@ export default function CustomerProfilePage() {
     enabled: !isNaN(userId),
   })
 
-  const { data: activity, isLoading: activityLoading } = useQuery<CustomerActivity>({
-    queryKey: ['customerActivity', userId],
-    queryFn: async () => {
-      const { data } = await authApi.getCustomerActivity(userId)
-      return data
-    },
-    enabled: !isNaN(userId),
-  })
+  const { data: activity, isLoading: activityLoading } = useCustomerActivity(userId)
 
   const updateMutation = useMutation({
     mutationFn: (data: EditableFields) => authApi.updateCustomerDetail(userId, data),
@@ -574,7 +566,7 @@ export default function CustomerProfilePage() {
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <EditableField label="Date of Birth" value={profile.date_of_birth ? formatDate(profile.date_of_birth) : null} field="date_of_birth" editing={editing} editData={editData} onChange={handleEditField} type="date" />
-            <EditableSelect label="Marital Status" value={profile.marital_status} displayValue={maritalLabels[profile.marital_status] || profile.marital_status} field="marital_status" editing={editing} editData={editData} onChange={handleEditField} options={maritalLabels} />
+            <EditableSelect label="Marital Status" displayValue={maritalLabels[profile.marital_status] || profile.marital_status} field="marital_status" editing={editing} editData={editData} onChange={handleEditField} options={maritalLabels} />
             <EditableField label="Phone" value={profile.phone} field="phone" editing={editing} editData={editData} onChange={handleEditField} />
             {editing ? (
               <>
@@ -603,7 +595,7 @@ export default function CustomerProfilePage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <EditableSelect label="Housing Situation" value={profile.housing_situation} displayValue={housingSituationLabels[profile.housing_situation] || profile.housing_situation} field="housing_situation" editing={editing} editData={editData} onChange={handleEditField} options={housingSituationLabels} />
+              <EditableSelect label="Housing Situation" displayValue={housingSituationLabels[profile.housing_situation] || profile.housing_situation} field="housing_situation" editing={editing} editData={editData} onChange={handleEditField} options={housingSituationLabels} />
               <EditableField label="Time at Current Address (Years)" value={profile.time_at_current_address_years} field="time_at_current_address_years" editing={editing} editData={editData} onChange={handleEditField} type="number" />
               <EditableField label="Number of Dependants" value={profile.number_of_dependants} field="number_of_dependants" editing={editing} editData={editData} onChange={handleEditField} type="number" />
               {editing ? (
@@ -623,7 +615,7 @@ export default function CustomerProfilePage() {
                   ) : null
                 })()
               )}
-              <EditableSelect label="Preferred Contact Method" value={profile.preferred_contact_method} displayValue={contactMethodLabels[profile.preferred_contact_method] || profile.preferred_contact_method} field="preferred_contact_method" editing={editing} editData={editData} onChange={handleEditField} options={contactMethodLabels} />
+              <EditableSelect label="Preferred Contact Method" displayValue={contactMethodLabels[profile.preferred_contact_method] || profile.preferred_contact_method} field="preferred_contact_method" editing={editing} editData={editData} onChange={handleEditField} options={contactMethodLabels} />
             </CardContent>
           </Card>
 
@@ -636,12 +628,12 @@ export default function CustomerProfilePage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <EditableSelect label="Residency" value={profile.residency_status} displayValue={residencyLabels[profile.residency_status] || profile.residency_status} field="residency_status" editing={editing} editData={editData} onChange={handleEditField} options={residencyLabels} />
-              <EditableSelect label="Primary ID" value={profile.primary_id_type} displayValue={idTypeLabels[profile.primary_id_type] || profile.primary_id_type} field="primary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={idTypeLabels} />
+              <EditableSelect label="Residency" displayValue={residencyLabels[profile.residency_status] || profile.residency_status} field="residency_status" editing={editing} editData={editData} onChange={handleEditField} options={residencyLabels} />
+              <EditableSelect label="Primary ID" displayValue={idTypeLabels[profile.primary_id_type] || profile.primary_id_type} field="primary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={idTypeLabels} />
               {editing && (
                 <EditableField label="Primary ID Number" value="" field="primary_id_number" editing={editing} editData={editData} onChange={handleEditField} />
               )}
-              <EditableSelect label="Secondary ID" value={profile.secondary_id_type} displayValue={idTypeLabels[profile.secondary_id_type] || profile.secondary_id_type} field="secondary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={{...idTypeLabels, '': 'None'}} />
+              <EditableSelect label="Secondary ID" displayValue={idTypeLabels[profile.secondary_id_type] || profile.secondary_id_type} field="secondary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={{...idTypeLabels, '': 'None'}} />
               {editing && (
                 <EditableField label="Secondary ID Number" value="" field="secondary_id_number" editing={editing} editData={editData} onChange={handleEditField} />
               )}
@@ -680,8 +672,8 @@ export default function CustomerProfilePage() {
             <div className="space-y-3">
               <EditableField label="Employer Name" value={profile.employer_name} field="employer_name" editing={editing} editData={editData} onChange={handleEditField} />
               <EditableField label="Occupation" value={profile.occupation} field="occupation" editing={editing} editData={editData} onChange={handleEditField} />
-              <EditableSelect label="Industry" value={profile.industry} displayValue={industryLabels[profile.industry] || profile.industry} field="industry" editing={editing} editData={editData} onChange={handleEditField} options={industryLabels} />
-              <EditableSelect label="Employment Status" value={profile.employment_status} displayValue={employmentStatusLabels[profile.employment_status] || profile.employment_status} field="employment_status" editing={editing} editData={editData} onChange={handleEditField} options={employmentStatusLabels} />
+              <EditableSelect label="Industry" displayValue={industryLabels[profile.industry] || profile.industry} field="industry" editing={editing} editData={editData} onChange={handleEditField} options={industryLabels} />
+              <EditableSelect label="Employment Status" displayValue={employmentStatusLabels[profile.employment_status] || profile.employment_status} field="employment_status" editing={editing} editData={editData} onChange={handleEditField} options={employmentStatusLabels} />
               <EditableField label="Years in Current Role" value={profile.years_in_current_role} field="years_in_current_role" editing={editing} editData={editData} onChange={handleEditField} type="number" />
               <EditableField label="Previous Employer" value={profile.previous_employer} field="previous_employer" editing={editing} editData={editData} onChange={handleEditField} />
             </div>
