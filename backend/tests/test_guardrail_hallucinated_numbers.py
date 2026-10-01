@@ -214,3 +214,84 @@ def test_offers_without_amount_or_rate_ignored(checker):
     }
     result = checker.check_hallucinated_numbers(text, context)
     assert result["passed"], f"Valid offer should still apply: {result['details']}"
+
+
+# ---------------------------------------------------------------------------
+# I7 — rate validation: no whole-line keyword skips; denial / NBO rates checked
+# ---------------------------------------------------------------------------
+
+_PRICING = {"interest_rate_number": 7.49, "comparison_rate_number": 7.89}
+
+
+def test_rate_on_a_line_mentioning_income_is_still_checked(checker):
+    """A broad word such as "income" used to exempt the whole line."""
+    text = "Based on your income, your interest rate is 12.99% p.a."
+    result = checker.check_hallucinated_numbers(text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING})
+    assert not result["passed"]
+    assert "12.99" in result["details"]
+
+
+def test_correct_rate_next_to_income_passes(checker):
+    text = "Based on your income, your interest rate is 7.49% p.a. (comparison rate 7.89% p.a.)."
+    result = checker.check_hallucinated_numbers(text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING})
+    assert result["passed"], result["details"]
+
+
+def test_disclaimer_percentages_stay_exempt(checker):
+    text = (
+        "Repayments above 30% of your income are not assessed as affordable.\n"
+        "A deposit of 20% avoids LMI, and an 80% LVR applies.\n"
+        "Your interest rate is 7.49% p.a."
+    )
+    result = checker.check_hallucinated_numbers(text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING})
+    assert result["passed"], result["details"]
+
+
+def test_denial_teaser_rate_validated_against_offer(checker):
+    ctx = {
+        "loan_amount": 20000,
+        "decision": "denied",
+        "nbo_amounts": [5000],
+        "nbo_offers": [{"amount": 5000, "estimated_rate": 7.49}],
+    }
+    bad = checker.check_hallucinated_numbers("You may qualify for $5,000 at 3.10% p.a.", ctx)
+    assert not bad["passed"] and "3.10" in bad["details"]
+    good = checker.check_hallucinated_numbers("You may qualify for $5,000 at 7.49% p.a.", ctx)
+    assert good["passed"], good["details"]
+
+
+def test_denial_without_offer_cannot_quote_a_rate(checker):
+    result = checker.check_hallucinated_numbers(
+        "A smaller loan could be offered at 12.99% p.a.", {"loan_amount": 20000, "decision": "denied"}
+    )
+    assert not result["passed"]
+
+
+def test_decision_email_path_passes_offer_rates_to_guardrails(sample_application):
+    """S1-F1: the decision email passed nbo_amounts but not nbo_offers."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from apps.email_engine.services.email_generator import EmailGenerator
+
+    seen = {}
+    gen = EmailGenerator()
+    gen.client = object()
+    real = gen.guardrail_checker.run_all_checks
+
+    def _spy(body, context, **kw):
+        seen.update(context)
+        return real(body, context, **kw)
+
+    gen.guardrail_checker.run_all_checks = _spy
+    offer = {"name": "Secured Loan", "amount": 5000, "estimated_rate": 7.49}
+    resp = SimpleNamespace(
+        content=[SimpleNamespace(type="tool_use", input={"subject": "S", "body": "B"})], usage=None, stop_reason="x"
+    )
+    with (
+        patch("apps.agents.services.api_budget.ApiBudgetGuard.check_budget"),
+        patch("apps.agents.services.api_budget.guarded_api_call", return_value=resp),
+        patch.object(EmailGenerator, "MAX_RETRIES", 1),
+    ):
+        gen.generate(sample_application, "denied", profile_context={"nbo_offer": offer})
+    assert seen.get("nbo_offers") == [offer]

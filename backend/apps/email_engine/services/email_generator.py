@@ -431,6 +431,9 @@ class EmailGenerator:
                 nbo_amounts = nbo_offer_amounts([nbo_offer])
                 if nbo_amounts:
                     context["nbo_amounts"] = nbo_amounts
+                # The offer itself carries estimated_rate, so the teaser's
+                # "at X% p.a." is validated against the real rate (S1-F1).
+                context["nbo_offers"] = [nbo_offer]
 
         # Add retry feedback if not first attempt.
         # The feedback is structured to tell Claude exactly what failed,
