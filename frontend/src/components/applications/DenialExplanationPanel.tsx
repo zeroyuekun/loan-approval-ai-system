@@ -10,11 +10,6 @@ import { DecisionReviewStatus } from './DecisionReviewStatus'
 interface DenialExplanationPanelProps {
   denialReasons: Array<{ code: string; reason: string; feature: string }>
   counterfactuals: Array<{ changes: Record<string, number>; statement: string }>
-  reapplicationGuidance: {
-    improvement_targets: Array<any>
-    estimated_review_months: number
-    message: string
-  } | null
   creditScore: number | null
   applicationId?: string
   admDisclosure?: AdmDisclosure | null
@@ -31,7 +26,6 @@ function getEquifaxBand(score: number): string {
 export function DenialExplanationPanel({
   denialReasons,
   counterfactuals,
-  reapplicationGuidance,
   creditScore,
   applicationId,
   admDisclosure,

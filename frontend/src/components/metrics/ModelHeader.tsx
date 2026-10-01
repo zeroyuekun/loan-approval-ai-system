@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, CheckCircle, XCircle } from 'lucide-react'
 import { TrainControl } from './TrainControl'
 import { ModelMetrics } from '@/types'
+import { ALGORITHM_LABELS } from '@/lib/utils'
 
 export function ElapsedTimer() {
   const [seconds, setSeconds] = useState(0)
@@ -27,14 +28,11 @@ interface ModelHeaderProps {
   isTraining: boolean
   activeTrainingLabel: string
   trainingStatus: 'idle' | 'training' | 'success' | 'failure' | 'skipped'
-  trainError: boolean
   trainErrorMessage: string | null
 }
 
-const ALGORITHM_LABELS: Record<string, string> = { rf: 'Random Forest', xgb: 'XGBoost' }
-
 export function ModelHeader(props: ModelHeaderProps) {
-  const { metrics, isAdmin, selectedAlgorithm, onSelect, onTrain, isTraining, activeTrainingLabel, trainingStatus, trainError, trainErrorMessage } = props
+  const { metrics, isAdmin, selectedAlgorithm, onSelect, onTrain, isTraining, activeTrainingLabel, trainingStatus, trainErrorMessage } = props
   const algorithmLabel = ALGORITHM_LABELS[metrics.algorithm] || metrics.algorithm
 
   return (
@@ -86,7 +84,7 @@ export function ModelHeader(props: ModelHeaderProps) {
         </Card>
       )}
 
-      {(trainError || trainingStatus === 'failure') && !isTraining && (
+      {(trainErrorMessage || trainingStatus === 'failure') && !isTraining && (
         <Card className="border-red-200 bg-gradient-to-r from-red-50 to-rose-50">
           <CardContent className="flex items-center gap-3 py-4">
             <XCircle className="h-5 w-5 shrink-0 text-red-600" />

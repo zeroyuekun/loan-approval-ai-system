@@ -1,13 +1,22 @@
 'use client'
 
 import { useRef } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { agentsApi } from '@/lib/api'
+import { nextPollInterval } from '@/lib/polling'
 import { AgentRun } from '@/types'
 
-/** Exponential backoff: 2s -> 4s -> 8s -> 16s -> 30s max */
-function nextBackoff(pollCount: number): number {
-  return Math.min(2000 * Math.pow(2, pollCount), 30000)
+/** Queries that change once a pipeline run is (re)started for a loan. */
+export function invalidateRunQueries(queryClient: QueryClient, loanId: string) {
+  queryClient.invalidateQueries({ queryKey: ['agentRun', loanId] })
+  queryClient.invalidateQueries({ queryKey: ['application', loanId] })
+  queryClient.invalidateQueries({ queryKey: ['email', loanId] })
+}
+
+function rateLimitedError(error: any): Error {
+  const retryAfter = error.response.headers?.['retry-after']
+  const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
+  return new Error(`Rate limited — try again in ${waitSec}s`)
 }
 
 export function useAgentRun(loanId: string, options?: { pipelineQueued?: boolean }) {
@@ -29,16 +38,11 @@ export function useAgentRun(loanId: string, options?: { pipelineQueued?: boolean
     gcTime: 30_000, // 30s: polled data, drop fast after unmount
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      // Keep polling while the run is active, with exponential backoff
-      if (status === 'pending' || status === 'running') {
-        const interval = nextBackoff(pollCountRef.current)
-        pollCountRef.current += 1
-        return interval
-      }
-      // Also keep polling if the frontend knows a new run is expected
-      // (the current data is the OLD completed run; Celery hasn't created the new one yet)
-      if (pipelineQueued) {
-        const interval = nextBackoff(pollCountRef.current)
+      // Keep polling (with exponential backoff) while the run is active, or
+      // while the frontend knows a new run is expected (the current data is
+      // the OLD completed run; Celery hasn't created the new one yet).
+      if (status === 'pending' || status === 'running' || pipelineQueued) {
+        const interval = nextPollInterval(pollCountRef.current)
         pollCountRef.current += 1
         return interval
       }
@@ -56,17 +60,11 @@ export function useOrchestrate() {
       const { data } = await agentsApi.orchestrate(loanId)
       return data
     },
-    onSuccess: (_data, loanId) => {
-      queryClient.invalidateQueries({ queryKey: ['agentRun', loanId] })
-      queryClient.invalidateQueries({ queryKey: ['application', loanId] })
-      queryClient.invalidateQueries({ queryKey: ['email', loanId] })
-    },
+    onSuccess: (_data, loanId) => invalidateRunQueries(queryClient, loanId),
     onError: (error: any) => {
       // Surface throttle errors so the button doesn't just silently fail
       if (error?.response?.status === 429) {
-        const retryAfter = error.response.headers?.['retry-after']
-        const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
-        throw new Error(`Rate limited — try again in ${waitSec}s`)
+        throw rateLimitedError(error)
       }
       if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
         throw new Error('Request timed out — the backend may be starting up. Please try again.')
@@ -84,11 +82,7 @@ export function useForceRerun() {
       const { data } = await agentsApi.forceRerun(loanId, reason)
       return data
     },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['agentRun', variables.loanId] })
-      queryClient.invalidateQueries({ queryKey: ['application', variables.loanId] })
-      queryClient.invalidateQueries({ queryKey: ['email', variables.loanId] })
-    },
+    onSuccess: (_data, variables) => invalidateRunQueries(queryClient, variables.loanId),
     onError: (error: any) => {
       if (error?.response?.status === 403) {
         throw new Error('Force rerun requires staff role.')
@@ -97,9 +91,7 @@ export function useForceRerun() {
         throw new Error(error?.response?.data?.detail || 'A reason is required.')
       }
       if (error?.response?.status === 429) {
-        const retryAfter = error.response.headers?.['retry-after']
-        const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
-        throw new Error(`Rate limited — try again in ${waitSec}s`)
+        throw rateLimitedError(error)
       }
       throw error
     },

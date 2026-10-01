@@ -1,19 +1,17 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useCreateApplication } from '@/hooks/useApplications'
+import { useCustomerProfile } from '@/hooks/useCustomerProfile'
 import { useAuth } from '@/lib/auth'
-import { authApi } from '@/lib/api'
-import { CustomerProfile } from '@/types'
 
 export const STEP_LABELS = ['Personal', 'Employment & Income', 'Expenses & Debts', 'Loan Details', 'Review & Submit']
 
-export const formSchema = z.object({
+const formSchema = z.object({
   // Step 1: Personal
   applicant_type: z.enum(['single', 'couple']),
   number_of_dependants: z.coerce.number().min(0).max(10),
@@ -53,6 +51,29 @@ interface DraftEnvelope {
   data: Partial<FormData>
 }
 
+function loadSavedDraft(): Partial<FormData> | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    if (!raw) return null
+    const envelope: DraftEnvelope = JSON.parse(raw)
+    // Expire drafts older than DRAFT_TTL_MS
+    if (Date.now() - envelope.savedAt > DRAFT_TTL_MS) {
+      localStorage.removeItem(DRAFT_KEY)
+      return null
+    }
+    return envelope.data
+  } catch (e) { console.warn('[useApplicationForm] Failed to parse draft from localStorage:', e) }
+  return null
+}
+
+/** Fields validated before leaving each step; steps not listed have none. */
+const STEP_FIELDS: Record<number, (keyof FormData)[]> = {
+  1: ['applicant_type', 'number_of_dependants', 'home_ownership'],
+  2: ['annual_income', 'credit_score', 'employment_length', 'employment_type'],
+  3: ['debt_to_income', 'existing_credit_card_limit'],
+  4: ['loan_amount', 'loan_term_months', 'purpose'],
+}
+
 export function useApplicationForm(onSuccessPath?: string) {
   const [step, setStep] = useState(1)
   const totalSteps = STEP_LABELS.length
@@ -62,22 +83,8 @@ export function useApplicationForm(onSuccessPath?: string) {
   const createApplication = useCreateApplication()
   const isCustomer = user?.role === 'customer'
 
-  const getSavedDraft = useCallback((): Partial<FormData> | null => {
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY)
-      if (!raw) return null
-      const envelope: DraftEnvelope = JSON.parse(raw)
-      // Expire drafts older than DRAFT_TTL_MS
-      if (Date.now() - envelope.savedAt > DRAFT_TTL_MS) {
-        localStorage.removeItem(DRAFT_KEY)
-        return null
-      }
-      return envelope.data
-    } catch (e) { console.warn('[useApplicationForm] Failed to parse draft from localStorage:', e) }
-    return null
-  }, [])
-
-  const savedDraft = useRef(getSavedDraft())
+  // Read once on mount; useForm only consumes defaultValues on the first render
+  const [savedDraft] = useState(loadSavedDraft)
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema) as any,
@@ -97,13 +104,11 @@ export function useApplicationForm(onSuccessPath?: string) {
       has_cosigner: false,
       has_hecs: false,
       has_bankruptcy: false,
-      ...savedDraft.current,
+      ...savedDraft,
     },
   })
 
   const { register, handleSubmit, trigger, watch, formState: { errors } } = form
-
-  const purpose = watch('purpose')
 
   // Persist form state to localStorage on every change
   useEffect(() => {
@@ -125,15 +130,7 @@ export function useApplicationForm(onSuccessPath?: string) {
 
   const submittingRef = useRef(false)
 
-  const { data: profile, isLoading: profileLoading } = useQuery<CustomerProfile>({
-    queryKey: ['customerProfile'],
-    queryFn: async () => {
-      const { data } = await authApi.getCustomerProfile()
-      return data
-    },
-    enabled: isCustomer,
-    staleTime: 0,
-  })
+  const { data: profile, isLoading: profileLoading } = useCustomerProfile({ enabled: isCustomer, staleTime: 0 })
 
   const onSubmit = async (data: FormData) => {
     if (submittingRef.current) return
@@ -153,12 +150,7 @@ export function useApplicationForm(onSuccessPath?: string) {
   }
 
   const goNext = async () => {
-    let fieldsToValidate: (keyof FormData)[] = []
-    if (step === 1) fieldsToValidate = ['applicant_type', 'number_of_dependants', 'home_ownership']
-    if (step === 2) fieldsToValidate = ['annual_income', 'credit_score', 'employment_length', 'employment_type']
-    if (step === 3) fieldsToValidate = ['debt_to_income', 'existing_credit_card_limit']
-    if (step === 4) fieldsToValidate = ['loan_amount', 'loan_term_months', 'purpose']
-
+    const fieldsToValidate = STEP_FIELDS[step] ?? []
     const valid = fieldsToValidate.length === 0 || await trigger(fieldsToValidate)
     if (valid) {
       setStep(step + 1)
@@ -184,10 +176,8 @@ export function useApplicationForm(onSuccessPath?: string) {
     errors,
     watch,
     step,
-    setStep,
     stepRef,
     totalSteps,
-    purpose,
     profile,
     profileLoading,
     isCustomer,

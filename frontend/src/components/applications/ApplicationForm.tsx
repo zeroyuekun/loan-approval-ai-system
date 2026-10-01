@@ -34,7 +34,6 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
     errors,
     watch,
     step,
-    setStep,
     stepRef,
     totalSteps,
     user,

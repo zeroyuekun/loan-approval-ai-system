@@ -4,13 +4,13 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useApplication } from '@/hooks/useApplications'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ArrowLeft, CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
-import { formatCurrency, formatDate, formatPurpose, getDisplayStatus } from '@/lib/utils'
+import { CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
+import { formatCurrency, formatDate, formatPurpose } from '@/lib/utils'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
 import { DecisionReviewStatus } from '@/components/applications/DecisionReviewStatus'
+import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,
@@ -186,9 +186,8 @@ export default function CustomerApplicationStatusPage() {
   const { id } = useParams<{ id: string }>()
   const { data: application, isLoading } = useApplication(id, {
     // Poll every 5s only while still being processed. Letting TanStack Query
-    // own the interval avoids stale closures / interval-leak races that the
-    // old useEffect(setInterval) pattern was prone to when the hook remounted
-    // faster than the cleanup timer fired.
+    // own the interval avoids the stale closures and interval leaks a
+    // useEffect(setInterval) is prone to when the hook remounts quickly.
     refetchInterval: (query) => {
       const status = query.state.data?.status
       return status === 'pending' || status === 'processing' ? 5000 : false
@@ -216,7 +215,6 @@ export default function CustomerApplicationStatusPage() {
     )
   }
 
-  const decision = application.decision
   const hasConditions =
     application.status === 'approved' &&
     Array.isArray(application.conditions) &&
@@ -239,9 +237,7 @@ export default function CustomerApplicationStatusPage() {
             <h2 className="text-xl font-bold mb-1">{formatPurpose(application.purpose)} Loan</h2>
             <div aria-live="polite" aria-atomic="true">
               <div className="flex items-center gap-3 mb-1">
-                {(() => { const s = getDisplayStatus(application.status, application.decision); return (
-                  <Badge className={s.color} variant="outline" role="status" aria-label={`Application status: ${s.label}`}>{s.label}</Badge>
-                ) })()}
+                <ApplicationStatusBadge status={application.status} decision={application.decision} announce />
               </div>
               <p className="text-muted-foreground">
                 {statusMessages[application.status] || 'Status unknown.'}
@@ -294,7 +290,6 @@ export default function CustomerApplicationStatusPage() {
         <DenialExplanationPanel
           denialReasons={application.decision.denial_reasons || []}
           counterfactuals={application.decision.counterfactuals || []}
-          reapplicationGuidance={application.decision.reapplication_guidance || null}
           creditScore={application.credit_score}
           applicationId={application.id}
           admDisclosure={application.decision.adm_disclosure || null}

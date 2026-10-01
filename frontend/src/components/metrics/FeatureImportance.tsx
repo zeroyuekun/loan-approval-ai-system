@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatPercent, titleCase } from '@/lib/utils'
 import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface FeatureImportanceProps {
@@ -132,7 +133,7 @@ const CATEGORY_PREFIXES = Object.keys(CATEGORY_GROUPS).sort((a, b) => b.length -
 const TOP_N = 20
 
 function formatFeatureName(s: string): string {
-  return FEATURE_LABELS[s] ?? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return FEATURE_LABELS[s] ?? titleCase(s)
 }
 
 function parentLabelFor(rawKey: string): string | null {
@@ -208,7 +209,7 @@ export function FeatureImportance({ features, title = 'Feature Importance' }: Fe
 
   const top3 = charted
     .slice(0, 3)
-    .map((d) => `${d.name} ${(d.importance * 100).toFixed(1)}%`)
+    .map((d) => `${d.name} ${formatPercent(d.importance)}`)
     .join(', ')
   const ariaLabel =
     expanded || !hasOverflow
@@ -254,7 +255,7 @@ export function FeatureImportance({ features, title = 'Feature Importance' }: Fe
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <ChartHoverPanel active={active} formatValue={(v) => `${(Number(v) * 100).toFixed(1)}%`} />
+        <ChartHoverPanel active={active} formatValue={(v) => formatPercent(Number(v))} />
         {hasOverflow && (
           <button
             type="button"

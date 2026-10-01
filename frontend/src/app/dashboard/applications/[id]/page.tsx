@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useApplication } from '@/hooks/useApplications'
+import { invalidateRunQueries } from '@/hooks/useAgentStatus'
 import { useAuth } from '@/lib/auth'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { emailApi, loansApi } from '@/lib/api'
@@ -32,11 +33,7 @@ export default function ApplicationDetailPage() {
     retry: false,
   })
 
-  const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['application', id] })
-    queryClient.invalidateQueries({ queryKey: ['email', id] })
-    queryClient.invalidateQueries({ queryKey: ['agentRun', id] })
-  }
+  const handleRefresh = () => invalidateRunQueries(queryClient, id)
 
   const handleDelete = async () => {
     setIsDeleting(true)

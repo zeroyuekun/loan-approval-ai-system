@@ -48,9 +48,6 @@ function ReviewActionModal({
   }
 
   const biasReport = run.bias_reports?.find((br) => br.flagged || br.requires_human_review)
-  const reviewStep = run.steps?.find(
-    (s) => s.step_name === 'human_review_required'
-  )
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !submitReview.isPending) onClose() }}>
       <DialogContent className="sm:max-w-lg">

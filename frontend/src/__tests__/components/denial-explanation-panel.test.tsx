@@ -19,18 +19,9 @@ const mockCounterfactuals: Array<{ changes: Record<string, number>; statement: s
   },
 ]
 
-const mockReapplicationGuidance = {
-  improvement_targets: [
-    { feature: 'debt_to_income', current_value: '0.55', target_value: '0.40', description: 'Lower DTI' },
-  ],
-  estimated_review_months: 6,
-  message: 'Consider reapplying after addressing these areas.',
-}
-
 const defaultProps = {
   denialReasons: mockDenialReasons,
   counterfactuals: mockCounterfactuals,
-  reapplicationGuidance: mockReapplicationGuidance,
   creditScore: 500,
 }
 
@@ -109,7 +100,6 @@ describe('DenialExplanationPanel', () => {
       <DenialExplanationPanel
         denialReasons={[]}
         counterfactuals={mockCounterfactuals}
-        reapplicationGuidance={mockReapplicationGuidance}
         creditScore={500}
       />
     )
@@ -121,7 +111,6 @@ describe('DenialExplanationPanel', () => {
       <DenialExplanationPanel
         denialReasons={mockDenialReasons}
         counterfactuals={[]}
-        reapplicationGuidance={mockReapplicationGuidance}
         creditScore={null}
       />
     )

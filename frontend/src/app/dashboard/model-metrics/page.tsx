@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useModelMetrics, useTrainModel } from '@/hooks/useMetrics'
 import { useDriftReports } from '@/hooks/useDriftReports'
 import { useAuth } from '@/lib/auth'
+import { ALGORITHM_LABELS } from '@/lib/utils'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -17,8 +18,6 @@ import { FairnessTab } from '@/components/metrics/tabs/FairnessTab'
 import { CalibrationThresholdsTab } from '@/components/metrics/tabs/CalibrationThresholdsTab'
 import { DriftTab } from '@/components/metrics/tabs/DriftTab'
 import { DiagnosticsTab } from '@/components/metrics/tabs/DiagnosticsTab'
-
-const ALGORITHM_LABELS: Record<string, string> = { rf: 'Random Forest', xgb: 'XGBoost' }
 
 export default function ModelMetricsPage() {
   const { data: metrics, isLoading, isError } = useModelMetrics()
@@ -110,7 +109,6 @@ export default function ModelMetricsPage() {
         isTraining={isTraining}
         activeTrainingLabel={activeTrainingLabel}
         trainingStatus={trainingStatus}
-        trainError={trainModel.isError}
         trainErrorMessage={trainErrorMessage}
       />
 
