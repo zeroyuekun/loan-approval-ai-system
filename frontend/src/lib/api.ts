@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { toast } from 'sonner'
 import { clearSession } from '@/lib/session'
+import { resolveApiUrl } from '@/lib/csp'
 
 // API parameter and payload types
 interface PaginationParams {
@@ -58,7 +59,9 @@ export interface LoanPayload {
   [key: string]: string | number | boolean | null | undefined
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+// Production builds without NEXT_PUBLIC_API_URL use the same-origin /api/v1
+// path rather than baking in localhost (see lib/csp.ts).
+const API_URL = resolveApiUrl(process.env.NEXT_PUBLIC_API_URL, process.env.NODE_ENV)
 
 const api = axios.create({
   baseURL: API_URL,

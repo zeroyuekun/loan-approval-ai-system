@@ -3,7 +3,7 @@
  *
  * The real session lives in HttpOnly cookies set by the backend. These are
  * only the non-PII markers the UI reads: a sessionStorage copy of role +
- * username for instant render, and a `user_role` cookie that middleware.ts
+ * username for instant render, and a `user_role` cookie that proxy.ts
  * reads for route gating. Shared by AuthProvider and the axios interceptor
  * (which runs outside React and cannot use the hook).
  */

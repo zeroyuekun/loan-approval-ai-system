@@ -1,8 +1,14 @@
 # --- Build stage ---
 FROM node:22-alpine AS builder
 
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# NEXT_PUBLIC_* values are inlined into the client bundle at build time, so
+# this is the API base URL every browser using the image will call. No
+# localhost default: unset means the same-origin path /api/v1 (reverse proxy
+# or Ingress in front of the app). Pass an absolute URL only when the API
+# lives on another origin; the CSP connect-src is derived from it.
+#   docker build --build-arg NEXT_PUBLIC_API_URL=https://api.example.com/api/v1 .
+ARG NEXT_PUBLIC_API_URL=/api/v1
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api/v1}
 
 WORKDIR /app
 
