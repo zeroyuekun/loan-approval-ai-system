@@ -43,6 +43,9 @@ export function getDisplayStatus(status: string, decision?: { decision: string }
   return { label: status.toUpperCase(), color: getStatusColor(status) }
 }
 
+/** Display names for the model algorithms the backend can train. */
+export const ALGORITHM_LABELS: Record<string, string> = { rf: 'Random Forest', xgb: 'XGBoost' }
+
 const PURPOSE_LABELS: Record<string, string> = {
   home: 'Home Purchase',
   home_improvement: 'Home Improvement',

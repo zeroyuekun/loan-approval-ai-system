@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { ALGORITHM_LABELS, titleCase } from '@/lib/utils'
 import { XCircle, FileText, AlertTriangle, CheckCircle2, Clock, Shield } from 'lucide-react'
 
 function formatMetric(value: number | null | undefined, decimals = 4): string {
@@ -79,8 +80,7 @@ export default function ModelCardPage() {
 
   const { model_details, intended_use, training_data, performance_metrics, fairness_analysis, governance, independent_validation, limitations, synthetic_data_validation, regulatory_compliance, last_updated } = card
 
-  const algorithmLabels: Record<string, string> = { rf: 'Random Forest', xgb: 'XGBoost' }
-  const algorithmLabel = algorithmLabels[model_details.algorithm] || model_details.algorithm
+  const algorithmLabel = ALGORITHM_LABELS[model_details.algorithm] || model_details.algorithm
 
   return (
     <div className="space-y-6">
@@ -329,7 +329,7 @@ export default function ModelCardPage() {
                     {Object.entries(governance.retraining_policy).map(([key, value]) => (
                       <KeyValue
                         key={key}
-                        label={key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                        label={titleCase(key)}
                         value={typeof value === 'object' ? JSON.stringify(value) : String(value)}
                       />
                     ))}

@@ -5,9 +5,9 @@ import { useAuth } from '@/lib/auth'
 import { authApi } from '@/lib/api'
 import { useApplications } from '@/hooks/useApplications'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { getDisplayStatus, formatCurrency, formatDate, formatPurpose } from '@/lib/utils'
+import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
+import { formatCurrency, formatDate, formatPurpose } from '@/lib/utils'
 import { Plus, ArrowRight, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { CustomerProfile } from '@/types'
@@ -136,9 +136,7 @@ export default function CustomerApplyPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    {(() => { const s = getDisplayStatus(app.status, app.decision); return (
-                      <Badge className={s.color} variant="outline">{s.label}</Badge>
-                    ) })()}
+                    <ApplicationStatusBadge status={app.status} decision={app.decision} />
                     <ArrowRight className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </CardContent>

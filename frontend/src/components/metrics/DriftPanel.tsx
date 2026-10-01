@@ -3,6 +3,7 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { formatPercent } from '@/lib/utils'
 import { DriftReport } from '@/types'
 import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
@@ -30,7 +31,7 @@ export function DriftPanel({ reports }: DriftPanelProps) {
   const stats = [
     { label: 'Report Date', value: latest.report_date },
     { label: 'Predictions', value: latest.num_predictions.toLocaleString() },
-    { label: 'Approval Rate', value: latest.approval_rate != null ? `${(latest.approval_rate * 100).toFixed(1)}%` : '—' },
+    { label: 'Approval Rate', value: latest.approval_rate != null ? formatPercent(latest.approval_rate) : '—' },
     { label: 'Mean Probability', value: latest.mean_probability != null ? latest.mean_probability.toFixed(4) : '—' },
   ]
 
