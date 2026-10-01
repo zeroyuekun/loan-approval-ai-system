@@ -2,7 +2,7 @@
 
 ![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
 ![Django 5](https://img.shields.io/badge/Django-5-092E20?logo=django&logoColor=white)
-[![CI](https://github.com/zeroyuekun/loan-approval-ai-system/actions/workflows/test.yml/badge.svg)](https://github.com/zeroyuekun/loan-approval-ai-system/actions/workflows/test.yml)
+[![CI](https://github.com/zeroyuekun/loan-approval-ai-system/actions/workflows/ci.yml/badge.svg)](https://github.com/zeroyuekun/loan-approval-ai-system/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/zeroyuekun/loan-approval-ai-system)](https://github.com/zeroyuekun/loan-approval-ai-system/releases)
 ![Last commit](https://img.shields.io/github/last-commit/zeroyuekun/loan-approval-ai-system)
 ![License](https://img.shields.io/badge/License-MIT-yellow)

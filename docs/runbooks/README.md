@@ -15,6 +15,7 @@ Operational procedures for incidents and known failure modes. Each runbook follo
 - [Frontend container exits with code 243](frontend-exit-243.md)
 - [Celery queue backpressure](celery-backpressure.md)
 - [Migration rollback](migration-rollback.md)
+- [CI gate and image deployment](ci-deployment.md): the `ci-gate` required check, deploy gating, the `PUBLIC_API_URL` variable
 
 ## Adding a runbook
 
