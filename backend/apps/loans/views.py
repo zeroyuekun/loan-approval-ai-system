@@ -120,15 +120,22 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             transaction.on_commit(lambda: dispatch_pipeline_or_queue_failed(instance, source="api"))
 
     def perform_update(self, serializer):
-        instance = serializer.save()
-        AuditLog.objects.create(
-            user=self.request.user,
-            action="loan_updated",
-            resource_type="LoanApplication",
-            resource_id=str(instance.id),
-            details={"status": instance.status},
-            ip_address=self.request.META.get("REMOTE_ADDR"),
-        )
+        """Every changed field is audited (before/after; free text by name).
+        Decision inputs of an assessed application are refused in the
+        serializer, so they never reach here."""
+        before = _snapshot(serializer.instance)
+        with transaction.atomic():
+            instance = serializer.save()
+            details = _field_change_details(before, instance, names_only=("notes", "conditions"))
+            details["status"] = instance.status
+            AuditLog.objects.create(
+                user=self.request.user,
+                action="loan_updated",
+                resource_type="LoanApplication",
+                resource_id=str(instance.id),
+                details=details,
+                ip_address=self.request.META.get("REMOTE_ADDR"),
+            )
 
     def perform_destroy(self, instance):
         """Soft delete: the application and its decision evidence (decision,
@@ -311,6 +318,26 @@ def _audit_value(value):
     return str(value)
 
 
+def _snapshot(instance):
+    return {f.attname: getattr(instance, f.attname) for f in instance._meta.concrete_fields}
+
+
+def _field_change_details(before, instance, *, values_for=None, names_only=()):
+    """AuditLog details for a staff edit: every changed field by name, plus
+    before/after values (all changed fields, or only ``values_for``). Fields
+    in ``names_only`` (free text) never have their values recorded."""
+    changed = [name for name, old in before.items() if name != "updated_at" and getattr(instance, name) != old]
+    details = {"changed_fields": sorted(n.removesuffix("_id") for n in changed)}
+    for name in changed:
+        if name in names_only or (values_for is not None and name not in values_for):
+            continue
+        details[name.removesuffix("_id")] = {
+            "from": _audit_value(before[name]),
+            "to": _audit_value(getattr(instance, name)),
+        }
+    return details
+
+
 class ComplaintFilingThrottle(UserRateThrottle):
     """Tight cap on complaint filing — sensitive + spam vector."""
 
@@ -348,18 +375,10 @@ class ComplaintViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         """Staff edits are audited with every changed field."""
-        instance = serializer.instance
-        before = {f.attname: getattr(instance, f.attname) for f in instance._meta.concrete_fields}
+        before = _snapshot(serializer.instance)
         with transaction.atomic():
             updated = serializer.save()
-            changed = [name for name, old in before.items() if name != "updated_at" and getattr(updated, name) != old]
-            details = {"changed_fields": sorted(n.removesuffix("_id") for n in changed)}
-            for name in self._AUDITED_VALUES:
-                if name in changed:
-                    details[name.removesuffix("_id")] = {
-                        "from": _audit_value(before[name]),
-                        "to": _audit_value(getattr(updated, name)),
-                    }
+            details = _field_change_details(before, updated, values_for=self._AUDITED_VALUES)
             AuditLog.objects.create(
                 user=self.request.user,
                 action="complaint_updated",

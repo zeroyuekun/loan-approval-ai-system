@@ -149,6 +149,49 @@ class LoanApplicationSerializer(serializers.ModelSerializer):
             "financial_situation_notes",
         )
 
+    # The applicant's facts the decision was assessed on. Once the pipeline
+    # has taken the application (any status but pending / queue_failed) they
+    # are frozen: changing them would leave the stored decision, and the ADM
+    # explanation computed from these fields, out of step with its inputs.
+    # notes / conditions / conditions_met are post-decision workflow fields.
+    DECISION_INPUT_FIELDS = (
+        "annual_income",
+        "credit_score",
+        "loan_amount",
+        "loan_term_months",
+        "debt_to_income",
+        "employment_length",
+        "property_value",
+        "deposit_amount",
+        "monthly_expenses",
+        "existing_credit_card_limit",
+        "number_of_dependants",
+        "employment_type",
+        "applicant_type",
+        "purpose",
+        "home_ownership",
+        "has_cosigner",
+        "has_hecs",
+        "has_bankruptcy",
+        "state",
+    )
+    INPUTS_EDITABLE_STATUSES = ("pending", "queue_failed")
+
+    def validate(self, attrs):
+        instance = self.instance
+        if instance is not None and instance.status not in self.INPUTS_EDITABLE_STATUSES:
+            frozen = {
+                name: (
+                    f"Cannot change a decision input once the application has been assessed "
+                    f"(status '{instance.status}')."
+                )
+                for name, value in attrs.items()
+                if name in self.DECISION_INPUT_FIELDS and value != getattr(instance, name)
+            }
+            if frozen:
+                raise serializers.ValidationError(frozen)
+        return attrs
+
     def get_latest_fraud_check(self, obj):
         # Use .all() to hit the prefetch cache — .first() bypasses it and causes N+1
         fraud_checks = list(obj.fraud_checks.all()[:1]) if hasattr(obj, "fraud_checks") else []
