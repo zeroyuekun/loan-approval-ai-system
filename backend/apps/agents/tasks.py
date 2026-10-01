@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 from celery import Task, shared_task
 from django.core.cache import cache
@@ -28,16 +29,18 @@ class _OrchestrateTask(Task):
     abstract = True
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
+        # Celery calls on_failure only for a TERMINAL failure: a scheduled
+        # autoretry goes through on_retry, so the lock stays held across
+        # retries without a check here. A non-retryable error on retry 1 is
+        # terminal too, so no retries >= max_retries guard (it used to leave
+        # the application in PROCESSING).
         application_id = args[0] if args else kwargs.get("application_id")
-        if application_id and self.request.retries >= self.max_retries:
-            # Terminal failure: reset the stuck-PROCESSING application (the
-            # helper logs and swallows its own errors), then release the lock.
+        if application_id:
+            # Reset the stuck-PROCESSING application (the helper logs and
+            # swallows its own errors), then release the lock.
             _cleanup_stuck_application(application_id)
             cache.delete(_lock_key(application_id))
-            logger.warning(
-                "Application %s: dedup lock released after max_retries exhausted (terminal failure)",
-                application_id,
-            )
+            logger.warning("Application %s: dedup lock released after terminal failure", application_id)
         # Explicit base-class call so unit tests can instantiate this class
         # directly without Celery's full task machinery.
         Task.on_failure(self, exc, task_id, args, kwargs, einfo)
@@ -115,6 +118,7 @@ def orchestrate_pipeline_task(self, application_id, force=False):
     """Run the full loan processing pipeline."""
     from apps.agents.models import AgentRun
     from apps.agents.services.orchestrator import PipelineOrchestrator
+    from apps.agents.services.step_tracker import pipeline_deadline
 
     # Idempotency: skip if already completed (unless force re-run)
     if not force:
@@ -145,7 +149,8 @@ def orchestrate_pipeline_task(self, application_id, force=False):
 
     try:
         orchestrator = PipelineOrchestrator()
-        agent_run = orchestrator.orchestrate(application_id)
+        with pipeline_deadline(self.soft_time_limit or _DEDUP_LOCK_TTL):
+            agent_run = orchestrator.orchestrate(application_id)
     except (ConnectionError, TimeoutError, OSError):
         # Infrastructure error — Celery autoretry will re-queue this task.
         # Do NOT release the dedup lock here: releasing it before the retry
@@ -207,10 +212,12 @@ def orchestrate_pipeline_task(self, application_id, force=False):
 def resume_pipeline_task(self, agent_run_id, reviewer="", note=""):
     """Resume an escalated pipeline after human approval."""
     from apps.agents.services.orchestrator import PipelineOrchestrator
+    from apps.agents.services.step_tracker import pipeline_deadline
 
     try:
         orchestrator = PipelineOrchestrator()
-        agent_run = orchestrator.resume_after_review(agent_run_id, reviewer=reviewer, note=note)
+        with pipeline_deadline(self.soft_time_limit or _DEDUP_LOCK_TTL):
+            agent_run = orchestrator.resume_after_review(agent_run_id, reviewer=reviewer, note=note)
     except (ConnectionError, TimeoutError, OSError):
         raise
     except Exception:
@@ -233,6 +240,40 @@ def resume_pipeline_task(self, agent_run_id, reviewer="", note=""):
         "total_time_ms": agent_run.total_time_ms,
         "num_steps": len(agent_run.steps),
     }
+
+
+# A run that is still PROCESSING this long after it was last touched cannot
+# be alive: the orchestrate task is hard-killed at 600 s.
+_STUCK_PROCESSING_AFTER = timedelta(minutes=15)
+
+
+@shared_task(name="apps.agents.tasks.recover_stuck_processing_applications", time_limit=120, soft_time_limit=100)
+def recover_stuck_processing_applications():
+    """Beat sweep: reset applications a hard-killed task left in PROCESSING.
+
+    A hard time-limit kill terminates the worker child, so neither the task's
+    own except arm nor Task.on_failure runs, and nothing else watches the
+    application. Anything PROCESSING past ``_STUCK_PROCESSING_AFTER`` with no
+    dedup lock held is reset via the same audited cleanup the task uses.
+    """
+    from django.utils import timezone
+
+    from apps.loans.models import LoanApplication
+
+    cutoff = timezone.now() - _STUCK_PROCESSING_AFTER
+    recovered = []
+    stuck_ids = LoanApplication.objects.filter(
+        status=LoanApplication.Status.PROCESSING, updated_at__lt=cutoff
+    ).values_list("pk", flat=True)[:100]
+    for application_id in stuck_ids:
+        if cache.get(_lock_key(application_id)) is not None:
+            continue  # a task still owns it
+        _cleanup_stuck_application(application_id)
+        if not LoanApplication.objects.filter(pk=application_id, status=LoanApplication.Status.PROCESSING).exists():
+            recovered.append(str(application_id))
+    if recovered:
+        logger.warning("Recovered %d application(s) stuck in processing: %s", len(recovered), recovered)
+    return {"recovered": recovered}
 
 
 @shared_task(name="apps.agents.tasks.compute_pipeline_sla", time_limit=300, soft_time_limit=270)

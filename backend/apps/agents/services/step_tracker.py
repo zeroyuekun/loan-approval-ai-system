@@ -1,7 +1,11 @@
+import contextvars
 import logging
+import sys
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 
 from apps.agents.metrics import pipeline_e2e_seconds
@@ -36,10 +40,44 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(
 )
 
 
+# ---------------------------------------------------------------------------
+# Time-limit propagation (I9)
+#
+# Celery's SoftTimeLimitExceeded subclasses Exception, so the broad
+# ``except Exception`` arm in every pipeline step (and in the bias, NBO and
+# marketing helpers) would swallow it and the run would carry on until the
+# hard kill, which skips all cleanup. Rather than patch every handler, the
+# step lifecycle is the choke point every step passes through:
+#   * fail_step re-raises a SoftTimeLimitExceeded that is being handled, and
+#   * start_step refuses to begin a step once the task's soft deadline has
+#     passed (catches a limit swallowed by a helper that never calls fail_step).
+# The orchestrate/resume tasks open the deadline scope with their soft limit.
+# ---------------------------------------------------------------------------
+
+_PIPELINE_DEADLINE = contextvars.ContextVar("pipeline_deadline", default=None)
+
+
+@contextmanager
+def pipeline_deadline(seconds):
+    """Steps may not start after ``seconds`` from now (monotonic clock)."""
+    token = _PIPELINE_DEADLINE.set(time.monotonic() + seconds)
+    try:
+        yield
+    finally:
+        _PIPELINE_DEADLINE.reset(token)
+
+
+def raise_if_past_deadline():
+    deadline = _PIPELINE_DEADLINE.get()
+    if deadline is not None and time.monotonic() >= deadline:
+        raise SoftTimeLimitExceeded("pipeline soft time limit reached")
+
+
 class StepTracker:
     """Pure utility class for tracking pipeline step lifecycle."""
 
     def start_step(self, step_name):
+        raise_if_past_deadline()
         return {
             "step_name": step_name,
             "status": "running",
@@ -70,6 +108,11 @@ class StepTracker:
         return step
 
     def fail_step(self, step, error, failure_category=None):
+        # Step handlers call this from inside their broad except arm; a soft
+        # time limit being handled there must reach the task, not be recorded.
+        handled = sys.exc_info()[1]
+        if isinstance(handled, SoftTimeLimitExceeded):
+            raise handled
         now = datetime.now(UTC)
         step["status"] = "failed"
         step["completed_at"] = now.isoformat()
