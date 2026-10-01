@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { toast } from 'sonner'
+import { clearSession } from '@/lib/session'
 
 // API parameter and payload types
 interface PaginationParams {
@@ -67,22 +68,12 @@ const api = axios.create({
 })
 
 /**
- * Clear auth session and redirect to login.
- *
- * Called from the response interceptor when a token refresh fails — mirrors
- * the sessionStorage + redirect convention used by useAuth.logout(), but does
- * not require importing the React hook (interceptors run outside React).
- *
- * Exported so unit tests can spy on / replace it without touching window.location.
+ * Clear the client session hints and redirect to login. Called from the
+ * response interceptor when a token refresh fails (interceptors run outside
+ * React, so this cannot go through useAuth.logout()).
  */
-export function clearAuthAndRedirect(): void {
-  if (typeof sessionStorage !== 'undefined') {
-    sessionStorage.removeItem('user')
-  }
-  if (typeof document !== 'undefined') {
-    // Clear the role cookie (max-age=0 expires it immediately)
-    document.cookie = 'user_role=;path=/;max-age=0'
-  }
+function clearAuthAndRedirect(): void {
+  clearSession()
   if (typeof window !== 'undefined') {
     window.location.assign('/login')
   }
@@ -141,8 +132,7 @@ api.interceptors.response.use(
         return api(originalRequest)
       } catch {
         // Refresh failed — clear auth state and redirect to login so the user
-        // is not left on a blank/stuck page. Mirror the logout convention in
-        // useAuth (sessionStorage + redirect) without importing the React hook.
+        // is not left on a blank/stuck page.
         clearAuthAndRedirect()
         return Promise.reject(error)
       } finally {
@@ -172,6 +162,21 @@ api.interceptors.response.use(
 )
 
 export default api
+
+/**
+ * Run `request`, resolving to `fallback` when the endpoint answers 404
+ * (e.g. no active model has been trained yet). Any other error is rethrown.
+ */
+export async function withNotFoundFallback<T, F>(request: () => Promise<T>, fallback: F): Promise<T | F> {
+  try {
+    return await request()
+  } catch (err) {
+    if ((err as { response?: { status?: number } }).response?.status === 404) {
+      return fallback
+    }
+    throw err
+  }
+}
 
 // Auth
 export const authApi = {

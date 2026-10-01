@@ -11,7 +11,7 @@ interface UsePipelineOrchestrationReturn {
   pipelineError: string | null
   pipelineSuccess: string | null
   pipelineDisabled: boolean
-  // Promise<void> so callers can await and react to orchestration failures (H25)
+  // Promise<void> so callers can await and react to orchestration failures
   handleOrchestrate: () => Promise<void>
 }
 

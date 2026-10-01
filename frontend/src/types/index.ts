@@ -486,13 +486,6 @@ export interface ModelCard {
   last_updated: string;
 }
 
-export interface TaskStatus {
-  task_id: string;
-  status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE';
-  result: Record<string, unknown> | string | null;
-  date_done: string | null;
-}
-
 export interface PaginatedResponse<T> {
   count: number;
   next: string | null;
@@ -525,11 +518,9 @@ export interface DashboardStatusStrip {
 }
 
 // Dashboard stats — response shape of GET /loans/dashboard-stats/.
-// Fields added in PR-1 of the dashboard persona refit are marked.
 export interface DashboardStats {
   total_applications: number
   approval_rate: number
-  // PR-1 additions:
   approved_count: number
   denied_count: number
   avg_processing_seconds: number | null
@@ -538,7 +529,6 @@ export interface DashboardStats {
   decisions_24h_count: number
   llm_spend_today_usd: number
   llm_spend_cap_usd: number
-  // end PR-1 additions
   active_model: {
     name: string | null
     auc: number | null
