@@ -32,7 +32,6 @@ from .serializers import (
     LoanApplicationCustomerUpdateSerializer,
     LoanApplicationSerializer,
 )
-from .services.dashboard_status import compute_status_strip
 from .services.decision_review import apply_review_outcome, withdraw_review
 from .services.overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
 from .tasks import dispatch_pipeline_or_queue_failed
@@ -285,7 +284,6 @@ class DashboardStatsView(APIView):
                 if pipeline_total > 0
                 else 0,
             },
-            "status_strip": compute_status_strip(),
         }
 
 
