@@ -69,6 +69,7 @@ def test_generate_does_not_sleep_on_rate_limit(monkeypatch):
         email = "test@example.com"
 
     class _FakeApp:
+        pk = None  # EmailGenerator attributes the APP 8 API-call log to application.pk
         applicant = _FakeApplicant()
         loan_amount = 25000
         decision = None
