@@ -9,8 +9,6 @@ from .base import *  # noqa: F401, F403
 DEBUG = False
 
 # Must match the env var name used in base.py (DJANGO_ALLOWED_HOSTS).
-# production.py previously read "ALLOWED_HOSTS" which silently returned an
-# empty list when only DJANGO_ALLOWED_HOSTS was set (H29).
 _hosts = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
 ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()]
 if not ALLOWED_HOSTS:
@@ -22,7 +20,6 @@ if not ALLOWED_HOSTS:
     )
 
 # Security settings
-SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
@@ -44,23 +41,11 @@ CSRF_COOKIE_HTTPONLY = False
 # Celery task limits
 CELERY_TASK_TIME_LIMIT = 600
 CELERY_TASK_SOFT_TIME_LIMIT = 540
-# worker_max_tasks_per_child is set canonically in celery.py with env-var override;
-# remove duplicate here to avoid the Django CELERY_* setting shadowing it.
+# worker_max_tasks_per_child is set in celery.py (env-var override there).
 CELERY_RESULT_EXPIRES = 3600
 
 # Enforce Content Security Policy in production (base.py has REPORT_ONLY=True for dev)
-CONTENT_SECURITY_POLICY = {
-    "REPORT_ONLY": False,
-    "DIRECTIVES": {
-        "default-src": ["'self'"],
-        "script-src": ["'self'"],
-        "style-src": ["'self'", "'unsafe-inline'"],
-        "img-src": ["'self'", "data:"],
-        "font-src": ["'self'"],
-        "connect-src": ["'self'"],
-        "frame-ancestors": ["'none'"],
-    },
-}
+CONTENT_SECURITY_POLICY = {**CONTENT_SECURITY_POLICY, "REPORT_ONLY": False}  # noqa: F405
 
 # Logging
 LOGGING = {

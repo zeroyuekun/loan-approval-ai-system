@@ -119,7 +119,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # Tag this app's PostgreSQL connections so the watchdog's idle-in-transaction
-# reaper (L24) can scope pg_terminate_backend to ONLY this app's wedged
+# reaper can scope pg_terminate_backend to ONLY this app's wedged
 # transactions and never touch a pooler's healthy idle connections. The
 # watchdog reads the same DB_APPLICATION_NAME setting — keep them in sync.
 DB_APPLICATION_NAME = os.environ.get("DB_APPLICATION_NAME", "loan_approval")
@@ -194,7 +194,6 @@ SIMPLE_JWT = {
 # JWT Cookie settings (HttpOnly cookies instead of localStorage)
 JWT_COOKIE_SECURE = not DEBUG  # Secure flag in production
 JWT_COOKIE_SAMESITE = "Lax"
-JWT_COOKIE_HTTPONLY = True
 JWT_ACCESS_COOKIE_NAME = "access_token"
 JWT_REFRESH_COOKIE_NAME = "refresh_token"
 
@@ -243,15 +242,9 @@ CSRF_COOKIE_HTTPONLY = False  # Frontend JS needs to read CSRF token
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "django-db")
 CELERY_RESULT_EXPIRES = 3600  # Expire task results after 1 hour to prevent DB bloat
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
-CELERY_TASK_ROUTES = {
-    "apps.ml_engine.tasks.*": {"queue": "ml"},
-    "apps.email_engine.tasks.*": {"queue": "email"},
-    "apps.agents.tasks.*": {"queue": "agents"},
-}
+# Serializers, task routes, acks and worker tuning are set on app.conf in
+# config/celery.py (app.conf assignments take precedence over CELERY_* here).
 
 # Django Cache (Redis-backed)
 CACHES = {
@@ -277,13 +270,12 @@ ML_FAIRNESS_TARGET_DI = 0.80  # Target disparate impact ratio (EEOC 80% rule)
 # but excluded from the min/max ratio, which is otherwise dominated by their
 # sampling noise. Shared by MetricsService.compute_fairness_metrics and the gate.
 FAIRNESS_MIN_GROUP_SIZE = 30
-ML_OVERFITTING_THRESHOLD = 0.05  # Flag if train-test AUC gap exceeds this
 # XGBoost max_bin for histogram construction. 256 is the XGBoost default and
 # is plenty for the 50k-row / 35-feature synthetic dataset; 512 doubled the
 # histogram memory and training cost with no measurable accuracy gain.
 ML_MAX_BIN = 256
 # Optuna trials per tuning run. TPE with a fixed seed converges well before
-# trial 30; trials 30-50 typically add <0.002 AUC. Overridable via env var.
+# trial 30; trials 30-50 typically add <0.002 AUC.
 ML_OPTUNA_TRIALS = 30
 # Threads per XGBoost training. Matches the celery_worker_ml CPU quota.
 ML_XGB_N_JOBS = 2
@@ -292,7 +284,7 @@ ML_XGB_N_JOBS = 2
 # self-heal stays fast while still producing a usable model. Env-overridable.
 ML_AUTO_SEED_ROWS = _env_int("ML_AUTO_SEED_ROWS", 20000)
 
-# Hard credit policy overlay (D3). Modes: "off" (not applied), "shadow"
+# Hard credit policy overlay. Modes: "off" (not applied), "shadow"
 # (evaluated + logged, model verdict stands), "enforce" (hard-fails override
 # the model, refers route to human review). Default is "shadow" so the rule
 # set can be calibrated against production traffic before being promoted
@@ -305,9 +297,8 @@ CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shado
 # "warn" (default — log + flag failures, leave model active; current
 # behaviour byte-identical), "block" (refuse activation if fairness gate
 # fails or no fairness data was recorded — old segment models keep serving),
-# "off" (skip the check entirely; emergency escape hatch). Default is "warn"
-# so the PR ships zero behaviour change for any deployment that doesn't set
-# the env var; flip to "block" only after validating the training pipeline
+# "off" (skip the check entirely; emergency escape hatch). Default is "warn";
+# flip to "block" only after validating the training pipeline
 # produces compliant fairness metrics for the segments in scope. See
 # docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
 ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
@@ -317,24 +308,22 @@ ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
 # on training_metadata, model activates regardless), "block" (refuse activation
 # if model_selector.promote_if_eligible reports any of the 4 gates failed —
 # KS regression, PSI stability, ECE calibration, AUC regression), "off" (skip
-# the check entirely). Default "warn" so the PR ships zero behaviour change for
-# any deployment that doesn't set the env var; flip to "block" only after
+# the check entirely). Default "warn"; flip to "block" only after
 # validating the trainer produces compliant promotion metrics for the segments
 # in scope. See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
 ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
 
-# Pre-activation validation sign-off gate mode (Codex v1.10.7). Mirrors the
+# Pre-activation validation sign-off gate mode. Mirrors the
 # fairness/promotion gate pattern: "warn" (default — gate runs, decision is
 # recorded, activation proceeds even with no approved ModelValidationReport),
 # "block" (training-path candidates are demoted to is_active=False without
 # an approved sign-off; manual ModelActivateView returns 409 unless ?force=true
-# is provided), "off" (skip the check entirely). Defaults to "warn" so the
-# PR ships zero behaviour change for any deployment that doesn't set the env
-# var; flip to "block" once operators have established a sign-off cadence.
+# is provided), "off" (skip the check entirely). Defaults to "warn"; flip to
+# "block" once operators have established a sign-off cadence.
 # See docs/superpowers/specs/2026-05-07-codex-adversarial-response-v1-10-7-design.md.
 ML_VALIDATION_SIGNOFF_GATE_MODE = os.environ.get("ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
 
-# D7 — MRM dossier auto-generation on ModelVersion post_save.
+# MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
 MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").lower() == "true"
 
@@ -343,7 +332,7 @@ MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").
 # without removing the API surface (returns 503).
 DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lower() in ("true", "1", "yes")
 
-# L29 — maker/checker gate on high-value officer overturns. Default "off"
+# Maker/checker gate on high-value officer overturns. Default "off"
 # (no behaviour change). "2fa" requires the acting officer to hold a verified
 # TOTP device before overturning a denial >= DECISION_OVERTURN_THRESHOLD;
 # "second_approver" blocks such overturns at the API pending dual approval.
@@ -356,15 +345,15 @@ DECISION_OVERTURN_THRESHOLD = _env_float("DECISION_OVERTURN_THRESHOLD", 100000)
 # does NOT create an escalated AgentRun, so a borderline/drift/policy-refer
 # prediction would park the application in 'review' with no resumable run and a
 # stale ADM disclosure. Default OFF; flip on only for ad-hoc scoring that does
-# not rely on the human-review queue. (Phase-1 holistic Issue 1.)
+# not rely on the human-review queue.
 ML_STANDALONE_PREDICT_ENABLED = os.environ.get("ML_STANDALONE_PREDICT_ENABLED", "false").lower() in (
     "true",
     "1",
     "yes",
 )
 
-# Two-factor authentication (PR-4 of the security gap-closure cycle —
-# spec: docs/superpowers/specs/2026-05-25-security-gap-closure-design.md).
+# Two-factor authentication
+# (spec: docs/superpowers/specs/2026-05-25-security-gap-closure-design.md).
 #
 # ENFORCE_2FA_FOR_STAFF — when "true", IsAdmin / IsAdminOrOfficer /
 # IsLoanOfficer permissions require the user to have a confirmed TOTP
@@ -384,7 +373,6 @@ ALLOW_2FA_BYPASS = os.environ.get("ALLOW_2FA_BYPASS", "false").lower() == "true"
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_SAMESITE = "Lax"
 
 # HSTS (HTTP Strict Transport Security) — production only
 if not DEBUG:
@@ -407,7 +395,7 @@ if not FIELD_ENCRYPTION_KEY and not DEBUG:
 
     raise ImproperlyConfigured("FIELD_ENCRYPTION_KEY must be set in production")
 
-# KMS abstraction for field-level encryption (PR-1 of security gap-closure).
+# KMS abstraction for field-level encryption.
 #  - "env" (default): read FIELD_ENCRYPTION_KEY from settings (current behaviour)
 #  - "aws": fetch a DEK from AWS KMS via boto3.generate_data_key
 #
@@ -465,8 +453,7 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")  # blank -> backend default (l
 OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "ollama")  # dummy; Ollama ignores auth
 
 # Model for the senior bias reviewer (Head of Compliance — holistic email review).
-# Blank/unset -> Opus 4.8 (the free same-price upgrade over the now-legacy Opus
-# 4.7: ~4x less likely to miss a flaw). Sampling-param handling for adaptive-only
+# Blank/unset -> claude-opus-4-8. Sampling-param handling for adaptive-only
 # models lives in guarded_api_call.
 BIAS_REVIEWER_MODEL = os.environ.get("BIAS_REVIEWER_MODEL", "") or "claude-opus-4-8"
 
@@ -479,13 +466,13 @@ BIAS_THRESHOLD_REVIEW = 60  # 31-60: moderate bias, LLM reviews for false positi
 # Rationale: marketing emails target declined customers who are in a vulnerable position.
 # ASIC REP 798 flagged insufficient consumer fairness policies — stricter marketing
 # bias controls demonstrate responsible AI governance for vulnerable consumers.
-# Decision emails: human review at 61-80, escalation at 81+
+# Decision emails: see BIAS_THRESHOLD_PASS / BIAS_THRESHOLD_REVIEW above
 # Marketing emails: AI review at 51-70, blocked at 71+ (no human override — conservative)
 MARKETING_BIAS_THRESHOLD_PASS = 50  # 0-50: compliant marketing email
 MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior AI review
 # 71+: blocked entirely — marketing to vulnerable declined customers requires zero bias risk
 
-# Bias-check failure policy (M7/M10/L21). When the bias check cannot RUN
+# Bias-check failure policy. When the bias check cannot RUN
 # (detector construction, pre-screen crash, or an unexpected error — NOT a
 # Claude LLM outage, which already falls back to the deterministic score),
 # the pipeline applies this policy. Mirrors the warn/block/off pattern of the

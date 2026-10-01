@@ -3,7 +3,7 @@
 Used by email_generator.py, bias_detector.py, and any other service that
 passes user-controlled strings into LLM prompts.
 
-Improvements over the original per-module implementations:
+Hardening applied:
 - Unicode NFKC normalization (collapses homoglyphs like fullwidth chars)
 - Zero-width character stripping (U+200B, U+200C, U+200D, U+FEFF, etc.)
 - Broader injection pattern coverage
