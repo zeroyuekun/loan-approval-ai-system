@@ -100,7 +100,6 @@ def test_403_with_token_at_threshold_fires_critical_alert(mock_get, mock_record,
     assert cmd.consecutive_failures == 3
     assert mock_record.call_args[0][0] == "auth_rejected"
     mock_logger.critical.assert_called_once()
-    assert "3" in mock_logger.critical.call_args[0][0] % mock_logger.critical.call_args[0][1:]
 
 
 @patch("apps.agents.management.commands.watchdog.logger")

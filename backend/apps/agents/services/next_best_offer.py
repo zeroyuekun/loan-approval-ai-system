@@ -1,9 +1,9 @@
 import json
 import logging
-import os
 
 import anthropic
-import httpx
+
+from utils.anthropic_client import make_anthropic_client
 
 from .api_budget import guarded_api_call
 from .recommendation_engine import RecommendationEngine
@@ -40,14 +40,7 @@ class NextBestOfferGenerator:
     """
 
     def __init__(self):
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if api_key:
-            self.client = anthropic.Anthropic(
-                api_key=api_key,
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
-        else:
-            self.client = None
+        self.client = make_anthropic_client()
         self.engine = RecommendationEngine()
 
     def generate(self, application, denial_reasons=""):

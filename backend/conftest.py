@@ -14,6 +14,4 @@ def _isolate_email_llm_client(monkeypatch):
 
     monkeypatch.delenv("EMAIL_LLM_BACKEND", raising=False)
     monkeypatch.delenv("EMAIL_LLM_MODEL", raising=False)
-    email_generator._CLIENT_CACHE.clear()
-    yield
-    email_generator._CLIENT_CACHE.clear()
+    monkeypatch.setattr(email_generator, "_CLIENT_CACHE", {})

@@ -1,6 +1,7 @@
 """Subjects must contain exactly one "Loan": purposes arrive both as enum keys
-("personal") and as display-form values ("Auto Loan" — the primary real
-get_purpose_display() value ending in Loan), plus hypothetical product names."""
+("personal") and as display-form values ("Auto Loan"), plus product names."""
+
+import pytest
 
 from apps.email_engine.services.template_fallback import (
     _loan_label,
@@ -9,24 +10,23 @@ from apps.email_engine.services.template_fallback import (
 )
 
 
-def test_loan_label_appends_loan_to_bare_types():
-    """Bare enum keys get ' Loan' appended; "Business Loan" and "Home Loan" are preserved."""
-    assert _loan_label("personal") == "Personal Loan"
-    assert _loan_label("auto") == "Vehicle Loan"
-    assert _loan_label("home") == "Home Purchase Loan"
-    assert _loan_label("Business Loan") == "Business Loan"
-    assert _loan_label("Home Loan") == "Home Loan"
-
-
-def test_loan_label_keeps_single_loan_for_display_form_and_products():
-    """Display-form values and product names already ending in 'Loan' are unchanged.
-
-    "Auto Loan" is the primary real get_purpose_display() value; "green_loan"
-    is a hypothetical product-name case.
-    """
-    assert _loan_label("Personal Loan") == "Personal Loan"
-    assert _loan_label("green_loan") == "Green Loan"
-    assert _loan_label("Auto Loan") == "Auto Loan"
+@pytest.mark.parametrize(
+    ("purpose", "expected"),
+    [
+        # Bare enum keys get " Loan" appended.
+        ("personal", "Personal Loan"),
+        ("auto", "Vehicle Loan"),
+        ("home", "Home Purchase Loan"),
+        # Display-form values and product names already ending in "Loan" are unchanged.
+        ("Business Loan", "Business Loan"),
+        ("Home Loan", "Home Loan"),
+        ("Personal Loan", "Personal Loan"),
+        ("green_loan", "Green Loan"),
+        ("Auto Loan", "Auto Loan"),
+    ],
+)
+def test_loan_label_ends_in_single_loan(purpose, expected):
+    assert _loan_label(purpose) == expected
 
 
 def test_approval_template_has_single_loan_word():

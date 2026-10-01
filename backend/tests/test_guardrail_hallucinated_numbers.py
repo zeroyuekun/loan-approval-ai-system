@@ -158,33 +158,28 @@ def test_no_nbo_unaffected(checker):
 # ---------------------------------------------------------------------------
 
 
-def test_interest_at_actual_low_rate_passes_with_offer_rates(checker):
-    """$20,000 at 4.90% → $980/yr is correct and must pass when the caller
-    passes the offer with its rate."""
-    # 20000 × 0.049 = 980 (annual), 81.67 (monthly), 37.69 (fortnightly).
-    # None of these fall in the 30%-band derivations (annual $6,000 band
-    # $5,400–$6,600; P/12 $1,667 band $1,500–$1,833; P/26 $769 band $692–$846).
-    text = "With our $20,000 offer, you could save around $980 in interest over the first year."
+@pytest.mark.parametrize(
+    ("amount", "rate", "text"),
+    [
+        # 20000 × 0.049 = 980 (annual), 81.67 (monthly), 37.69 (fortnightly).
+        # None of these fall in the 30%-band derivations (annual $6,000 band
+        # $5,400–$6,600; P/12 $1,667 band $1,500–$1,833; P/26 $769 band $692–$846).
+        (20000, 4.90, "With our $20,000 offer, you could save around $980 in interest over the first year."),
+        # $2,997/yr exceeds the P/12 band ceiling ($2,750).
+        (30000, 9.99, "A $30,000 consolidation loan would cost about $2,997 in interest for the first year."),
+    ],
+    ids=["low-rate", "mid-rate"],
+)
+def test_interest_at_actual_rate_passes_with_offer_rates(checker, amount, rate, text):
+    """Interest that is correct at the offer's actual rate, but outside the
+    30%-band derivations, must pass when the caller passes the offer with its rate."""
     context = {
-        "loan_amount": 20000,
-        "nbo_amounts": [20000],
-        "nbo_offers": [{"amount": 20000, "estimated_rate": 4.90}],
+        "loan_amount": amount,
+        "nbo_amounts": [amount],
+        "nbo_offers": [{"amount": amount, "estimated_rate": rate}],
     }
     result = checker.check_hallucinated_numbers(text, context)
-    assert result["passed"], f"Correct interest at the offer's actual 4.90% rate should pass: {result['details']}"
-
-
-def test_interest_at_actual_mid_rate_passes_with_offer_rates(checker):
-    """$30,000 at 9.99% → $2,997/yr exceeds the P/12 band ceiling ($2,750) but
-    is correct at the offer's actual rate and must pass."""
-    text = "A $30,000 consolidation loan would cost about $2,997 in interest for the first year."
-    context = {
-        "loan_amount": 30000,
-        "nbo_amounts": [30000],
-        "nbo_offers": [{"amount": 30000, "estimated_rate": 9.99}],
-    }
-    result = checker.check_hallucinated_numbers(text, context)
-    assert result["passed"], f"Correct interest at the offer's actual 9.99% rate should pass: {result['details']}"
+    assert result["passed"], f"Correct interest at the offer's actual {rate}% rate should pass: {result['details']}"
 
 
 def test_fabricated_amount_still_flagged_with_offer_rates(checker):

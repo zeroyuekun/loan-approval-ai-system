@@ -177,11 +177,9 @@ class OpenAICompatibleLLMClient:
 
         if resp.status_code == 429:
             # RateLimited reaches the Celery task, which retries after Retry-After.
-            try:
-                raise RateLimited(retry_after=int(resp.headers["retry-after"]))
-            except (KeyError, ValueError):
-                # Header missing, or an http-date: use RateLimited's default.
-                raise RateLimited() from None
+            # Header missing, or an http-date: use RateLimited's default.
+            retry_after = resp.headers.get("retry-after", "").strip()
+            raise RateLimited(retry_after=int(retry_after)) if retry_after.isdigit() else RateLimited()
         if resp.status_code >= 400:
             # 4xx (e.g. 413 request-too-large on a small free tier) / 5xx →
             # degrade to the template rather than hard-error.

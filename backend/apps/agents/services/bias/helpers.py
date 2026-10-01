@@ -1,13 +1,14 @@
 import json
 import logging
-import os
 
 import anthropic
-import httpx
 
+from utils.anthropic_client import (
+    make_anthropic_client as _make_anthropic_client,  # noqa: F401 - re-exported to bias modules
+)
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
-from ..api_budget import BudgetExhausted, CircuitOpen, guarded_api_call
+from ..api_budget import ApiGateClosed, guarded_api_call
 
 logger = logging.getLogger("agents.bias_detector")
 
@@ -32,20 +33,6 @@ def _extract_tool_result(response, fallback):
         if text_block:
             return _parse_json_response(text_block.text, fallback)
         return fallback
-
-
-def _make_anthropic_client():
-    """Construct an Anthropic client if ANTHROPIC_API_KEY is set, else None."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if api_key:
-        return anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-            # Pin the SDK's transient-error retry policy (connect errors,
-            # 408/429/5xx with backoff) so the relied-upon default can't drift.
-            max_retries=2,
-        )
-    return None
 
 
 # Default for the senior compliance reviewers (Opus 4.8 — free same-price
@@ -76,7 +63,7 @@ def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **
     """Call the Anthropic API once, returning ``fallback`` on terminal failure.
 
     Transient errors are retried by the SDK client's own bounded backoff
-    (policy pinned in _make_anthropic_client); there is no extra retry loop
+    (policy pinned in utils.anthropic_client); there is no extra retry loop
     here, which would hold the Celery worker thread longer. Any API error
     that survives the SDK retries returns ``fallback``, which the
     bias-detector callers score as the worst-case (high-risk) result.
@@ -86,7 +73,7 @@ def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **
     try:
         response = guarded_api_call(client, **api_kwargs)
         return _extract_tool_result(response, fallback)
-    except (BudgetExhausted, CircuitOpen):
+    except ApiGateClosed:
         raise  # let callers invoke _handle_bias_unavailable
     except anthropic.APIError as e:
         logger.error("%s failed (%s: %s) — %s", service_name, type(e).__name__, e, final_failure_suffix)

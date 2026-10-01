@@ -122,16 +122,20 @@ return {1, newcost, newcalls}
 """
 
 
-class BudgetExhausted(Exception):
+class ApiGateClosed(Exception):
+    """Base for every gate that refuses an API call before it is made.
+
+    Callers that degrade to a template catch this base, so a new gate
+    exception cannot slip past a site that only lists the old ones.
+    """
+
+
+class BudgetExhausted(ApiGateClosed):
     """Raised when the daily API budget is exhausted."""
 
-    pass
 
-
-class CircuitOpen(Exception):
+class CircuitOpen(ApiGateClosed):
     """Raised when the circuit breaker is open due to consecutive failures."""
-
-    pass
 
 
 # Process-local fallback counter used when Redis is unavailable.
@@ -207,7 +211,7 @@ class ApiBudgetGuard:
             # does not permanently brick this worker (F-04).
             with _REDIS_FALLBACK_LOCK:
                 _REDIS_FALLBACK_CALLS = 0
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             raise
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             # Redis is unavailable. We can't enforce the true daily budget, but
@@ -274,7 +278,7 @@ class ApiBudgetGuard:
             with _REDIS_FALLBACK_LOCK:
                 _REDIS_FALLBACK_CALLS = 0
             return estimated_cost_cents
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             raise
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             # Redis unavailable: reuse the per-process fallback cap so a brief

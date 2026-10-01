@@ -3,13 +3,13 @@ from datetime import date
 
 import anthropic
 
-from apps.agents.services.api_budget import BudgetExhausted, CircuitOpen, guarded_api_call
-from apps.agents.services.bias.helpers import _make_anthropic_client
-from apps.email_engine.services.guardrails import GuardrailChecker
+from apps.agents.services.api_budget import ApiGateClosed, guarded_api_call
+from apps.email_engine.services.guardrails import GuardrailChecker, nbo_offer_amounts
 
 # Use the hardened shared sanitizer (NFKC + zero-width strip + broader
 # blocklist + pipe removal) instead of a weaker local copy (L26). The alias
 # preserves the module-level name existing callers/tests import.
+from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 MARKETING_EMAIL_PROMPT = """You are filling in a templated follow-up email for AussieLoanAI. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline.
@@ -111,7 +111,7 @@ class MarketingAgent:
     MAX_RETRIES = 3
 
     def __init__(self):
-        self.client = _make_anthropic_client()
+        self.client = make_anthropic_client()
         self.guardrail_checker = GuardrailChecker()
 
     def generate(self, application, nbo_result, denial_reasons=""):
@@ -170,16 +170,10 @@ class MarketingAgent:
         figures the email quotes from the NBO result.
         """
         offers = (nbo_result or {}).get("offers", [])
-        nbo_amounts = [
-            float(offer[key])
-            for offer in offers
-            for key in ("amount", "monthly_repayment", "fortnightly_repayment")
-            if offer.get(key)
-        ]
         return {
             "decision": "denied",
             "loan_amount": float(application.loan_amount) if application.loan_amount else None,
-            "nbo_amounts": nbo_amounts,
+            "nbo_amounts": nbo_offer_amounts(offers),
             "nbo_offers": offers,
         }
 
@@ -202,6 +196,8 @@ class MarketingAgent:
         # worker thread longer.
         # Transient, budget, circuit and auth failures use the template;
         # unexpected errors raise and fail the marketing_email_generation step.
+        # Each fallback arm only logs; the single template return follows the try.
+        response = None
         try:
             response = guarded_api_call(
                 self.client,
@@ -210,38 +206,31 @@ class MarketingAgent:
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
                 messages=[{"role": "user", "content": current_prompt}],
             )
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             _logger.info("Marketing email API budget exhausted, circuit open, or no API key — using template")
-            return self._marketing_template_fallback(application, start_time, nbo_result=nbo_result)
         except anthropic.AuthenticationError as api_err:
             _logger.error("Marketing email API auth error (not retryable): %s", api_err)
-            return self._marketing_template_fallback(application, start_time, nbo_result=nbo_result)
-        except anthropic.RateLimitError as api_err:
-            # Transient: rate limit → template fallback (no sleep)
-            _logger.warning("Marketing email API rate limited — using template: %s", api_err)
-            return self._marketing_template_fallback(application, start_time, nbo_result=nbo_result)
-        except (anthropic.APITimeoutError, anthropic.APIConnectionError) as api_err:
-            # Transient: network/timeout → template fallback (no sleep)
-            _logger.warning("Marketing email API connection/timeout — using template: %s", api_err)
-            return self._marketing_template_fallback(application, start_time, nbo_result=nbo_result)
+        except (anthropic.RateLimitError, anthropic.APIConnectionError) as api_err:
+            # Transient (rate limit, network, timeout) → template fallback (no sleep).
+            # APITimeoutError subclasses APIConnectionError.
+            _logger.warning("Marketing email API %s — using template: %s", type(api_err).__name__, api_err)
         except anthropic.APIStatusError as api_err:
             if api_err.status_code >= 500:
-                # Transient: server error → template fallback (no sleep)
                 _logger.warning(
                     "Marketing email API server error (%d) — using template: %s",
                     api_err.status_code,
                     api_err,
                 )
-                return self._marketing_template_fallback(application, start_time, nbo_result=nbo_result)
             elif "credit" in str(api_err).lower() or "balance" in str(api_err).lower():
                 _logger.warning("Marketing email API credit insufficient — using template")
-                return self._marketing_template_fallback(application, start_time, nbo_result=nbo_result)
             else:
                 _logger.error("Marketing email API client error (%d, not retryable): %s", api_err.status_code, api_err)
                 raise
         except Exception as api_err:
             _logger.critical("Marketing email API UNEXPECTED failure: %s", api_err, exc_info=True)
             raise
+        if response is None:
+            return self._marketing_template_fallback(application, start_time, nbo_result=nbo_result)
 
         response_text = response.content[0].text
         generation_time_ms = int((time.time() - start_time) * 1000)

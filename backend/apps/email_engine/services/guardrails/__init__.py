@@ -8,6 +8,6 @@ Re-export the class so `from apps.email_engine.services.guardrails import Guardr
 keeps working after the module → package conversion.
 """
 
-from .engine import GuardrailChecker
+from .engine import GuardrailChecker, nbo_offer_amounts
 
-__all__ = ["GuardrailChecker"]
+__all__ = ["GuardrailChecker", "nbo_offer_amounts"]

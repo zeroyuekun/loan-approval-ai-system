@@ -99,8 +99,6 @@ class Command(BaseCommand):
             self.max_idle_minutes,
             self.max_failures,
         )
-        if not getattr(settings, "HEALTH_CHECK_TOKEN", ""):
-            logger.info("HEALTH_CHECK_TOKEN is unset — deep health checks will be skipped; set it to enable them")
 
         while self._running:
             try:
@@ -128,10 +126,8 @@ class Command(BaseCommand):
 
     def _check_health(self):
         """Poll the deep health endpoint and track failures."""
-        from django.conf import settings as django_settings
-
         backend_url = "http://backend:8000/api/v1/health/deep/"
-        token = getattr(django_settings, "HEALTH_CHECK_TOKEN", "")
+        token = getattr(settings, "HEALTH_CHECK_TOKEN", "")
         headers = {"X-Health-Token": token} if token else {}
         try:
             resp = httpx.get(backend_url, timeout=10, headers=headers)

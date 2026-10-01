@@ -11,6 +11,13 @@ from . import patterns
 
 logger = logging.getLogger("email_engine.guardrails")
 
+NBO_AMOUNT_KEYS = ("amount", "monthly_repayment", "fortnightly_repayment")
+
+
+def nbo_offer_amounts(offers):
+    """Dollar figures from NBO offer dicts, for the ``nbo_amounts`` guardrail context."""
+    return [float(offer[key]) for offer in offers for key in NBO_AMOUNT_KEYS if offer.get(key)]
+
 
 class GuardrailChecker:
     """Runs compliance checks on generated emails."""

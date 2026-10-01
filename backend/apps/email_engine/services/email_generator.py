@@ -5,11 +5,12 @@ import time
 import anthropic
 import httpx
 
+from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from .documentation import build_documentation_checklist
 from .exceptions import EmailBackendError
-from .guardrails import GuardrailChecker
+from .guardrails import GuardrailChecker, nbo_offer_amounts
 from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
 
@@ -105,11 +106,8 @@ class EmailGenerator:
         Returns ``(client_or_None, provider_name, model_id)``. A missing API key
         yields a ``None`` client, which routes ``generate()`` to the
         deterministic template fallback — the system never depends on any API to
-        produce a compliant, sendable email.
-
-        Clients are memoized in ``_CLIENT_CACHE`` keyed by their full
-        construction config, so per-task EmailGenerator() instances reuse one
-        connection pool instead of churning an unclosed httpx.Client each call.
+        produce a compliant, sendable email. Clients are memoized in
+        ``_CLIENT_CACHE`` (see its comment).
         """
         if backend == "groq":
             from .llm_client import DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, GroqLLMClient
@@ -168,10 +166,7 @@ class EmailGenerator:
         if not api_key:
             return None, "anthropic", model
         # The model is a per-request kwarg, so the key alone identifies the client.
-        client = _cached_client(
-            ("anthropic", api_key),
-            lambda: anthropic.Anthropic(api_key=api_key, timeout=httpx.Timeout(60.0, connect=10.0)),
-        )
+        client = _cached_client(("anthropic", api_key), make_anthropic_client)
         return client, "anthropic", model
 
     # Map ML feature names to plain-language denial reasons
@@ -410,11 +405,7 @@ class EmailGenerator:
             # Whitelist the teaser figures so the hallucinated-numbers guardrail
             # (engine.py:61) recognises them on the decision email.
             if nbo_offer:
-                nbo_amounts = []
-                for key in ("amount", "monthly_repayment", "fortnightly_repayment"):
-                    val = nbo_offer.get(key)
-                    if val:
-                        nbo_amounts.append(float(val))
+                nbo_amounts = nbo_offer_amounts([nbo_offer])
                 if nbo_amounts:
                     context["nbo_amounts"] = nbo_amounts
 
@@ -458,12 +449,12 @@ class EmailGenerator:
         # Call Claude API with tool_use for structured output (with budget check)
         from django.conf import settings as django_settings
 
-        from apps.agents.services.api_budget import ApiBudgetGuard, BudgetExhausted, CircuitOpen, guarded_api_call
+        from apps.agents.services.api_budget import ApiBudgetGuard, ApiGateClosed, guarded_api_call
 
         budget = ApiBudgetGuard()
         try:
             budget.check_budget()
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             # CircuitOpen: the shared breaker may have been tripped by ANOTHER
             # AI service's failures — the customer still gets a template email.
             return self._generate_fallback(application, decision, context, start_time)
@@ -497,7 +488,7 @@ class EmailGenerator:
             if usage:
                 input_tokens = getattr(usage, "input_tokens", 0)
                 output_tokens = getattr(usage, "output_tokens", 0)
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             return self._generate_fallback(application, decision, context, start_time)
         except anthropic.RateLimitError as exc:
             # Anthropic-backend seam only: the OpenAI-compatible adapter raises

@@ -137,7 +137,16 @@ class TestGroqRequestPayload:
         # Auth header carries the bearer key.
         assert c._http.post.call_args.kwargs["headers"]["Authorization"] == "Bearer test-key"
 
-    def test_system_string_kwarg_becomes_leading_system_message(self):
+    @pytest.mark.parametrize(
+        ("system", "expected"),
+        [
+            ("You are a compliance email writer.", "You are a compliance email writer."),
+            # Anthropic also allows system as a list of text blocks.
+            ([{"type": "text", "text": "Line one."}, {"type": "text", "text": "Line two."}], "Line one.\nLine two."),
+        ],
+        ids=["string", "block-list"],
+    )
+    def test_system_kwarg_becomes_leading_system_message(self, system, expected):
         # api_budget._extract_prompt_text hashes kwargs["system"] into the APP 8
         # audit record — so the adapter must actually SEND it, not drop it.
         c = _client()
@@ -145,29 +154,11 @@ class TestGroqRequestPayload:
             payload=_completion(tool_args=json.dumps({"subject": "S", "body": "B"}))
         )
 
-        c.messages.create(
-            system="You are a compliance email writer.",
-            messages=[{"role": "user", "content": "hello"}],
-        )
+        c.messages.create(system=system, messages=[{"role": "user", "content": "hello"}])
 
         sent = c._http.post.call_args.kwargs["json"]
-        assert sent["messages"][0] == {"role": "system", "content": "You are a compliance email writer."}
+        assert sent["messages"][0] == {"role": "system", "content": expected}
         assert sent["messages"][1] == {"role": "user", "content": "hello"}
-
-    def test_system_block_list_is_joined_into_system_message(self):
-        # Anthropic also allows system as a list of text blocks.
-        c = _client()
-        c._http.post.return_value = _http_response(
-            payload=_completion(tool_args=json.dumps({"subject": "S", "body": "B"}))
-        )
-
-        c.messages.create(
-            system=[{"type": "text", "text": "Line one."}, {"type": "text", "text": "Line two."}],
-            messages=[{"role": "user", "content": "hello"}],
-        )
-
-        sent = c._http.post.call_args.kwargs["json"]
-        assert sent["messages"][0] == {"role": "system", "content": "Line one.\nLine two."}
 
     def test_unknown_kwarg_warns_but_call_proceeds(self, caplog):
         # Silent kwarg drops are an audit-integrity hazard; future drops must be
