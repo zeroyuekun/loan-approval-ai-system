@@ -1,10 +1,6 @@
 """Training subpackage — model training pipeline + feature engineering.
 
-Extracted from the flat ml_engine/services/ directory on 2026-05-26 as part
-of PR-5 of the decomposition cycle (see
-docs/superpowers/specs/2026-05-25-ml-engine-decomposition-design.md).
-
-- ``trainer`` — main ModelTrainer entry point (1334 LOC) including Optuna
+- ``trainer`` — main ModelTrainer entry point including Optuna
   hyperparameter optimisation, isotonic calibration, monotonic constraints
 - ``feature_engineering`` — engineered interaction features
 - ``feature_prep`` — pre-training feature preparation

@@ -95,25 +95,22 @@ def _metric(mv: ModelVersion, key: str, default=None):
     val = getattr(mv, key, None)
     if val is not None:
         return val
+    # Some metrics (e.g. brier_decomp, psi_by_feature) are persisted only in
+    # training_metadata, notably on older records.
     meta = getattr(mv, "training_metadata", None) or {}
-    if key in meta:
-        return meta[key]
-    # brier_decomp + psi_by_feature live at the top of the metrics payload but
-    # trainer persists them only in training_metadata on older records.
     return meta.get(key, default)
 
 
 def _max_psi(mv: ModelVersion) -> float:
     """Return the largest per-feature PSI recorded at training time.
 
-    Reads from `training_metadata.psi_by_feature` which D5 populates. If the
-    attribute is missing (pre-D5 model) the gate treats PSI as 0 — the model
-    simply hasn't recorded stability data and we refuse to promote.
+    Reads from `training_metadata.psi_by_feature`. If it is missing (older
+    model with no recorded stability data) this returns +inf so the gate
+    refuses to promote.
     """
     meta = getattr(mv, "training_metadata", None) or {}
     by_feature = meta.get("psi_by_feature") or {}
     if not by_feature:
-        # pre-D5 model — refuse to judge by returning an above-threshold value
         return float("inf")
     try:
         return float(max(by_feature.values()))

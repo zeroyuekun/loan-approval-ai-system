@@ -1,10 +1,10 @@
-import hashlib
 from datetime import datetime
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from apps.ml_engine.models import ModelVersion
+from apps.ml_engine.services.scoring.prediction_cache import file_sha256
 from apps.ml_engine.services.scoring.predictor import clear_model_cache
 from apps.ml_engine.services.training.trainer import ModelTrainer
 
@@ -35,7 +35,7 @@ class Command(BaseCommand):
 
         # Self-heal: parity with the Celery "Train Model" path so a fresh clone
         # (no .tmp/synthetic_loans.csv) doesn't die with a cryptic FileNotFoundError.
-        from apps.ml_engine.tasks import _ensure_training_data
+        from apps.ml_engine.tasks import _ensure_training_data, model_version_metric_fields
 
         if _ensure_training_data(data_path):
             self.stdout.write(self.style.WARNING(f"No training data at {data_path} — generated a synthetic dataset."))
@@ -49,12 +49,7 @@ class Command(BaseCommand):
         model_path = str(settings.ML_MODELS_DIR / model_filename)
         trainer.save_model(model, model_path)
 
-        # Compute SHA-256 hash of saved model file for integrity verification
-        sha256 = hashlib.sha256()
-        with open(model_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                sha256.update(chunk)
-        file_hash = sha256.hexdigest()
+        file_hash = file_sha256(model_path)  # integrity check at load time
 
         # Deactivate existing active models before creating the new one
         ModelVersion.objects.filter(is_active=True).update(is_active=False)
@@ -64,29 +59,7 @@ class Command(BaseCommand):
             file_path=model_path,
             file_hash=file_hash,
             is_active=True,
-            accuracy=metrics["accuracy"],
-            precision=metrics["precision"],
-            recall=metrics["recall"],
-            f1_score=metrics["f1_score"],
-            auc_roc=metrics["auc_roc"],
-            brier_score=metrics.get("brier_score"),
-            gini_coefficient=metrics.get("gini_coefficient"),
-            ks_statistic=metrics.get("ks_statistic"),
-            log_loss_value=metrics.get("log_loss"),
-            ece=metrics.get("calibration_data", {}).get("ece"),
-            # Persist the SAME operating threshold the per-group fairness search
-            # is anchored to (cost-optimal), so the disparate-impact guarantee
-            # holds at serving and the reported metrics match deployment.
-            optimal_threshold=metrics.get("optimal_threshold"),
-            confusion_matrix=metrics["confusion_matrix"],
-            feature_importances=metrics["feature_importances"],
-            roc_curve_data=metrics["roc_curve"],
-            training_params=metrics["training_params"],
-            calibration_data=metrics.get("calibration_data", {}),
-            threshold_analysis=metrics.get("threshold_analysis", {}),
-            decile_analysis=metrics.get("decile_analysis", {}),
-            fairness_metrics=metrics.get("fairness", {}),
-            training_metadata=metrics.get("training_metadata", {}),
+            **model_version_metric_fields(metrics),
         )
 
         # Invalidate cached models so workers pick up the new version

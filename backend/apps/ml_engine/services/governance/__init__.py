@@ -1,9 +1,5 @@
 """Governance subpackage — model risk management, fairness, drift, validation.
 
-Extracted from the flat ml_engine/services/ directory on 2026-05-26 as PR-3
-of the decomposition cycle (see
-docs/superpowers/specs/2026-05-25-ml-engine-decomposition-design.md).
-
 Files in this subpackage cover the SR 11-7 / APRA CPG 235 / Banking Code
 governance surface:
 

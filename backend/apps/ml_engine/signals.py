@@ -1,7 +1,7 @@
 """Signal handlers for ml_engine.
 
 Currently only handles:
-- ModelVersion post_save → enqueue MRM dossier generation (D7).
+- ModelVersion post_save → enqueue MRM dossier generation.
 
 Handlers are registered in `MlEngineConfig.ready()`.
 """
@@ -27,9 +27,8 @@ def enqueue_mrm_dossier(sender, instance: ModelVersion, created: bool, **kwargs)
     merely update metadata). Failing to enqueue is not fatal — the
     dossier can always be regenerated with `manage.py generate_mrm_dossier`.
 
-    Skipped in tests (DEBUG + TESTING flag) and when
-    `MRM_DOSSIER_AUTO_GENERATE` setting is explicitly False so that
-    ModelVersion.save() stays fast in unit tests that don't exercise the
+    Skipped when the `MRM_DOSSIER_AUTO_GENERATE` setting is False, so
+    ModelVersion.save() can stay fast in unit tests that don't exercise the
     Celery path.
     """
     if not created:

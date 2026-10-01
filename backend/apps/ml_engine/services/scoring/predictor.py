@@ -200,7 +200,7 @@ class ModelPredictor:
         """Public seam over the engineered + one-hot/scale pipeline.
 
         Stable contract for cross-app callers (e.g. the agents orchestrator)
-        so internal ``_transform`` changes don't leak across boundaries (L17).
+        so internal ``_transform`` changes don't leak across boundaries.
         """
         return self._transform(df)
 
@@ -208,7 +208,7 @@ class ModelPredictor:
         """Construct a CounterfactualEngine wired to this model's transform
         pipeline. Returns the engine; the caller invokes ``.generate(...)``.
 
-        Keeps the agents orchestrator off ``ModelPredictor`` internals (L17).
+        Keeps the agents orchestrator off ``ModelPredictor`` internals.
         """
         from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 
@@ -351,7 +351,7 @@ class ModelPredictor:
         stress_results = self._stress_test(features, threshold)
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
-        # === Credit policy overlay (D3) + referral audit (D6) ======
+        # === Credit policy overlay + referral audit ======
         prediction_label, requires_human_review, policy_payload = _apply_policy_overlay_helper(
             application=application,
             model_version=self.model_version,

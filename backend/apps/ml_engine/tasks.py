@@ -1,4 +1,3 @@
-import hashlib
 import logging
 from datetime import datetime, timedelta
 
@@ -9,9 +8,47 @@ from django.utils import timezone
 
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
+from apps.ml_engine.services.governance.drift_monitor import PSI_INVESTIGATE, PSI_STABLE
 from apps.ml_engine.services.governance.drift_monitor import compute_psi as _compute_psi
+from apps.ml_engine.services.scoring.prediction_cache import file_sha256
 
 logger = logging.getLogger(__name__)
+
+# Redis lock held for the duration of a training run. TrainModelView checks the
+# same key to reject duplicate requests before queueing a task.
+TRAIN_LOCK_KEY = "train_model_lock"
+
+
+def model_version_metric_fields(metrics: dict) -> dict:
+    """ModelVersion fields populated from a trainer ``metrics`` dict.
+
+    Shared by the Celery training task and the ``train_model`` command.
+    """
+    return dict(
+        accuracy=metrics["accuracy"],
+        precision=metrics["precision"],
+        recall=metrics["recall"],
+        f1_score=metrics["f1_score"],
+        auc_roc=metrics["auc_roc"],
+        brier_score=metrics.get("brier_score"),
+        gini_coefficient=metrics.get("gini_coefficient"),
+        ks_statistic=metrics.get("ks_statistic"),
+        log_loss_value=metrics.get("log_loss"),
+        ece=metrics.get("calibration_data", {}).get("ece"),
+        # Persist the SAME operating threshold the per-group fairness search
+        # is anchored to (cost-optimal), so the disparate-impact guarantee
+        # holds at serving and the reported metrics match deployment.
+        optimal_threshold=metrics.get("optimal_threshold"),
+        confusion_matrix=metrics["confusion_matrix"],
+        feature_importances=metrics["feature_importances"],
+        roc_curve_data=metrics["roc_curve"],
+        training_params=metrics["training_params"],
+        calibration_data=metrics.get("calibration_data", {}),
+        threshold_analysis=metrics.get("threshold_analysis", {}),
+        decile_analysis=metrics.get("decile_analysis", {}),
+        fairness_metrics=metrics.get("fairness", {}),
+        training_metadata=metrics.get("training_metadata", {}),
+    )
 
 
 @shared_task(
@@ -35,7 +72,7 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
     # Prevent concurrent training — acquire a Redis lock for 30 minutes
     redis_url = settings.CELERY_BROKER_URL
     redis_client = _redis.from_url(redis_url)
-    lock = redis_client.lock("train_model_lock", timeout=1800, blocking=False)
+    lock = redis_client.lock(TRAIN_LOCK_KEY, timeout=1800, blocking=False)
     if not lock.acquire(blocking=False):
         logger.warning("Training already in progress — skipping duplicate task %s", self.request.id)
         return {"status": "skipped", "reason": "training_already_in_progress"}
@@ -133,12 +170,7 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
     model_path = str(settings.ML_MODELS_DIR / model_filename)
     trainer.save_model(model, model_path)
 
-    # Compute SHA-256 hash of saved model file for integrity verification
-    sha256 = hashlib.sha256()
-    with open(model_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    file_hash = sha256.hexdigest()
+    file_hash = file_sha256(model_path)  # integrity check at load time
 
     # Pre-activation fairness gate. In `block` mode this raises
     # FairnessGateBlocked BEFORE the atomic activation block — old segment
@@ -186,29 +218,7 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
             file_hash=file_hash,
             is_active=True,
             segment=segment,
-            accuracy=metrics["accuracy"],
-            precision=metrics["precision"],
-            recall=metrics["recall"],
-            f1_score=metrics["f1_score"],
-            auc_roc=metrics["auc_roc"],
-            brier_score=metrics.get("brier_score"),
-            gini_coefficient=metrics.get("gini_coefficient"),
-            ks_statistic=metrics.get("ks_statistic"),
-            log_loss_value=metrics.get("log_loss"),
-            ece=metrics.get("calibration_data", {}).get("ece"),
-            # Persist the SAME operating threshold the per-group fairness search
-            # is anchored to (cost-optimal), so the disparate-impact guarantee
-            # holds at serving and the reported metrics match deployment.
-            optimal_threshold=metrics.get("optimal_threshold"),
-            confusion_matrix=metrics["confusion_matrix"],
-            feature_importances=metrics["feature_importances"],
-            roc_curve_data=metrics["roc_curve"],
-            training_params=metrics["training_params"],
-            calibration_data=metrics.get("calibration_data", {}),
-            threshold_analysis=metrics.get("threshold_analysis", {}),
-            decile_analysis=metrics.get("decile_analysis", {}),
-            fairness_metrics=metrics.get("fairness", {}),
-            training_metadata=metrics.get("training_metadata", {}),
+            **model_version_metric_fields(metrics),
             retraining_policy={
                 "cadence_days": 90,
                 "min_samples": 10000,
@@ -220,7 +230,7 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
             next_review_date=(timezone.now() + timedelta(days=90)).date(),
         )
 
-    # Validation sign-off gate (Codex v1.10.7 finding 2). The candidate now
+    # Validation sign-off gate. The candidate now
     # has a real PK so the gate can query ModelValidationReport. In `block`
     # mode the gate raises — at training time there is by construction no
     # approved sign-off (the row was just created), so block mode demotes
@@ -259,6 +269,8 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
     }
     validation_decision_payload = validation_gate_decision.get("decision")
     if validation_decision_payload is not None:
+        # The blocked-demoted path above stores the exception's dict payload;
+        # every other path stores a ValidationDecision.
         gate_meta["validation_gate"] = (
             validation_decision_payload.to_dict()
             if hasattr(validation_decision_payload, "to_dict")
@@ -384,7 +396,7 @@ def run_prediction_task(self, application_id):
     # Flag borderline cases for human review ONLY when the standalone path is
     # explicitly enabled. The standalone task creates no escalated AgentRun, so
     # a 'review' transition here would be unresumable and would leave the ADM
-    # disclosure stale (Phase-1 Issue 1). Default: apply the raw decision.
+    # disclosure stale. Default: apply the raw decision.
     standalone_enabled = getattr(settings, "ML_STANDALONE_PREDICT_ENABLED", False)
     if standalone_enabled and result.get("requires_human_review"):
         application.transition_to("review")
@@ -502,10 +514,10 @@ def compute_weekly_drift_report(self):
         # (compute_on_demand_feature_psi); this weekly task tracks score-level PSI.
 
     # Determine alert level
-    if psi_score is not None and psi_score >= 0.25:
+    if psi_score is not None and psi_score >= PSI_INVESTIGATE:
         drift_detected = True
         alert_level = "significant"
-    elif psi_score is not None and psi_score >= 0.1:
+    elif psi_score is not None and psi_score >= PSI_STABLE:
         drift_detected = True
         alert_level = "moderate"
     else:
@@ -529,7 +541,7 @@ def compute_weekly_drift_report(self):
         },
     )[0]
 
-    if psi_score is not None and psi_score >= 0.25:
+    if alert_level == "significant":
         logger.warning(
             "Significant model drift detected: PSI=%.4f for model %s (report %s)",
             psi_score,

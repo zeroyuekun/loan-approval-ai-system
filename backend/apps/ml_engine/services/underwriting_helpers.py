@@ -1,4 +1,4 @@
-"""compute_approval per-gate helpers (L15 decomposition, sibling module).
+"""compute_approval per-gate helpers (sibling module of underwriting_engine).
 
 Verbatim extractions of ``UnderwritingEngine.compute_approval`` gates that do
 not depend on engine instance state (or depend only on an explicitly-passed
@@ -18,7 +18,7 @@ def simulate_latent_signals(df, n, rng):
     """Simulate latent underwriter signals not available to the model as
     features (doc quality, savings pattern, employer stability, relationship
     bonus). Verbatim extraction of compute_approval's STEP 0 — draws from
-    the same rng in the same order (L15)."""
+    the same rng in the same order."""
     # Documentation quality: how clean/complete the applicant's
     # paperwork is (payslips, tax returns, bank statements).
     # Strong effect on underwriter confidence. Scale 0-1.
@@ -55,7 +55,7 @@ def simulate_latent_signals(df, n, rng):
 
 def compute_effective_expenses(df, get_hem):
     """STEP 6: declared expenses floored at the HEM benchmark. No rng draws
-    (L15 verbatim extraction). ``get_hem`` is the engine's HEM lookup."""
+    (verbatim extraction). ``get_hem`` is the engine's HEM lookup."""
     hem_values = np.array(
         [
             get_hem(at, dep, inc, st)

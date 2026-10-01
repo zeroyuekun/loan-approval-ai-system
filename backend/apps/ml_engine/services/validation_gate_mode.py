@@ -1,12 +1,9 @@
 """Mode dispatcher for the pre-activation validation sign-off gate (SR 11-7).
 
-Codex adversarial review (v1.10.7) flagged that the existing fairness gate
-(PR #163) and champion-challenger promotion gate (PRs #164–#165) check
-*performance metrics* but never enforce the governance artefact:
-``ModelValidationReport`` is created by the ``validate_model`` management
-command but neither the training task nor manual activation consults it.
-
-This dispatcher closes that gap. It mirrors the warn|block|off pattern of
+The fairness gate and the champion-challenger promotion gate check
+*performance metrics*; this gate enforces the governance artefact: an
+approved, signed-off ``ModelValidationReport`` (created by the
+``validate_model`` management command) for the candidate. It mirrors the warn|block|off pattern of
 ``fairness_gate_mode`` and ``promotion_gate_mode`` so operators learn one
 mode pattern that applies across all three gates.
 
@@ -34,7 +31,7 @@ See ``docs/superpowers/specs/2026-05-07-codex-adversarial-response-v1-10-7-desig
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from apps.ml_engine.models import ModelValidationReport, ModelVersion
 
@@ -68,14 +65,7 @@ class ValidationDecision:
     signed_off: bool | None
 
     def to_dict(self) -> dict:
-        return {
-            "result": self.result,
-            "reason": self.reason,
-            "candidate_id": self.candidate_id,
-            "report_id": self.report_id,
-            "report_outcome": self.report_outcome,
-            "signed_off": self.signed_off,
-        }
+        return asdict(self)
 
 
 def normalize_mode(mode: str | None) -> str:
@@ -98,9 +88,7 @@ def normalize_mode(mode: str | None) -> str:
 def _check_signoff(candidate: ModelVersion) -> ValidationDecision:
     """Return the raw gate decision for a candidate ModelVersion.
 
-    The candidate must have a saved primary key. Training-path callers that
-    haven't yet persisted the candidate should use ``check_pre_activation``
-    instead, which handles the no-PK case explicitly.
+    The candidate must have a saved primary key.
     """
     candidate_id = str(candidate.pk) if getattr(candidate, "pk", None) else None
     report = (

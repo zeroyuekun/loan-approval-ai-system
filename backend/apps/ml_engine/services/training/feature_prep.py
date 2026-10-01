@@ -7,11 +7,9 @@
   training-data-driven user bounds. Raises `ApplicationValidationError` with
   all violations aggregated so the caller can show them in one error.
 - `FEATURE_BOUNDS` — canonical hard-bounds dict consumed by `validate_input`,
-  `open_banking_service`, `macro_data_service`, and regression tests. Lives
-  here (with `validate_input`) so the constraint and its enforcer stay
-  co-located; re-exported from `predictor` for back-compat.
-
-Extracted in Arm C Phase 1 so the predictor focuses on orchestration.
+  the `external` adapters (open_banking, macro_data, credit_bureau), and
+  regression tests. Lives here (with `validate_input`) so the constraint and
+  its enforcer stay co-located; re-exported from `predictor`.
 """
 
 from __future__ import annotations

@@ -38,10 +38,9 @@ logger = logging.getLogger(__name__)
 
 
 # Borderline margin: applications within this many probability points of the
-# effective threshold are routed to human review. 0.10 flags ~20% of all
-# applications which is far too broad for operational use. Reduced to 0.05
-# and made env-configurable (ML_BORDERLINE_MARGIN) for tuning without
-# redeploys. See M11 fix.
+# effective threshold are routed to human review. Default 0.05 (0.10 flagged
+# ~20% of all applications, far too broad for operational use); override via
+# ML_BORDERLINE_MARGIN to tune without a redeploy.
 _BORDERLINE_MARGIN = float(os.environ.get("ML_BORDERLINE_MARGIN", "0.05"))
 
 

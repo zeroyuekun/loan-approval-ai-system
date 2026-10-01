@@ -73,7 +73,6 @@ class DataGenerator:
     REJECT_INFERENCE_CREDIT_WEIGHT = 0.6
     REJECT_INFERENCE_DTI_WEIGHT = 0.4
 
-    PURPOSES = ["home", "auto", "education", "personal", "business"]
     HOME_OWNERSHIP = ["own", "rent", "mortgage"]
     HOME_OWNERSHIP_WEIGHTS = [0.22, 0.30, 0.48]
     EMPLOYMENT_TYPES = ["payg_permanent", "payg_casual", "self_employed", "contract"]
@@ -106,13 +105,6 @@ class DataGenerator:
 
     # Credit card assessment: banks use 3% of limit as monthly commitment
     CREDIT_CARD_MONTHLY_RATE = 0.03
-
-    # LMI premium rates by LVR band (approximate, capitalised into loan)
-    LMI_RATES = {
-        (0.80, 0.85): 0.01,
-        (0.85, 0.90): 0.02,
-        (0.90, 0.95): 0.03,
-    }
 
     # ===================================================================
     # GEOGRAPHIC SEGMENTATION by Australian state/territory.
@@ -353,29 +345,6 @@ class DataGenerator:
     # Westpac-Melbourne Institute Consumer Confidence Index (100 = neutral)
     CONSUMER_CONFIDENCE = BenchmarkResolver.CONSUMER_CONFIDENCE
 
-    # Quarter start dates for generating application_date within each quarter
-    _QUARTER_START_DATES = {
-        "2023Q3": date(2023, 7, 1),
-        "2023Q4": date(2023, 10, 1),
-        "2024Q1": date(2024, 1, 1),
-        "2024Q2": date(2024, 4, 1),
-        "2024Q3": date(2024, 7, 1),
-        "2024Q4": date(2024, 10, 1),
-        "2025Q1": date(2025, 1, 1),
-        "2025Q2": date(2025, 4, 1),
-        "2025Q3": date(2025, 7, 1),
-        "2025Q4": date(2025, 10, 1),
-        "2026Q1": date(2026, 1, 1),
-        "2026Q2": date(2026, 4, 1),
-    }
-
-    # Seasonal application volume weights.
-    _QUARTER_SEASON_WEIGHTS = {
-        "Q1": 1.15,
-        "Q2": 0.80,
-        "Q3": 0.95,
-        "Q4": 1.10,
-    }
     # Monthly seasonal weights (ABS Lending Indicators).
     _MONTH_SEASON_WEIGHTS = {
         1: 1.10,
@@ -407,8 +376,6 @@ class DataGenerator:
                 historical quarters always use hardcoded tables.
         """
         self._benchmarks_raw = benchmarks
-        self._use_live_macro = use_live_macro
-        self._macro_cache: dict = {}
         self.reject_inference_labels = None
         self._property_service = PropertyDataService()
 
@@ -419,7 +386,7 @@ class DataGenerator:
         self._performance = LoanPerformanceSimulator()
 
     # ------------------------------------------------------------------
-    # Backward-compatible delegate methods (keep _ prefix on DataGenerator)
+    # Thin delegates to the resolver / feature / underwriting helpers
     # ------------------------------------------------------------------
 
     def _get_state_industry_weights(self, state_code: str) -> np.ndarray:
@@ -439,9 +406,6 @@ class DataGenerator:
 
     def _resolve_credit_score_params(self, pop_name, state_credit_adj):
         return self._benchmark.resolve_credit_score_params(pop_name, state_credit_adj, self.SUB_POPULATIONS)
-
-    def _resolve_default_base_rate(self):
-        return self._benchmark.resolve_default_base_rate()
 
     def _resolve_macro_for_quarter(self, quarter, state):
         return self._benchmark.resolve_macro_for_quarter(quarter, state)
@@ -500,7 +464,7 @@ class DataGenerator:
         return {name: uniform_samples[:, i] for i, name in enumerate(self.COPULA_FEATURES)}
 
     # ------------------------------------------------------------------
-    # generate() phase helpers (M2 decomposition).
+    # generate() phase helpers.
     #
     # These are verbatim extractions of post-DataFrame-assembly phases.
     # They are called at the SAME point in sequence as the inlined code,
@@ -665,13 +629,12 @@ class DataGenerator:
         sub-population mixture model for realistic applicant segmentation.
         """
         rng = np.random.default_rng(random_seed)
-        # Do NOT call np.random.seed() — it mutates the global legacy RNG which is
-        # non-reproducible in a multi-tenant Celery environment (M13 fix).
-        # _simulate_loan_performance now receives the per-instance Generator.
+        # Do NOT call np.random.seed() — it mutates the global legacy RNG, which is
+        # not reproducible across concurrent Celery tasks. Every step, including
+        # _simulate_loan_performance, receives this per-instance Generator.
         n = num_records
         self.reject_inference_labels = None  # populated at end of generate()
-        self._macro_cache = {}  # reset per-generate to ensure reproducibility
-        self._benchmark._macro_cache = {}  # reset delegate cache too
+        self._benchmark._macro_cache = {}  # reset per-generate to ensure reproducibility
 
         # =============================================================
         # STEP 0: Generate correlated uniform samples via Gaussian copula

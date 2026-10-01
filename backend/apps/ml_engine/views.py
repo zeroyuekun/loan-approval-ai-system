@@ -1,3 +1,4 @@
+import redis
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -15,7 +16,7 @@ from apps.ml_engine.services.validation_gate_mode import (
     ValidationSignoffBlocked,
     evaluate_validation_signoff_gate,
 )
-from apps.ml_engine.tasks import run_prediction_task, train_model_task
+from apps.ml_engine.tasks import TRAIN_LOCK_KEY, run_prediction_task, train_model_task
 
 
 class PredictionThrottle(UserRateThrottle):
@@ -30,9 +31,7 @@ class PredictView(APIView):
         """Trigger ML prediction for a loan application."""
         check_loan_access(request, loan_id)
 
-        from django.conf import settings
-
-        if not getattr(settings, "ML_STANDALONE_PREDICT_ENABLED", False):
+        if not getattr(django_settings, "ML_STANDALONE_PREDICT_ENABLED", False):
             return Response(
                 {"detail": "Standalone prediction is disabled; use the agent orchestrator."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -101,7 +100,7 @@ class ModelMetricsView(APIView):
 class TrainModelView(APIView):
     permission_classes = [IsAdmin]
 
-    TRAIN_LOCK_KEY = "train_model_lock"
+    TRAIN_LOCK_KEY = TRAIN_LOCK_KEY
 
     def post(self, request):
         """Trigger model training (admin only)."""
@@ -115,11 +114,8 @@ class TrainModelView(APIView):
         # Reject duplicate training requests at the API layer. The Celery task
         # also holds this same Redis lock as a backstop, but checking here
         # prevents recording misleading audit events for no-op runs.
-        import redis as _redis
-        from django.conf import settings as dj_settings
-
         try:
-            redis_client = _redis.from_url(dj_settings.CELERY_BROKER_URL)
+            redis_client = redis.from_url(django_settings.CELERY_BROKER_URL)
             if redis_client.exists(self.TRAIN_LOCK_KEY):
                 return Response(
                     {
@@ -128,7 +124,7 @@ class TrainModelView(APIView):
                     },
                     status=status.HTTP_409_CONFLICT,
                 )
-        except _redis.RedisError:
+        except redis.RedisError:
             # If Redis is unreachable the Celery task itself will fail fast;
             # don't block the user here on a transient broker blip.
             pass
@@ -272,8 +268,7 @@ class ModelActivateView(APIView):
         except ModelVersion.DoesNotExist:
             return Response({"error": "Model not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Codex v1.10.7 finding 2: validation sign-off gate. In `block` mode
-        # we refuse activation when no approved ModelValidationReport exists
+        # Validation sign-off gate. In `block` mode we refuse activation when no approved ModelValidationReport exists
         # for this candidate, unless the caller passes ?force=true (audited
         # break-glass). `warn` mode (default) records the decision but lets
         # activation proceed.
@@ -294,13 +289,6 @@ class ModelActivateView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # Codex adversarial review (v1.10.7) finding 1: this used to clear
-        # is_active across ALL segments before re-activating one — silently
-        # breaking scoring for every other segment until an operator repaired
-        # traffic. The training path in tasks.py:save_model already filters
-        # deactivation by segment; manual activation now mirrors that
-        # invariant. The segment-scoped filter alone preserves coverage by
-        # construction (we only deactivate models that share this segment).
         target_segment = version.segment
         previous_active_segments = sorted(
             ModelVersion.objects.filter(is_active=True).values_list("segment", flat=True).distinct()
@@ -319,8 +307,7 @@ class ModelActivateView(APIView):
             version.traffic_percentage = 100
             version.save()
 
-            audit_decision = validation_decision.get("decision")
-            audit_payload = audit_decision.to_dict() if hasattr(audit_decision, "to_dict") else audit_decision
+            audit_payload = validation_decision["decision"].to_dict()
             AuditLog.objects.create(
                 user=request.user,
                 action="model_activate_force" if force else "model_activate",

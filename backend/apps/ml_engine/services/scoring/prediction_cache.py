@@ -34,6 +34,7 @@ __all__ = [
     "_cache_lock",
     "_validate_model_path",
     "_verify_model_hash",
+    "file_sha256",
     "_load_bundle",
     "clear_model_cache",
 ]
@@ -65,6 +66,15 @@ def _validate_model_path(file_path):
     return resolved
 
 
+def file_sha256(path) -> str:
+    """Hex SHA-256 of a file, read in 8 KiB chunks."""
+    sha256 = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
 def _verify_model_hash(file_path, expected_hash, version_id=None):
     """Verify SHA-256 hash of model file to detect tampering.
 
@@ -78,11 +88,7 @@ def _verify_model_hash(file_path, expected_hash, version_id=None):
             raise ValueError(f"Model version {version_id} has no file_hash — hash verification required in production")
         logger.warning("No file_hash stored for model version %s — skipping integrity check (dev mode)", version_id)
         return
-    sha256 = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    actual_hash = sha256.hexdigest()
+    actual_hash = file_sha256(file_path)
     if actual_hash != expected_hash:
         raise ValueError(
             f"Model file integrity check failed: expected hash {expected_hash[:16]}..., got {actual_hash[:16]}..."

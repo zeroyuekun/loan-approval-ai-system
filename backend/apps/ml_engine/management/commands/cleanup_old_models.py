@@ -18,7 +18,7 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand
 
-from apps.ml_engine.models import ModelVersion
+from apps.ml_engine.models import ModelValidationReport, ModelVersion
 
 
 class Command(BaseCommand):
@@ -49,31 +49,25 @@ class Command(BaseCommand):
         # referenced by a ModelValidationReport (champion or challenger).
         protected_ids: set = set(ModelVersion.objects.filter(is_active=True).values_list("id", flat=True))
 
-        try:
-            from apps.ml_engine.models import ModelValidationReport
+        reports = ModelValidationReport.objects.all()
+        protected_ids.update(reports.values_list("model_version_id", flat=True))
 
-            reports = ModelValidationReport.objects.all()
-            protected_ids.update(reports.values_list("model_version_id", flat=True))
-
-            # Also protect challenger models referenced inside the JSON blob.
-            # validate_model.py stores `model_version: str(challenger.id)` per
-            # entry, which the FK lookup above misses.
-            for cc in reports.values_list("challenger_comparison", flat=True):
-                if not isinstance(cc, dict):
+        # Also protect challenger models referenced inside the JSON blob.
+        # validate_model.py stores `model_version: str(challenger.id)` per
+        # entry, which the FK lookup above misses.
+        for cc in reports.values_list("challenger_comparison", flat=True):
+            if not isinstance(cc, dict):
+                continue
+            for entry in cc.values():
+                if not isinstance(entry, dict):
                     continue
-                for entry in cc.values():
-                    if not isinstance(entry, dict):
-                        continue
-                    mv = entry.get("model_version")
-                    if not mv:
-                        continue
-                    try:
-                        protected_ids.add(uuid.UUID(str(mv)))
-                    except (TypeError, ValueError):
-                        continue
-        except (ImportError, AttributeError):
-            # ModelValidationReport may not exist in older deployments
-            pass
+                mv = entry.get("model_version")
+                if not mv:
+                    continue
+                try:
+                    protected_ids.add(uuid.UUID(str(mv)))
+                except (TypeError, ValueError):
+                    continue
 
         # Candidates: every non-protected model, ordered newest first.
         candidates = list(ModelVersion.objects.exclude(id__in=protected_ids).order_by("-created_at"))
@@ -91,13 +85,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("Nothing to delete."))
             return
 
-        files_to_remove = []
         for mv in delete:
             self.stdout.write(
                 f"  - {mv.version} ({mv.algorithm}) created {mv.created_at.isoformat()} -> {mv.file_path or '(no file)'}"
             )
-            if mv.file_path:
-                files_to_remove.append(Path(mv.file_path))
 
         if not apply_changes:
             self.stdout.write(self.style.WARNING("\nDry-run only. Pass --apply to delete."))

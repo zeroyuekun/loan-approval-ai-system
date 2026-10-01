@@ -153,28 +153,6 @@ class PlaidPatternsService:
             logger.exception("Failed to extract patterns from Plaid sandbox")
             return None
 
-    def _create_link_token(self) -> str | None:
-        """Create a Plaid Link token for sandbox."""
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(
-                    f"{self.base_url}/link/token/create",
-                    json={
-                        "client_id": self.client_id,
-                        "secret": self.secret,
-                        "user": {"client_user_id": "pattern-research"},
-                        "client_name": "Loan Approval AI",
-                        "products": ["transactions"],
-                        "country_codes": ["US"],
-                        "language": "en",
-                    },
-                )
-                response.raise_for_status()
-                return response.json().get("link_token")
-        except Exception:
-            logger.exception("Failed to create Plaid link token")
-            return None
-
     def _create_sandbox_public_token(self) -> str | None:
         """Create a sandbox public token directly (sandbox-only endpoint)."""
         try:

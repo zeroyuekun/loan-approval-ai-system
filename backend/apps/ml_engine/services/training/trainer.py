@@ -22,6 +22,7 @@ from sklearn.preprocessing import StandardScaler
 
 from ..metrics import (
     MetricsService,
+    VintageAnalyser,
     brier_decomposition,
     ks_statistic,
     psi_by_feature,
@@ -679,7 +680,7 @@ class ModelTrainer:
         # Save original test indices before transform() resets them
         test_original_indices = df_test.index.copy()
 
-        # Save raw copies BEFORE preprocessing for WOE scorecard (C4 fix).
+        # Save raw copies BEFORE preprocessing for the WOE scorecard.
         # WOE bins must be in interpretable units (credit_score 650-750),
         # not z-score units from StandardScaler.
         df_train_raw = self.add_derived_features(df_train.copy())
@@ -710,7 +711,6 @@ class ModelTrainer:
             iv_max=1.5,
         )
         selected_numeric = iv_result["selected_features"]
-        self._iv_result = iv_result  # store for metrics later
         self._original_numeric_cols = list(self.NUMERIC_COLS)
 
         logger.info(
@@ -773,7 +773,7 @@ class ModelTrainer:
         # with train_quarters_snapshot (the original split), so it must run on
         # these pre-RI copies. Running it on the augmented set misaligns against
         # the snapshot and the diagnostic gets silently skipped/failed whenever
-        # reject inference runs (#8).
+        # reject inference runs.
         _y_train_pre_ri_len = len(y_train)
         _X_train_pre_ri = X_train
         _y_train_pre_ri = y_train
@@ -892,12 +892,8 @@ class ModelTrainer:
         temporal_cv_auc_mean = None
         temporal_cv_folds_used = 0
         cv_drift_signal = None
-        # Align the quarter snapshot to the PRE-reject-inference split. RI
-        # augmentation above reassigned X_train/y_train to a larger set, but the
-        # snapshot is row-aligned only to the original split — so temporal CV runs
-        # on the pre-RI copies (#8: previously it used the augmented X_train and
-        # was silently skipped/failed whenever RI ran). Guard on length in case
-        # preprocessing trimmed rows before the snapshot.
+        # Temporal CV runs on the pre-RI copies (see the snapshot above); guard on
+        # length in case preprocessing trimmed rows before the snapshot.
         if train_quarters_snapshot is not None and len(train_quarters_snapshot) == _y_train_pre_ri_len:
             try:
                 temporal_cv_auc_mean, temporal_cv_folds_used = self._compute_temporal_cv_auc(
@@ -971,7 +967,7 @@ class ModelTrainer:
         metrics["threshold_analysis"] = self.metrics_service.compute_threshold_analysis(y_test, y_prob)
         metrics["decile_analysis"] = self.metrics_service.compute_decile_analysis(y_test, y_prob)
 
-        # D5 — production-grade metrics for champion-challenger promotion.
+        # Production-grade metrics for champion-challenger promotion.
         # `ks` is the bare float, distinct from `ks_statistic` (rounded) so
         # gate comparisons carry full precision. Brier decomposition lets the
         # MRM dossier and promotion gate separate calibration error
@@ -1045,12 +1041,12 @@ class ModelTrainer:
             "optimal_threshold": optimal_threshold,
             "calibration_method": getattr(model, "calibration_method", "unknown"),
             "group_thresholds": getattr(self, "_group_thresholds", {}),
-            "iv_features_selected": len(getattr(self, "_iv_result", {}).get("selected_features", [])),
-            "iv_features_excluded_weak": len(getattr(self, "_iv_result", {}).get("excluded_weak", [])),
-            "iv_features_excluded_leakage": len(getattr(self, "_iv_result", {}).get("excluded_leakage", [])),
+            "iv_features_selected": len(iv_result.get("selected_features", [])),
+            "iv_features_excluded_weak": len(iv_result.get("excluded_weak", [])),
+            "iv_features_excluded_leakage": len(iv_result.get("excluded_leakage", [])),
             # Kept-but-flagged: IV above the standard 0.5 leakage line but <= the
-            # (higher) iv_max used for exclusion — the honest leakage signal (#13).
-            "iv_features_elevated": len(getattr(self, "_iv_result", {}).get("elevated_iv", [])),
+            # (higher) iv_max used for exclusion — the honest leakage signal.
+            "iv_features_elevated": len(iv_result.get("elevated_iv", [])),
             # Per-feature PSI (test vs train) — consumed by model_selector._max_psi,
             # the MRM dossier, and mrm_compliance._compliance_status via training_metadata.
             "psi_by_feature": metrics.get("psi_by_feature", {}),
@@ -1181,8 +1177,6 @@ class ModelTrainer:
 
         # Vintage analysis (if temporal data present)
         if all(c in df_test_raw.columns for c in ["origination_quarter", "months_on_book"]):
-            from ..metrics import VintageAnalyser
-
             test_with_temporal = df_test_raw.copy()
             test_with_temporal["default_flag"] = y_test
             test_with_temporal["prediction_probability"] = y_prob
@@ -1261,8 +1255,8 @@ class ModelTrainer:
 
         # Build monotonic constraints from feature names
         monotonic = self._build_monotonic_constraints(list(X_train.columns))
-        max_bin = getattr(settings, "ML_MAX_BIN", 512)
-        n_optuna_trials = getattr(settings, "ML_OPTUNA_TRIALS", 50)
+        max_bin = settings.ML_MAX_BIN
+        n_optuna_trials = settings.ML_OPTUNA_TRIALS
 
         # 3-fold stratified CV for objective evaluation
         cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)

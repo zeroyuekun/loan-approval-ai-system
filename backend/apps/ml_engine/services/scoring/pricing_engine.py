@@ -1,4 +1,4 @@
-"""Risk-based pricing tiers (D4).
+"""Risk-based pricing tiers.
 
 Maps a PD score + product segment to an indicative interest-rate band and
 pricing-tier label. AU challenger banks publish coarse pricing bands by
