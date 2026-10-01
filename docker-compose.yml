@@ -128,7 +128,7 @@ services:
     # runtime and failures: worker processes expose no /metrics endpoint.
     command: celery -A config worker -l info -E -Q ml --concurrency 1 --max-tasks-per-child 5 --prefetch-multiplier 1
     healthcheck:
-      test: ["CMD-SHELL", "celery -A config inspect ping --timeout 10"]
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 10"]
       interval: 30s
       timeout: 15s
       retries: 3
@@ -172,7 +172,7 @@ services:
     # by one worker, delaying fairness across queues). -E: see celery_worker_ml.
     command: celery -A config worker -l info -E -Q email,agents,celery --concurrency 4 --prefetch-multiplier 1
     healthcheck:
-      test: ["CMD-SHELL", "celery -A config inspect ping --timeout 10"]
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 10"]
       interval: 30s
       timeout: 15s
       retries: 3
