@@ -3,6 +3,8 @@ import re
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from utils.sanitization import sanitize_prompt_input
@@ -87,6 +89,19 @@ class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"password": "Password must contain at least one lowercase letter."})
         if not re.search(r"[0-9]", pw):
             raise serializers.ValidationError({"password": "Password must contain at least one digit."})
+        # The configured AUTH_PASSWORD_VALIDATORS (common passwords, similarity
+        # to the username/email/name, all-numeric). A throwaway user carries
+        # the attributes the similarity check compares against.
+        candidate = CustomUser(
+            username=data.get("username", ""),
+            email=data.get("email", ""),
+            first_name=data.get("first_name", ""),
+            last_name=data.get("last_name", ""),
+        )
+        try:
+            validate_password(pw, user=candidate)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"password": list(exc.messages)}) from exc
         return data
 
     def validate_email(self, value):
