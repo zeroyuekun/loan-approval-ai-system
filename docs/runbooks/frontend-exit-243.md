@@ -1,12 +1,12 @@
 # Frontend container exits with code 243
 
-**Severity:** High — end users can't reach the UI.
+**Severity:** High. End users can't reach the UI.
 
 ## Symptoms
 
 - `docker compose ps frontend` shows `exited (243)` in a loop
 - Browsers at port 3000 see "connection refused" or immediate 502
-- Container restarts every 10–30 seconds
+- Container restarts every 10 to 30 seconds
 
 ## Diagnose
 
@@ -16,17 +16,17 @@
    docker compose logs --tail 200 frontend
    ```
 
-2. **Common signatures:**
+2. **Match the logs against common signatures:**
 
    | Signature in logs | Likely cause |
    |-------------------|--------------|
    | `JavaScript heap out of memory` / `FATAL ERROR: Reached heap limit` | Node OOM during build or SSR |
    | `Error: listen EADDRINUSE` | Port conflict inside container |
-   | `unable to resolve host` (for the backend) | Networking — `depends_on` or service name mismatch |
+   | `unable to resolve host` (for the backend) | Networking: `depends_on` or service name mismatch |
    | `health check failed` / no logs at all, just a restart | Healthcheck timing out before app is ready |
    | `kill -9` without message | OOM at container level (cgroup limit) |
 
-3. **Check cgroup memory limit:**
+3. **Check the cgroup memory limit:**
 
    ```bash
    docker inspect $(docker compose ps -q frontend) --format '{{.HostConfig.Memory}}'
@@ -34,13 +34,13 @@
 
    Value `0` means no limit. A low limit (e.g. 134217728 = 128 MB) with a Next.js build will OOM every time.
 
-4. **Exit code 243 specifically** usually means Node exited with code 115 (128+115 = 243). Common cause: Node hit its heap limit and exited.
+4. **Interpret exit code 243:** it usually means Node exited with code 115 (128+115 = 243). A common cause is Node hitting its heap limit.
 
 ## Remediate
 
 **If OOM (most common):**
 
-1. Edit `docker-compose.yml` frontend service:
+1. Edit the frontend service in `docker-compose.yml`:
    ```yaml
    services:
      frontend:
@@ -52,13 +52,13 @@
          NODE_OPTIONS: "--max-old-space-size=768"
    ```
 
-2. Rebuild + restart:
+2. Rebuild and restart:
    ```bash
    docker compose up -d --build frontend
    docker compose logs -f frontend
    ```
 
-**If healthcheck timeout:**
+**If the healthcheck times out:**
 
 In the frontend service, extend `healthcheck.start_period`:
 ```yaml
@@ -69,7 +69,7 @@ healthcheck:
   retries: 5
 ```
 
-**If networking:**
+**If it's a networking problem:**
 
 Confirm the backend hostname used by the frontend container matches the service name in compose. Run `docker compose exec frontend ping backend`.
 
@@ -83,4 +83,4 @@ If the container still crash-loops after applying the fix above:
 
 ## Resolved cases
 
-- **2026-04-17** — Root cause: Next.js dev server hit Node's default heap ceiling under `WATCHPACK_POLLING=true`, exiting with code 243. Fix: pin `NODE_OPTIONS=--max-old-space-size=768` and `mem_limit: 1g` on the frontend service in `docker-compose.yml`, and raise `healthcheck.start_period` to 90 s so the first `npm ci && npm run dev` boot doesn't trip the healthcheck. No app code changed.
+- **2026-04-17.** Root cause: the Next.js dev server hit Node's default heap ceiling under `WATCHPACK_POLLING=true` and exited with code 243. Fix: pin `NODE_OPTIONS=--max-old-space-size=768` and `mem_limit: 1g` on the frontend service in `docker-compose.yml`, and raise `healthcheck.start_period` to 90 s so the first `npm ci && npm run dev` boot doesn't trip the healthcheck. No app code changed.

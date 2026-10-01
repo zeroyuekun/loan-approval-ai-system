@@ -1,13 +1,13 @@
 ## Summary
-<!-- 1–3 bullets. What changed and why. -->
+<!-- 1 to 3 bullets. What changed and why. -->
 
 ## Type
-- [ ] feat — user-facing feature
-- [ ] fix — bug fix
-- [ ] docs — documentation only
-- [ ] chore — tooling / config
-- [ ] refactor — no behavior change
-- [ ] test — test-only
+- [ ] feat: user-facing feature
+- [ ] fix: bug fix
+- [ ] docs: documentation only
+- [ ] chore: tooling / config
+- [ ] refactor: no behavior change
+- [ ] test: test-only
 
 ## Scope (check all that apply)
 - [ ] Backend (`backend/`)
@@ -18,7 +18,7 @@
 - [ ] Schema / migration
 
 ## Testing
-<!-- How the change was verified. Commands run, tests added, manual checks. -->
+<!-- How you verified the change: commands run, tests added, manual checks. -->
 
 - [ ] Unit tests pass locally
 - [ ] Integration / e2e tests pass (if applicable)

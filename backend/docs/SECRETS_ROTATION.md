@@ -1,10 +1,10 @@
-# Secrets Rotation Runbook
+# Secrets rotation runbook
 
 Last updated: 2026-03-30
 
 ---
 
-## Quick Reference
+## Quick reference
 
 | Secret | Protects | Rotation Frequency | Downtime Required |
 |--------|----------|--------------------|-------------------|
@@ -37,7 +37,7 @@ Last updated: 2026-03-30
 
 **Minimising impact:**
 - Rotate during low-traffic periods.
-- The frontend uses HttpOnly cookie-based JWT with 60-min access / 7-day refresh tokens. Users will need to log in again. There is no dual-key support for `SECRET_KEY` -- it is a hard cut-over.
+- The frontend uses HttpOnly cookie-based JWT with 60-min access / 7-day refresh tokens. Users will need to log in again. `SECRET_KEY` has no dual-key support, so the change is a hard cut-over.
 
 **Rollback:** Revert `DJANGO_SECRET_KEY` to the previous value in `.env` and restart. Old sessions and JWTs will work again (if they have not expired).
 
@@ -57,21 +57,21 @@ Last updated: 2026-03-30
    ```
    FIELD_ENCRYPTION_KEY=NEW_KEY,OLD_KEY
    ```
-   The encryption module (`apps.accounts.utils.encryption`) uses `MultiFernet` -- the first key encrypts, all keys decrypt.
+   The encryption module (`apps.accounts.utils.encryption`) uses `MultiFernet`: the first key encrypts, and all keys decrypt.
 3. Deploy the updated `.env` and restart Django/Celery workers.
 4. Run the management command to re-encrypt all records with the new key:
    ```bash
    python manage.py rotate_encryption_key
    ```
-   This iterates all `CustomerProfile` rows (chunked at 100), decrypts with any available key, and re-encrypts with the primary (first) key.
-5. After confirming success (check command output for count), remove the old key:
+   The command walks every `CustomerProfile` row in chunks of 100, decrypts each with any available key and re-encrypts it with the primary (first) key.
+5. When the command has succeeded (check the count in its output), remove the old key:
    ```
    FIELD_ENCRYPTION_KEY=NEW_KEY
    ```
 6. Restart workers again.
 
 **What breaks on rotation:**
-- If you replace the key without the comma-separated transition period, existing encrypted values become unreadable. The `decrypt_field` function degrades gracefully (returns the raw ciphertext), but PII will display as garbage.
+- If you replace the key without the comma-separated transition period, existing encrypted values become unreadable. The `decrypt_field` function degrades gracefully by returning the raw ciphertext, but PII will display as garbage.
 - If you remove the old key before running `rotate_encryption_key`, any rows not yet re-encrypted will be unreadable.
 
 **Rollback:** Add the old key back to the comma-separated list and restart. No data is lost as long as you still have the old key.
@@ -86,12 +86,12 @@ Last updated: 2026-03-30
 
 1. Generate a new API key in the [Anthropic Console](https://console.anthropic.com/).
 2. Update `ANTHROPIC_API_KEY` in `.env`.
-3. Restart Celery workers on the `email` and `agents` queues. Django web workers also need restart if they read the key at import time.
+3. Restart Celery workers on the `email` and `agents` queues. Django web workers also need a restart if they read the key at import time.
 4. Revoke the old key in the Anthropic Console.
 
 **What breaks on rotation:**
-- Any in-flight Celery tasks using the old key will fail with a 401 error. The orchestrator pipeline will record these as failed `AgentRun` records. They can be retried.
-- The AI circuit breaker (`AI_CIRCUIT_BREAKER_THRESHOLD=3`) will trip after 3 consecutive failures, blocking new AI calls for 10 minutes. Plan the restart to minimise the window.
+- In-flight Celery tasks that use the old key will fail with a 401 error. The orchestrator pipeline records them as failed `AgentRun` records, which can be retried.
+- The AI circuit breaker (`AI_CIRCUIT_BREAKER_THRESHOLD=3`) trips after 3 consecutive failures and blocks new AI calls for 10 minutes. Plan the restart to keep that window short.
 
 **Rollback:** If the new key is invalid, revert to the old key in `.env` and restart. Only revoke the old key in the Anthropic Console after confirming the new key works.
 
@@ -121,7 +121,7 @@ Last updated: 2026-03-30
 ALTER USER postgres WITH PASSWORD 'old-password';
 ```
 
-**Recommended approach for zero-downtime:**
+**Recommended zero-downtime approach:**
 1. Create a second PostgreSQL user with the same privileges.
 2. Switch the application to the new user.
 3. Drop the old user.
@@ -139,7 +139,7 @@ ALTER USER postgres WITH PASSWORD 'old-password';
    ```bash
    redis-cli CONFIG SET requirepass "new-password"
    ```
-   Note: This is runtime-only. Also update `redis.conf` for persistence across Redis restarts.
+   This only changes the running instance. Also update `redis.conf` so the password survives a Redis restart.
 2. Authenticate the current session with the new password:
    ```bash
    redis-cli AUTH "new-password"
@@ -160,7 +160,7 @@ ALTER USER postgres WITH PASSWORD 'old-password';
 
 ---
 
-## 6. EMAIL_HOST_PASSWORD (Gmail App Password)
+## 6. EMAIL_HOST_PASSWORD (Gmail app password)
 
 **What it protects:** SMTP authentication for sending loan decision emails via Gmail (`smtp.gmail.com:587`).
 
@@ -179,14 +179,14 @@ ALTER USER postgres WITH PASSWORD 'old-password';
 
 ---
 
-## General Rotation Checklist
+## General rotation checklist
 
-1. **Before rotation:** Back up the current `.env` file.
+1. **Back up the current `.env` file** before rotating.
 2. **Test the new credential** in a staging environment or with a quick smoke test before deploying to production.
-3. **Restart order:** Web workers first, then Celery workers (`ml`, `email`, `agents` queues).
-4. **Verify after rotation:**
+3. **Restart web workers first**, then Celery workers (`ml`, `email`, `agents` queues).
+4. **Verify the rotation:**
    - Hit `/api/v1/health/` to confirm the app is up.
-   - Trigger a test loan pipeline to verify Claude API, email sending, and DB access.
+   - Trigger a test loan pipeline to check the Claude API, email sending and DB access.
    - Check Celery worker logs for connection errors.
-5. **Audit:** Record the rotation date and who performed it. Update any shared password managers.
+5. **Record the rotation:** the date and who performed it. Update any shared password managers.
 6. **Never commit secrets** to git. Secrets live in `.env` only (see `CLAUDE.md` conventions).

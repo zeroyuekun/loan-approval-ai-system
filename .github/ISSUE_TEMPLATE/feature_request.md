@@ -16,8 +16,8 @@ labels: ["enhancement"]
 
 ## Scope
 - [ ] Small (≤ 1 day)
-- [ ] Medium (2–5 days)
-- [ ] Large (> 5 days — consider breaking up)
+- [ ] Medium (2 to 5 days)
+- [ ] Large (> 5 days; consider breaking it up)
 
 ## Impact on existing behaviour
 <!-- Migrations? Breaking API changes? Config changes? -->

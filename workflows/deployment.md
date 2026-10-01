@@ -1,18 +1,18 @@
-# Deployment Workflow
+# Deployment workflow
 
 ## Objective
 
-Stand up the full Loan Approval AI System locally using Docker Compose, including the Django backend, PostgreSQL, Redis, Celery workers, and the Next.js frontend.
+Stand up the full Loan Approval AI System locally with Docker Compose: the Django backend, PostgreSQL, Redis, Celery workers, and the Next.js frontend.
 
 ## Prerequisites
 
 - Docker and Docker Compose installed
 - Git repository cloned
-- At minimum 4GB RAM available for Docker
+- At least 4GB of RAM available to Docker
 
 ## Steps
 
-### 1. Configure Environment
+### 1. Configure environment
 
 ```bash
 # Copy the example env file
@@ -30,7 +30,7 @@ Required keys to set:
 | `DJANGO_SECRET_KEY` | Must be unique, random, and secret |
 | `ANTHROPIC_API_KEY` | Required for email generation and bias detection (Levels 2 and 3) |
 
-### 2. Build Containers
+### 2. Build containers
 
 ```bash
 docker-compose build
@@ -38,7 +38,7 @@ docker-compose build
 
 Expected: All 5 services build successfully (db, redis, backend, celery_worker, celery_beat, frontend).
 
-### 3. Start Services
+### 3. Start services
 
 ```bash
 docker-compose up -d
@@ -51,13 +51,13 @@ docker-compose ps
 
 All services should show `Up` status. The `db` and `redis` services should show `(healthy)`.
 
-### 4. Run Migrations
+### 4. Run migrations
 
 ```bash
 docker-compose exec backend python manage.py migrate
 ```
 
-### 5. Create Superuser
+### 5. Create superuser
 
 ```bash
 docker-compose exec backend python manage.py createsuperuser
@@ -65,7 +65,7 @@ docker-compose exec backend python manage.py createsuperuser
 
 Follow the prompts to set username, email, and password.
 
-### 6. Generate Synthetic Data
+### 6. Generate synthetic data
 
 ```bash
 # Option A: Using the standalone tool (outside Docker)
@@ -75,7 +75,7 @@ python tools/generate_synthetic_data.py --num-records 10000 --output-path .tmp/s
 docker-compose exec backend python manage.py generate_loan_data --count 10000
 ```
 
-### 7. Train Initial Model
+### 7. Train initial model
 
 ```bash
 # Option A: Using the standalone tool (outside Docker)
@@ -98,16 +98,16 @@ docker-compose exec backend python manage.py train_model --algorithm both
 
 Port conflicts are the most common issue. If 5432, 6379, 8000, or 3000 are already in use, either stop the local service or remap the port in `docker-compose.yml` (and `.env` for Postgres). The backend and frontend ports are the ones most likely to collide if you're running other dev servers.
 
-Volume permission errors happen occasionally on Linux — `docker-compose down -v` then `up -d` fixes it, but `-v` nukes your database volumes so only do this when you want a fresh start.
+Volume permission errors happen occasionally on Linux. `docker-compose down -v` then `up -d` fixes them, but `-v` nukes your database volumes, so only do this when you want a fresh start.
 
-PostgreSQL sometimes takes 10-15 seconds to initialise. If the backend can't connect, check `docker-compose ps db` and wait for the healthcheck to pass before panicking. Same goes for Celery workers — if tasks aren't processing, check `docker-compose logs celery_worker` and verify Redis is up (`docker-compose exec redis redis-cli ping` should return PONG).
+PostgreSQL sometimes takes 10-15 seconds to initialise. If the backend can't connect, check `docker-compose ps db` and wait for the healthcheck to pass before panicking. Same goes for Celery workers: if tasks aren't processing, check `docker-compose logs celery_worker` and verify Redis is up (`docker-compose exec redis redis-cli ping` should return PONG).
 
 Build failures are usually pip dependency issues. `docker-compose build --no-cache backend` is the nuclear option but it works.
 
 <!-- the frontend→backend connection trips people up because inside Docker it's http://backend:8000, but from the browser it's localhost:8000 -->
 If the frontend can't reach the backend, check `NEXT_PUBLIC_API_URL` in `.env`. Inside the Docker network the frontend talks to `http://backend:8000`, but from the browser API calls go to `http://localhost:8000/api/v1/`.
 
-## Stopping the System
+## Stopping the system
 
 ```bash
 # Stop all containers (preserves data)
@@ -119,8 +119,8 @@ docker-compose down -v
 
 ## Scope: local-only portfolio project
 
-This project is designed to run locally via Docker Compose. No cloud-hosting configuration is committed. That is a deliberate scoping choice — portfolio reviewers are expected to clone, `make dev`, and walk through the dashboards on `localhost`.
+This project is designed to run locally with Docker Compose, and no cloud-hosting configuration is committed. That is a deliberate scoping choice: portfolio reviewers are expected to clone, `make dev`, and walk through the dashboards on `localhost`.
 
-Operational procedures for a running local instance (rotating secrets, recovering from a stuck Celery queue, database backup, upgrading the model) live in `backend/docs/RUNBOOK.md`. Security and compliance baselines live in `backend/docs/SECURITY.md`.
+Operational procedures for a running local instance (rotating secrets, recovering from a stuck Celery queue, database backup, upgrading the model) live in `docs/runbooks/`, starting with `docs/runbooks/operations.md`. Secrets rotation is in `backend/docs/SECRETS_ROTATION.md`. Security and compliance baselines live in `SECURITY.md`, `docs/adr/008-security-architecture.md` and `docs/compliance/`.
 
-If you need a cloud deployment of your own, the Docker Compose topology is portable to any container host (Kubernetes, bare-metal, or any PaaS that accepts Docker images) — but no specific host config is supported here.
+If you need a cloud deployment of your own, the Docker Compose topology is portable to any container host (Kubernetes, bare metal, or any PaaS that accepts Docker images), but no specific host config is supported here.
