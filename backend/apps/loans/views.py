@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import timedelta
 
 from django.conf import settings
@@ -8,6 +9,7 @@ from django.db.models import Avg, Count, Q
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import permissions, viewsets
+from rest_framework import serializers as drf_serializers
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
@@ -382,6 +384,10 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
             qs = qs.filter(requested_by=user)
         application_id = self.request.query_params.get("application")
         if application_id:
+            try:
+                application_id = uuid.UUID(application_id)
+            except ValueError as exc:
+                raise drf_serializers.ValidationError({"application": "must be a UUID"}) from exc
             qs = qs.filter(application_id=application_id)
         return qs
 

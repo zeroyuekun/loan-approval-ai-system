@@ -30,3 +30,12 @@ def test_null_note_is_treated_as_empty(officer_user, review):
 def test_non_string_note_is_a_400(officer_user, review):
     resp = _resolve(officer_user, review, {"outcome": "upheld", "note": 12345})
     assert resp.status_code == 400, resp.data
+
+
+@pytest.mark.django_db
+def test_non_uuid_application_filter_is_a_400_not_a_500(officer_user):
+    """M6: a UUIDField filter on "abc" raised Django's ValidationError (500)."""
+    client = APIClient()
+    client.force_authenticate(user=officer_user)
+    resp = client.get("/api/v1/loans/decision-reviews/?application=abc")
+    assert resp.status_code == 400, resp.status_code
