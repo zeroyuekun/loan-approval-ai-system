@@ -21,6 +21,7 @@ from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 
 from .models import CustomerProfile, CustomUser
 from .permissions import IsAdminOrOfficer
+from .policy import is_staff_role
 from .serializers import (
     AdminCustomerProfileUpdateSerializer,
     CustomerProfileSerializer,
@@ -280,7 +281,7 @@ class LoginView(generics.GenericAPIView):
         # which login flow each token came from.
         if has_totp and bypass:
             audit_action = "login_2fa_bypassed"
-        elif user.role in ("admin", "officer") and not has_totp:
+        elif is_staff_role(user) and not has_totp:
             audit_action = "login_success_no_2fa_setup"
         else:
             audit_action = "login_success"
@@ -288,7 +289,7 @@ class LoginView(generics.GenericAPIView):
         _audit_user_event(request, user, audit_action)
 
         body = {"user": UserSerializer(user).data}
-        if user.role in ("admin", "officer") and not has_totp:
+        if is_staff_role(user) and not has_totp:
             # Frontend uses this flag to redirect to /2fa/setup/.
             body["requires_2fa_setup"] = True
 
@@ -302,6 +303,7 @@ class LoginView(generics.GenericAPIView):
 class UserProfileView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     permission_classes = (IsAuthenticated,)
+    allow_unenrolled_staff = True  # the frontend bootstraps the session (and the enrolment redirect) from it
 
     def get_object(self):
         return self.request.user
@@ -675,6 +677,7 @@ class LogoutView(generics.GenericAPIView):
     """Blacklist the refresh token and clear auth cookies."""
 
     permission_classes = (IsAuthenticated,)
+    allow_unenrolled_staff = True
 
     def post(self, request, *args, **kwargs):
         # Try cookie first, then request body (backwards compat)

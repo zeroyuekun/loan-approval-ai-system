@@ -9,6 +9,7 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrOfficer
+from apps.accounts.policy import is_staff_role
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.agents.serializers import agent_run_serializer_class
 from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
@@ -39,7 +40,7 @@ class AgentRunListView(APIView):
         )
 
         # Non-staff users can only see runs for their own applications
-        if user.role not in ("admin", "officer"):
+        if not is_staff_role(user):
             queryset = queryset.filter(application__applicant=user)
 
         # Optional status filter
@@ -124,7 +125,7 @@ class OrchestrateView(APIView):
         ).strip()
 
         if force:
-            if request.user.role not in ("admin", "officer"):
+            if not is_staff_role(request.user):
                 return Response(
                     {"detail": "force rerun requires staff role"},
                     status=status.HTTP_403_FORBIDDEN,

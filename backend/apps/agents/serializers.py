@@ -13,6 +13,7 @@ the paginated hot path. The detail endpoint nests
 
 from rest_framework import serializers
 
+from apps.accounts.policy import is_staff_role
 from apps.email_engine.services.html_renderer import render_html
 
 
@@ -213,6 +214,6 @@ class CustomerAgentRunSerializer(AgentRunSerializer):
 
 def agent_run_serializer_class(user):
     """Staff get the full run; everyone else gets the customer-facing view."""
-    if getattr(user, "role", None) in ("admin", "officer") or getattr(user, "is_superuser", False):
+    if is_staff_role(user):
         return AgentRunSerializer
     return CustomerAgentRunSerializer

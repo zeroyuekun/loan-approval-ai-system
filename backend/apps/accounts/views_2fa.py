@@ -15,6 +15,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.policy import is_staff_role
+
 from .throttles import TOTPVerifyThrottle
 
 logger = logging.getLogger(__name__)
@@ -24,10 +26,11 @@ class TOTPSetupView(APIView):
     """Enrol the current user in TOTP 2FA. Returns a provisioning URI and QR code."""
 
     permission_classes = [IsAuthenticated]
+    allow_unenrolled_staff = True  # enrolment itself
 
     def post(self, request):
         user = request.user
-        if user.role not in ("admin", "officer"):
+        if not is_staff_role(user):
             return Response(
                 {"detail": "2FA is only required for officer and admin accounts."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -78,6 +81,7 @@ class TOTPVerifyView(APIView):
     """Verify a TOTP code and confirm the device (completes 2FA enrolment)."""
 
     permission_classes = [IsAuthenticated]
+    allow_unenrolled_staff = True  # enrolment itself
     throttle_classes = [TOTPVerifyThrottle]
 
     def post(self, request):
@@ -110,11 +114,12 @@ class TOTPStatusView(APIView):
     """Check whether the current user has 2FA enabled."""
 
     permission_classes = [IsAuthenticated]
+    allow_unenrolled_staff = True  # enrolment itself
 
     def get(self, request):
         user = request.user
         device = TOTPDevice.objects.filter(user=user, name="default", confirmed=True).first()
-        required = user.role in ("admin", "officer")
+        required = is_staff_role(user)
         return Response(
             {
                 "enabled": device is not None,

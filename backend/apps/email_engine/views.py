@@ -5,6 +5,7 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrOfficer
+from apps.accounts.policy import is_staff_role
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.decision_email import (
     DecisionMismatch,
@@ -23,7 +24,7 @@ class EmailGenerationThrottle(UserRateThrottle):
 
 
 def _is_staff(user):
-    return getattr(user, "role", None) in ("admin", "officer") or user.is_superuser
+    return is_staff_role(user)
 
 
 def _visible_emails(user, queryset):

@@ -1,18 +1,11 @@
-from django.conf import settings
 from rest_framework.permissions import BasePermission
 
+from apps.accounts.policy import is_staff_role
+from apps.accounts.policy import staff_2fa_satisfied as _staff_2fa_satisfied
 
-def _staff_2fa_satisfied(user) -> bool:
-    """When ENFORCE_2FA_FOR_STAFF is on, admin/officer/superuser users
-    must have a confirmed TOTP device. When off (default), this check
-    is a no-op — endpoints behave as they did before PR-4.
-
-    Customers are never gated by 2FA. Per the security gap-closure spec,
-    2FA is only for privileged accounts.
-    """
-    if not getattr(settings, "ENFORCE_2FA_FOR_STAFF", False):
-        return True
-    return user.has_confirmed_totp()
+# The 2FA rule itself is enforced at authentication for every DRF view
+# (apps.accounts.policy); the permission classes keep the check so a view
+# that opts out of that gate with allow_unenrolled_staff is still covered.
 
 
 class IsAdmin(BasePermission):
@@ -37,9 +30,6 @@ class IsCustomer(BasePermission):
 
 class IsAdminOrOfficer(BasePermission):
     def has_permission(self, request, view):
-        if not (
-            request.user.is_authenticated
-            and (getattr(request.user, "role", None) in ("admin", "officer") or request.user.is_superuser)
-        ):
+        if not is_staff_role(request.user):
             return False
         return _staff_2fa_satisfied(request.user)

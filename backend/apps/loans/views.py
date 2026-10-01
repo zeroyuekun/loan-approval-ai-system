@@ -17,6 +17,7 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
+from apps.accounts.policy import is_staff_role
 from apps.agents.models import AgentRun
 from apps.agents.services.api_budget import ApiBudgetGuard
 from apps.ml_engine.models import ModelVersion
@@ -43,7 +44,7 @@ class IsOwnerOrStaff(permissions.BasePermission):
     """Object-level permission: only the applicant, admins, or officers can modify."""
 
     def has_object_permission(self, request, view, obj):
-        if request.user.role in ("admin", "officer"):
+        if is_staff_role(request.user):
             return True
         return obj.applicant_id == request.user.id
 
@@ -72,7 +73,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = LoanApplication.objects.select_related("applicant", "decision").prefetch_related("fraud_checks")
-        if user.role in ("admin", "officer"):
+        if is_staff_role(user):
             return qs.all()
         return qs.filter(applicant=user)
 
@@ -302,7 +303,7 @@ class ComplaintViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role in ("admin", "officer"):
+        if is_staff_role(user):
             return Complaint.objects.all().select_related("complainant", "loan_application")
         return Complaint.objects.filter(complainant=user).select_related("loan_application")
 
@@ -332,7 +333,7 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = DecisionReview.objects.select_related("application", "requested_by")
-        if user.role not in ("admin", "officer"):
+        if not is_staff_role(user):
             qs = qs.filter(requested_by=user)
         application_id = self.request.query_params.get("application")
         if application_id:
