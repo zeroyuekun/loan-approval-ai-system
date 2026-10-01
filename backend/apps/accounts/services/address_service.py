@@ -148,7 +148,7 @@ class AddressService:
                     "latitude": location["lat"],
                     "longitude": location["lng"],
                 }
-        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError) as exc:
+        except (httpx.HTTPError, KeyError, ValueError) as exc:
             logger.warning("Google Geocoding failed: %s", exc)
             return None
 
@@ -215,7 +215,7 @@ class AddressService:
                     confidence=min(float(best.get("score", 0.8)), 1.0),
                     source="gnaf",
                 )
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as exc:
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
             logger.warning("Addressr/G-NAF lookup failed: %s", exc)
             return None
 
@@ -270,6 +270,6 @@ class AddressService:
                     confidence=confidence,
                     source="google",
                 )
-        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError) as exc:
+        except (httpx.HTTPError, KeyError, ValueError) as exc:
             logger.warning("Google Geocoding validation failed: %s", exc)
             return None

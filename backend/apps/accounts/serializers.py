@@ -152,6 +152,80 @@ def _mask_id_number(value):
     return "****" + value[-4:]
 
 
+# Profile field groups shared by the customer, staff-read and admin-update
+# serializers. Order matters: it is the JSON key order of each response.
+_PROFILE_PERSONAL_AND_ID_FIELDS = (
+    # Personal details
+    "date_of_birth",
+    "phone",
+    "address_line_1",
+    "address_line_2",
+    "suburb",
+    "state",
+    "postcode",
+    "marital_status",
+    # Identity & compliance
+    "residency_status",
+    "primary_id_type",
+    "primary_id_number",
+    "secondary_id_type",
+    "secondary_id_number",
+)
+_MASKED_ID_FIELDS = ("primary_id_number_masked", "secondary_id_number_masked")
+_PROFILE_DETAIL_FIELDS = (
+    "tax_file_number_provided",
+    "is_politically_exposed",
+    # Employment
+    "employer_name",
+    "occupation",
+    "industry",
+    "employment_status",
+    "years_in_current_role",
+    "previous_employer",
+    # Income
+    "gross_annual_income",
+    "other_income",
+    "other_income_source",
+    "partner_annual_income",
+    # Assets
+    "estimated_property_value",
+    "vehicle_value",
+    "savings_other_institutions",
+    "investment_value",
+    "superannuation_balance",
+    # Liabilities
+    "other_loan_repayments_monthly",
+    "other_credit_card_limits",
+    "rent_or_board_monthly",
+    # Living situation
+    "housing_situation",
+    "time_at_current_address_years",
+    "number_of_dependants",
+    "previous_suburb",
+    "previous_state",
+    "previous_postcode",
+    # Contact
+    "preferred_contact_method",
+    # Computed (read-only)
+    "total_assets",
+    "total_monthly_liabilities",
+)
+# Banking relationship fields — managed by the bank, never editable via a profile endpoint.
+_BANKING_FIELDS = (
+    "account_tenure_years",
+    "loyalty_tier",
+    "num_products",
+    "savings_balance",
+    "checking_balance",
+    "has_credit_card",
+    "has_mortgage",
+    "has_auto_loan",
+    "on_time_payment_pct",
+    "previous_loans_repaid",
+)
+_TIMESTAMP_FIELDS = ("created_at", "updated_at")
+
+
 class CustomerProfileSerializer(serializers.ModelSerializer):
     account_tenure_years = serializers.IntegerField(read_only=True)
     loyalty_tier = serializers.CharField(read_only=True)
@@ -171,98 +245,17 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerProfile
         fields = (
-            "id",
-            # Profile completeness
-            "is_profile_complete",
-            "missing_profile_fields",
-            # Personal details
-            "date_of_birth",
-            "phone",
-            "address_line_1",
-            "address_line_2",
-            "suburb",
-            "state",
-            "postcode",
-            "marital_status",
-            # Identity & compliance
-            "residency_status",
-            "primary_id_type",
-            "primary_id_number",
-            "secondary_id_type",
-            "secondary_id_number",
-            "primary_id_number_masked",
-            "secondary_id_number_masked",
-            "tax_file_number_provided",
-            "is_politically_exposed",
-            # Employment
-            "employer_name",
-            "occupation",
-            "industry",
-            "employment_status",
-            "years_in_current_role",
-            "previous_employer",
-            # Income
-            "gross_annual_income",
-            "other_income",
-            "other_income_source",
-            "partner_annual_income",
-            # Assets
-            "estimated_property_value",
-            "vehicle_value",
-            "savings_other_institutions",
-            "investment_value",
-            "superannuation_balance",
-            # Liabilities
-            "other_loan_repayments_monthly",
-            "other_credit_card_limits",
-            "rent_or_board_monthly",
-            # Living situation
-            "housing_situation",
-            "time_at_current_address_years",
-            "number_of_dependants",
-            "previous_suburb",
-            "previous_state",
-            "previous_postcode",
-            # Contact
-            "preferred_contact_method",
-            # Computed (read-only)
-            "total_assets",
-            "total_monthly_liabilities",
-            # Banking (read-only for customer)
-            "account_tenure_years",
-            "loyalty_tier",
-            "num_products",
-            "savings_balance",
-            "checking_balance",
-            "has_credit_card",
-            "has_mortgage",
-            "has_auto_loan",
-            "on_time_payment_pct",
-            "previous_loans_repaid",
-            # Timestamps
-            "created_at",
-            "updated_at",
+            ("id", "is_profile_complete", "missing_profile_fields")
+            + _PROFILE_PERSONAL_AND_ID_FIELDS
+            + _MASKED_ID_FIELDS
+            + _PROFILE_DETAIL_FIELDS
+            + _BANKING_FIELDS
+            + _TIMESTAMP_FIELDS
         )
         read_only_fields = (
-            "id",
-            "is_profile_complete",
-            "missing_profile_fields",
-            # Computed
-            "total_assets",
-            "total_monthly_liabilities",
-            # Banking — managed by the bank
-            "account_tenure_years",
-            "loyalty_tier",
-            "num_products",
-            "savings_balance",
-            "checking_balance",
-            "has_credit_card",
-            "has_mortgage",
-            "has_auto_loan",
-            "on_time_payment_pct",
-            "previous_loans_repaid",
-            "created_at",
-            "updated_at",
+            ("id", "is_profile_complete", "missing_profile_fields", "total_assets", "total_monthly_liabilities")
+            + _BANKING_FIELDS
+            + _TIMESTAMP_FIELDS
         )
         # Government ID numbers are encrypted at rest. Customers may SET them
         # but must never READ back the decrypted value — only the masked
@@ -324,73 +317,11 @@ class StaffCustomerDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerProfile
         fields = (
-            "id",
-            "user",
-            # Personal details
-            "date_of_birth",
-            "phone",
-            "address_line_1",
-            "address_line_2",
-            "suburb",
-            "state",
-            "postcode",
-            "marital_status",
-            # Identity & compliance
-            "residency_status",
-            "primary_id_type",
-            "primary_id_number",
-            "secondary_id_type",
-            "secondary_id_number",
-            "tax_file_number_provided",
-            "is_politically_exposed",
-            # Employment
-            "employer_name",
-            "occupation",
-            "industry",
-            "employment_status",
-            "years_in_current_role",
-            "previous_employer",
-            # Income
-            "gross_annual_income",
-            "other_income",
-            "other_income_source",
-            "partner_annual_income",
-            # Assets
-            "estimated_property_value",
-            "vehicle_value",
-            "savings_other_institutions",
-            "investment_value",
-            "superannuation_balance",
-            # Liabilities
-            "other_loan_repayments_monthly",
-            "other_credit_card_limits",
-            "rent_or_board_monthly",
-            # Living situation
-            "housing_situation",
-            "time_at_current_address_years",
-            "number_of_dependants",
-            "previous_suburb",
-            "previous_state",
-            "previous_postcode",
-            # Contact
-            "preferred_contact_method",
-            # Computed (read-only)
-            "total_assets",
-            "total_monthly_liabilities",
-            # Banking
-            "account_tenure_years",
-            "loyalty_tier",
-            "num_products",
-            "savings_balance",
-            "checking_balance",
-            "has_credit_card",
-            "has_mortgage",
-            "has_auto_loan",
-            "on_time_payment_pct",
-            "previous_loans_repaid",
-            # Timestamps
-            "created_at",
-            "updated_at",
+            ("id", "user")
+            + _PROFILE_PERSONAL_AND_ID_FIELDS
+            + _PROFILE_DETAIL_FIELDS
+            + _BANKING_FIELDS
+            + _TIMESTAMP_FIELDS
         )
         read_only_fields = fields
 
@@ -418,94 +349,14 @@ class AdminCustomerProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerProfile
         fields = (
-            "id",
-            "user",
-            # Personal details
-            "date_of_birth",
-            "phone",
-            "address_line_1",
-            "address_line_2",
-            "suburb",
-            "state",
-            "postcode",
-            "marital_status",
-            # Identity & compliance
-            "residency_status",
-            "primary_id_type",
-            "primary_id_number",
-            "secondary_id_type",
-            "secondary_id_number",
-            "primary_id_number_masked",
-            "secondary_id_number_masked",
-            "tax_file_number_provided",
-            "is_politically_exposed",
-            # Employment
-            "employer_name",
-            "occupation",
-            "industry",
-            "employment_status",
-            "years_in_current_role",
-            "previous_employer",
-            # Income
-            "gross_annual_income",
-            "other_income",
-            "other_income_source",
-            "partner_annual_income",
-            # Assets
-            "estimated_property_value",
-            "vehicle_value",
-            "savings_other_institutions",
-            "investment_value",
-            "superannuation_balance",
-            # Liabilities
-            "other_loan_repayments_monthly",
-            "other_credit_card_limits",
-            "rent_or_board_monthly",
-            # Living situation
-            "housing_situation",
-            "time_at_current_address_years",
-            "number_of_dependants",
-            "previous_suburb",
-            "previous_state",
-            "previous_postcode",
-            # Contact
-            "preferred_contact_method",
-            # Computed (read-only)
-            "total_assets",
-            "total_monthly_liabilities",
-            # Banking
-            "account_tenure_years",
-            "loyalty_tier",
-            "num_products",
-            "savings_balance",
-            "checking_balance",
-            "has_credit_card",
-            "has_mortgage",
-            "has_auto_loan",
-            "on_time_payment_pct",
-            "previous_loans_repaid",
-            # Timestamps
-            "created_at",
-            "updated_at",
+            ("id", "user")
+            + _PROFILE_PERSONAL_AND_ID_FIELDS
+            + _MASKED_ID_FIELDS
+            + _PROFILE_DETAIL_FIELDS
+            + _BANKING_FIELDS
+            + _TIMESTAMP_FIELDS
         )
-        read_only_fields = (
-            "id",
-            "total_assets",
-            "total_monthly_liabilities",
-            "created_at",
-            "updated_at",
-            # Banking fields — managed by the bank, not editable via profile endpoint
-            "account_tenure_years",
-            "loyalty_tier",
-            "num_products",
-            "savings_balance",
-            "checking_balance",
-            "has_credit_card",
-            "has_mortgage",
-            "has_auto_loan",
-            "on_time_payment_pct",
-            "previous_loans_repaid",
-        )
+        read_only_fields = ("id", "total_assets", "total_monthly_liabilities") + _TIMESTAMP_FIELDS + _BANKING_FIELDS
         extra_kwargs = {
             "primary_id_number": {"write_only": True, "required": False},
             "secondary_id_number": {"write_only": True, "required": False},

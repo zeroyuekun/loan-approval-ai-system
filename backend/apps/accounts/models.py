@@ -7,12 +7,18 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from apps.accounts.fields import EncryptedCharField  # noqa: F401 — used by this module and migrations
-from apps.accounts.utils.encryption import get_fernet
+from apps.accounts.fields import EncryptedCharField
 from apps.common.models import SoftDeleteModel
 
-# Backward-compatible alias — existing tests and commands import _get_fernet from here.
-_get_fernet = get_fernet
+
+def _to_decimal(value, default):
+    """Parse an encrypted-at-rest decimal string; ``default`` when empty or malformed."""
+    if not value:
+        return default
+    try:
+        return Decimal(value)
+    except (InvalidOperation, TypeError):
+        return default
 
 
 class CustomUser(AbstractUser):
@@ -33,14 +39,10 @@ class CustomUser(AbstractUser):
 
     @property
     def is_locked(self):
-        if self.locked_until and self.locked_until > timezone.now():
-            return True
-        return False
+        return bool(self.locked_until and self.locked_until > timezone.now())
 
     def record_failed_login(self):
-        from django.db.models import F
-
-        CustomUser.objects.filter(pk=self.pk).update(failed_login_attempts=F("failed_login_attempts") + 1)
+        CustomUser.objects.filter(pk=self.pk).update(failed_login_attempts=models.F("failed_login_attempts") + 1)
         self.refresh_from_db()
 
         if self.failed_login_attempts >= 15:
@@ -68,8 +70,7 @@ class CustomUser(AbstractUser):
     def has_confirmed_totp(self) -> bool:
         """True if the user has at least one confirmed TOTP device.
 
-        Used by both the LoginView's 2FA gate (PR-4 of security
-        gap-closure) and the IsAdminOrOfficer permission when
+        Used by both the LoginView's 2FA gate and the IsAdminOrOfficer permission when
         ENFORCE_2FA_FOR_STAFF is on. Lazy-imports django_otp so the
         model can be imported in environments where django_otp isn't
         loaded yet (e.g., management commands during initial migration).
@@ -284,35 +285,17 @@ class CustomerProfile(SoftDeleteModel):
     @property
     def gross_annual_income_decimal(self) -> Decimal | None:
         """Return gross_annual_income as Decimal, or None."""
-        val = self.gross_annual_income
-        if not val or val == "":
-            return None
-        try:
-            return Decimal(val)
-        except (InvalidOperation, TypeError):
-            return None
+        return _to_decimal(self.gross_annual_income, None)
 
     @property
     def other_income_decimal(self) -> Decimal:
         """Return other_income as Decimal (defaults to 0)."""
-        val = self.other_income
-        if not val or val == "":
-            return Decimal("0")
-        try:
-            return Decimal(val)
-        except (InvalidOperation, TypeError):
-            return Decimal("0")
+        return _to_decimal(self.other_income, Decimal("0"))
 
     @property
     def partner_annual_income_decimal(self) -> Decimal | None:
         """Return partner_annual_income as Decimal, or None."""
-        val = self.partner_annual_income
-        if not val or val == "":
-            return None
-        try:
-            return Decimal(val)
-        except (InvalidOperation, TypeError):
-            return None
+        return _to_decimal(self.partner_annual_income, None)
 
     @property
     def total_deposits(self):

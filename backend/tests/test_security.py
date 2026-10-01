@@ -234,10 +234,3 @@ class TestPIIEncryption(TestCase):
         f1 = get_fernet()
         f2 = get_fernet()
         assert f1 is f2, "get_fernet should return a cached singleton"
-
-    def test_backward_compat_get_fernet_alias(self):
-        """_get_fernet alias in models should still work for backward compat."""
-        from apps.accounts.models import _get_fernet
-        from apps.accounts.utils.encryption import get_fernet
-
-        assert _get_fernet is get_fernet

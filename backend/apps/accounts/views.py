@@ -2,7 +2,7 @@ import logging
 
 from django.conf import settings as django_settings
 from django.contrib.auth.hashers import check_password, make_password
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.middleware.csrf import get_token as get_csrf_token
 from django.middleware.csrf import rotate_token
 from django.shortcuts import get_object_or_404
@@ -14,10 +14,10 @@ from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.agents.models import AgentRun
+from apps.agents.models import AgentRun, MarketingEmail
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.html_renderer import render_html
-from apps.loans.models import AuditLog
+from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 
 from .models import CustomerProfile, CustomUser
 from .permissions import IsAdminOrOfficer
@@ -73,6 +73,18 @@ def _clear_jwt_cookies(response):
     return response
 
 
+def _audit_user_event(request, user, action, details=None):
+    """Write an AuditLog row for an auth event on ``user``'s own account."""
+    AuditLog.objects.create(
+        user=user,
+        action=action,
+        resource_type="CustomUser",
+        resource_id=str(user.id),
+        details=details or {},
+        ip_address=request.META.get("REMOTE_ADDR"),
+    )
+
+
 class RefreshRateThrottle(AnonRateThrottle):
     # Distinct scope so this limit doesn't share AnonRateThrottle's "anon" cache
     # key with the login/register throttles — without it all three count against
@@ -105,9 +117,7 @@ class CookieTokenRefreshView(generics.GenericAPIView):
                     try:
                         refresh.blacklist()
                     except AttributeError:
-                        import logging
-
-                        logging.getLogger("accounts").debug("Token blacklist not available — skipping")
+                        logger.debug("Token blacklist not available — skipping")
                 refresh = RefreshToken.for_user(self._get_user_from_token(refresh))
                 new_access = refresh.access_token
 
@@ -131,12 +141,9 @@ class CookieTokenRefreshView(generics.GenericAPIView):
             return response
 
     def _get_user_from_token(self, token):
-        from django.contrib.auth import get_user_model
-
-        User = get_user_model()
         try:
-            return User.objects.get(pk=token["user_id"])
-        except User.DoesNotExist as exc:
+            return CustomUser.objects.get(pk=token["user_id"])
+        except CustomUser.DoesNotExist as exc:
             # Deleted-user race: token is cryptographically valid but its
             # subject no longer exists. Treat as invalid token (401) rather
             # than letting the outer handler return 500.
@@ -167,14 +174,7 @@ class RegisterView(generics.CreateAPIView):
         user = serializer.save()
         refresh = RefreshToken.for_user(user)
 
-        AuditLog.objects.create(
-            user=user,
-            action="register",
-            resource_type="CustomUser",
-            resource_id=str(user.id),
-            details={"username": user.username},
-            ip_address=request.META.get("REMOTE_ADDR"),
-        )
+        _audit_user_event(request, user, "register", {"username": user.username})
 
         response = Response(
             {
@@ -218,27 +218,15 @@ class LoginView(generics.GenericAPIView):
                 check_password(request.data.get("password", ""), self._DUMMY_HASH)
 
         if user_obj and user_obj.is_locked:
-            AuditLog.objects.create(
-                user=user_obj,
-                action="login_blocked_locked",
-                resource_type="CustomUser",
-                resource_id=str(user_obj.id),
-                details={"reason": "account_locked"},
-                ip_address=request.META.get("REMOTE_ADDR"),
-            )
+            _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
         if not serializer.is_valid():
             # Record failed login attempt
             if user_obj:
                 user_obj.record_failed_login()
-                AuditLog.objects.create(
-                    user=user_obj,
-                    action="login_failed",
-                    resource_type="CustomUser",
-                    resource_id=str(user_obj.id),
-                    details={"failed_attempts": user_obj.failed_login_attempts},
-                    ip_address=request.META.get("REMOTE_ADDR"),
+                _audit_user_event(
+                    request, user_obj, "login_failed", {"failed_attempts": user_obj.failed_login_attempts}
                 )
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
@@ -246,7 +234,7 @@ class LoginView(generics.GenericAPIView):
         user.reset_failed_logins()
 
         # ------------------------------------------------------------------
-        # 2FA gate (PR-4 of security gap-closure cycle).
+        # 2FA gate.
         #
         # - User has a confirmed TOTP device → require otp_token in the
         #   request body. Missing → 200 with {"requires_2fa": True} so the
@@ -266,14 +254,7 @@ class LoginView(generics.GenericAPIView):
             if not otp_token:
                 # Step 1 of two-step login: signal frontend to prompt
                 # for the OTP and resubmit. NO JWT issued yet.
-                AuditLog.objects.create(
-                    user=user,
-                    action="login_2fa_required",
-                    resource_type="CustomUser",
-                    resource_id=str(user.id),
-                    details={},
-                    ip_address=request.META.get("REMOTE_ADDR"),
-                )
+                _audit_user_event(request, user, "login_2fa_required")
                 return Response(
                     {
                         "requires_2fa": True,
@@ -286,14 +267,7 @@ class LoginView(generics.GenericAPIView):
             device = TOTPDevice.objects.filter(user=user, confirmed=True).first()
             if not device or not device.verify_token(otp_token):
                 user.record_failed_login()
-                AuditLog.objects.create(
-                    user=user,
-                    action="login_2fa_invalid",
-                    resource_type="CustomUser",
-                    resource_id=str(user.id),
-                    details={"failed_attempts": user.failed_login_attempts},
-                    ip_address=request.META.get("REMOTE_ADDR"),
-                )
+                _audit_user_event(request, user, "login_2fa_invalid", {"failed_attempts": user.failed_login_attempts})
                 return Response(
                     {"detail": "Invalid two-factor authentication code."},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -311,14 +285,7 @@ class LoginView(generics.GenericAPIView):
         else:
             audit_action = "login_success"
 
-        AuditLog.objects.create(
-            user=user,
-            action=audit_action,
-            resource_type="CustomUser",
-            resource_id=str(user.id),
-            details={},
-            ip_address=request.META.get("REMOTE_ADDR"),
-        )
+        _audit_user_event(request, user, audit_action)
 
         body = {"user": UserSerializer(user).data}
         if user.role in ("admin", "officer") and not has_totp:
@@ -359,8 +326,6 @@ class StaffCustomerListView(generics.ListAPIView):
         qs = CustomUser.objects.filter(role=CustomUser.Role.CUSTOMER).select_related("profile").order_by("-created_at")
         search = self.request.query_params.get("search", "").strip()
         if search:
-            from django.db.models import Q
-
             qs = qs.filter(
                 Q(first_name__icontains=search)
                 | Q(last_name__icontains=search)
@@ -385,8 +350,8 @@ class StaffCustomerProfileView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         user_id = self.kwargs["user_id"]
         # Gate the profile fetch on role=customer BEFORE the get_or_create so we
-        # never auto-attach a CustomerProfile row to a staff account. Codex
-        # adversarial review (v1.10.7) flagged this as a PII trust-boundary leak.
+        # never auto-attach a CustomerProfile row to a staff account (a PII
+        # trust-boundary leak).
         user = get_object_or_404(CustomUser, pk=user_id, role=CustomUser.Role.CUSTOMER)
         profile, _ = CustomerProfile.objects.select_related("user").get_or_create(user=user)
         return profile
@@ -591,33 +556,28 @@ class CustomerDataExportView(generics.GenericAPIView):
             data["profile"] = None
 
         # Loan applications with related decisions, emails, agent runs, bias reports
-        from apps.agents.models import AgentRun as _AgentRun
-        from apps.agents.models import MarketingEmail as _MarketingEmail
-        from apps.email_engine.models import GeneratedEmail as _GeneratedEmail
-        from apps.loans.models import LoanApplication, LoanDecision
-
         applications = (
             LoanApplication.objects.filter(applicant=user)
             .select_related("decision", "decision__model_version")
             .prefetch_related(
                 # Use Prefetch with bounded sub-querysets so Django's prefetch
                 # cache is hit inside the loop (list(qs)[:n] bypasses the cache
-                # and causes N+1 queries per application — M2 fix).
+                # and causes N+1 queries per application).
                 Prefetch(
                     "emails",
-                    queryset=_GeneratedEmail.objects.order_by("-created_at")[: self.MAX_EMAILS_PER_APP],
+                    queryset=GeneratedEmail.objects.order_by("-created_at")[: self.MAX_EMAILS_PER_APP],
                     to_attr="_emails_cached",
                 ),
                 Prefetch(
                     "agent_runs",
-                    queryset=_AgentRun.objects.prefetch_related("bias_reports").order_by("-created_at")[
+                    queryset=AgentRun.objects.prefetch_related("bias_reports").order_by("-created_at")[
                         : self.MAX_AGENT_RUNS_PER_APP
                     ],
                     to_attr="_agent_runs_cached",
                 ),
                 Prefetch(
                     "marketing_emails",
-                    queryset=_MarketingEmail.objects.order_by("-created_at")[: self.MAX_EMAILS_PER_APP],
+                    queryset=MarketingEmail.objects.order_by("-created_at")[: self.MAX_EMAILS_PER_APP],
                     to_attr="_marketing_emails_cached",
                 ),
             )
@@ -706,14 +666,7 @@ class CustomerDataExportView(generics.GenericAPIView):
         )
         data["audit_logs"] = [{k: str(v) for k, v in log.items()} for log in audit_logs]
 
-        AuditLog.objects.create(
-            user=user,
-            action="data_export",
-            resource_type="CustomUser",
-            resource_id=str(user.id),
-            details={},
-            ip_address=request.META.get("REMOTE_ADDR"),
-        )
+        _audit_user_event(request, user, "data_export")
 
         return Response(data)
 
@@ -743,14 +696,7 @@ class LogoutView(generics.GenericAPIView):
                 extra={"user_id": str(request.user.id), "error": type(exc).__name__},
             )
 
-        AuditLog.objects.create(
-            user=request.user,
-            action="logout",
-            resource_type="CustomUser",
-            resource_id=str(request.user.id),
-            details={},
-            ip_address=request.META.get("REMOTE_ADDR"),
-        )
+        _audit_user_event(request, request.user, "logout")
 
         response = Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
         _clear_jwt_cookies(response)
