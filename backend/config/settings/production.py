@@ -8,6 +8,19 @@ from .base import *  # noqa: F401, F403
 
 DEBUG = False
 
+# Everything base.py derived from the DJANGO_DEBUG env var is re-derived here,
+# now that DEBUG is final: a stray DJANGO_DEBUG=true in a production env must
+# not ship insecure cookies or skip the secret checks.
+JWT_COOKIE_SECURE = True
+
+from config.env_validation import validate_production_secrets  # noqa: E402
+
+validate_production_secrets(
+    secret_key=SECRET_KEY,  # noqa: F405
+    field_encryption_key=FIELD_ENCRYPTION_KEY,  # noqa: F405
+    kms_backend=KMS_BACKEND,  # noqa: F405
+)
+
 # Must match the env var name used in base.py (DJANGO_ALLOWED_HOSTS).
 _hosts = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
 ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()]
@@ -31,7 +44,9 @@ REST_FRAMEWORK = {  # noqa: F405
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
-SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "True").lower() in ("true", "1", "yes")
+# An empty value (compose passes SECURE_SSL_REDIRECT= when unset) means the
+# default, not "off".
+SECURE_SSL_REDIRECT = (os.environ.get("SECURE_SSL_REDIRECT") or "True").lower() in ("true", "1", "yes")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
