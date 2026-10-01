@@ -152,15 +152,15 @@ def test_no_nbo_unaffected(checker):
 #
 # The 30%-band derivations alone reject CORRECT interest figures computed at
 # each offer's actual estimated_rate (4.50–12.49% catalogue range), which the
-# marketing prompt explicitly hands to the LLM.  The caller now supplies
-# `nbo_rate_derived` (principal × actual rate, annual/monthly/fortnightly)
-# and the checker must accept those figures (±10 %).
+# marketing prompt explicitly hands to the LLM.  The caller supplies the
+# offers as `nbo_offers` and the checker must accept interest derived at each
+# offer's actual rate (annual/monthly/fortnightly, ±10 %).
 # ---------------------------------------------------------------------------
 
 
-def test_interest_at_actual_low_rate_passes_with_rate_derived_context(checker):
+def test_interest_at_actual_low_rate_passes_with_offer_rates(checker):
     """$20,000 at 4.90% → $980/yr is correct and must pass when the caller
-    provides the real-rate-derived references."""
+    passes the offer with its rate."""
     # 20000 × 0.049 = 980 (annual), 81.67 (monthly), 37.69 (fortnightly).
     # None of these fall in the 30%-band derivations (annual $6,000 band
     # $5,400–$6,600; P/12 $1,667 band $1,500–$1,833; P/26 $769 band $692–$846).
@@ -168,48 +168,54 @@ def test_interest_at_actual_low_rate_passes_with_rate_derived_context(checker):
     context = {
         "loan_amount": 20000,
         "nbo_amounts": [20000],
-        "nbo_rate_derived": [980.0, 81.67, 37.69],
+        "nbo_offers": [{"amount": 20000, "estimated_rate": 4.90}],
     }
     result = checker.check_hallucinated_numbers(text, context)
     assert result["passed"], f"Correct interest at the offer's actual 4.90% rate should pass: {result['details']}"
 
 
-def test_interest_at_actual_mid_rate_passes_with_rate_derived_context(checker):
+def test_interest_at_actual_mid_rate_passes_with_offer_rates(checker):
     """$30,000 at 9.99% → $2,997/yr exceeds the P/12 band ceiling ($2,750) but
     is correct at the offer's actual rate and must pass."""
     text = "A $30,000 consolidation loan would cost about $2,997 in interest for the first year."
     context = {
         "loan_amount": 30000,
         "nbo_amounts": [30000],
-        "nbo_rate_derived": [2997.0, 249.75, 115.27],
+        "nbo_offers": [{"amount": 30000, "estimated_rate": 9.99}],
     }
     result = checker.check_hallucinated_numbers(text, context)
     assert result["passed"], f"Correct interest at the offer's actual 9.99% rate should pass: {result['details']}"
 
 
-def test_fabricated_amount_still_flagged_with_rate_derived_context(checker):
-    """Regression: a figure matching neither the rate-derived references nor
-    the 30%-band fallback is still flagged."""
-    # $7,777 vs derived refs {980, 81.67, 37.69} and 30%-band refs
+def test_fabricated_amount_still_flagged_with_offer_rates(checker):
+    """Regression: a figure matching neither the offer-rate references nor
+    the 30%-band derivations is still flagged."""
+    # $7,777 vs offer-rate refs {980, 81.67, 37.69} and 30%-band refs
     # {6000, 500, 230.77, 1666.67, 769.23} — outside every ±10 % band.
     text = "Your $20,000 offer comes with a bonus of $7,777."
     context = {
         "loan_amount": 20000,
         "nbo_amounts": [20000],
-        "nbo_rate_derived": [980.0, 81.67, 37.69],
+        "nbo_offers": [{"amount": 20000, "estimated_rate": 4.90}],
     }
     result = checker.check_hallucinated_numbers(text, context)
-    assert not result["passed"], "Fabricated $7,777 must remain flagged even with rate-derived context"
+    assert not result["passed"], "Fabricated $7,777 must remain flagged even with offer rates"
     assert "7,777" in result["details"] or "7777" in result["details"], result["details"]
 
 
-def test_non_numeric_rate_derived_entries_ignored(checker):
-    """Garbage entries in nbo_rate_derived are skipped, valid ones still apply."""
+def test_offers_without_amount_or_rate_ignored(checker):
+    """Offers without a usable amount/rate are skipped, valid ones still apply."""
     text = "You could save around $980 in interest in the first year on a $20,000 loan."
     context = {
         "loan_amount": 20000,
         "nbo_amounts": [20000],
-        "nbo_rate_derived": [None, "not-a-number", 980.0],
+        "nbo_offers": [
+            {"amount": 2000},  # no rate
+            {"estimated_rate": 4.75},  # no amount
+            {"amount": "bad", "estimated_rate": "data"},
+            None,
+            {"amount": 20000, "estimated_rate": 4.90},
+        ],
     }
     result = checker.check_hallucinated_numbers(text, context)
-    assert result["passed"], f"Valid rate-derived entry should still apply: {result['details']}"
+    assert result["passed"], f"Valid offer should still apply: {result['details']}"

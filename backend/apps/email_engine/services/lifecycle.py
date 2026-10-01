@@ -40,10 +40,11 @@ def send_application_received(application):
         f"{application.purpose.upper()[:3]}-{datetime.now().strftime('%Y%m%d')}-{str(application.id)[:4].upper()}"
     )
 
-    subject = f"We've Received Your {_loan_label(purpose)} Application | Ref #{ref_code}"
+    loan_label = _loan_label(purpose)
+    subject = f"We've Received Your {loan_label} Application | Ref #{ref_code}"
     body = f"""Dear {name},
 
-Thank you for your {_loan_label(purpose)} application with AussieLoanAI. We have everything we need to get started.
+Thank you for your {loan_label} application with AussieLoanAI. We have everything we need to get started.
 
 Application summary:
 

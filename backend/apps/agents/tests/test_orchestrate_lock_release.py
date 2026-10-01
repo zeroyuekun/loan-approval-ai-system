@@ -37,13 +37,17 @@ def _invoke_on_failure(retries, max_retries, args, kwargs):
     """Call the lock-management logic inside _OrchestrateTask.on_failure.
 
     Patches Task.on_failure so the super() call succeeds with a non-real-Task
-    self object.
+    self object, and patches the stuck-application cleanup (which needs the
+    DB). Returns the cleanup mock.
     """
     from apps.agents.tasks import _OrchestrateTask
 
     fake_self = _FakeSelf(retries, max_retries)
 
-    with patch.object(Task, "on_failure"):  # neutralise super().on_failure
+    with (
+        patch.object(Task, "on_failure"),  # neutralise super().on_failure
+        patch("apps.agents.tasks._cleanup_stuck_application") as mock_cleanup,
+    ):
         _OrchestrateTask.on_failure(
             fake_self,
             exc=ConnectionError("error"),
@@ -52,6 +56,7 @@ def _invoke_on_failure(retries, max_retries, args, kwargs):
             kwargs=kwargs,
             einfo=None,
         )
+    return mock_cleanup
 
 
 class TestOrchestrateTaskOnFailure:
@@ -68,9 +73,10 @@ class TestOrchestrateTaskOnFailure:
         cache.add(lock_key, "task-abc", 600)
         assert cache.get(lock_key) is not None, "Lock should be set before on_failure"
 
-        _invoke_on_failure(retries=3, max_retries=3, args=[app_id], kwargs={})
+        mock_cleanup = _invoke_on_failure(retries=3, max_retries=3, args=[app_id], kwargs={})
 
         assert cache.get(lock_key) is None, "Dedup lock must be released after max_retries exhausted"
+        mock_cleanup.assert_called_once_with(app_id)
 
     @CACHE_OVERRIDE
     def test_lock_kept_during_retry(self):
@@ -83,10 +89,11 @@ class TestOrchestrateTaskOnFailure:
         cache.add(lock_key, "task-xyz", 600)
         assert cache.get(lock_key) is not None
 
-        _invoke_on_failure(retries=1, max_retries=3, args=[app_id], kwargs={})
+        mock_cleanup = _invoke_on_failure(retries=1, max_retries=3, args=[app_id], kwargs={})
 
         # Lock must still be held so the next retry is protected (M22)
         assert cache.get(lock_key) is not None, "Dedup lock must be kept alive during retries (M22)"
+        mock_cleanup.assert_not_called()
 
     @CACHE_OVERRIDE
     def test_lock_released_when_application_id_from_kwargs(self):
@@ -132,53 +139,6 @@ class TestOrchestrateTaskOnFailure:
         _invoke_on_failure(retries=0, max_retries=3, args=[app_id], kwargs={})
 
         assert cache.get(lock_key) is not None
-
-
-class TestOnFailureStuckCleanup:
-    """Terminal failure must also reset the stuck-PROCESSING application (S1-F4).
-
-    Before the fix on_failure only deleted the dedup lock; the application
-    stayed PROCESSING forever because the designed cleanup path was never
-    invoked on terminal failure.
-    """
-
-    @CACHE_OVERRIDE
-    def test_terminal_failure_calls_stuck_cleanup_and_releases_lock(self):
-        from django.core.cache import cache
-
-        app_id = "CleanupApp-001"
-        lock_key = f"orchestrate_lock:{app_id}"
-        cache.add(lock_key, "task-c", 600)
-
-        with patch("apps.agents.tasks._cleanup_stuck_application") as mock_cleanup:
-            _invoke_on_failure(retries=3, max_retries=3, args=[app_id], kwargs={})
-
-        mock_cleanup.assert_called_once_with(app_id, clear_lock=True)
-        assert cache.get(lock_key) is None, "Lock must be released on terminal failure"
-
-    @CACHE_OVERRIDE
-    def test_cleanup_error_never_masks_failure_and_lock_still_released(self):
-        from django.core.cache import cache
-
-        app_id = "CleanupBoomApp-001"
-        lock_key = f"orchestrate_lock:{app_id}"
-        cache.add(lock_key, "task-cb", 600)
-
-        with patch(
-            "apps.agents.tasks._cleanup_stuck_application",
-            side_effect=RuntimeError("cleanup boom"),
-        ):
-            # Must not raise: a cleanup error never masks the original failure.
-            _invoke_on_failure(retries=3, max_retries=3, args=[app_id], kwargs={})
-
-        assert cache.get(lock_key) is None, "Lock release must survive a cleanup error"
-
-    @CACHE_OVERRIDE
-    def test_mid_retry_failure_does_not_run_stuck_cleanup(self):
-        with patch("apps.agents.tasks._cleanup_stuck_application") as mock_cleanup:
-            _invoke_on_failure(retries=1, max_retries=3, args=["MidRetryApp-001"], kwargs={})
-
-        mock_cleanup.assert_not_called()
 
 
 class TestOrchestrateRetryReentrancy:

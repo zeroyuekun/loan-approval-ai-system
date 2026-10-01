@@ -27,8 +27,7 @@ structural change. The adapter:
     caller reads (``.content[].type/.input/.text``, ``.usage.input_tokens/
     output_tokens``, ``.stop_reason``),
   * raises the typed ``RateLimited`` signal on HTTP 429 (parsing ``Retry-After``)
-    so the Celery task can ``self.retry(countdown=...)`` — no counterfeit
-    ``anthropic.RateLimitError`` is constructed for a foreign provider response,
+    so the Celery task can ``self.retry(countdown=...)``,
   * raises ``EmailBackendError`` on 4xx/5xx/transport failures so the caller
     degrades to the deterministic template.
 
@@ -177,17 +176,12 @@ class OpenAICompatibleLLMClient:
             raise EmailBackendError(f"{self.provider} request failed: {exc}") from exc
 
         if resp.status_code == 429:
-            # Raise the typed RateLimited signal DIRECTLY so the Celery task can
-            # self.retry(countdown=...). Building a counterfeit
-            # anthropic.RateLimitError around a foreign httpx.Response was
-            # fragile under SDK signature drift (and its fallback silently
-            # flipped 429 semantics to an immediate template).
+            # RateLimited reaches the Celery task, which retries after Retry-After.
             try:
-                retry_after = int(resp.headers.get("retry-after", "30") or 30)
-            except (TypeError, ValueError):
-                # Retry-After may be an http-date — fall back to the default.
-                retry_after = 30
-            raise RateLimited(retry_after=retry_after)
+                raise RateLimited(retry_after=int(resp.headers["retry-after"]))
+            except (KeyError, ValueError):
+                # Header missing, or an http-date: use RateLimited's default.
+                raise RateLimited() from None
         if resp.status_code >= 400:
             # 4xx (e.g. 413 request-too-large on a small free tier) / 5xx →
             # degrade to the template rather than hard-error.

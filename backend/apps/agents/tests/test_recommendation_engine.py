@@ -70,6 +70,22 @@ class TestUnsecuredPersonalTermSelection:
         if rec is not None:
             assert rec.term_months == 60
 
+    def test_fallback_resize_respects_the_15pct_of_gross_ceiling(self):
+        """When no term fits and the loop falls back to 60 months, the re-size
+        must use the same min(15% of gross, surplus) cap the loop enforced.
+        Sized against raw surplus, this snapshot is quoted the $50,000 catalog
+        maximum at about $1,087/month, well above its $750/month cap."""
+        eng = RecommendationEngine()
+        # Gross $5,000/mo -> 15% cap = $750; surplus ~ $2,218 (> cap).
+        s = _snapshot(annual_income=60000.0, monthly_expenses=1000.0, credit_score=720)
+        rec = eng._evaluate_unsecured_personal(s)
+        assert rec is not None
+        assert rec.term_months == 60
+        cap = min(0.15 * s.annual_income / 12, s.monthly_surplus)
+        assert rec.monthly_repayment <= cap + 0.01, (
+            f"quoted ${rec.monthly_repayment:,.2f}/mo exceeds the repayment cap ${cap:,.2f}/mo"
+        )
+
 
 class TestSecuredPersonalServiceability:
     """Guards the M19-parity fix for secured personal loans (review #3). The

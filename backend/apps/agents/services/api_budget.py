@@ -42,20 +42,6 @@ MODEL_PRICING = {
     "claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-20250514": {"input": 0.25, "output": 1.25},
-    # Free Groq backend for email generation — $0/token. The budget guard still
-    # reserves the per-call floor and counts the call against the daily call
-    # limit, but no dollar spend accrues.
-    "llama-3.1-8b-instant": {"input": 0.00, "output": 0.00},
-    # Free LOCAL Ollama backend — $0/token (runs on-prem, no API billing).
-    # "loan-email" is our 16k-context Modelfile build; the rest are common
-    # Ollama tags. These rows are harmless defense for direct estimate_cost_usd
-    # callers that pass only a model tag — unlisted tags are now zeroed by the
-    # provider-keyed check (_FREE_PROVIDERS), so a new OLLAMA_MODEL no longer
-    # falls back to Sonnet pricing.
-    "loan-email": {"input": 0.00, "output": 0.00},
-    "qwen2.5:7b": {"input": 0.00, "output": 0.00},
-    "llama3.2:3b": {"input": 0.00, "output": 0.00},
-    "llama3.1:8b": {"input": 0.00, "output": 0.00},
 }
 
 # Fallback: assume Sonnet pricing for unknown models
@@ -85,8 +71,9 @@ def _sampling_params_removed(model):
 _PROVIDER_DESTINATION = {"anthropic": "US", "groq": "US", "ollama": "AU"}
 
 # Providers whose calls cost $0/token (free Groq tier, on-prem Ollama). Keyed
-# by PROVIDER — not model tag — so an unlisted/local model tag cannot fall back
-# to Sonnet pricing and accrue phantom spend against the shared daily cap.
+# by PROVIDER, not model tag, so any local model tag costs $0 without a
+# MODEL_PRICING row. The budget guard still reserves the per-call floor and
+# counts the call against the daily call limit.
 _FREE_PROVIDERS = frozenset({"groq", "ollama"})
 
 
@@ -348,6 +335,9 @@ class ApiBudgetGuard:
 
             reserved = int(reserved_cents)
             cost_usd = estimate_cost_usd(input_tokens, output_tokens, model, provider=provider)
+            # Minimum 1 cent per real call, except free providers ($0).
+            min_cents = 0 if provider in _FREE_PROVIDERS else 1
+            floored_cents = max(min_cents, int(cost_usd * 100))
 
             if reserved > 0 and released:
                 # Failure release: undo the reservation in full. No cent floor —
@@ -364,16 +354,13 @@ class ApiBudgetGuard:
             elif reserved > 0:
                 # Successful reconcile to the real cost. The call was already
                 # counted inside reserve_budget, so do NOT touch calls again.
-                # Minimum 1 cent per real call — except free providers ($0).
-                cost_cents = int(cost_usd * 100) if provider in _FREE_PROVIDERS else max(1, int(cost_usd * 100))
-                cost_delta = cost_cents - reserved
+                cost_delta = floored_cents - reserved
             else:
                 # Fallback path: the call was never reserved. Count the call +
-                # full cost with the minimum-cent floor (skipped for free providers).
-                cost_cents = int(cost_usd * 100) if provider in _FREE_PROVIDERS else max(1, int(cost_usd * 100))
+                # full cost with the minimum-cent floor.
                 pipe.incr(calls_key)
                 pipe.expire(calls_key, self.KEY_TTL)
-                cost_delta = cost_cents
+                cost_delta = floored_cents
 
             pipe.incrby(tokens_key, input_tokens + output_tokens)
             pipe.expire(tokens_key, self.KEY_TTL)

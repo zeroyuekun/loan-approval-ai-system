@@ -15,7 +15,6 @@ still consume call slots against the daily call limit — only the dollar
 accounting is zeroed.
 """
 
-from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -27,7 +26,7 @@ _UNLISTED_TAG = "totally-unknown-tag"  # deliberately NOT in MODEL_PRICING
 
 
 def _cost_key():
-    return f"ai_budget:{date.today().isoformat()}:cost_cents"
+    return ApiBudgetGuard()._daily_key("cost_cents")
 
 
 def _guard():
@@ -95,13 +94,13 @@ def test_record_call_free_provider_unreserved_adds_zero_cost():
 
 
 def test_record_call_paid_provider_keeps_one_cent_floor():
-    """Pin current paid-path behavior: a $0-priced model tag on the anthropic
+    """Pin current paid-path behavior: a near-$0 call on the anthropic
     provider still floors to 1 cent per call."""
     guard, pipe = _guard()
     guard.record_call(
         input_tokens=10,
         output_tokens=5,
-        model="llama-3.1-8b-instant",  # $0 row in MODEL_PRICING
+        model="claude-sonnet-4-6",  # 10/5 tokens round to 0 cents
         reserved_cents=5,
         provider="anthropic",
     )
@@ -126,8 +125,7 @@ def _fake_client(provider):
 def test_guarded_api_call_passes_provider_to_record_call(mock_guard_cls):
     """End-to-end: an ollama client with an UNLISTED tag must record its call
     provider-keyed, so the budget math zeroes it."""
-    guard = MagicMock()
-    mock_guard_cls.return_value = guard
+    guard = mock_guard_cls.return_value
 
     guarded_api_call(_fake_client("ollama"), model=_UNLISTED_TAG, messages=[{"role": "user", "content": "hi"}])
 
@@ -139,8 +137,7 @@ def test_guarded_api_call_passes_provider_to_record_call(mock_guard_cls):
 @patch("apps.agents.services.api_budget.ApiBudgetGuard")
 def test_guarded_api_call_passes_provider_on_failure_release(mock_guard_cls):
     """The failure-release record_call must also be provider-keyed."""
-    guard = MagicMock()
-    mock_guard_cls.return_value = guard
+    guard = mock_guard_cls.return_value
     client = _fake_client("ollama")
     client.messages.create.side_effect = RuntimeError("boom")
 

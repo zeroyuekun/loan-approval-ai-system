@@ -190,35 +190,23 @@ class TestGroqRequestPayload:
 
 
 class TestGroqErrorHandling:
-    def test_429_raises_rate_limited_with_retry_after_header(self):
-        # The adapter raises the typed RateLimited signal DIRECTLY (no counterfeit
-        # anthropic.RateLimitError) so tasks.py can self.retry(countdown=...).
+    @pytest.mark.parametrize(
+        ("headers", "expected"),
+        [
+            ({"Retry-After": "7"}, 7),
+            (None, 30),
+            # HTTP allows an http-date Retry-After; fall back to the default.
+            ({"Retry-After": "Wed, 10 Jun 2026 07:28:00 GMT"}, 30),
+        ],
+    )
+    def test_429_raises_rate_limited_with_retry_after(self, headers, expected):
+        # The adapter raises the typed RateLimited signal so tasks.py can
+        # self.retry(countdown=...).
         c = _client()
-        c._http.post.return_value = _http_response(
-            status_code=429, payload={"error": "rate limited"}, headers={"Retry-After": "7"}
-        )
+        c._http.post.return_value = _http_response(status_code=429, payload={"error": "rate limited"}, headers=headers)
         with pytest.raises(RateLimited) as excinfo:
             c.messages.create(messages=[{"role": "user", "content": "x"}])
-        assert excinfo.value.retry_after == 7
-
-    def test_429_without_retry_after_defaults_to_30(self):
-        c = _client()
-        c._http.post.return_value = _http_response(status_code=429, payload={"error": "rate limited"})
-        with pytest.raises(RateLimited) as excinfo:
-            c.messages.create(messages=[{"role": "user", "content": "x"}])
-        assert excinfo.value.retry_after == 30
-
-    def test_429_with_non_numeric_retry_after_defaults_to_30(self):
-        # HTTP allows an http-date Retry-After; don't crash on it.
-        c = _client()
-        c._http.post.return_value = _http_response(
-            status_code=429,
-            payload={"error": "rate limited"},
-            headers={"Retry-After": "Wed, 10 Jun 2026 07:28:00 GMT"},
-        )
-        with pytest.raises(RateLimited) as excinfo:
-            c.messages.create(messages=[{"role": "user", "content": "x"}])
-        assert excinfo.value.retry_after == 30
+        assert excinfo.value.retry_after == expected
 
     def test_413_request_too_large_raises_email_backend_error(self):
         # Free-tier TPM/context ceiling → must be a backend error so the caller
@@ -257,15 +245,11 @@ class TestClientMemoization:
     (and its httpx connection pool) must be reused, not rebuilt per task."""
 
     @pytest.fixture(autouse=True)
-    def _clean_cache_and_env(self, monkeypatch):
-        from apps.email_engine.services import email_generator as eg
-
-        eg._CLIENT_CACHE.clear()
+    def _groq_env(self, monkeypatch):
+        # The root conftest clears _CLIENT_CACHE around every test.
         monkeypatch.setenv("EMAIL_LLM_BACKEND", "groq")
         monkeypatch.setenv("GROQ_API_KEY", "test-key")
         monkeypatch.setenv("EMAIL_LLM_MODEL", "llama-3.1-8b-instant")
-        yield
-        eg._CLIENT_CACHE.clear()
 
     def test_same_config_reuses_the_same_client_instance(self):
         from apps.email_engine.services.email_generator import EmailGenerator

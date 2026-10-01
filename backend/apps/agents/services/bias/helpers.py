@@ -75,46 +75,22 @@ def _format_flag_detail(prescreen):
 def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **api_kwargs):
     """Call the Anthropic API once, returning ``fallback`` on terminal failure.
 
-    Retry for transient errors lives inside the anthropic SDK client: it
-    retries connect errors and 408/429/5xx responses internally with
-    exponential backoff (max_retries=2, pinned in _make_anthropic_client).
-    This helper makes a single in-worker attempt on top of that —
-    time.sleep() inside a Celery worker blocks the thread and prevents other
-    tasks from running, so there is no worker-level retry loop.
-
-    If the (SDK-retried) attempt still terminates with a transient error
-    (RateLimit, Timeout, Connection, 5xx) or a non-retryable 4xx, the
-    supplied ``fallback`` dict is returned immediately; the bias-detector
-    callers score it as the worst-case (high-risk) result.
-    BudgetExhausted / CircuitOpen propagate so callers can invoke
+    Transient errors are retried by the SDK client's own bounded backoff
+    (policy pinned in _make_anthropic_client); there is no extra retry loop
+    here, which would hold the Celery worker thread longer. Any API error
+    that survives the SDK retries returns ``fallback``, which the
+    bias-detector callers score as the worst-case (high-risk) result.
+    BudgetExhausted and CircuitOpen propagate so callers can invoke
     _handle_bias_unavailable.
     """
     try:
         response = guarded_api_call(client, **api_kwargs)
         return _extract_tool_result(response, fallback)
-    except anthropic.AuthenticationError as e:
-        logger.error("%s failed (auth error, not retryable: %s) — %s", service_name, e, final_failure_suffix)
-        return fallback
-    except anthropic.RateLimitError as e:
-        logger.error("%s failed (rate limited: %s) — %s", service_name, e, final_failure_suffix)
-        return fallback
-    except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
-        logger.error("%s failed (connection/timeout: %s) — %s", service_name, e, final_failure_suffix)
-        return fallback
-    except anthropic.APIStatusError as e:
-        if e.status_code >= 500:
-            logger.error("%s failed (server error %d: %s) — %s", service_name, e.status_code, e, final_failure_suffix)
-        else:
-            logger.error(
-                "%s failed (client error %d, not retryable: %s) — %s",
-                service_name,
-                e.status_code,
-                e,
-                final_failure_suffix,
-            )
-        return fallback
     except (BudgetExhausted, CircuitOpen):
         raise  # let callers invoke _handle_bias_unavailable
+    except anthropic.APIError as e:
+        logger.error("%s failed (%s: %s) — %s", service_name, type(e).__name__, e, final_failure_suffix)
+        return fallback
     except Exception as e:
         logger.critical("%s UNEXPECTED failure: %s", service_name, e, exc_info=True)
         return fallback

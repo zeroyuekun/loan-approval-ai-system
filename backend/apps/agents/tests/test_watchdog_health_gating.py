@@ -116,3 +116,20 @@ def test_403_without_token_never_fires_critical(mock_get, mock_record, mock_logg
     assert cmd.consecutive_failures == 2  # untouched
     mock_record.assert_not_called()
     mock_logger.critical.assert_not_called()
+
+
+@patch("apps.agents.management.commands.watchdog.logger")
+@patch.object(Command, "_record_health")
+@patch("apps.agents.management.commands.watchdog.httpx.get")
+def test_unreachable_at_threshold_fires_critical_alert(mock_get, mock_record, mock_logger):
+    """A backend that stays unreachable must escalate like a degraded one."""
+    import httpx
+
+    mock_get.side_effect = httpx.ConnectError("connection refused")
+    cmd = _command(consecutive_failures=2)
+
+    cmd._check_health()
+
+    assert cmd.consecutive_failures == 3
+    assert mock_record.call_args[0][0] == "unreachable"
+    mock_logger.critical.assert_called_once()
