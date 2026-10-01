@@ -226,14 +226,18 @@ _PRICING = {"interest_rate_number": 7.49, "comparison_rate_number": 7.89}
 def test_rate_on_a_line_mentioning_income_is_still_checked(checker):
     """A broad word such as "income" used to exempt the whole line."""
     text = "Based on your income, your interest rate is 12.99% p.a."
-    result = checker.check_hallucinated_numbers(text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING})
+    result = checker.check_hallucinated_numbers(
+        text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING}
+    )
     assert not result["passed"]
     assert "12.99" in result["details"]
 
 
 def test_correct_rate_next_to_income_passes(checker):
     text = "Based on your income, your interest rate is 7.49% p.a. (comparison rate 7.89% p.a.)."
-    result = checker.check_hallucinated_numbers(text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING})
+    result = checker.check_hallucinated_numbers(
+        text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING}
+    )
     assert result["passed"], result["details"]
 
 
@@ -243,7 +247,9 @@ def test_disclaimer_percentages_stay_exempt(checker):
         "A deposit of 20% avoids LMI, and an 80% LVR applies.\n"
         "Your interest rate is 7.49% p.a."
     )
-    result = checker.check_hallucinated_numbers(text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING})
+    result = checker.check_hallucinated_numbers(
+        text, {"loan_amount": 20000, "decision": "approved", "pricing": _PRICING}
+    )
     assert result["passed"], result["details"]
 
 

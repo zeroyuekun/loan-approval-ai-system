@@ -183,7 +183,9 @@ class OpenAICompatibleLLMClient:
         if resp.status_code >= 400:
             # 4xx (e.g. 413 request-too-large on a small free tier) / 5xx →
             # degrade to the template rather than hard-error.
-            raise EmailBackendError(f"{self.provider} API error {resp.status_code}: {resp.text[:300]}")
+            raise EmailBackendError(
+                f"{self.provider} API error {resp.status_code}: {resp.text[:300]}", status_code=resp.status_code
+            )
 
         return self._normalise(resp.json())
 

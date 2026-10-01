@@ -479,7 +479,7 @@ class EmailGenerator:
 
         budget = ApiBudgetGuard()
         try:
-            budget.check_budget()
+            budget.check_budget(provider=self.provider)
         except ApiGateClosed:
             # CircuitOpen: the shared breaker may have been tripped by ANOTHER
             # AI service's failures — the customer still gets a template email.
