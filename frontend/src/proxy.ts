@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { buildCsp, originOf, resolveApiUrl } from '@/lib/csp'
+import { buildCsp, originOf, resolveApiUrl, sentryOriginFromDsn } from '@/lib/csp'
 
 const API_URL = resolveApiUrl(process.env.NEXT_PUBLIC_API_URL, process.env.NODE_ENV)
 
@@ -36,7 +36,8 @@ export function proxy(request: NextRequest) {
   const csp = buildCsp({
     nonce,
     isDev: process.env.NODE_ENV === 'development',
-    connectOrigins: [originOf(API_URL)],
+    // The API (when on another origin) and the Sentry ingest host
+    connectOrigins: [originOf(API_URL), sentryOriginFromDsn(process.env.NEXT_PUBLIC_SENTRY_DSN)],
   })
 
   const redirectTo = roleRedirect(request)

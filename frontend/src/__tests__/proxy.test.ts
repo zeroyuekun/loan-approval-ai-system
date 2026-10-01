@@ -25,6 +25,18 @@ describe('proxy CSP', () => {
     expect(a).not.toBe(b)
   })
 
+  it('allows the Sentry ingest origin in connect-src when a DSN is configured', () => {
+    const prev = process.env.NEXT_PUBLIC_SENTRY_DSN
+    process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://key@o42.ingest.us.sentry.io/7'
+    try {
+      const csp = proxy(new NextRequest('http://localhost:3000/login')).headers.get('Content-Security-Policy')
+      expect(csp).toMatch(/connect-src [^;]*https:\/\/o42\.ingest\.us\.sentry\.io/)
+      expect(csp).not.toContain('key@')
+    } finally {
+      process.env.NEXT_PUBLIC_SENTRY_DSN = prev
+    }
+  })
+
   it('runs on page routes, not on static assets', () => {
     const matcher = JSON.stringify(config.matcher)
     expect(matcher).toContain('_next/static')
