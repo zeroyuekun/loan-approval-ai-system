@@ -6,7 +6,9 @@ from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
+from apps.accounts.permissions import IsAdminOrOfficer
 from apps.email_engine.models import GeneratedEmail
+from apps.email_engine.services.decision_email import DecisionMismatch, require_decision_on_record
 from apps.email_engine.services.html_renderer import render_html
 from apps.email_engine.tasks import generate_email_task
 from apps.loans.permissions import check_loan_access
@@ -106,19 +108,30 @@ class EmailListView(APIView):
 
 
 class GenerateEmailView(APIView):
-    permission_classes = [IsAuthenticated]
+    # Staff only: a decision email is a credit representation from the lender,
+    # so the applicant must never be able to trigger one.
+    permission_classes = [IsAdminOrOfficer]
     throttle_classes = [EmailGenerationThrottle]
 
     def post(self, request, loan_id):
-        """Trigger email generation for a loan application."""
+        """Trigger generation of the decision email for the decision on record.
+
+        ``decision`` in the body is optional; when present it must match the
+        application's LoanDecision (409 otherwise), so a stale screen cannot
+        issue the wrong letter.
+        """
         check_loan_access(request, loan_id)
 
-        decision = request.data.get("decision", "approved")
-        if decision not in ("approved", "denied"):
+        requested = request.data.get("decision") if isinstance(request.data, dict) else None
+        if requested is not None and requested not in ("approved", "denied"):
             return Response(
                 {"error": "decision must be 'approved' or 'denied'"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            decision = require_decision_on_record(loan_id, requested)
+        except DecisionMismatch as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
 
         task = generate_email_task.delay(str(loan_id), decision)
         return Response(
@@ -128,7 +141,7 @@ class GenerateEmailView(APIView):
 
 
 class SendLatestEmailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrOfficer]
     throttle_classes = [EmailGenerationThrottle]
 
     def post(self, request, loan_id):
@@ -153,6 +166,11 @@ class SendLatestEmailView(APIView):
                 {"error": "Cannot send email that failed guardrails"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        try:
+            require_decision_on_record(loan_id, email.decision)
+        except DecisionMismatch as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
 
         from apps.email_engine.services.sender import send_decision_email
 

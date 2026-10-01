@@ -9,6 +9,14 @@ import pytest
 from apps.email_engine.models import GeneratedEmail
 
 
+@pytest.fixture
+def denied_decision(sample_application):
+    """The task only issues the email for the decision on record (C1)."""
+    from apps.loans.models import LoanDecision
+
+    return LoanDecision.objects.create(application=sample_application, decision="denied", confidence=0.9)
+
+
 @pytest.mark.django_db
 def test_generated_email_has_sent_at_marker(sample_application):
     email = GeneratedEmail.objects.create(
@@ -90,7 +98,7 @@ def httpx_response_stub():
 
 
 @pytest.mark.django_db
-def test_task_converts_rate_limited_to_retry(monkeypatch, sample_application):
+def test_task_converts_rate_limited_to_retry(monkeypatch, sample_application, denied_decision):
     from celery.exceptions import Retry
 
     from apps.email_engine import tasks as email_tasks
@@ -119,7 +127,7 @@ def test_task_converts_rate_limited_to_retry(monkeypatch, sample_application):
 
 
 @pytest.mark.django_db
-def test_send_is_idempotent_on_redelivery(monkeypatch, sample_application):
+def test_send_is_idempotent_on_redelivery(monkeypatch, sample_application, denied_decision):
     """Already-sent email (sent_at set) must NOT be re-sent on redelivery.
 
     The task short-circuits on the persisted GeneratedEmail and reports the true
@@ -153,7 +161,7 @@ def test_send_is_idempotent_on_redelivery(monkeypatch, sample_application):
 
 
 @pytest.mark.django_db
-def test_send_occurs_once_when_not_yet_sent(monkeypatch, sample_application):
+def test_send_occurs_once_when_not_yet_sent(monkeypatch, sample_application, denied_decision):
     """First delivery: sent_at is None → send IS called once and sent_at persists."""
     from apps.email_engine import tasks as email_tasks
 
@@ -235,7 +243,7 @@ def test_denial_template_has_no_apology_language(monkeypatch, sample_application
 
 
 @pytest.mark.django_db
-def test_send_latest_email_view_double_send_guard(monkeypatch, sample_application):
+def test_send_latest_email_view_double_send_guard(monkeypatch, sample_application, denied_decision):
     """Second POST to SendLatestEmailView must be a no-op — sent_at must not be
     set twice and send_decision_email must only be called once."""
     from unittest.mock import MagicMock
@@ -257,8 +265,12 @@ def test_send_latest_email_view_double_send_guard(monkeypatch, sample_applicatio
         sent_at=None,
     )
 
+    # Sending a decision email is staff-only (C1); customers get 403.
+    from apps.accounts.models import CustomUser
+
+    officer = CustomUser.objects.create_user(username="send_officer", password="x", role="officer")
     client = APIClient()
-    client.force_authenticate(user=sample_application.applicant)
+    client.force_authenticate(user=officer)
 
     url = f"/api/v1/emails/send/{sample_application.id}/"
 
@@ -284,7 +296,7 @@ def test_send_latest_email_view_double_send_guard(monkeypatch, sample_applicatio
 
 
 @pytest.mark.django_db
-def test_redelivery_sends_generated_but_unsent_email(monkeypatch, sample_application):
+def test_redelivery_sends_generated_but_unsent_email(monkeypatch, sample_application, denied_decision):
     """A passing-but-unsent email (sent_at is None) must be delivered on a later
     task run, exactly once, without re-generating (regression: the idempotency
     guard treated 'a row exists' as 'work done' and never retried the send)."""

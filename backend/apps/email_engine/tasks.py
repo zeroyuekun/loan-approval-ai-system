@@ -8,6 +8,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.email_engine.models import GeneratedEmail, GuardrailAnalytics, GuardrailLog
+from apps.email_engine.services.decision_email import require_decision_on_record
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.exceptions import RateLimited
 from apps.email_engine.services.persistence import EmailPersistenceService
@@ -26,7 +27,13 @@ logger = logging.getLogger("email_engine.tasks")
     max_retries=3,
 )
 def generate_email_task(self, application_id, decision):
-    """Generate a decision email for a loan application."""
+    """Generate a decision email for a loan application.
+
+    Refuses (DecisionMismatch, not retried) when ``decision`` disagrees with
+    the application's LoanDecision, whoever the caller is.
+    """
+    require_decision_on_record(application_id, decision)
+
     # Idempotency: if email already generated for this application+decision, return it.
     # Report the TRUE sent state from the sent_at marker so callers don't think an
     # already-delivered email still needs sending on a redelivery.
