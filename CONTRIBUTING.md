@@ -100,5 +100,5 @@ Other directories:
 ## References
 
 - [`CLAUDE.md`](CLAUDE.md): AI agent conventions and WAT architecture
-- [`backend/docs/RUNBOOK.md`](backend/docs/RUNBOOK.md): operations runbook and incident response
+- [`docs/runbooks/`](docs/runbooks/README.md): operations runbook, incident response and failure-mode runbooks
 - [`SECURITY.md`](SECURITY.md): security policy and responsible disclosure

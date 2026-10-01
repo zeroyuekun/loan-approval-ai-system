@@ -121,6 +121,6 @@ docker-compose down -v
 
 This project is designed to run locally with Docker Compose, and no cloud-hosting configuration is committed. That is a deliberate scoping choice: portfolio reviewers are expected to clone, `make dev`, and walk through the dashboards on `localhost`.
 
-Operational procedures for a running local instance (rotating secrets, recovering from a stuck Celery queue, database backup, upgrading the model) live in `backend/docs/RUNBOOK.md`. Security and compliance baselines live in `SECURITY.md`, `docs/adr/008-security-architecture.md` and `docs/compliance/`.
+Operational procedures for a running local instance (rotating secrets, recovering from a stuck Celery queue, database backup, upgrading the model) live in `docs/runbooks/`, starting with `docs/runbooks/operations.md`. Secrets rotation is in `backend/docs/SECRETS_ROTATION.md`. Security and compliance baselines live in `SECURITY.md`, `docs/adr/008-security-architecture.md` and `docs/compliance/`.
 
 If you need a cloud deployment of your own, the Docker Compose topology is portable to any container host (Kubernetes, bare metal, or any PaaS that accepts Docker images), but no specific host config is supported here.

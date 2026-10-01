@@ -11,6 +11,7 @@ Operational procedures for incidents and known failure modes. Each runbook follo
 
 ## Index
 
+- [Operations runbook](operations.md): service architecture, API and health endpoints, monitoring, common incidents, operational commands, rollback, scheduled tasks, escalation and gate enablement. It predates the template below and uses its own layout.
 - [Frontend container exits with code 243](frontend-exit-243.md)
 - [Celery queue backpressure](celery-backpressure.md)
 - [Migration rollback](migration-rollback.md)
