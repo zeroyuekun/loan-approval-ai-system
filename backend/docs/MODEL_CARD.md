@@ -482,7 +482,7 @@ Each table below maps existing system capabilities to one regulatory framework.
 | Bias detection | Two-phase bias detection (regex + LLM), EEOC 80% rule testing, fairness reweighting during training |
 | Explainability | SHAP TreeExplainer, feature importance charts, WOE/IV scorecard |
 | Lifecycle governance | Model versioning (`ModelVersion.is_active`), challenger model comparison, 5-fold stratified CV |
-| Technical documentation | This model card, SECURITY.md, ADRs, SLA.md, runbook |
+| Technical documentation | This model card, SECURITY.md, ADRs, docs/slo.md, runbooks |
 
 ### Federal Reserve / OCC SR 11-7: model risk management
 
