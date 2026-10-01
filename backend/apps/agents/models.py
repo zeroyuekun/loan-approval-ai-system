@@ -168,6 +168,12 @@ class APICallLog(models.Model):
     input_tokens = models.IntegerField(default=0)
     output_tokens = models.IntegerField(default=0)
     destination_country = models.CharField(max_length=2, default="US", help_text="ISO country code of API endpoint")
+    outcome = models.CharField(
+        max_length=10,
+        default="success",
+        choices=[("success", "Success"), ("error", "Error")],
+        help_text="Failed calls are logged too: a prompt sent before a timeout/5xx is still a disclosure",
+    )
 
     class Meta:
         ordering = ["-timestamp"]

@@ -15,6 +15,7 @@ from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.scoring.predictor import ModelPredictor
 from apps.ml_engine.services.scoring.segmentation import derive_segment
 
+from .api_budget import api_call_context, bind_api_call_context
 from .context_builder import ApplicationContextBuilder
 from .email_pipeline import EmailPipelineService
 from .human_review_handler import HumanReviewHandler
@@ -135,6 +136,12 @@ class PipelineOrchestrator:
     # ------------------------------------------------------------------
 
     def orchestrate(self, application_id):
+        # APP 8: attribute every LLM call made during this run (bias, NBO,
+        # marketing, email) to the application and, once created, the run.
+        with api_call_context(application_id=application_id):
+            return self._orchestrate(application_id)
+
+    def _orchestrate(self, application_id):
         start_time = time.time()
         logger.info("Starting pipeline for application %s", application_id)
 
@@ -170,6 +177,7 @@ class PipelineOrchestrator:
             status=AgentRun.Status.RUNNING,
             steps=[],
         )
+        bind_api_call_context(application_id=application.pk, agent_run_id=agent_run.pk)
 
         steps = []
         waterfall = []
@@ -529,4 +537,5 @@ class PipelineOrchestrator:
         return agent_run
 
     def resume_after_review(self, agent_run_id, reviewer="", note=""):
-        return self._human_review_handler.resume_after_review(agent_run_id, reviewer, note)
+        with api_call_context(agent_run_id=agent_run_id):
+            return self._human_review_handler.resume_after_review(agent_run_id, reviewer, note)

@@ -350,3 +350,28 @@ def test_no_profile_graceful_degradation(application_no_profile, orch_mocks):
     # profile_context is passed (auto-created profile) — pipeline should still work
     call_args = orch_mocks["email_gen"].return_value.generate.call_args
     assert "profile_context" in call_args.kwargs
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
+def test_llm_calls_run_inside_application_and_run_context(sample_application, orch_mocks):
+    """I6: every LLM call made during a run is attributable to the application
+    and the AgentRun in the APP 8 log (guarded_api_call reads this context)."""
+    from apps.agents.services.api_budget import current_api_call_context
+
+    _wire_approved(orch_mocks)
+    seen = {}
+
+    def _generate(*args, **kwargs):
+        seen.update(current_api_call_context())
+        return _email()
+
+    orch_mocks["email_gen"].return_value.generate.side_effect = _generate
+
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    run = PipelineOrchestrator().orchestrate(sample_application.pk)
+
+    assert seen.get("application_id") == sample_application.pk
+    assert seen.get("agent_run_id") == run.pk
+    assert current_api_call_context() == {}, "context must not leak past the run"

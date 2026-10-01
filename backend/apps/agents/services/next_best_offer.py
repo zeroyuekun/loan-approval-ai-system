@@ -156,6 +156,11 @@ RULES:
 
             response = guarded_api_call(
                 self.client,
+                _service="nbo_messaging",
+                _loan_application_id=application.pk,
+                # Interpolated: loan amount, credit score, income, decline
+                # factors and the banking-relationship profile.
+                _pii_categories=["loan_amount", "credit_score", "income", "credit_assessment", "financial_profile"],
                 model="claude-sonnet-4-6",
                 max_tokens=1024,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
@@ -277,6 +282,16 @@ Respond with the marketing message text only, no JSON wrapping."""
         try:
             response = guarded_api_call(
                 self.client,
+                _service="nbo_marketing_message",
+                _loan_application_id=application.pk,
+                _pii_categories=[
+                    "loan_amount",
+                    "credit_score",
+                    "income",
+                    "employment",
+                    "credit_assessment",
+                    "financial_profile",
+                ],
                 model="claude-sonnet-4-6",
                 max_tokens=1024,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),

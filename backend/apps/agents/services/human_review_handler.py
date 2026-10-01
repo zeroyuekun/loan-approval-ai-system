@@ -12,6 +12,7 @@ from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
 from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action_reasons
 
+from .api_budget import bind_api_call_context
 from .bias.core import BiasDetector
 from .context_builder import ApplicationContextBuilder
 from .email_pipeline import build_denial_email_context
@@ -65,6 +66,7 @@ class HumanReviewHandler:
             escalated_at = agent_run.updated_at
 
             application = agent_run.application
+            bind_api_call_context(application_id=application.pk)
 
             # Lock application to prevent two simultaneous reviews from resuming
             LoanApplication.objects.select_for_update().get(pk=application.pk)

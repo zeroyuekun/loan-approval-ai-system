@@ -357,6 +357,13 @@ class EmailGenerator:
                 lines.append("- Existing mortgage holder")
             banking_context = "\n".join(lines) if lines else banking_context
 
+        # APP 8: the personal-data categories this prompt actually carries.
+        pii_categories = ["name", "loan_amount", "credit_assessment"]
+        if decision == "approved":
+            pii_categories.append("employment")
+        if profile_context and banking_context != "No banking relationship data available":
+            pii_categories.append("financial_profile")
+
         # Resolve confidence: prefer explicit param, then decision model, then 0.0
         if confidence is None:
             confidence = 0.0
@@ -491,6 +498,9 @@ class EmailGenerator:
             # self.retry(countdown=...) and free the worker (M6/L25).
             response = guarded_api_call(
                 self.client,
+                _service="email_generation",
+                _loan_application_id=application.pk,
+                _pii_categories=pii_categories,
                 model=_model,
                 max_tokens=token_limit,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_DECISION_EMAIL", 0.0),

@@ -17,14 +17,54 @@ Or use the guarded_api_call() wrapper which handles all of the above:
     response = guarded_api_call(client, model='claude-sonnet-4-6', ...)
 """
 
+import contextvars
 import hashlib
 import logging
 import threading
+from contextlib import contextmanager
 
 import redis
 from django.conf import settings
 
 logger = logging.getLogger("agents.api_budget")
+
+# ---------------------------------------------------------------------------
+# APP 8 attribution context
+#
+# Which application / AgentRun an LLM call is made for. Entry points (the
+# orchestrator run, the human-review resume) open a scope and guarded_api_call
+# reads it, so deep callers such as the bias detector, which never see the
+# application, are still attributed. An explicit _loan_application_id /
+# _agent_run_id kwarg wins over the context.
+# ---------------------------------------------------------------------------
+
+_API_CALL_CONTEXT = contextvars.ContextVar("api_call_context", default=None)
+
+
+@contextmanager
+def api_call_context(**fields):
+    """Scope in which LLM calls are attributed to ``application_id`` / ``agent_run_id``."""
+    parent = _API_CALL_CONTEXT.get() or {}
+    token = _API_CALL_CONTEXT.set({**parent, **{k: v for k, v in fields.items() if v is not None}})
+    try:
+        yield
+    finally:
+        _API_CALL_CONTEXT.reset(token)
+
+
+def bind_api_call_context(**fields):
+    """Add fields (e.g. the AgentRun id once created) to the innermost open scope.
+
+    No-op outside an ``api_call_context`` scope, so nothing leaks past it.
+    """
+    ctx = _API_CALL_CONTEXT.get()
+    if ctx is not None:
+        ctx.update({k: v for k, v in fields.items() if v is not None})
+
+
+def current_api_call_context():
+    return dict(_API_CALL_CONTEXT.get() or {})
+
 
 # Anthropic pricing per million tokens. Verified April 2026 against
 # https://platform.claude.com/docs/en/docs/about-claude/models/overview
@@ -458,20 +498,39 @@ def _extract_prompt_text(kwargs):
     return "\n".join(parts)
 
 
-def _detect_pii_categories(prompt_text):
-    """Detect PII categories present in the prompt text."""
-    category_keywords = {
-        "name": ["name", "applicant", "customer"],
-        "income": ["income", "salary", "earnings"],
-        "employment": ["employment", "employer", "job", "occupation"],
-        "loan_amount": ["loan_amount", "loan amount", "borrowing"],
-        "credit_score": ["credit_score", "credit score"],
-        "address": ["address", "postcode", "suburb"],
-        "email": ["email"],
-        "phone": ["phone", "mobile"],
-    }
-    lower_text = prompt_text.lower()
-    return [cat for cat, keywords in category_keywords.items() if any(kw in lower_text for kw in keywords)]
+def _log_api_call(
+    kwargs,
+    *,
+    outcome,
+    service,
+    provider,
+    model,
+    loan_application_id,
+    agent_run_id,
+    pii_categories,
+    input_tokens=0,
+    output_tokens=0,
+):
+    """Write the APP 8 cross-border record. Never raises."""
+    try:
+        from apps.agents.models import APICallLog
+
+        prompt_text = _extract_prompt_text(kwargs)
+        APICallLog.objects.create(
+            loan_application_id=loan_application_id,
+            agent_run_id=agent_run_id,
+            service=service,
+            provider=provider,
+            model_used=model,
+            pii_categories=pii_categories,
+            prompt_hash=hashlib.sha256(prompt_text.encode()).hexdigest(),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            destination_country=_PROVIDER_DESTINATION.get(provider, "US"),
+            outcome=outcome,
+        )
+    except Exception as e:
+        logger.warning("Failed to create APICallLog: %s", e)
 
 
 def guarded_api_call(client, **kwargs):
@@ -487,8 +546,13 @@ def guarded_api_call(client, **kwargs):
         **kwargs: passed directly to client.messages.create()
             Extra keyword args (not passed to API):
             - _service: str — service name for API call logging (e.g. 'email_generation')
-            - _loan_application_id: UUID — FK to LoanApplication
-            - _agent_run_id: UUID — FK to AgentRun
+            - _loan_application_id: UUID — FK to LoanApplication (default: the
+              open api_call_context scope)
+            - _agent_run_id: UUID — FK to AgentRun (default: the open scope)
+            - _pii_categories: list[str] — categories of personal data the
+              caller actually interpolated into the prompt, declared from its
+              structured fields and never guessed from prompt wording. A call
+              that declares none is logged as "unclassified".
 
     Returns:
         The API response object.
@@ -502,9 +566,11 @@ def guarded_api_call(client, **kwargs):
         raise BudgetExhausted("No API client configured — using fallback")
 
     # Pop internal metadata before passing to API
+    ctx = current_api_call_context()
     service = kwargs.pop("_service", "unknown")
-    loan_application_id = kwargs.pop("_loan_application_id", None)
-    agent_run_id = kwargs.pop("_agent_run_id", None)
+    loan_application_id = kwargs.pop("_loan_application_id", None) or ctx.get("application_id")
+    agent_run_id = kwargs.pop("_agent_run_id", None) or ctx.get("agent_run_id")
+    pii_categories = list(kwargs.pop("_pii_categories", None) or ["unclassified"])
 
     model = kwargs.get("model", "")
     # See _SAMPLING_PARAMS_REMOVED_FAMILIES: adaptive-only models 400 on
@@ -525,6 +591,14 @@ def guarded_api_call(client, **kwargs):
         estimated_cost_cents=_estimate_reserve_cents(model, kwargs.get("max_tokens"), provider=provider),
     )
 
+    audit = {
+        "service": service,
+        "provider": provider,
+        "model": model,
+        "loan_application_id": loan_application_id,
+        "agent_run_id": agent_run_id,
+        "pii_categories": pii_categories,
+    }
     try:
         response = client.messages.create(**kwargs)
     except Exception:
@@ -534,6 +608,9 @@ def guarded_api_call(client, **kwargs):
         budget.record_call(
             input_tokens=0, output_tokens=0, model=model, reserved_cents=reserved, released=True, provider=provider
         )
+        # A timeout or 5xx can arrive after the prompt was transmitted (the SDK
+        # may even have sent it more than once): still a disclosure for APP 8.
+        _log_api_call(kwargs, outcome="error", **audit)
         raise
 
     # Track cost from actual usage, reconciling the reservation to the true cost.
@@ -550,23 +627,6 @@ def guarded_api_call(client, **kwargs):
     budget.record_success()
 
     # Log API call for PII cross-border audit (Privacy Act APP 8)
-    try:
-        from apps.agents.models import APICallLog
-
-        prompt_text = _extract_prompt_text(kwargs)
-        APICallLog.objects.create(
-            loan_application_id=loan_application_id,
-            agent_run_id=agent_run_id,
-            service=service,
-            provider=provider,
-            model_used=model,
-            pii_categories=_detect_pii_categories(prompt_text),
-            prompt_hash=hashlib.sha256(prompt_text.encode()).hexdigest(),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            destination_country=_PROVIDER_DESTINATION.get(provider, "US"),
-        )
-    except Exception as e:
-        logger.warning("Failed to create APICallLog: %s", e)
+    _log_api_call(kwargs, outcome="success", input_tokens=input_tokens, output_tokens=output_tokens, **audit)
 
     return response

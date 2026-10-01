@@ -156,6 +156,9 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
             fallback,
             "LLM marketing bias",
             "falling back to deterministic",
+            # The marketing email under review carries the name and offer amounts.
+            _service="marketing_bias_detection",
+            _pii_categories=["name", "loan_amount"],
             model="claude-sonnet-4-6",
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
@@ -299,6 +302,8 @@ Use the record_marketing_review_decision tool to submit your decision."""
             fallback,
             "Marketing senior review",
             "defaulting to human escalation",
+            _service="marketing_senior_review",
+            _pii_categories=["name", "loan_amount"],
             model=self.model,
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),

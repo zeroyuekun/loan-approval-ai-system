@@ -201,6 +201,19 @@ class MarketingAgent:
         try:
             response = guarded_api_call(
                 self.client,
+                _service="marketing_email",
+                _loan_application_id=application.pk,
+                # MARKETING_EMAIL_PROMPT interpolates name, loan amount, credit
+                # score, income, employment, decline factors and banking profile.
+                _pii_categories=[
+                    "name",
+                    "loan_amount",
+                    "credit_score",
+                    "income",
+                    "employment",
+                    "credit_assessment",
+                    "financial_profile",
+                ],
                 model="claude-sonnet-4-6",
                 max_tokens=1500,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
