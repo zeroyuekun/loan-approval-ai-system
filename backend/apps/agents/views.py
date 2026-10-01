@@ -79,7 +79,7 @@ class AgentRunListView(APIView):
         runs = queryset[offset : offset + page_size]
 
         # List endpoint drops marketing html_body to avoid re-rendering the
-        # large regex HTML renderer per row in this paginated hot path (L14).
+        # large regex HTML renderer per row in this paginated hot path.
         results = AgentRunSerializer(runs, many=True, context={"include_html": False}).data
 
         # Build next/previous URLs preserving all filter params
@@ -134,8 +134,6 @@ class OrchestrateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         else:
-            from apps.agents.models import AgentRun
-
             existing = (
                 AgentRun.objects.filter(
                     application_id=loan_id,
@@ -189,9 +187,6 @@ class BatchOrchestrateView(APIView):
 
         if recheck:
             # Query applications in REVIEW status that are eligible for re-processing.
-            # Previous code used filter(status__in=[REVIEW, PROCESSING]).exclude(PROCESSING)
-            # which is logically identical to filter(status=REVIEW) — the PROCESSING
-            # inclusion was immediately negated by the .exclude() call.
             # Stuck-PROCESSING recovery is out of scope here; that belongs in a
             # dedicated dead-letter / recovery task.
             reviewable_qs = LoanApplication.objects.filter(
@@ -296,7 +291,7 @@ class AgentRunView(APIView):
 class HumanReviewView(APIView):
     """Lets loan officers approve, deny, or regenerate escalated pipeline runs.
 
-    Fixes applied per code review:
+    Concurrency and consistency guarantees:
     - select_for_update() to prevent race conditions between concurrent reviewers
     - Audit log inside transaction to prevent ghost entries on DB failure
     - LoanDecision updated on human deny to maintain consistency
@@ -442,21 +437,11 @@ class HumanReviewView(APIView):
                 transaction.on_commit(_dispatch_regenerate)
 
         # For approve/regenerate, return task info after transaction commits
-        if action == "approve":
-            task_id = task_holder.get("task", {})
-            return Response(
-                {
-                    "task_id": getattr(task_id, "id", None),
-                    "status": "review_approved_pipeline_resuming",
-                    "action": "approve",
-                }
-            )
-        else:  # regenerate
-            task_id = task_holder.get("task", {})
-            return Response(
-                {
-                    "task_id": getattr(task_id, "id", None),
-                    "status": "regeneration_queued",
-                    "action": "regenerate",
-                }
-            )
+        task = task_holder.get("task")
+        return Response(
+            {
+                "task_id": getattr(task, "id", None),
+                "status": "review_approved_pipeline_resuming" if action == "approve" else "regeneration_queued",
+                "action": action,
+            }
+        )

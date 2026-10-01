@@ -4,6 +4,9 @@ from datetime import UTC, datetime
 
 from django.conf import settings
 
+from apps.agents.metrics import pipeline_e2e_seconds
+from apps.loans.models import LoanDecision
+
 logger = logging.getLogger("agents.orchestrator")
 
 # Step timeout budgets — configurable via settings for environment-specific tuning.
@@ -109,9 +112,6 @@ class StepTracker:
         # Emit Prometheus e2e-latency histogram. Metric emission must never
         # break the pipeline, so any Prometheus client failure is swallowed.
         try:
-            from apps.agents.metrics import pipeline_e2e_seconds
-            from apps.loans.models import LoanDecision
-
             decision_label = "unknown"
             try:
                 decision_label = agent_run.application.decision.decision or "unknown"
@@ -136,8 +136,6 @@ class StepTracker:
 
     @staticmethod
     def save_waterfall(application, waterfall: list) -> None:
-        from apps.loans.models import LoanDecision
-
         LoanDecision.objects.filter(application=application).update(
             decision_waterfall=waterfall,
         )

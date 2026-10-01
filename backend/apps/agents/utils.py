@@ -105,9 +105,6 @@ def retry_llm_call(max_attempts=3, base_delay=1.0):
                         # 4xx (non-auth, non-rate-limit) — not retryable
                         logger.error("LLM client error (%d, not retryable): %s", e.status_code, e)
                         raise LLMServiceError(str(e)) from e
-                except Exception:
-                    # Unexpected — don't retry
-                    raise
 
             # Should not reach here, but safety net
             raise LLMServiceError(f"LLM call failed after {max_attempts} attempts") from last_exc

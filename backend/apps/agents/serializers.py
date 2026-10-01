@@ -1,14 +1,13 @@
-"""DRF serializers for AgentRun and its nested artifacts (L13/L14).
+"""DRF serializers for AgentRun and its nested artifacts.
 
-These replace the hand-built response dicts in ``agents/views.py`` that were
-duplicated across the list and detail endpoints. The serialized shapes are
-byte-equal to the legacy dicts: UUIDs render via ``str(...)`` and timestamps
-via ``.isoformat()`` (hence SerializerMethodField rather than raw
-UUIDField/DateTimeField, which would change the representation).
+Shared by the list and detail endpoints in ``agents/views.py``. UUIDs render
+via ``str(...)`` and timestamps via ``.isoformat()`` (hence
+SerializerMethodField rather than raw UUIDField/DateTimeField, which would
+change the representation the frontend relies on).
 
 The list endpoint nests ``MarketingEmailListSerializer`` (no ``html_body``) so
-the 1k-LOC regex HTML renderer is not invoked per marketing email per row in
-the paginated hot path (L14). The detail endpoint nests
+the ~1k-line regex HTML renderer is not invoked per marketing email per row in
+the paginated hot path. The detail endpoint nests
 ``MarketingEmailDetailSerializer`` (with ``html_body``).
 """
 

@@ -1,19 +1,20 @@
 import logging
 import time
+from datetime import timedelta
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.agents.exceptions import (
     MLPredictionError,
 )
 from apps.agents.models import AgentRun
-from apps.loans.models import FraudCheck, LoanApplication, LoanDecision
+from apps.loans.models import AuditLog, FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.scoring.predictor import ModelPredictor
 from apps.ml_engine.services.scoring.segmentation import derive_segment
 
-from .bias_detector import AIEmailReviewer, BiasDetector, MarketingBiasDetector, MarketingEmailReviewer  # noqa: F401
 from .context_builder import ApplicationContextBuilder
 from .email_pipeline import EmailPipelineService
 from .human_review_handler import HumanReviewHandler
@@ -71,9 +72,6 @@ class PipelineOrchestrator:
     def _run_nbo_and_marketing_pipeline(self, application, agent_run, steps, denial_reasons, profile_context):
         return self._marketing_pipeline.run(application, agent_run, steps, denial_reasons, profile_context)
 
-    def _run_marketing_bias_check(self, email_result_marketing, application, agent_run, steps):
-        return self._marketing_pipeline.check_bias(email_result_marketing, application, agent_run, steps)
-
     # ------------------------------------------------------------------
     # Counterfactual generation (denied applications only)
     # ------------------------------------------------------------------
@@ -103,7 +101,7 @@ class PipelineOrchestrator:
             return []
 
     # ------------------------------------------------------------------
-    # Idempotent status restore (L16)
+    # Idempotent status restore
     # ------------------------------------------------------------------
 
     def restore_status_from_decision(self, application_id):
@@ -112,9 +110,7 @@ class PipelineOrchestrator:
 
         ALLOWED_TRANSITIONS does not permit pending->approved directly, so the
         restore replays the legitimate pipeline path pending->processing->
-        <decision>; each hop produces a status_transition AuditLog. This
-        replaces the old save(update_fields=["status"]) that bypassed both
-        validation and auditing.
+        <decision>; each hop produces a status_transition AuditLog.
         """
         with transaction.atomic():
             # Lock by pk — never via a nullable join (FOR UPDATE caveat).
@@ -148,9 +144,7 @@ class PipelineOrchestrator:
                 # If processing for more than 10 minutes, treat as stale/stuck.
                 # Must exceed Celery soft_time_limit (540s / 9min) to avoid
                 # race conditions where a slow-but-alive task is treated as stale.
-                from django.utils import timezone as tz
-
-                stale_threshold = tz.now() - tz.timedelta(minutes=10)
+                stale_threshold = timezone.now() - timedelta(minutes=10)
                 if application.updated_at > stale_threshold:
                     raise ValueError("Pipeline already running for this application")
                 logger.warning(
@@ -268,8 +262,6 @@ class PipelineOrchestrator:
                 processing_time_ms=prediction_result["processing_time_ms"],
             )
 
-            from apps.loans.models import AuditLog
-
             AuditLog.objects.create(
                 action="prediction_completed",
                 resource_type="LoanApplication",
@@ -295,44 +287,22 @@ class PipelineOrchestrator:
 
             # Record policy-level waterfall entries derived from application data
             if application.has_bankruptcy:
-                waterfall.append(
-                    self._waterfall_entry(
-                        "policy_rules",
-                        "fail",
-                        "BANKRUPTCY_FLAG",
-                        "Applicant has undischarged bankruptcy or within 7-year window",
-                    )
+                bankruptcy = (
+                    "fail",
+                    "BANKRUPTCY_FLAG",
+                    "Applicant has undischarged bankruptcy or within 7-year window",
                 )
             else:
-                waterfall.append(
-                    self._waterfall_entry(
-                        "policy_rules",
-                        "pass",
-                        "BANKRUPTCY_CLEAR",
-                        "No bankruptcy flag on application",
-                    )
-                )
+                bankruptcy = ("pass", "BANKRUPTCY_CLEAR", "No bankruptcy flag on application")
+            waterfall.append(self._waterfall_entry("policy_rules", *bankruptcy))
 
             dti = float(application.debt_to_income)
             dti_cap = 6.0
             if dti > dti_cap:
-                waterfall.append(
-                    self._waterfall_entry(
-                        "policy_rules",
-                        "fail",
-                        "DTI_EXCEEDED",
-                        f"Debt-to-income ratio {dti:.2f} exceeds cap of {dti_cap}",
-                    )
-                )
+                dti_check = ("fail", "DTI_EXCEEDED", f"Debt-to-income ratio {dti:.2f} exceeds cap of {dti_cap}")
             else:
-                waterfall.append(
-                    self._waterfall_entry(
-                        "policy_rules",
-                        "pass",
-                        "DTI_WITHIN_LIMIT",
-                        f"Debt-to-income ratio {dti:.2f} within cap of {dti_cap}",
-                    )
-                )
+                dti_check = ("pass", "DTI_WITHIN_LIMIT", f"Debt-to-income ratio {dti:.2f} within cap of {dti_cap}")
+            waterfall.append(self._waterfall_entry("policy_rules", *dti_check))
 
             # ML prediction waterfall entry
             prob = prediction_result["probability"]
@@ -438,7 +408,7 @@ class PipelineOrchestrator:
                 step = self._fail_step(step, str(e))
             steps.append(step)
 
-        # H1: borderline / severe-drift / policy-"refer" predictions must be
+        # Borderline / severe-drift / policy-"refer" predictions must be
         # decided by a human. Escalate BEFORE the email pipeline so no
         # automated decision email is generated or sent for these cases.
         if prediction_result.get("requires_human_review"):
@@ -489,12 +459,7 @@ class PipelineOrchestrator:
             self._finalize_run(agent_run, steps, start_time)
             return agent_run
 
-        # Email pipeline failure — finalize and return.
-        # Guard: the bias fail-safe block path (escalated=True) was already
-        # handled above and returns early.  Reaching this point with escalated=True
-        # would mean the two None-triple shapes are ambiguous — assert the paths
-        # are mutually exclusive so a future refactor cannot silently mis-route (M18).
-        assert not escalated, "escalated=True should have been handled by the bias block path before reaching here"
+        # Email pipeline failure (not escalated, all three results None) — finalize and return.
         if email_result is None and generated_email is None and bias_result is None:
             # Email generation failed — find the error from the last step
             last_step = steps[-1] if steps else {}
@@ -511,14 +476,14 @@ class PipelineOrchestrator:
         # Step 5: NBO + Marketing pipeline (if denied)
         if decision == "denied":
             denial_reasons = ""
-            shap_vals = prediction_result.get("shap_values") if prediction_result else None
+            shap_vals = prediction_result.get("shap_values")
             if shap_vals:
                 # Use per-applicant SHAP values — negative values are denial drivers
                 negative = {k: abs(v) for k, v in shap_vals.items() if v < 0}
                 if negative:
                     top_factors = sorted(negative.items(), key=lambda x: x[1], reverse=True)[:3]
                     denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
-            if not denial_reasons and prediction_result and prediction_result.get("feature_importances"):
+            if not denial_reasons and prediction_result.get("feature_importances"):
                 top_factors = sorted(
                     prediction_result["feature_importances"].items(), key=lambda x: x[1], reverse=True
                 )[:3]
@@ -543,8 +508,7 @@ class PipelineOrchestrator:
             )
         )
 
-        # No bias escalation — apply ML decision directly.
-        # Human review is exclusively for bias-flagged applications.
+        # No escalation — apply the ML decision directly.
         self._save_waterfall(application, waterfall)
 
         with transaction.atomic():

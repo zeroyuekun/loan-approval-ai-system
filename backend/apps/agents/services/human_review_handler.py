@@ -2,13 +2,18 @@ import logging
 import time
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.agents.exceptions import LLMServiceError
+from apps.agents.metrics import bias_review_total, bias_review_ttr_seconds
 from apps.agents.models import AgentRun
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.persistence import EmailPersistenceService
 from apps.loans.models import LoanApplication, LoanDecision
+from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
+from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action_reasons
 
+from .bias.core import BiasDetector
 from .context_builder import ApplicationContextBuilder
 from .marketing_pipeline import MarketingPipelineService
 from .step_tracker import StepTracker
@@ -19,17 +24,12 @@ logger = logging.getLogger("agents.orchestrator")
 def build_denial_reason_summary(shap_values: dict, feature_importances: dict) -> str:
     """Human-readable denial-reason summary for the marketing/NBO step.
 
-    Uses the shared DecisionExplanation ranking + reason codes instead of the
-    old ad-hoc `"feature: 0.123"` float dump.
+    Uses the shared DecisionExplanation ranking + reason codes.
     """
-    from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action_reasons
-
     reasons = generate_adverse_action_reasons(shap_values or {}, "denied")
     if reasons:
         return "; ".join(r["reason"] for r in reasons)
     if feature_importances:
-        from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
-
         drivers = ranked_denial_drivers(shap_values=shap_values or {}, feature_importances=feature_importances, max_n=3)
         return ", ".join(name.replace("_", " ") for name, _ in drivers)
     return ""
@@ -72,11 +72,9 @@ class HumanReviewHandler:
                 raise ValueError(f'Cannot resume: application status is {application.status!r} (expected "review")')
 
             try:
-                _ = application.decision
+                decision = application.decision.decision
             except LoanDecision.DoesNotExist as err:
                 raise ValueError(f"No decision found for application {application.id}") from err
-
-            decision = application.decision.decision
 
             # Mark as running inside the lock to prevent duplicate resume
             agent_run.status = "running"
@@ -164,8 +162,6 @@ class HumanReviewHandler:
             # path must mirror this check so a regenerated email cannot bypass
             # bias screening by going through the human-review flow.
             if email_result and email_result.get("passed_guardrails"):
-                from apps.agents.services.bias.core import BiasDetector
-
                 step_bias = self.tracker.start_step("bias_check_resume")
                 try:
                     bias_detector = BiasDetector()
@@ -244,7 +240,7 @@ class HumanReviewHandler:
                             recipient,
                             email_result["subject"],
                             email_result["body"],
-                            email_type="approval" if decision == "approved" else "denial",
+                            email_type="approval",
                         )
                         if send_result["sent"]:
                             step = self.tracker.complete_step(
@@ -310,7 +306,7 @@ class HumanReviewHandler:
                 decision,
                 details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
             )
-            # H2: record that a human was involved, so the ADM disclosure can
+            # Record that a human was involved, so the ADM disclosure can
             # truthfully report "assisted" after status moves off 'review'.
             loan_decision = application.decision
             if loan_decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
@@ -320,11 +316,7 @@ class HumanReviewHandler:
 
         # Emit time-to-resolution for the bias review queue (docs/slo.md).
         try:
-            from django.utils import timezone as _tz
-
-            from apps.agents.metrics import bias_review_total, bias_review_ttr_seconds
-
-            ttr = (_tz.now() - escalated_at).total_seconds()
+            ttr = (timezone.now() - escalated_at).total_seconds()
             bias_review_ttr_seconds.labels(decision=decision).observe(ttr)
             bias_review_total.labels(outcome="human_resolved").inc()
         except Exception as exc:  # noqa: BLE001 — best-effort metric

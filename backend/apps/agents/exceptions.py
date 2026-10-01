@@ -1,7 +1,7 @@
 """Custom exception hierarchy for the agents pipeline.
 
 These exceptions allow catch blocks to distinguish between expected failure
-modes (e.g. rate limits, model not found) and truly unexpected errors, so
+modes (e.g. rate limits, auth failures) and truly unexpected errors, so
 that logging, retry logic, and failure categorisation are precise.
 """
 
@@ -67,23 +67,5 @@ class LLMTimeoutError(LLMServiceError):
 
 class MLPredictionError(PipelineError):
     """ML model prediction failed."""
-
-    pass
-
-
-class ModelNotFoundError(MLPredictionError):
-    """No active model version found."""
-
-    pass
-
-
-class ApplicationNotFoundError(PipelineError):
-    """Loan application not found."""
-
-    pass
-
-
-class InvalidApplicationStateError(PipelineError):
-    """Application is in an unexpected state for the requested operation."""
 
     pass

@@ -5,10 +5,9 @@ Both the decision gate (`core.py`) and the marketing gates (`marketing.py`,
 *equal to* the review threshold is, by definition, at the "review" level and
 must escalate/block — it must not fall through to the moderate-findings path.
 
-Before this helper, `core.py` used `>=` while `marketing.py` used `>` (M4),
-so a deterministic marketing score of exactly 70 (prohibited 50 + decline 20)
-was treated as merely "moderate" instead of blocked. Centralising the
-comparison here makes the inclusive policy impossible to drift between gates.
+For example, a deterministic marketing score of exactly 70 (prohibited 50 +
+decline 20) must be blocked, not treated as merely "moderate". Centralising
+the comparison here keeps the inclusive policy from drifting between gates.
 """
 
 from __future__ import annotations

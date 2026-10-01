@@ -9,7 +9,7 @@ from apps.agents.metrics import bias_check_unavailable_total
 from apps.agents.models import BiasReport
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.persistence import EmailPersistenceService
-from apps.loans.models import LoanApplication
+from apps.loans.models import LoanApplication, LoanDecision
 
 from .bias_detector import BiasDetector
 from .recommendation_engine import RecommendationEngine
@@ -41,8 +41,6 @@ class EmailPipelineService:
         # from earlier in the orchestrator flow. Refresh from DB so we pick up
         # the counterfactual_results saved by the CF step.
         if decision == "denied":
-            from apps.loans.models import LoanDecision
-
             try:
                 decision_obj = LoanDecision.objects.get(application=application)
             except LoanDecision.DoesNotExist:
