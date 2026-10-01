@@ -90,9 +90,6 @@ export default function TwoFactorSetupPage() {
                 <Button onClick={() => setup.mutate()} disabled={setup.isPending}>
                   {setup.isPending ? 'Starting...' : 'Set up authenticator'}
                 </Button>
-                <Button variant="ghost" asChild>
-                  <Link href="/dashboard">Skip for now</Link>
-                </Button>
               </div>
             </div>
           ) : (
@@ -141,9 +138,6 @@ export default function TwoFactorSetupPage() {
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="submit" disabled={code.length !== 6 || verify.isPending}>
                   {verify.isPending ? 'Confirming...' : 'Confirm'}
-                </Button>
-                <Button variant="ghost" asChild>
-                  <Link href="/dashboard">Skip for now</Link>
                 </Button>
               </div>
             </form>
