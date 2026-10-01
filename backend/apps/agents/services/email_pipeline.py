@@ -2,20 +2,35 @@ import logging
 
 from django.conf import settings
 from django.db import transaction
-from django.utils import timezone
 
 from apps.agents.exceptions import LLMServiceError
 from apps.agents.metrics import bias_check_unavailable_total
 from apps.agents.models import BiasReport
-from apps.email_engine.services.email_generator import EmailGenerator
-from apps.email_engine.services.persistence import EmailPersistenceService
-from apps.loans.models import LoanApplication, LoanDecision
+from apps.email_engine.services.decision_email import deliver_decision_email, generate_decision_email
+from apps.loans.models import LoanApplication
 
 from .bias_detector import BiasDetector
 from .recommendation_engine import RecommendationEngine
 from .step_tracker import StepTracker
 
 logger = logging.getLogger("agents.orchestrator")
+
+
+def build_denial_email_context(application, profile_context):
+    """Add the deterministic alternative-offer teaser to a denial email's context.
+
+    RecommendationEngine makes NO API call, so this adds no cost, and it must
+    never block the decision email: on error the email goes out without a
+    teaser. Shared by the orchestrator and the human-review resume path.
+    """
+    try:
+        nbo = RecommendationEngine().recommend(application, denial_reasons="")
+        offers = nbo.get("offers") or []
+        if offers:
+            return {**(profile_context or {}), "nbo_offer": offers[0]}
+    except Exception as exc:  # noqa: BLE001 — teaser is best-effort
+        logger.warning("Application %s: NBO teaser unavailable: %s", application.pk, exc)
+    return profile_context
 
 
 class EmailPipelineService:
@@ -34,47 +49,19 @@ class EmailPipelineService:
         email_result = None
         generated_email = None
 
-        # Inject counterfactual statements into profile_context for denial emails.
-        # These are deterministic strings already produced by the orchestrator's
-        # counterfactual_generation step — no new Claude API call.
-        # IMPORTANT: the reverse OneToOne relation may be cached on `application`
-        # from earlier in the orchestrator flow. Refresh from DB so we pick up
-        # the counterfactual_results saved by the CF step.
         if decision == "denied":
-            try:
-                decision_obj = LoanDecision.objects.get(application=application)
-            except LoanDecision.DoesNotExist:
-                decision_obj = None
-            if decision_obj is not None:
-                cf_results = decision_obj.counterfactual_results or []
-                cf_statements = [cf["statement"] for cf in cf_results if isinstance(cf, dict) and cf.get("statement")]
-                if cf_statements:
-                    profile_context = {**(profile_context or {}), "counterfactual_statements": cf_statements}
+            profile_context = build_denial_email_context(application, profile_context)
 
-            # Deterministic alternative-offer teaser for the denial email.
-            # RecommendationEngine makes NO API call, so this adds no cost and
-            # must never block the decision email — degrade to no teaser on error.
-            try:
-                nbo = RecommendationEngine().recommend(application, denial_reasons="")
-                offers = nbo.get("offers") or []
-                if offers:
-                    profile_context = {**(profile_context or {}), "nbo_offer": offers[0]}
-            except Exception as exc:  # noqa: BLE001 — teaser is best-effort
-                logger.warning("Application %s: NBO teaser unavailable: %s", application_id, exc)
-
-        # Step 2: Generate Email
+        # Step 2: Generate Email (template fallback on provider errors, budget
+        # gate, guardrail exhaustion and 429 — see decision_email).
         step = self.tracker.start_step("email_generation")
         try:
-            generator = EmailGenerator()
-            email_result = generator.generate(
+            email_result, generated_email = generate_decision_email(
                 application,
                 decision,
                 confidence=prediction_result["probability"],
                 profile_context=profile_context,
             )
-
-            generated_email = EmailPersistenceService.save_generated_email(application, decision, email_result)
-            EmailPersistenceService.save_guardrail_logs(generated_email, email_result.get("guardrail_results", []))
 
             email_status = "pass" if email_result["passed_guardrails"] else "fail"
             waterfall.append(
@@ -271,43 +258,22 @@ class EmailPipelineService:
             # Fall through to normal completion instead of escalating
 
         elif email_result and email_result["passed_guardrails"]:
-            # Send decision email to customer (only when guardrails passed)
+            # Send decision email to customer (only when guardrails passed).
+            # deliver_decision_email sends once under a row lock and stamps
+            # sent_at, so the standalone task's redelivery path cannot re-send.
             step = self.tracker.start_step("email_delivery")
             try:
-                from apps.email_engine.services.sender import send_decision_email
-
-                recipient = application.applicant.email
-                if recipient and generated_email:
-                    send_result = send_decision_email(
-                        recipient,
-                        email_result["subject"],
-                        email_result["body"],
-                        email_type="approval" if decision == "approved" else "denial",
-                    )
-                    if send_result["sent"]:
-                        # Stamp sent_at so it is an authoritative system-wide
-                        # "delivered" marker. Without this, orchestrator-delivered
-                        # emails stay sent_at=None and the standalone task's
-                        # redelivery path would treat them as unsent and re-send.
-                        generated_email.sent_at = timezone.now()
-                        generated_email.save(update_fields=["sent_at"])
-                        step = self.tracker.complete_step(
-                            step,
-                            result_summary={
-                                "sent": True,
-                                "recipient": recipient,
-                            },
-                        )
-                    else:
-                        step = self.tracker.fail_step(step, send_result.get("error", "Send failed"))
-                else:
+                outcome = deliver_decision_email(generated_email)
+                if outcome["sent"] or outcome["already_sent"]:
                     step = self.tracker.complete_step(
-                        step,
-                        result_summary={
-                            "sent": False,
-                            "reason": "No recipient email or generated email missing",
-                        },
+                        step, result_summary={"sent": True, "recipient": outcome["recipient"]}
                     )
+                elif outcome["recipient"] is None:
+                    step = self.tracker.complete_step(
+                        step, result_summary={"sent": False, "reason": "No recipient email"}
+                    )
+                else:
+                    step = self.tracker.fail_step(step, outcome["error"] or "Send failed")
             except (ConnectionError, TimeoutError, OSError) as e:
                 logger.error("Application %s: email delivery failed: %s", application_id, e)
                 step = self.tracker.fail_step(step, str(e), failure_category="transient")

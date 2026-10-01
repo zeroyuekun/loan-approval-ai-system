@@ -1,12 +1,43 @@
 """Issuing decision emails (approval / denial) to the applicant.
 
-The decision an email announces always comes from the application's
-``LoanDecision`` record, never from a caller-supplied value: an approval letter
-carries a rate, repayments and a sign-by date, so sending one for a pending or
-denied application is a false credit representation.
+One service for every path that issues a decision notice: the orchestrator's
+email step, the human-review resume and deny outcomes, the standalone
+``generate_email_task``, the staff "send latest" endpoint and the decision
+review overturn. Before this module each path had its own generate / fallback /
+send / ``sent_at`` semantics, which is how a decided application could end up
+with no notice (guardrail exhaustion, a 429) or with two (a send that never
+stamped ``sent_at``).
+
+Guarantees:
+
+* The decision an email announces always comes from the application's
+  ``LoanDecision`` record when a caller asks for it to be checked
+  (``require_decision_on_record``), never from a caller-supplied value: an
+  approval letter carries a rate, repayments and a sign-by date.
+* ``generate_decision_email`` never leaves the caller without a compliant
+  email for provider trouble: LLM/provider errors, a closed budget gate and
+  guardrail exhaustion degrade to the deterministic template inside
+  ``EmailGenerator``; a 429 degrades to the template here unless the caller
+  can retry itself (the Celery task, ``on_rate_limit="raise"``).
+* ``deliver_decision_email`` sends at most once per row: the send runs under a
+  row lock and only while ``sent_at`` is unset, and a successful send stamps
+  ``sent_at``. Delivery is at-least-once across a crash between SMTP accept
+  and COMMIT.
 """
 
+import logging
+
+from django.db import transaction
+from django.utils import timezone
+
+from apps.email_engine.models import GeneratedEmail
+from apps.email_engine.services import sender
+from apps.email_engine.services.email_generator import EmailGenerator
+from apps.email_engine.services.exceptions import RateLimited
+from apps.email_engine.services.persistence import EmailPersistenceService
 from apps.loans.models import LoanDecision
+
+logger = logging.getLogger("email_engine.decision_email")
 
 
 class DecisionMismatch(ValueError):
@@ -32,3 +63,79 @@ def require_decision_on_record(application_id, requested=None):
             f"is {recorded!r}"
         )
     return recorded
+
+
+def email_type_for(decision):
+    return "approval" if decision == "approved" else "denial"
+
+
+def generate_decision_email(
+    application, decision, *, confidence=None, profile_context=None, on_rate_limit="template", generator=None
+):
+    """Generate and persist the decision email. Returns ``(result, generated_email)``.
+
+    ``on_rate_limit="raise"`` lets a caller that can reschedule itself (the
+    Celery email task) retry the LLM later instead of taking the template now.
+    """
+    generator = generator or EmailGenerator()
+    try:
+        result = generator.generate(application, decision, confidence=confidence, profile_context=profile_context)
+    except RateLimited:
+        if on_rate_limit == "raise":
+            raise
+        logger.warning("Application %s: email LLM rate limited — issuing the template decision email", application.pk)
+        result = generator.generate_template(application, decision)
+
+    generated_email = EmailPersistenceService.save_generated_email(application, decision, result)
+    EmailPersistenceService.save_guardrail_logs(generated_email, result.get("guardrail_results", []))
+    return result, generated_email
+
+
+def deliver_decision_email(generated_email):
+    """Send a persisted decision email to the applicant exactly once.
+
+    Returns ``{"sent": bool, "already_sent": bool, "recipient": str|None,
+    "error": str|None}``. ``sent`` is True only when this call delivered it.
+    """
+    recipient = generated_email.application.applicant.email or None
+    outcome = {"sent": False, "already_sent": False, "recipient": recipient, "error": None}
+    if not generated_email.passed_guardrails:
+        outcome["error"] = "Email failed guardrails — withheld"
+        return outcome
+    if not recipient:
+        outcome["error"] = "No recipient email address on file"
+        return outcome
+
+    with transaction.atomic():
+        locked = GeneratedEmail.objects.select_for_update().get(pk=generated_email.pk)
+        if locked.sent_at is not None:
+            generated_email.sent_at = locked.sent_at
+            outcome["already_sent"] = True
+            return outcome
+
+        result = sender.send_decision_email(
+            recipient,
+            locked.subject,
+            locked.body,
+            email_type=email_type_for(locked.decision),
+        )
+        if result.get("sent"):
+            locked.sent_at = timezone.now()
+            locked.save(update_fields=["sent_at"])
+            generated_email.sent_at = locked.sent_at
+            outcome["sent"] = True
+        else:
+            outcome["error"] = result.get("error", "Send failed")
+    return outcome
+
+
+def issue_decision_email(application, decision, *, confidence=None, profile_context=None):
+    """Generate, persist and (when it passed the guardrails) deliver the email.
+
+    For callers with no step between generation and delivery. Returns
+    ``(result, generated_email, delivery_outcome)``.
+    """
+    result, generated_email = generate_decision_email(
+        application, decision, confidence=confidence, profile_context=profile_context
+    )
+    return result, generated_email, deliver_decision_email(generated_email)

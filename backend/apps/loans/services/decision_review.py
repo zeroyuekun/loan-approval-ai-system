@@ -23,16 +23,12 @@ def _send_approval_email(application) -> None:
     """Re-generate + send the approval email after an overturn. Best-effort:
     a delivery failure must not roll back the approved decision."""
     try:
-        from apps.email_engine.services.email_generator import EmailGenerator
-        from apps.email_engine.services.persistence import EmailPersistenceService
-        from apps.email_engine.services.sender import send_decision_email
+        # Shared issuance service: template fallback on provider trouble, and a
+        # row-locked send that stamps sent_at so a later generate/send does not
+        # email the customer a second approval.
+        from apps.email_engine.services.decision_email import issue_decision_email
 
-        result = EmailGenerator().generate(application, "approved", confidence=application.decision.confidence)
-        generated = EmailPersistenceService.save_generated_email(application, "approved", result)
-        EmailPersistenceService.save_guardrail_logs(generated, result.get("guardrail_results", []))
-        recipient = application.applicant.email
-        if recipient and result.get("passed_guardrails"):
-            send_decision_email(recipient, result["subject"], result["body"], email_type="approval")
+        issue_decision_email(application, "approved", confidence=application.decision.confidence)
     except Exception:  # noqa: BLE001 — email is best-effort post-override
         logger.exception("Approval email after overturn failed for application %s", application.id)
 

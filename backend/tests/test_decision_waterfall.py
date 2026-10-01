@@ -141,8 +141,8 @@ class DecisionWaterfallTestCase(TestCase):
 
         with (
             patch("apps.agents.services.orchestrator.ModelPredictor", return_value=mock_predictor),
-            patch("apps.agents.services.email_pipeline.EmailGenerator", return_value=mock_generator),
-            patch("apps.agents.services.email_pipeline.EmailPersistenceService") as mock_persist,
+            patch("apps.email_engine.services.decision_email.EmailGenerator", return_value=mock_generator),
+            patch("apps.email_engine.services.decision_email.EmailPersistenceService") as mock_persist,
             patch("apps.agents.services.email_pipeline.BiasDetector", return_value=mock_bias),
             patch("apps.agents.services.orchestrator.FraudDetectionService", return_value=mock_fraud),
             patch("apps.agents.services.orchestrator.FraudCheck"),

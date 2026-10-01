@@ -78,8 +78,8 @@ def _noop_select_for_update(self, **kwargs):
 def resume_mocks():
     with (
         patch(f"{ORCH}.ModelPredictor") as mp,
-        patch(f"{HUMAN_REVIEW}.EmailGenerator") as eg,
-        patch(f"{HUMAN_REVIEW}.EmailPersistenceService") as eps,
+        patch("apps.email_engine.services.decision_email.EmailGenerator") as eg,
+        patch("apps.email_engine.services.decision_email.EmailPersistenceService") as eps,
         patch(f"{MKT_PIPE}.MarketingBiasDetector") as mbd,
         patch(f"{MKT_PIPE}.MarketingEmailReviewer") as mer,
         patch(f"{MKT_PIPE}.NextBestOfferGenerator") as nbo,
@@ -126,6 +126,18 @@ def test_resume_denied(escalated_agent_run, resume_mocks):
     decision.feature_importances = {"credit_score": 0.4, "income": 0.3, "dti": 0.2}
     decision.save()
 
+    # The denied resume now issues the denial email before the marketing follow-up.
+    from apps.email_engine.models import GeneratedEmail
+
+    resume_mocks["email_gen"].return_value.generate.return_value = _email()
+    resume_mocks["persistence"].save_generated_email.return_value = GeneratedEmail.objects.create(
+        application=escalated_agent_run.application,
+        decision="denied",
+        subject="Your Loan Decision",
+        body="Dear Customer, ...",
+        prompt_used="p",
+        passed_guardrails=True,
+    )
     resume_mocks["nbo"].return_value.generate.return_value = _nbo()
     resume_mocks["nbo"].return_value.generate_marketing_message.return_value = _marketing_msg()
     resume_mocks["marketing_agent"].return_value.generate.return_value = _marketing_email()
@@ -146,6 +158,8 @@ def test_resume_denied(escalated_agent_run, resume_mocks):
     escalated_agent_run.application.refresh_from_db()
     assert escalated_agent_run.application.status == "denied"
     resume_mocks["nbo"].return_value.generate.assert_called_once()
+    denial_sends = [c for c in resume_mocks["send"].call_args_list if c.kwargs.get("email_type") == "denial"]
+    assert len(denial_sends) == 1
 
 
 @CACHE_OVERRIDE

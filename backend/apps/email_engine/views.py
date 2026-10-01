@@ -1,5 +1,3 @@
-from django.db import transaction
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -8,7 +6,12 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrOfficer
 from apps.email_engine.models import GeneratedEmail
-from apps.email_engine.services.decision_email import DecisionMismatch, require_decision_on_record
+from apps.email_engine.services.decision_email import (
+    DecisionMismatch,
+    deliver_decision_email,
+    email_type_for,
+    require_decision_on_record,
+)
 from apps.email_engine.services.html_renderer import render_html
 from apps.email_engine.tasks import generate_email_task
 from apps.loans.permissions import check_loan_access
@@ -16,10 +19,6 @@ from apps.loans.permissions import check_loan_access
 
 class EmailGenerationThrottle(UserRateThrottle):
     rate = "10/hour"
-
-
-def _email_type(decision):
-    return "approval" if decision == "approved" else "denial"
 
 
 def _is_staff(user):
@@ -57,7 +56,7 @@ def _serialize_email(email, *, include_body, staff=True):
     }
     if include_body:
         data["body"] = email.body
-        data["html_body"] = render_html(email.body, email_type=_email_type(email.decision))
+        data["html_body"] = render_html(email.body, email_type=email_type_for(email.decision))
     data.update(
         {
             "model_used": email.model_used,
@@ -192,39 +191,15 @@ class SendLatestEmailView(APIView):
         except DecisionMismatch as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
 
-        from apps.email_engine.services.sender import send_decision_email
-
-        recipient = email.application.applicant.email
-        if not recipient:
-            return Response(
-                {"error": "No recipient email address on file"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        with transaction.atomic():
-            locked = GeneratedEmail.objects.select_for_update().get(pk=email.pk)
-            if locked.sent_at is not None:
-                return Response({"detail": "Email already sent."}, status=status.HTTP_200_OK)
-
-            result = send_decision_email(
-                recipient,
-                locked.subject,
-                locked.body,
-                email_type=_email_type(locked.decision),
-            )
-            if result["sent"]:
-                locked.sent_at = timezone.now()
-                locked.save(update_fields=["sent_at"])
-                return Response(
-                    {
-                        "sent": True,
-                        "recipient": recipient,
-                        "email_id": str(locked.id),
-                    }
-                )
-
+        outcome = deliver_decision_email(email)
+        if outcome["already_sent"]:
+            return Response({"detail": "Email already sent."}, status=status.HTTP_200_OK)
+        if outcome["sent"]:
+            return Response({"sent": True, "recipient": outcome["recipient"], "email_id": str(email.id)})
+        if outcome["recipient"] is None:
+            return Response({"error": outcome["error"]}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
-            {"sent": False, "error": result.get("error", "Send failed")},
+            {"sent": False, "error": outcome["error"] or "Send failed"},
             status=status.HTTP_502_BAD_GATEWAY,
         )
 

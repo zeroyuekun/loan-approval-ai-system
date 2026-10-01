@@ -108,8 +108,8 @@ def test_resume_stamps_human_involvement_assisted(_resume_setup):
     run, application = _resume_setup
 
     with (
-        patch(f"{HUMAN_REVIEW}.EmailGenerator") as eg,
-        patch(f"{HUMAN_REVIEW}.EmailPersistenceService") as eps,
+        patch("apps.email_engine.services.decision_email.EmailGenerator") as eg,
+        patch("apps.email_engine.services.decision_email.EmailPersistenceService") as eps,
         patch(SENDER, return_value={"sent": True}),
         patch("django.db.models.QuerySet.select_for_update", _noop_select_for_update),
     ):

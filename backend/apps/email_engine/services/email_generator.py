@@ -288,6 +288,33 @@ class EmailGenerator:
             "You can discuss this option using the contact details below."
         )
 
+    @staticmethod
+    def _applicant_name(application):
+        applicant_name = _sanitize_prompt_input(
+            f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
+            max_length=200,
+        )
+        if not applicant_name:
+            applicant_name = _sanitize_prompt_input(application.applicant.username, max_length=200)
+        return applicant_name
+
+    def _base_context(self, application, decision):
+        """Guardrail context shared by the LLM and template paths."""
+        return {
+            "applicant_name": self._applicant_name(application),
+            "loan_amount": float(application.loan_amount),
+            "purpose": application.get_purpose_display(),
+            "decision": decision,
+        }
+
+    def generate_template(self, application, decision):
+        """Issue the deterministic, guardrail-checked template email directly.
+
+        Used by callers that must degrade without an LLM round trip (for
+        example on a provider 429 outside the Celery email task).
+        """
+        return self._generate_fallback(application, decision, self._base_context(application, decision), time.time())
+
     def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
         """Generate an approval/denial email for the given loan application."""
         # Reset retry state only on the first attempt (not recursive retries)
@@ -296,19 +323,8 @@ class EmailGenerator:
 
         start_time = time.time()
 
-        applicant_name = _sanitize_prompt_input(
-            f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
-            max_length=200,
-        )
-        if not applicant_name:
-            applicant_name = _sanitize_prompt_input(application.applicant.username, max_length=200)
-
-        context = {
-            "applicant_name": applicant_name,
-            "loan_amount": float(application.loan_amount),
-            "purpose": application.get_purpose_display(),
-            "decision": decision,
-        }
+        context = self._base_context(application, decision)
+        applicant_name = context["applicant_name"]
 
         # Build banking context string from profile data
         # Sanitize all string values to prevent prompt injection
@@ -549,6 +565,21 @@ class EmailGenerator:
 
         _record_email_metric(decision=decision, source="claude_api", passed_guardrails=all_passed)
 
+        if not all_passed:
+            # Every LLM attempt failed the guardrails. The decision still has to
+            # reach the customer, so issue the compliant deterministic template
+            # (itself guardrail-checked) rather than withholding the notice.
+            # Only if the template ALSO fails is the email withheld.
+            logging.getLogger("email_engine.generator").warning(
+                "email LLM output failed guardrails on all %d attempts (%s) — issuing template",
+                attempt,
+                ", ".join(r["check_name"] for r in guardrail_results if not r["passed"]),
+            )
+            fallback = self._generate_fallback(application, decision, context, start_time)
+            fallback["attempt_number"] = attempt
+            fallback["prompt_used"] = "[TEMPLATE FALLBACK — LLM output failed guardrails on every attempt]"
+            return fallback
+
         return {
             "subject": subject,
             "body": body,
@@ -561,6 +592,7 @@ class EmailGenerator:
             "template_fallback": False,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "model_used": f"{self.provider}:{_model}",
         }
 
     def _parse_tool_response(self, response):
@@ -633,13 +665,7 @@ class EmailGenerator:
         from .pricing import calculate_loan_pricing
         from .template_fallback import generate_approval_template, generate_denial_template
 
-        applicant_name = (
-            _sanitize_prompt_input(
-                f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
-                max_length=200,
-            )
-            or application.applicant.username
-        )
+        applicant_name = self._applicant_name(application)
 
         pricing = None
         if decision == "approved":
@@ -716,4 +742,5 @@ class EmailGenerator:
             "template_fallback": True,
             "input_tokens": 0,
             "output_tokens": 0,
+            "model_used": "template",
         }

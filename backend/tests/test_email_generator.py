@@ -169,7 +169,30 @@ class TestEmailGenerator:
         gen = EmailGenerator()
 
         app = _make_mock_application(decision="approved")
-        result = gen.generate(app, "approved", confidence=0.92)
+        # Price the loan at the figures GOOD_APPROVAL_BODY quotes. Otherwise the
+        # body fails the hallucinated-numbers check on every attempt and the
+        # generator (correctly) issues the compliant template instead of it.
+        from apps.email_engine.services import pricing as pricing_mod
+
+        real_pricing = pricing_mod.calculate_loan_pricing
+
+        def _matching_pricing(application):
+            p = real_pricing(application)
+            p.update(
+                interest_rate="6.50% p.a.",
+                interest_rate_number=6.50,
+                rate_type="Variable",
+                comparison_rate="6.85% p.a.",
+                comparison_rate_number=6.85,
+                monthly_payment="$767.00",
+                monthly_payment_number=767.00,
+                establishment_fee="$400.00",
+                establishment_fee_number=400.00,
+            )
+            return p
+
+        with patch("apps.email_engine.services.email_generator.calculate_loan_pricing", _matching_pricing):
+            result = gen.generate(app, "approved", confidence=0.92)
 
         assert result["subject"] == "Congratulations! Your Personal Loan is Approved"
         assert result["body"].strip() == GOOD_APPROVAL_BODY.strip()

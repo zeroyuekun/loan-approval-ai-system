@@ -13,15 +13,24 @@ class EmailPersistenceService:
     """
 
     @staticmethod
-    def save_generated_email(application, decision, email_result, model_used="claude-sonnet-4-6"):
-        """Persist a generated email with all metadata."""
+    def save_generated_email(application, decision, email_result, model_used=None):
+        """Persist a generated email with all metadata.
+
+        ``model_used`` defaults to what the generator reports
+        (``"<provider>:<model>"`` for LLM emails, ``"template"`` for the
+        deterministic fallback) so Groq/Ollama/template emails are not
+        mislabelled as Claude.
+        """
+        if model_used is None:
+            model_used = email_result.get("model_used") or "unknown"
+        max_len = GeneratedEmail._meta.get_field("model_used").max_length
         return GeneratedEmail.objects.create(
             application=application,
             decision=decision,
             subject=email_result.get("subject", ""),
             body=email_result.get("body", ""),
             prompt_used=email_result.get("prompt_used", ""),
-            model_used=model_used,
+            model_used=model_used[:max_len],
             generation_time_ms=email_result.get("generation_time_ms", 0),
             attempt_number=email_result.get("attempt_number", 1),
             passed_guardrails=email_result.get("passed_guardrails", False),

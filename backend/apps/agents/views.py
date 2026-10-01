@@ -12,6 +12,7 @@ from apps.accounts.permissions import IsAdminOrOfficer
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
 from apps.agents.serializers import agent_run_serializer_class
 from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
+from apps.email_engine.tasks import generate_email_task
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 from apps.loans.permissions import check_loan_access
 
@@ -379,6 +380,14 @@ class HumanReviewView(APIView):
                     decision.decision = "denied"
                     decision.reasoning = f"Human review override by {request.user.username}: {reviewer_note}"
                     decision.save(update_fields=["decision", "reasoning"])
+
+                    # The reviewer's denial is a decision the customer must be
+                    # told about: issue a fresh denial email (template fallback
+                    # inside the generator) after commit, so the task reads the
+                    # updated LoanDecision. regenerate=True stops it re-sending
+                    # the draft the bias review held back.
+                    app_id = str(application.id)
+                    transaction.on_commit(lambda: generate_email_task.delay(app_id, "denied", regenerate=True))
                 except LoanDecision.DoesNotExist:
                     logger.info(
                         "human_review_deny_no_decision_record",
