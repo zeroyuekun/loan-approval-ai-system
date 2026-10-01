@@ -16,12 +16,13 @@ from unittest.mock import MagicMock, patch
 import anthropic
 import pytest
 
-from apps.agents.services.api_budget import BudgetExhausted
+from apps.agents.services.api_budget import BudgetExhausted, CircuitOpen
 from apps.agents.services.marketing_agent import (
     MARKETING_EMAIL_PROMPT,
     MarketingAgent,
     _sanitize_prompt_input,
 )
+from apps.email_engine.services.guardrails import GuardrailChecker
 
 # ---------------------------------------------------------------------------
 # Mock helpers
@@ -349,7 +350,7 @@ class TestTemplateFallback:
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result()
-        result = agent._marketing_template_fallback(app, nbo_amounts=[15000.0, 476.50], start_time=0.0, nbo_result=nbo)
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result=nbo)
         assert "Option 1: Secured Personal Loan" in result["body"]
         assert "Option 2: Rewards Savings Account" in result["body"]
         assert "$15,000.00" in result["body"]
@@ -358,7 +359,7 @@ class TestTemplateFallback:
     def test_without_offers_returns_generic_fallback(self):
         agent = self._agent()
         app = _make_mock_application()
-        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result={"offers": []})
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result={"offers": []})
         assert result["subject"] == "Next Steps for Your Banking Needs"
         # Generic fallback mentions a loan enquiry and the lending team contact
         assert "loan enquiry" in result["body"].lower()
@@ -369,7 +370,7 @@ class TestTemplateFallback:
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result(with_term_deposit=True)
-        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result=nbo)
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result=nbo)
         assert "Financial Claims Scheme" in result["body"]
         assert "$250,000" in result["body"]
 
@@ -377,13 +378,13 @@ class TestTemplateFallback:
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result(with_term_deposit=False)
-        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result=nbo)
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result=nbo)
         assert "Financial Claims Scheme" not in result["body"]
 
     def test_returns_required_keys(self):
         agent = self._agent()
         app = _make_mock_application()
-        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result={"offers": []})
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result={"offers": []})
         expected = {
             "subject",
             "body",
@@ -407,14 +408,14 @@ class TestTemplateFallback:
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result()
-        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result=nbo)
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result=nbo)
         assert result["subject"] == "Next steps for your AussieLoanAI loan application"
 
     def test_includes_australian_regulatory_footer(self):
         agent = self._agent()
         app = _make_mock_application()
         nbo = _sample_nbo_result()
-        result = agent._marketing_template_fallback(app, nbo_amounts=[], start_time=0.0, nbo_result=nbo)
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result=nbo)
         body = result["body"]
         assert "Target Market Determination" in body
         assert "Product Disclosure Statement" in body
@@ -425,17 +426,13 @@ class TestTemplateFallback:
     def test_uses_first_name_when_available(self):
         agent = self._agent()
         app = _make_mock_application(first_name="Priya")
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[], start_time=0.0, nbo_result=_sample_nbo_result()
-        )
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result=_sample_nbo_result())
         assert "Dear Priya" in result["body"]
 
     def test_falls_back_to_username_when_first_name_empty(self):
         agent = self._agent()
         app = _make_mock_application(first_name="", username="anonuser")
-        result = agent._marketing_template_fallback(
-            app, nbo_amounts=[], start_time=0.0, nbo_result=_sample_nbo_result()
-        )
+        result = agent._marketing_template_fallback(app, start_time=0.0, nbo_result=_sample_nbo_result())
         assert "Dear anonuser" in result["body"]
 
 
@@ -471,15 +468,21 @@ class TestGenerate:
         assert result["attempt_number"] >= 1
         mock_call.assert_called()
 
+    @pytest.mark.parametrize(
+        "error",
+        [BudgetExhausted("daily cap hit"), CircuitOpen("circuit breaker open after consecutive failures")],
+        ids=["budget_exhausted", "circuit_open"],
+    )
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch("apps.agents.services.marketing_agent.anthropic.Anthropic")
     @patch("apps.agents.services.marketing_agent.guarded_api_call")
-    def test_budget_exhausted_falls_back_to_template(self, mock_call, mock_anthropic_cls):
+    def test_budget_guard_errors_fall_back_to_template(self, mock_call, mock_anthropic_cls, error):
+        """BudgetExhausted and CircuitOpen from guarded_api_call take the
+        template-fallback path (parity with email_generator), not hard-fail
+        the marketing_email_generation step."""
         mock_anthropic_cls.return_value = MagicMock()
-        mock_call.side_effect = BudgetExhausted("daily cap hit")
-        agent = MarketingAgent()
-        app = _make_mock_application()
-        result = agent.generate(app, _sample_nbo_result())
+        mock_call.side_effect = error
+        result = MarketingAgent().generate(_make_mock_application(), _sample_nbo_result())
         assert result["template_fallback"] is True
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
@@ -739,6 +742,48 @@ class TestPromptInjectionSanitizationLLMFields:
         prompt_passed = mock_call.call_args.kwargs["messages"][0]["content"]
         # Normal clean text should survive sanitization
         assert "Cross-sell savings account" in prompt_passed
+
+
+# ---------------------------------------------------------------------------
+# Guardrail context carries the NBO offers
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def run_all_checks_spy():
+    """Spy on GuardrailChecker.run_all_checks while keeping the real checks."""
+    with patch.object(
+        GuardrailChecker, "run_all_checks", autospec=True, side_effect=GuardrailChecker.run_all_checks
+    ) as spy:
+        yield spy
+
+
+class TestGuardrailContextCarriesNboOffers:
+    """The guardrail context must carry the NBO offers (`nbo_offers`) so the
+    checker can accept interest figures derived at each offer's real rate."""
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
+    @patch("apps.agents.services.marketing_agent.anthropic.Anthropic")
+    @patch("apps.agents.services.marketing_agent.guarded_api_call")
+    def test_generate_context_contains_nbo_offers(self, mock_call, mock_anthropic_cls, run_all_checks_spy):
+        mock_anthropic_cls.return_value = MagicMock()
+        mock_call.return_value = _make_mock_text_response(
+            "Subject: Next steps for your AussieLoanAI loan application\n\nDear Jane,\n\nContact me at 1300 000 000."
+        )
+        nbo = _sample_nbo_result()
+
+        MarketingAgent().generate(_make_mock_application(), nbo)
+
+        assert run_all_checks_spy.call_args.args[2]["nbo_offers"] == nbo["offers"]
+
+    def test_template_fallback_context_contains_nbo_offers(self, run_all_checks_spy):
+        with patch.dict(os.environ, {}, clear=True):
+            agent = MarketingAgent()
+        nbo = _sample_nbo_result()
+
+        agent._marketing_template_fallback(_make_mock_application(), start_time=0.0, nbo_result=nbo)
+
+        assert run_all_checks_spy.call_args.args[2]["nbo_offers"] == nbo["offers"]
 
 
 # ---------------------------------------------------------------------------

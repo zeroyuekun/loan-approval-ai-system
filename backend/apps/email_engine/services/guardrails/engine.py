@@ -11,6 +11,13 @@ from . import patterns
 
 logger = logging.getLogger("email_engine.guardrails")
 
+NBO_AMOUNT_KEYS = ("amount", "monthly_repayment", "fortnightly_repayment")
+
+
+def nbo_offer_amounts(offers):
+    """Dollar figures from NBO offer dicts, for the ``nbo_amounts`` guardrail context."""
+    return [float(offer[key]) for offer in offers for key in NBO_AMOUNT_KEYS if offer.get(key)]
+
 
 class GuardrailChecker:
     """Runs compliance checks on generated emails."""
@@ -135,29 +142,32 @@ class GuardrailChecker:
         has_nbo = len(nbo_amounts_list) > 0
 
         # Pre-compute plausible derived values from each NBO offer principal.
-        # We allow annual interest (principal × rate ≤ 30%), monthly interest,
-        # fortnightly repayment, and the offer amount itself ÷ term.
-        # This replaces the previous blanket "< $5,000 is always fine" which
-        # disabled hallucination detection for the entire sub-$5k range.
+        # Offers passed as `nbo_offers` contribute interest at their actual
+        # estimated_rate; every principal also gets the 30%-rate band below,
+        # which covers callers that pass amounts without rates.
         _nbo_derived: set[float] = set()
+
+        def _add_interest_refs(principal: float, annual_rate: float) -> None:
+            # Annual, monthly and fortnightly (26 periods/year) interest.
+            annual = principal * annual_rate
+            _nbo_derived.update((annual, annual / 12, annual / 26))
+
         if has_nbo:
+            # e.g. $20,000 at 4.90% -> $980/yr, which the 30% band would reject.
+            for _offer in context.get("nbo_offers") or []:
+                try:
+                    _add_interest_refs(float(_offer["amount"]), float(_offer["estimated_rate"]) / 100)
+                except (KeyError, TypeError, ValueError):
+                    continue
             _MAX_RATE = 0.30  # upper bound for realistic interest rates
             for _nbo_raw in nbo_amounts_list:
                 try:
                     _nbo = float(_nbo_raw)
                 except (TypeError, ValueError):
                     continue
-                # Annual interest at maximum plausible rate
-                _annual_interest = _nbo * _MAX_RATE
-                _nbo_derived.add(_annual_interest)
-                # Monthly interest
-                _nbo_derived.add(_annual_interest / 12)
-                # Fortnightly interest (26 periods/year)
-                _nbo_derived.add(_annual_interest / 26)
-                # Monthly principal ÷ 12 (first-year simplified)
-                _nbo_derived.add(_nbo / 12)
-                # Fortnightly principal ÷ 26
-                _nbo_derived.add(_nbo / 26)
+                _add_interest_refs(_nbo, _MAX_RATE)
+                # Principal ÷ 12 and ÷ 26 (first-year simplified repayments)
+                _nbo_derived.update((_nbo / 12, _nbo / 26))
 
         def _is_nbo_derived(val: float) -> bool:
             """Return True if val is within ±10 % of any NBO-derived amount."""

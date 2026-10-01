@@ -7,6 +7,11 @@ from django.db import transaction
 logger = logging.getLogger("agents.tasks")
 
 
+def _lock_key(application_id):
+    """Single source of truth for the orchestrate dedup-lock cache key."""
+    return f"orchestrate_lock:{application_id}"
+
+
 class _OrchestrateTask(Task):
     """Custom Task base that releases the dedup lock on terminal failure.
 
@@ -25,8 +30,10 @@ class _OrchestrateTask(Task):
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         application_id = args[0] if args else kwargs.get("application_id")
         if application_id and self.request.retries >= self.max_retries:
-            lock_key = f"orchestrate_lock:{application_id}"
-            cache.delete(lock_key)
+            # Terminal failure: reset the stuck-PROCESSING application (the
+            # helper logs and swallows its own errors), then release the lock.
+            _cleanup_stuck_application(application_id)
+            cache.delete(_lock_key(application_id))
             logger.warning(
                 "Application %s: dedup lock released after max_retries exhausted (terminal failure)",
                 application_id,
@@ -86,7 +93,7 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
             )
 
         if clear_lock:
-            cache.delete(f"orchestrate_lock:{application_id}")
+            cache.delete(_lock_key(application_id))
 
         logger.warning("Application %s: cleaned up stuck processing status", application_id)
     except Exception as e:
@@ -125,12 +132,16 @@ def orchestrate_pipeline_task(self, application_id, force=False):
                 logger.warning("Application %s: failed to restore status: %s", application_id, e)
             return {"status": "already_completed", "application_id": str(application_id)}
 
-    # Redis dedup lock: prevent concurrent runs for the same application
-    lock_key = f"orchestrate_lock:{application_id}"
-    acquired = cache.add(lock_key, self.request.id, _DEDUP_LOCK_TTL)
-    if not acquired:
-        logger.info("Application %s: dedup lock already held, skipping", application_id)
-        return {"skipped": True, "reason": "dedup_lock_held"}
+    # Redis dedup lock: prevent concurrent runs for the same application.
+    # The lock is kept alive across infrastructure-error retries (M22), and a
+    # Celery autoretry re-runs this body with the SAME task id, so a lock we
+    # already hold means our own retry is re-entering and should proceed.
+    lock_key = _lock_key(application_id)
+    if not cache.add(lock_key, self.request.id, _DEDUP_LOCK_TTL):
+        if cache.get(lock_key) != self.request.id:
+            logger.info("Application %s: dedup lock already held, skipping", application_id)
+            return {"skipped": True, "reason": "dedup_lock_held"}
+        cache.set(lock_key, self.request.id, _DEDUP_LOCK_TTL)  # refresh TTL for the retry
 
     try:
         orchestrator = PipelineOrchestrator()

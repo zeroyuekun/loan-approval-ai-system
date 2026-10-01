@@ -133,6 +133,7 @@ class MarketingPipelineService:
                         "passed_guardrails": email_result_marketing["passed_guardrails"],
                         "attempt_number": email_result_marketing["attempt_number"],
                         "generation_time_ms": email_result_marketing["generation_time_ms"],
+                        "template_fallback": email_result_marketing.get("template_fallback", False),
                     },
                 )
             except (LLMServiceError, ConnectionError, TimeoutError) as e:

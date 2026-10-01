@@ -5,11 +5,12 @@ import time
 import anthropic
 import httpx
 
+from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from .documentation import build_documentation_checklist
 from .exceptions import EmailBackendError
-from .guardrails import GuardrailChecker
+from .guardrails import GuardrailChecker, nbo_offer_amounts
 from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
 
@@ -29,6 +30,28 @@ def _record_email_metric(decision: str, source: str, passed_guardrails: bool) ->
         ).inc()
     except Exception as exc:  # noqa: BLE001 — metric emission is best-effort
         _metrics_logger.debug("email_generation_total emission failed: %s", exc)
+
+
+# Memoized LLM clients, keyed by the full construction config per backend.
+# EmailGenerator() is built per Celery task, so the cache lets tasks share one
+# connection pool. httpx.Client and anthropic.Anthropic are thread-safe, and
+# Celery prefork gives each child process its own module state.
+_CLIENT_CACHE = {}
+
+
+def _cached_client(key, build):
+    """Return the memoized client for ``key``, building it on first use."""
+    client = _CLIENT_CACHE.get(key)
+    if client is None:
+        client = _CLIENT_CACHE[key] = build()
+    return client
+
+
+def _email_llm_seed():
+    try:
+        return int(os.environ.get("EMAIL_LLM_SEED") or 0)
+    except ValueError:
+        return 0
 
 
 EMAIL_SUBMIT_TOOL = {
@@ -83,7 +106,8 @@ class EmailGenerator:
         Returns ``(client_or_None, provider_name, model_id)``. A missing API key
         yields a ``None`` client, which routes ``generate()`` to the
         deterministic template fallback — the system never depends on any API to
-        produce a compliant, sendable email.
+        produce a compliant, sendable email. Clients are memoized in
+        ``_CLIENT_CACHE`` (see its comment).
         """
         if backend == "groq":
             from .llm_client import DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, GroqLLMClient
@@ -92,16 +116,17 @@ class EmailGenerator:
             api_key = os.environ.get("GROQ_API_KEY", "")
             if not api_key:
                 return None, "groq", model
-            try:
-                seed = int(os.environ.get("EMAIL_LLM_SEED", "0") or "0")
-            except ValueError:
-                seed = 0
-            client = GroqLLMClient(
-                api_key=api_key,
-                base_url=os.environ.get("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
-                model=model,
-                seed=seed,
-                timeout=httpx.Timeout(60.0, connect=10.0),
+            seed = _email_llm_seed()
+            base_url = os.environ.get("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL)
+            client = _cached_client(
+                ("groq", api_key, base_url, model, seed),
+                lambda: GroqLLMClient(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    seed=seed,
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                ),
             )
             return client, "groq", model
 
@@ -115,23 +140,23 @@ class EmailGenerator:
             # -> EmailBackendError -> deterministic template fallback — not by
             # nulling the client here.
             api_key = os.environ.get("OLLAMA_API_KEY", "ollama")
-            try:
-                seed = int(os.environ.get("EMAIL_LLM_SEED", "0") or "0")
-            except ValueError:
-                seed = 0
-            client = OpenAICompatibleLLMClient(
-                api_key=api_key,
-                base_url=os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
-                model=model,
-                seed=seed,
-                # Local CPU inference is slow: a warm attempt on the ~4.5k-token
-                # prompt takes ~2 min, and a COLD first call also pays model-load
-                # time. 180s bounced cold starts to the template fallback; 300s
-                # lets a slow (not failed) generation finish instead of looking
-                # like an outage. Email runs in the async Celery queue, so the
-                # extra wall-clock is invisible to the request path.
-                timeout=httpx.Timeout(300.0, connect=10.0),
-                provider="ollama",
+            seed = _email_llm_seed()
+            base_url = os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
+            client = _cached_client(
+                ("ollama", api_key, base_url, model, seed),
+                lambda: OpenAICompatibleLLMClient(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    seed=seed,
+                    # Local CPU inference is slow: a warm attempt on the ~4.5k-token
+                    # prompt takes ~2 min, and a COLD first call also pays model-load
+                    # time. 300s lets a slow (not failed) generation finish instead
+                    # of looking like an outage. Email runs in the async Celery
+                    # queue, so the extra wall-clock is invisible to the request path.
+                    timeout=httpx.Timeout(300.0, connect=10.0),
+                    provider="ollama",
+                ),
             )
             return client, "ollama", model
 
@@ -140,10 +165,8 @@ class EmailGenerator:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             return None, "anthropic", model
-        client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        # The model is a per-request kwarg, so the key alone identifies the client.
+        client = _cached_client(("anthropic", api_key), make_anthropic_client)
         return client, "anthropic", model
 
     # Map ML feature names to plain-language denial reasons
@@ -382,11 +405,7 @@ class EmailGenerator:
             # Whitelist the teaser figures so the hallucinated-numbers guardrail
             # (engine.py:61) recognises them on the decision email.
             if nbo_offer:
-                nbo_amounts = []
-                for key in ("amount", "monthly_repayment", "fortnightly_repayment"):
-                    val = nbo_offer.get(key)
-                    if val:
-                        nbo_amounts.append(float(val))
+                nbo_amounts = nbo_offer_amounts([nbo_offer])
                 if nbo_amounts:
                     context["nbo_amounts"] = nbo_amounts
 
@@ -430,12 +449,12 @@ class EmailGenerator:
         # Call Claude API with tool_use for structured output (with budget check)
         from django.conf import settings as django_settings
 
-        from apps.agents.services.api_budget import ApiBudgetGuard, BudgetExhausted, CircuitOpen, guarded_api_call
+        from apps.agents.services.api_budget import ApiBudgetGuard, ApiGateClosed, guarded_api_call
 
         budget = ApiBudgetGuard()
         try:
             budget.check_budget()
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             # CircuitOpen: the shared breaker may have been tripped by ANOTHER
             # AI service's failures — the customer still gets a template email.
             return self._generate_fallback(application, decision, context, start_time)
@@ -469,12 +488,15 @@ class EmailGenerator:
             if usage:
                 input_tokens = getattr(usage, "input_tokens", 0)
                 output_tokens = getattr(usage, "output_tokens", 0)
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             return self._generate_fallback(application, decision, context, start_time)
         except anthropic.RateLimitError as exc:
+            # Anthropic-backend seam only: the OpenAI-compatible adapter raises
+            # RateLimited directly (with the provider's Retry-After), which is
+            # not caught here and propagates to the Celery task by design.
             from .exceptions import RateLimited
 
-            raise RateLimited(retry_after=30) from exc
+            raise RateLimited() from exc
         except (anthropic.APIError, EmailBackendError) as exc:
             # A provider error (timeout, connection drop, 4xx/5xx — e.g. a free
             # tier returning 413 "request too large") must NOT leave a customer

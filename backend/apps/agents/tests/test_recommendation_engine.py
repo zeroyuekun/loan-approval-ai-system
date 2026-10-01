@@ -70,6 +70,22 @@ class TestUnsecuredPersonalTermSelection:
         if rec is not None:
             assert rec.term_months == 60
 
+    def test_fallback_resize_respects_the_15pct_of_gross_ceiling(self):
+        """When no term fits and the loop falls back to 60 months, the re-size
+        must use the same min(15% of gross, surplus) cap the loop enforced.
+        Sized against raw surplus, this snapshot is quoted the $50,000 catalog
+        maximum at about $1,087/month, well above its $750/month cap."""
+        eng = RecommendationEngine()
+        # Gross $5,000/mo -> 15% cap = $750; surplus ~ $2,218 (> cap).
+        s = _snapshot(annual_income=60000.0, monthly_expenses=1000.0, credit_score=720)
+        rec = eng._evaluate_unsecured_personal(s)
+        assert rec is not None
+        assert rec.term_months == 60
+        cap = min(0.15 * s.annual_income / 12, s.monthly_surplus)
+        assert rec.monthly_repayment <= cap + 0.01, (
+            f"quoted ${rec.monthly_repayment:,.2f}/mo exceeds the repayment cap ${cap:,.2f}/mo"
+        )
+
 
 class TestSecuredPersonalServiceability:
     """Guards the M19-parity fix for secured personal loans (review #3). The
@@ -93,6 +109,32 @@ class TestSecuredPersonalServiceability:
         assert rec is not None
         assert rec.monthly_repayment <= s.monthly_surplus + 0.01, (
             f"quoted ${rec.monthly_repayment:,.0f}/mo exceeds serviceable surplus ${s.monthly_surplus:,.0f}/mo"
+        )
+
+    def test_term_84_resize_respects_the_15pct_of_gross_ceiling(self):
+        """Guards the delta-sweep S1-F2 fix. When the term loop selects 84
+        months, the re-size must use the SAME target_repayment cap the loop
+        enforced (min(15% of gross, surplus)) — not the raw surplus. With raw
+        surplus the re-sized amount's repayment breaches the 15%-of-gross leg
+        whenever surplus > 15% of gross at a non-premium tier (the premium
+        tier escapes only via the $100k catalog ceiling)."""
+        eng = RecommendationEngine()
+        # Gross $10,000/mo -> 15% cap = $1,500; surplus ~ $1,800.67 (> cap, so
+        # the gross leg binds); subprime tier (9.99%) so only term 84 fits the
+        # target; savings ample so the 90%-of-savings cap never binds.
+        s = _snapshot(
+            annual_income=120_000.0,
+            monthly_expenses=5_823.0,
+            savings_balance=115_000.0,
+            credit_score=660,
+        )
+        rec = eng._evaluate_secured_personal(s)
+        assert rec is not None
+        # Prove the breach path is exercised: the 84-month term was selected.
+        assert rec.term_months == 84
+        cap = min(0.15 * s.annual_income / 12, s.monthly_surplus)
+        assert rec.monthly_repayment <= cap + 0.01, (
+            f"quoted ${rec.monthly_repayment:,.2f}/mo exceeds the repayment cap ${cap:,.2f}/mo"
         )
 
     def test_quoted_repayment_is_internally_consistent_with_amount_and_term(self):

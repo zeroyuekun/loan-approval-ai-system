@@ -159,6 +159,52 @@ class TestNboDbFailureDoesNotRaiseNameError:
         # generate_marketing_message should never be called
         mock_gen_cls.return_value.generate_marketing_message.assert_not_called()
 
+    def test_email_step_summary_reports_template_fallback(self):
+        """The marketing_email_generation step summary must surface whether
+        the result came from the template fallback (observability)."""
+        tracker = StepTracker()
+        svc = MarketingPipelineService(step_tracker=tracker)
+
+        app = _make_mock_application()
+        agent_run = _make_mock_agent_run()
+
+        email_result = {
+            "subject": "Next steps for your AussieLoanAI loan application",
+            "body": "Dear Jane, ...",
+            "prompt_used": "[TEMPLATE FALLBACK — Claude API unavailable]",
+            "generation_time_ms": 5,
+            "attempt_number": 1,
+            "passed_guardrails": False,  # skip bias-check branch
+            "guardrail_results": [],
+            "template_fallback": True,
+        }
+
+        with (
+            patch("apps.agents.services.marketing_pipeline.NextBestOfferGenerator") as mock_gen_cls,
+            patch("apps.agents.services.marketing_pipeline.NextBestOffer"),
+            patch("apps.agents.services.marketing_pipeline.MarketingEmail"),
+            patch("apps.agents.services.marketing_pipeline.BiasReport"),
+            patch("apps.agents.services.marketing_pipeline.MarketingAgent") as mock_agent_cls,
+        ):
+            mock_gen_cls.return_value.generate.return_value = _valid_nbo_result()
+            mock_gen_cls.return_value.generate_marketing_message.return_value = {
+                "marketing_message": "msg",
+                "generation_time_ms": 3,
+            }
+            mock_agent_cls.return_value.generate.return_value = email_result
+
+            result = svc.run(
+                application=app,
+                agent_run=agent_run,
+                steps=[],
+                denial_reasons="credit score",
+                profile_context={},
+            )
+
+        email_steps = [s for s in result if s.get("step_name") == "marketing_email_generation"]
+        assert len(email_steps) == 1
+        assert email_steps[0]["result_summary"]["template_fallback"] is True
+
     def test_nbo_fails_entirely_skips_all_marketing(self):
         """When NBO generate() itself fails, all marketing steps must be skipped."""
         tracker = StepTracker()

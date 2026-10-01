@@ -42,18 +42,6 @@ MODEL_PRICING = {
     "claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-20250514": {"input": 0.25, "output": 1.25},
-    # Free Groq backend for email generation — $0/token. The budget guard still
-    # reserves the per-call floor and counts the call against the daily call
-    # limit, but no dollar spend accrues.
-    "llama-3.1-8b-instant": {"input": 0.00, "output": 0.00},
-    # Free LOCAL Ollama backend — $0/token (runs on-prem, no API billing).
-    # "loan-email" is our 16k-context Modelfile build; the rest are common
-    # Ollama tags. Add a row here if you deploy a different OLLAMA_MODEL, else it
-    # falls back to Sonnet pricing and would wrongly accrue spend.
-    "loan-email": {"input": 0.00, "output": 0.00},
-    "qwen2.5:7b": {"input": 0.00, "output": 0.00},
-    "llama3.2:3b": {"input": 0.00, "output": 0.00},
-    "llama3.1:8b": {"input": 0.00, "output": 0.00},
 }
 
 # Fallback: assume Sonnet pricing for unknown models
@@ -82,9 +70,17 @@ def _sampling_params_removed(model):
 # Australia, so it is NOT a cross-border disclosure; hosted providers are US.
 _PROVIDER_DESTINATION = {"anthropic": "US", "groq": "US", "ollama": "AU"}
 
+# Providers whose calls cost $0/token (free Groq tier, on-prem Ollama). Keyed
+# by PROVIDER, not model tag, so any local model tag costs $0 without a
+# MODEL_PRICING row. The budget guard still reserves the per-call floor and
+# counts the call against the daily call limit.
+_FREE_PROVIDERS = frozenset({"groq", "ollama"})
 
-def estimate_cost_usd(input_tokens, output_tokens, model=""):
+
+def estimate_cost_usd(input_tokens, output_tokens, model="", provider="anthropic"):
     """Estimate cost in USD for a single API call."""
+    if provider in _FREE_PROVIDERS:
+        return 0.0
     pricing = MODEL_PRICING.get(model, _DEFAULT_PRICING)
     cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
     return round(cost, 6)
@@ -94,13 +90,13 @@ def estimate_cost_usd(input_tokens, output_tokens, model=""):
 _RESERVE_FLOOR_CENTS = 5
 
 
-def _estimate_reserve_cents(model, max_tokens=None):
+def _estimate_reserve_cents(model, max_tokens=None, provider="anthropic"):
     """Worst-case cents to reserve before a call whose real token usage is unknown.
 
     Assumes a large-ish prompt (8k input) producing up to ``max_tokens`` output.
     Never returns below ``_RESERVE_FLOOR_CENTS``.
     """
-    cost_usd = estimate_cost_usd(8000, max_tokens or 2048, model)
+    cost_usd = estimate_cost_usd(8000, max_tokens or 2048, model, provider=provider)
     return max(_RESERVE_FLOOR_CENTS, int(cost_usd * 100))
 
 
@@ -126,16 +122,20 @@ return {1, newcost, newcalls}
 """
 
 
-class BudgetExhausted(Exception):
+class ApiGateClosed(Exception):
+    """Base for every gate that refuses an API call before it is made.
+
+    Callers that degrade to a template catch this base, so a new gate
+    exception cannot slip past a site that only lists the old ones.
+    """
+
+
+class BudgetExhausted(ApiGateClosed):
     """Raised when the daily API budget is exhausted."""
 
-    pass
 
-
-class CircuitOpen(Exception):
+class CircuitOpen(ApiGateClosed):
     """Raised when the circuit breaker is open due to consecutive failures."""
-
-    pass
 
 
 # Process-local fallback counter used when Redis is unavailable.
@@ -211,7 +211,7 @@ class ApiBudgetGuard:
             # does not permanently brick this worker (F-04).
             with _REDIS_FALLBACK_LOCK:
                 _REDIS_FALLBACK_CALLS = 0
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             raise
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             # Redis is unavailable. We can't enforce the true daily budget, but
@@ -278,7 +278,7 @@ class ApiBudgetGuard:
             with _REDIS_FALLBACK_LOCK:
                 _REDIS_FALLBACK_CALLS = 0
             return estimated_cost_cents
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             raise
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             # Redis unavailable: reuse the per-process fallback cap so a brief
@@ -300,7 +300,9 @@ class ApiBudgetGuard:
             )
             return 0
 
-    def record_call(self, input_tokens=0, output_tokens=0, model="", reserved_cents=0, released=False):
+    def record_call(
+        self, input_tokens=0, output_tokens=0, model="", reserved_cents=0, released=False, provider="anthropic"
+    ):
         """Record actual usage, reconciling any prior reservation to the true cost.
 
         Three paths, keyed off ``reserved_cents`` and ``released``:
@@ -321,6 +323,11 @@ class ApiBudgetGuard:
         * **Unreserved fallback** (``reserved_cents`` == 0): the call was never
           reserved (Redis was down at reserve time, or a legacy caller). Count the
           call + full cost, keeping the ``max(1, …)`` minimum-cent floor.
+
+        Free providers (``_FREE_PROVIDERS``) cost $0/token, so the minimum-cent
+        floor is skipped for them — otherwise every free call would drain a
+        phantom cent from the shared daily cap. Call-count accounting is
+        unchanged: free calls still consume call slots.
         """
         try:
             r = self._get_redis()
@@ -331,7 +338,10 @@ class ApiBudgetGuard:
             cost_key = self._daily_key("cost_cents")
 
             reserved = int(reserved_cents)
-            cost_usd = estimate_cost_usd(input_tokens, output_tokens, model)
+            cost_usd = estimate_cost_usd(input_tokens, output_tokens, model, provider=provider)
+            # Minimum 1 cent per real call, except free providers ($0).
+            min_cents = 0 if provider in _FREE_PROVIDERS else 1
+            floored_cents = max(min_cents, int(cost_usd * 100))
 
             if reserved > 0 and released:
                 # Failure release: undo the reservation in full. No cent floor —
@@ -348,15 +358,13 @@ class ApiBudgetGuard:
             elif reserved > 0:
                 # Successful reconcile to the real cost. The call was already
                 # counted inside reserve_budget, so do NOT touch calls again.
-                cost_cents = max(1, int(cost_usd * 100))  # minimum 1 cent per real call
-                cost_delta = cost_cents - reserved
+                cost_delta = floored_cents - reserved
             else:
                 # Fallback path: the call was never reserved. Count the call +
                 # full cost with the minimum-cent floor.
-                cost_cents = max(1, int(cost_usd * 100))  # minimum 1 cent per call
                 pipe.incr(calls_key)
                 pipe.expire(calls_key, self.KEY_TTL)
-                cost_delta = cost_cents
+                cost_delta = floored_cents
 
             pipe.incrby(tokens_key, input_tokens + output_tokens)
             pipe.expire(tokens_key, self.KEY_TTL)
@@ -506,11 +514,15 @@ def guarded_api_call(client, **kwargs):
         if stripped:
             logger.debug("Stripped sampling params %s for adaptive-only model %s", stripped, model)
 
+    # Provider drives BOTH the $0 cost accounting (_FREE_PROVIDERS) and the
+    # APICallLog cross-border destination, so resolve it once up front.
+    provider = getattr(client, "provider", "anthropic")
+
     budget = ApiBudgetGuard()
     # Authoritative atomic gate (M5): reserve a conservative worst-case before the
     # call so concurrent workers cannot collectively overshoot the daily cap.
     reserved = budget.reserve_budget(
-        estimated_cost_cents=_estimate_reserve_cents(model, kwargs.get("max_tokens")),
+        estimated_cost_cents=_estimate_reserve_cents(model, kwargs.get("max_tokens"), provider=provider),
     )
 
     try:
@@ -519,14 +531,22 @@ def guarded_api_call(client, **kwargs):
         budget.record_failure()
         # Release the reservation in full — the call never produced billable
         # tokens, so give back BOTH the reserved cost and the call slot.
-        budget.record_call(input_tokens=0, output_tokens=0, model=model, reserved_cents=reserved, released=True)
+        budget.record_call(
+            input_tokens=0, output_tokens=0, model=model, reserved_cents=reserved, released=True, provider=provider
+        )
         raise
 
     # Track cost from actual usage, reconciling the reservation to the true cost.
     usage = getattr(response, "usage", None)
     input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
     output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
-    budget.record_call(input_tokens=input_tokens, output_tokens=output_tokens, model=model, reserved_cents=reserved)
+    budget.record_call(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        model=model,
+        reserved_cents=reserved,
+        provider=provider,
+    )
     budget.record_success()
 
     # Log API call for PII cross-border audit (Privacy Act APP 8)
@@ -534,7 +554,6 @@ def guarded_api_call(client, **kwargs):
         from apps.agents.models import APICallLog
 
         prompt_text = _extract_prompt_text(kwargs)
-        provider = getattr(client, "provider", "anthropic")
         APICallLog.objects.create(
             loan_application_id=loan_application_id,
             agent_run_id=agent_run_id,

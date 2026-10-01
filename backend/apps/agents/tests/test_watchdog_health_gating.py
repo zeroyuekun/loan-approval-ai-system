@@ -3,9 +3,18 @@ an AUTH state (no/!valid HEALTH_CHECK_TOKEN — typical in local dev), not a hea
 failure. Before this guard, a 403 body ({"error": "unauthorized"}) fell through to
 the degraded branch and falsely escalated consecutive_failures → CRITICAL alerts.
 A genuine 503 (degraded) body must still count, and a 200 healthy body still resets.
+
+The token-UNSET 403 skip must not swallow production token drift, though: when a
+token IS configured but rejected (rotated server-side while the watchdog still
+holds the old env copy), every cycle 403s forever. Treating that as a benign skip
+left consecutive_failures at 0 and let the watchdog:health Redis key (120s TTL)
+expire — monitoring silently dead. That case must count as a failure, record an
+"auth_rejected" health state, and escalate to the CRITICAL alert at threshold.
 """
 
 from unittest.mock import MagicMock, patch
+
+from django.test import override_settings
 
 from apps.agents.management.commands.watchdog import Command
 
@@ -60,3 +69,66 @@ def test_healthy_200_resets_failures(mock_get, mock_record):
     assert cmd.consecutive_failures == 0
     mock_record.assert_called_once()
     assert mock_record.call_args[0][0] == "healthy"
+
+
+@override_settings(HEALTH_CHECK_TOKEN="ops-token-rotated-away")
+@patch.object(Command, "_record_health")
+@patch("apps.agents.management.commands.watchdog.httpx.get")
+def test_403_with_token_configured_counts_as_auth_rejected(mock_get, mock_record):
+    """Token drift (configured token rejected) must count + keep Redis key alive."""
+    mock_get.return_value = _resp(403, {"error": "unauthorized"})
+    cmd = _command()
+
+    cmd._check_health()
+
+    assert cmd.consecutive_failures == 1
+    mock_record.assert_called_once()
+    assert mock_record.call_args[0][0] == "auth_rejected"
+
+
+@override_settings(HEALTH_CHECK_TOKEN="ops-token-rotated-away")
+@patch("apps.agents.management.commands.watchdog.logger")
+@patch.object(Command, "_record_health")
+@patch("apps.agents.management.commands.watchdog.httpx.get")
+def test_403_with_token_at_threshold_fires_critical_alert(mock_get, mock_record, mock_logger):
+    """Persistent token drift must escalate to the CRITICAL alert path."""
+    mock_get.return_value = _resp(403, {"error": "unauthorized"})
+    cmd = _command(consecutive_failures=2)  # max_failures=3 → this cycle hits threshold
+
+    cmd._check_health()
+
+    assert cmd.consecutive_failures == 3
+    assert mock_record.call_args[0][0] == "auth_rejected"
+    mock_logger.critical.assert_called_once()
+
+
+@patch("apps.agents.management.commands.watchdog.logger")
+@patch.object(Command, "_record_health")
+@patch("apps.agents.management.commands.watchdog.httpx.get")
+def test_403_without_token_never_fires_critical(mock_get, mock_record, mock_logger):
+    """Token-unset (local dev) 403s stay a benign skip even past the threshold."""
+    mock_get.return_value = _resp(403, {"error": "unauthorized"})
+    cmd = _command(consecutive_failures=2)
+
+    cmd._check_health()
+
+    assert cmd.consecutive_failures == 2  # untouched
+    mock_record.assert_not_called()
+    mock_logger.critical.assert_not_called()
+
+
+@patch("apps.agents.management.commands.watchdog.logger")
+@patch.object(Command, "_record_health")
+@patch("apps.agents.management.commands.watchdog.httpx.get")
+def test_unreachable_at_threshold_fires_critical_alert(mock_get, mock_record, mock_logger):
+    """A backend that stays unreachable must escalate like a degraded one."""
+    import httpx
+
+    mock_get.side_effect = httpx.ConnectError("connection refused")
+    cmd = _command(consecutive_failures=2)
+
+    cmd._check_health()
+
+    assert cmd.consecutive_failures == 3
+    assert mock_record.call_args[0][0] == "unreachable"
+    mock_logger.critical.assert_called_once()

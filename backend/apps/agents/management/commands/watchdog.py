@@ -126,20 +126,31 @@ class Command(BaseCommand):
 
     def _check_health(self):
         """Poll the deep health endpoint and track failures."""
-        from django.conf import settings as django_settings
-
         backend_url = "http://backend:8000/api/v1/health/deep/"
-        token = getattr(django_settings, "HEALTH_CHECK_TOKEN", "")
+        token = getattr(settings, "HEALTH_CHECK_TOKEN", "")
         headers = {"X-Health-Token": token} if token else {}
         try:
             resp = httpx.get(backend_url, timeout=10, headers=headers)
             if resp.status_code == 403:
-                # Deep health is ops-gated (require_ops_auth). A 403 means the
-                # HEALTH_CHECK_TOKEN is unset/invalid — typical in local dev — not a
-                # health failure. Skip this cycle without penalising consecutive_failures.
-                logger.info(
-                    "Deep health gated (HTTP 403): set HEALTH_CHECK_TOKEN to enable "
-                    "watchdog deep checks. Skipping cycle (not a health failure)."
+                # Deep health is ops-gated (require_ops_auth). Two distinct cases:
+                if not token:
+                    # HEALTH_CHECK_TOKEN unset — typical local dev. Not a health
+                    # failure; skip the cycle without penalising consecutive_failures.
+                    logger.info(
+                        "Deep health gated (HTTP 403): set HEALTH_CHECK_TOKEN to enable "
+                        "watchdog deep checks. Skipping cycle (not a health failure)."
+                    )
+                    return
+                # Token configured but rejected — rotation/drift (this process holds
+                # a stale env copy), not dev. Count it and write watchdog:health so
+                # the 120s-TTL Redis key doesn't expire and kill observability while
+                # every cycle 403s.
+                self._record_failure(
+                    "auth_rejected",
+                    {"error": "403 with token configured"},
+                    logger.warning,
+                    "Deep health rejected our HEALTH_CHECK_TOKEN (HTTP 403) — token drift? "
+                    "Restart watchdog after rotating the token.",
                 )
                 return
             data = resp.json()
@@ -147,6 +158,9 @@ class Command(BaseCommand):
             db_ok = data.get("database") == "ok"
             redis_ok = data.get("redis") == "ok"
             queue_status = data.get("celery_queue_status", "ok")
+
+            if queue_status == "critical":
+                logger.warning("Celery queue depth critical: %s", data.get("celery_queue_depth"))
 
             if db_ok and redis_ok:
                 if self.consecutive_failures > 0:
@@ -157,34 +171,28 @@ class Command(BaseCommand):
                 self.consecutive_failures = 0
                 self._record_health("healthy", data)
             else:
-                self.consecutive_failures += 1
-                logger.warning(
-                    "Health degraded (failure %d/%d): db=%s redis=%s",
-                    self.consecutive_failures,
-                    self.max_failures,
+                self._record_failure(
+                    "degraded",
+                    data,
+                    logger.warning,
+                    "Health degraded: db=%s redis=%s",
                     data.get("database"),
                     data.get("redis"),
                 )
-                self._record_health("degraded", data)
-
-            if queue_status == "critical":
-                logger.warning("Celery queue depth critical: %s", data.get("celery_queue_depth"))
-
-            if self.consecutive_failures >= self.max_failures:
-                logger.critical(
-                    "ALERT: %d consecutive health failures — system requires attention",
-                    self.consecutive_failures,
-                )
 
         except httpx.HTTPError as e:
-            self.consecutive_failures += 1
-            logger.error(
-                "Health check unreachable (failure %d/%d): %s",
+            self._record_failure("unreachable", {"error": str(e)}, logger.error, "Health check unreachable: %s", e)
+
+    def _record_failure(self, status, details, log, msg, *args):
+        """Count one failed health check, log and record it, and alert at the threshold."""
+        self.consecutive_failures += 1
+        log(msg + " (failure %d/%d)", *args, self.consecutive_failures, self.max_failures)
+        self._record_health(status, details)
+        if self.consecutive_failures >= self.max_failures:
+            logger.critical(
+                "ALERT: %d consecutive health failures — system requires attention",
                 self.consecutive_failures,
-                self.max_failures,
-                e,
             )
-            self._record_health("unreachable", {"error": str(e)})
 
     def _record_health(self, status, details):
         """Store health state in Redis for observability."""
