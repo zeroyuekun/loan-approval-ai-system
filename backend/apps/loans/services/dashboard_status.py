@@ -1,5 +1,5 @@
 """Compute the four operator status-strip sub-statuses for the dashboard
-home (PR-2 of the dashboard persona refit).
+home.
 
 Each function returns a dict with at least:
     {
@@ -12,7 +12,7 @@ Each function returns a dict with at least:
 
 These are pure functions — no caching, no DRF — so they're trivial to
 unit-test. The caller (DashboardStatsView) is responsible for
-30s-caching the assembled payload.
+caching the assembled payload.
 """
 
 import logging
@@ -97,20 +97,12 @@ def pending_review_status() -> dict:
     age_hours = round(age.total_seconds() / 3600, 1)
     sla_breach = age_hours >= PENDING_REVIEW_SLA_HOURS
 
-    if sla_breach:
-        return {
-            "level": "significant",
-            "detail": f"{count} pending; oldest {age_hours}h (SLA breached)",
-            "count": count,
-            "oldest_age_hours": age_hours,
-            "sla_breach": True,
-        }
     return {
-        "level": "moderate",
-        "detail": f"{count} pending; oldest {age_hours}h",
+        "level": "significant" if sla_breach else "moderate",
+        "detail": f"{count} pending; oldest {age_hours}h" + (" (SLA breached)" if sla_breach else ""),
         "count": count,
         "oldest_age_hours": age_hours,
-        "sla_breach": False,
+        "sla_breach": sla_breach,
     }
 
 

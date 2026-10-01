@@ -7,6 +7,7 @@ from django.db import models, transaction
 from django.utils import timezone
 
 from apps.common.models import SoftDeleteModel
+from apps.loans.services.audit_chain import GENESIS_HASH, audit_log_insert_lock, compute_for_row
 
 
 class AuditLog(models.Model):
@@ -65,13 +66,6 @@ class AuditLog(models.Model):
         if not self._state.adding:
             return super().save(*args, **kwargs)
 
-        # Local import avoids circular dependency at module load time.
-        from apps.loans.services.audit_chain import (
-            GENESIS_HASH,
-            audit_log_insert_lock,
-            compute_hash,
-        )
-
         with transaction.atomic():
             with audit_log_insert_lock():
                 # Fetch prior chain head inside the lock so we both link
@@ -87,15 +81,7 @@ class AuditLog(models.Model):
                 else:
                     self.timestamp = now
                 self.hash_prev = prior.hash_self if prior and prior.hash_self else GENESIS_HASH
-                self.hash_self = compute_hash(
-                    hash_prev=self.hash_prev,
-                    timestamp=self.timestamp.isoformat(),
-                    user_id=str(self.user_id) if self.user_id else None,
-                    action=self.action,
-                    resource_type=self.resource_type,
-                    resource_id=self.resource_id,
-                    details=self.details or {},
-                )
+                self.hash_self = compute_for_row(self)
                 return super().save(*args, **kwargs)
 
 
@@ -348,7 +334,7 @@ class LoanApplication(SoftDeleteModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
     notes = models.TextField(blank=True)
 
-    # Referral audit trail (D6) — populated when credit-policy overlay's
+    # Referral audit trail — populated when credit-policy overlay's
     # refer rules (P08–P12) fire. Intentionally orthogonal to the
     # customer-facing bias review queue (which stays bias-only per the
     # established product preference); admins read these via the

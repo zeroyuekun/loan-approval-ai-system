@@ -1,8 +1,12 @@
 import logging
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.cache import cache as django_cache
-from django.db import models, transaction
+from django.db import transaction
+from django.db.models import Avg, Count, Q
+from django.db.models.functions import TruncDate
+from django.utils import timezone
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
@@ -13,7 +17,9 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
+from apps.agents.models import AgentRun
 from apps.agents.services.api_budget import ApiBudgetGuard
+from apps.ml_engine.models import ModelVersion
 
 from .filters import AuditLogFilter, LoanApplicationFilter
 from .models import AuditLog, Complaint, DecisionReview, LoanApplication
@@ -26,7 +32,10 @@ from .serializers import (
     LoanApplicationCustomerUpdateSerializer,
     LoanApplicationSerializer,
 )
-from .services.decision_review import apply_review_outcome
+from .services.dashboard_status import compute_status_strip
+from .services.decision_review import apply_review_outcome, withdraw_review
+from .services.overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+from .tasks import dispatch_pipeline_or_queue_failed
 
 logger = logging.getLogger(__name__)
 
@@ -108,46 +117,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
 
             # Durable dispatch: on_commit so the row is visible to the worker,
             # and an outbox fallback so a broker outage never swallows a submission.
-            from apps.agents.tasks import orchestrate_pipeline_task
-            from apps.loans.models import PipelineDispatchOutbox
-
-            def _dispatch():
-                # The outbox-record and status-flip each get their own try/except so a
-                # failure in one (e.g., DB lock on the outbox table) doesn't prevent
-                # the other from running. on_commit hooks must not raise — Django
-                # logs but there's no recovery path post-response.
-                try:
-                    orchestrate_pipeline_task.delay(str(instance.pk))
-                    logger.info("Auto-triggered pipeline for application %s", instance.pk)
-                except Exception as exc:
-                    logger.error(
-                        "Failed to auto-trigger pipeline for %s: %s — queued to outbox",
-                        instance.pk,
-                        exc,
-                    )
-                    try:
-                        PipelineDispatchOutbox.objects.get_or_create(
-                            application=instance,
-                            defaults={"last_error": str(exc)[:1000]},
-                        )
-                    except Exception as outbox_exc:
-                        logger.exception(
-                            "Failed to record PipelineDispatchOutbox row for %s: %s",
-                            instance.pk,
-                            outbox_exc,
-                        )
-                    try:
-                        LoanApplication.objects.filter(pk=instance.pk).update(
-                            status=LoanApplication.Status.QUEUE_FAILED
-                        )
-                    except Exception as status_exc:
-                        logger.exception(
-                            "Failed to flip status to QUEUE_FAILED for %s: %s",
-                            instance.pk,
-                            status_exc,
-                        )
-
-            transaction.on_commit(_dispatch)
+            transaction.on_commit(lambda: dispatch_pipeline_or_queue_failed(instance, source="api"))
 
     def perform_update(self, serializer):
         instance = serializer.save()
@@ -203,16 +173,7 @@ class DashboardStatsView(APIView):
         return Response(data)
 
     def _compute_stats(self):
-        from datetime import timedelta
-
         import numpy as np
-        from django.db.models import Avg, Count, Q
-        from django.db.models.functions import TruncDate
-        from django.utils import timezone
-
-        from apps.agents.models import AgentRun
-        from apps.loans.services.dashboard_status import compute_status_strip
-        from apps.ml_engine.models import ModelVersion
 
         now = timezone.now()
         last_24h = now - timedelta(hours=24)
@@ -250,9 +211,9 @@ class DashboardStatsView(APIView):
             p95_ms_24h = None
 
         # LLM spend — safe-defaults if the budget guard cannot reach Redis
-        # at all (already returns zeros on Redis error per
-        # api_budget.py:234, but defend against the rare case where
-        # ApiBudgetGuard itself raises during construction).
+        # at all (get_daily_stats already returns zeros on a Redis error, but
+        # defend against the rare case where ApiBudgetGuard itself raises
+        # during construction).
         try:
             budget_stats = ApiBudgetGuard().get_daily_stats()
             llm_spend_today_usd = float(budget_stats.get("cost_usd", 0.0))
@@ -279,7 +240,7 @@ class DashboardStatsView(APIView):
             LoanApplication.objects.filter(created_at__gte=thirty_days_ago, status__in=["approved", "denied"])
             .annotate(date=TruncDate("created_at"))
             .values("date")
-            .annotate(total=Count("id"), approved=Count("id", filter=models.Q(status="approved")))
+            .annotate(total=Count("id"), approved=Count("id", filter=Q(status="approved")))
             .order_by("date")
         )
         approval_trend = [
@@ -295,9 +256,6 @@ class DashboardStatsView(APIView):
             escalated=Count("id", filter=Q(status="escalated")),
         )
         pipeline_total = pipeline_stats["total"]
-        pipeline_completed = pipeline_stats["completed"]
-        pipeline_failed = pipeline_stats["failed"]
-        pipeline_escalated = pipeline_stats["escalated"]
 
         return {
             "total_applications": total,
@@ -311,8 +269,8 @@ class DashboardStatsView(APIView):
             "llm_spend_today_usd": llm_spend_today_usd,
             "llm_spend_cap_usd": llm_spend_cap_usd,
             "active_model": {
-                "name": f"{active_model.algorithm} v{active_model.version}" if active_model else None,
-                "auc": float(active_model.auc_roc) if active_model and active_model.auc_roc else None,
+                "name": f"{active_model.algorithm} v{active_model.version}",
+                "auc": float(active_model.auc_roc) if active_model.auc_roc else None,
             }
             if active_model
             else None,
@@ -320,10 +278,12 @@ class DashboardStatsView(APIView):
             "approval_trend": approval_trend,
             "pipeline": {
                 "total": pipeline_total,
-                "completed": pipeline_completed,
-                "failed": pipeline_failed,
-                "escalated": pipeline_escalated,
-                "success_rate": round(pipeline_completed / pipeline_total * 100, 1) if pipeline_total > 0 else 0,
+                "completed": pipeline_stats["completed"],
+                "failed": pipeline_stats["failed"],
+                "escalated": pipeline_stats["escalated"],
+                "success_rate": round(pipeline_stats["completed"] / pipeline_total * 100, 1)
+                if pipeline_total > 0
+                else 0,
             },
             "status_strip": compute_status_strip(),
         }
@@ -402,20 +362,15 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
         if outcome not in ("upheld", "overturned"):
             return Response({"detail": "outcome must be 'upheld' or 'overturned'"}, status=400)
 
-        # L29 (OPTIONAL): maker/checker gate on high-value overturns. Default
-        # mode is "off" — no behaviour change until an operator opts in.
+        # Optional maker/checker gate on high-value overturns. Default mode is
+        # "off" — no behaviour change until an operator opts in.
         if outcome == "overturned":
-            from django_otp.plugins.otp_totp.models import TOTPDevice
-
-            from apps.loans.services.overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
-
             mode = normalize_overturn_mode(getattr(settings, "DECISION_OVERTURN_GATE_MODE", "off"))
-            has_2fa = TOTPDevice.objects.filter(user=request.user, confirmed=True).exists()
             gate = evaluate_overturn_gate(
                 amount=float(review.application.loan_amount or 0),
                 threshold=getattr(settings, "DECISION_OVERTURN_THRESHOLD", 100000.0),
                 mode=mode,
-                officer_has_2fa=has_2fa,
+                officer_has_2fa=request.user.has_confirmed_totp(),
             )
             if not gate["allowed"]:
                 return Response({"detail": gate["reason"]}, status=403)
@@ -428,8 +383,6 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def withdraw(self, request, pk=None):
-        from apps.loans.services.decision_review import withdraw_review
-
         review = self.get_object()
         try:
             updated = withdraw_review(review, user=request.user)
@@ -462,17 +415,11 @@ class ReferralListView(APIView):
         code_filter = request.query_params.get("code")
         if code_filter:
             codes = [c.strip() for c in code_filter.split(",") if c.strip()]
-            # JSONField contains-any match — postgres supports @> with a list
-            # operand. Fall back to a Python filter if the DB dialect can't
-            # translate (sqlite in tests).
-            try:
-                code_q = models.Q()
-                for code in codes:
-                    code_q |= models.Q(referral_codes__contains=[code])
-                qs = qs.filter(code_q)
-            except Exception:
-                applications = [a for a in qs if any(c in (a.referral_codes or []) for c in codes)]
-                qs = applications  # fallback: Python-level filter
+            # JSONField contains-any match (postgres @> with a list operand).
+            code_q = Q()
+            for code in codes:
+                code_q |= Q(referral_codes__contains=[code])
+            qs = qs.filter(code_q)
 
         status_filter = request.query_params.get("status")
         if status_filter:
@@ -482,8 +429,7 @@ class ReferralListView(APIView):
                     {"error": f"Invalid status '{status_filter}'. Valid values: {valid_statuses}"},
                     status=400,
                 )
-            if hasattr(qs, "filter"):
-                qs = qs.filter(referral_status=status_filter)
+            qs = qs.filter(referral_status=status_filter)
 
         try:
             limit = int(request.query_params.get("limit", 100))
@@ -491,7 +437,7 @@ class ReferralListView(APIView):
             limit = 100
         limit = max(1, min(limit, 500))
         results = []
-        for app in list(qs)[:limit]:
+        for app in qs[:limit]:
             results.append(
                 {
                     "application_id": str(app.id),

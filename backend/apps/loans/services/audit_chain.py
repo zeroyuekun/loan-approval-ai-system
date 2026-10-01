@@ -1,7 +1,5 @@
 """Hash-chained AuditLog — tamper evidence for the audit trail.
 
-PR-2 of the security gap-closure cycle.
-
 Every AuditLog row carries:
   - hash_prev: the hash_self of the chronologically prior row (or
     GENESIS_HASH for the first row).

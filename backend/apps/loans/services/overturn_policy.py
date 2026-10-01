@@ -1,4 +1,4 @@
-"""Maker/checker gate for high-value officer overturns (L29, OPTIONAL).
+"""Optional maker/checker gate for high-value officer overturns.
 
 Any officer-role user can overturn a denial to approved and trigger an
 approval email. This optional gate adds a second control on high-value

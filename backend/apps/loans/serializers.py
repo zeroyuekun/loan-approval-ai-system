@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.models import CustomerProfile
@@ -314,10 +317,6 @@ class ComplaintSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
         now = timezone.now()
         request = self.context["request"]
         user = request.user
@@ -387,18 +386,12 @@ class DecisionReviewSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("You can only request a review of your own application.")
         if application.status != "denied":
             raise serializers.ValidationError("Reviews can only be requested on declined applications.")
-        from .models import DecisionReview as _DR
-
-        open_states = (_DR.Status.REQUESTED, _DR.Status.UNDER_REVIEW)
+        open_states = (DecisionReview.Status.REQUESTED, DecisionReview.Status.UNDER_REVIEW)
         if application.decision_reviews.filter(status__in=open_states).exists():
             raise serializers.ValidationError("A review is already in progress for this application.")
         return attrs
 
     def create(self, validated_data):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
         request = self.context["request"]
         validated_data["requested_by"] = request.user
         validated_data["sla_deadline"] = timezone.now() + timedelta(days=21)

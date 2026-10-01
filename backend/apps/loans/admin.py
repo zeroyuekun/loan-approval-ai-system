@@ -1,12 +1,9 @@
-import logging
-
 from django.contrib import admin, messages
 from django.db import transaction
 
 from .models import Complaint, DecisionReview, LoanApplication, LoanDecision, PipelineDispatchOutbox
 from .services.decision_review import apply_review_outcome
-
-logger = logging.getLogger(__name__)
+from .tasks import dispatch_pipeline_or_queue_failed
 
 
 @admin.register(LoanApplication)
@@ -38,10 +35,8 @@ class LoanApplicationAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         """Default applicant to the logged-in admin and trigger the orchestrator on create.
 
-        Mirrors the API behaviour at loans/views.py:73 perform_create so applications
-        created via the Django admin get the same auto-pipeline + decision-email flow.
-        Without this, admin-created applications had no GeneratedEmail row and the
-        dashboard surfaced "No email found for this application".
+        Mirrors the API's ``perform_create`` so applications created via the Django
+        admin get the same auto-pipeline + decision-email flow.
         """
         if obj.applicant_id is None:
             obj.applicant = request.user
@@ -51,49 +46,10 @@ class LoanApplicationAdmin(admin.ModelAdmin):
         if change:
             return
 
-        from apps.agents.tasks import orchestrate_pipeline_task
-
-        def _dispatch():
-            # NOTE: messages.warning is NOT reliable here — transaction.on_commit fires
-            # after MessageMiddleware has serialized request._messages, so any message
-            # added in this closure is lost. Failure visibility comes from the
-            # QUEUE_FAILED status flip below, surfaced via the dashboard's status
-            # filter. Mirrors loans/views.py:73 perform_create.
-            #
-            # The outbox-record and status-flip steps each get their own try/except so
-            # one failure (e.g., DB lock on the outbox table) doesn't prevent the other
-            # from running. The on_commit hook itself must not raise — Django logs but
-            # there's no recovery path post-response.
-            try:
-                orchestrate_pipeline_task.delay(str(obj.pk))
-                logger.info("Admin-triggered pipeline for application %s", obj.pk)
-            except Exception as exc:
-                logger.error(
-                    "Failed to enqueue pipeline for admin-created application %s: %s",
-                    obj.pk,
-                    exc,
-                )
-                try:
-                    PipelineDispatchOutbox.objects.get_or_create(
-                        application=obj,
-                        defaults={"last_error": str(exc)[:1000]},
-                    )
-                except Exception as outbox_exc:
-                    logger.exception(
-                        "Failed to record PipelineDispatchOutbox row for %s: %s",
-                        obj.pk,
-                        outbox_exc,
-                    )
-                try:
-                    LoanApplication.objects.filter(pk=obj.pk).update(status=LoanApplication.Status.QUEUE_FAILED)
-                except Exception as status_exc:
-                    logger.exception(
-                        "Failed to flip status to QUEUE_FAILED for %s: %s",
-                        obj.pk,
-                        status_exc,
-                    )
-
-        transaction.on_commit(_dispatch)
+        # messages.warning is NOT reliable inside the on_commit callback — it fires
+        # after MessageMiddleware has serialized request._messages, so failure
+        # visibility comes from the QUEUE_FAILED status flip instead.
+        transaction.on_commit(lambda: dispatch_pipeline_or_queue_failed(obj, source="admin"))
 
         recipient = getattr(obj.applicant, "email", "") if obj.applicant_id else ""
         if recipient:
