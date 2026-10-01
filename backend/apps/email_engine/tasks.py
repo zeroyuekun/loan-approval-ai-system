@@ -8,6 +8,8 @@ from django.utils import timezone
 
 from apps.email_engine.models import GeneratedEmail, GuardrailAnalytics, GuardrailLog
 from apps.email_engine.services.decision_email import (
+    HeldForBiasReview,
+    bias_hold_reason,
     deliver_decision_email,
     generate_decision_email,
     require_decision_on_record,
@@ -34,8 +36,11 @@ def generate_email_task(self, application_id, decision, regenerate=False):
     the application's LoanDecision, whoever the caller is.
 
     ``regenerate=True`` always writes a fresh email instead of re-delivering
-    the latest stored one (used after a human-review outcome, where the stored
-    draft may be the one the review held back).
+    the latest stored one.
+
+    Refuses (HeldForBiasReview, not retried) while the application is under
+    human review, and never re-delivers a draft the bias check held back:
+    only the human-review paths, which re-run the bias check, release those.
     """
     require_decision_on_record(application_id, decision)
 
@@ -50,6 +55,9 @@ def generate_email_task(self, application_id, decision, regenerate=False):
             .order_by("-created_at")
             .first()
         )
+    hold = bias_hold_reason(application_id, existing)
+    if hold:
+        raise HeldForBiasReview(hold)
     if existing:
         if existing.passed_guardrails and existing.sent_at is None:
             # Generated but never delivered (transient SMTP failure, or a worker

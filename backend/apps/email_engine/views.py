@@ -8,6 +8,7 @@ from apps.accounts.permissions import IsAdminOrOfficer
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.decision_email import (
     DecisionMismatch,
+    bias_hold_reason,
     deliver_decision_email,
     email_type_for,
     require_decision_on_record,
@@ -152,6 +153,17 @@ class GenerateEmailView(APIView):
         except DecisionMismatch as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
 
+        # Refuse rather than regenerate: a regenerated email here would skip
+        # the bias check, so it would release a decision the reviewer has not
+        # cleared. The latest draft for this decision is what the task would
+        # otherwise re-deliver.
+        latest = (
+            GeneratedEmail.objects.filter(application_id=loan_id, decision=decision).order_by("-created_at").first()
+        )
+        hold = bias_hold_reason(loan_id, latest)
+        if hold:
+            return Response({"error": hold}, status=status.HTTP_409_CONFLICT)
+
         task = generate_email_task.delay(str(loan_id), decision)
         return Response(
             {"task_id": task.id, "status": "email_generation_queued"},
@@ -190,6 +202,10 @@ class SendLatestEmailView(APIView):
             require_decision_on_record(loan_id, email.decision)
         except DecisionMismatch as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        hold = bias_hold_reason(loan_id, email)
+        if hold:
+            return Response({"error": hold}, status=status.HTTP_409_CONFLICT)
 
         outcome = deliver_decision_email(email)
         if outcome["already_sent"]:

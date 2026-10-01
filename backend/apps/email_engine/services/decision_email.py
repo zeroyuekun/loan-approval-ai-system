@@ -44,6 +44,40 @@ class DecisionMismatch(ValueError):
     """The requested decision email disagrees with the decision on record."""
 
 
+class HeldForBiasReview(ValueError):
+    """The decision email is held back by the bias review.
+
+    Only the human-review paths (approve / deny / regenerate) may release or
+    replace it, because they re-run the bias check before anything is sent.
+    """
+
+
+def bias_hold_reason(application_id, email=None):
+    """Why no staff send/generate may run for this application, or None.
+
+    * The application is under human review (status REVIEW or an escalated
+      AgentRun): the reviewer's outcome decides the email.
+    * ``email`` is an unsent draft with a flagged bias report: the pipeline
+      withheld it, so re-sending it would bypass the bias check. A flagged
+      draft that the pipeline then sent has ``sent_at`` set and is not held.
+    """
+    from apps.agents.models import AgentRun
+    from apps.loans.models import LoanApplication
+
+    under_review = (
+        LoanApplication.objects.filter(pk=application_id, status=LoanApplication.Status.REVIEW).exists()
+        or AgentRun.objects.filter(application_id=application_id, status=AgentRun.Status.ESCALATED).exists()
+    )
+    if under_review:
+        return "Application is under human review; the review outcome issues the decision email"
+    if email is not None and email.sent_at is None and email.bias_reports.filter(flagged=True).exists():
+        return (
+            "The stored draft was held back by the bias check and cannot be sent; "
+            "re-run the pipeline to issue a freshly screened email"
+        )
+    return None
+
+
 def decision_on_record(application_id):
     """Return ``"approved"``/``"denied"`` from LoanDecision, or None if undecided."""
     return LoanDecision.objects.filter(application_id=application_id).values_list("decision", flat=True).first()
