@@ -183,3 +183,16 @@ def test_staff_agent_run_keeps_internals(officer, application, run_with_internal
     assert resp.data["next_best_offers"][0]["customer_retention_score"] == 31
     assert len(resp.data["marketing_emails"]) == 2
     assert resp.data["steps"][0]["error"].startswith("anthropic")
+
+
+def test_run_endpoint_returns_the_latest_run(officer, application):
+    """review-frontend I5: the endpoint swapped in an OLDER run whenever it had
+    marketing emails and the latest did not, so the UI showed a superseded
+    run's status, steps and email."""
+    older = AgentRun.objects.create(application=application, status=AgentRun.Status.COMPLETED, steps=[])
+    MarketingEmail.objects.create(agent_run=older, application=application, subject="Old", body="b", prompt_used="p")
+    latest = AgentRun.objects.create(application=application, status=AgentRun.Status.FAILED, steps=[])
+
+    resp = _client(officer).get(f"/api/v1/agents/runs/{application.id}/")
+    assert resp.status_code == 200
+    assert resp.data["id"] == str(latest.id)

@@ -253,9 +253,9 @@ class AgentRunView(APIView):
         """Return the latest AgentRun with all related data for a loan application."""
         check_loan_access(request, loan_id)
 
-        # Prefer the most complete run: one with marketing emails first,
-        # then by most recent. This avoids showing a latest run where
-        # the marketing email step failed due to a transient error.
+        # Always the latest run: its status, steps and artefacts describe the
+        # application's current state. (An older run with marketing emails
+        # used to be swapped in, showing a superseded run as current.)
         agent_run = (
             AgentRun.objects.filter(application_id=loan_id)
             .select_related("application__applicant")
@@ -263,22 +263,6 @@ class AgentRunView(APIView):
             .order_by("-created_at")
             .first()
         )
-
-        # If the latest run is missing marketing emails, check if an older
-        # run has them (e.g. the latest run's marketing step hit circuit breaker).
-        if agent_run and not agent_run.marketing_emails.exists():
-            better_run = (
-                AgentRun.objects.filter(
-                    application_id=loan_id,
-                    marketing_emails__isnull=False,
-                )
-                .select_related("application__applicant")
-                .prefetch_related("bias_reports", "next_best_offers", "marketing_emails")
-                .order_by("-created_at")
-                .first()
-            )
-            if better_run:
-                agent_run = better_run
 
         if not agent_run:
             return Response(
