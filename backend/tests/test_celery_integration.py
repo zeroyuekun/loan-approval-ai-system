@@ -66,16 +66,18 @@ class TestCeleryTaskExecution:
 
     def test_email_task_serializes_correctly(self):
         """Verify the email task args are JSON-serializable through the broker."""
+        from apps.email_engine.services.decision_email import DecisionMismatch
         from apps.email_engine.tasks import generate_email_task
-        from apps.loans.models import LoanApplication
 
         # .apply() runs eagerly (no serialisation); prove serialisability explicitly.
         _assert_payload_json_serializable(args=[999, "approved"])
         result = generate_email_task.apply(args=[999, "approved"])
 
         assert result.failed(), "Task must actually execute (not just be constructed)"
-        assert isinstance(result.result, LoanApplication.DoesNotExist), (
-            f"Expected LoanApplication.DoesNotExist (proves task ran past serialisation "
+        # The task's first DB read is the LoanDecision check (C1): an unknown
+        # application has no decision on record, so the task refuses.
+        assert isinstance(result.result, DecisionMismatch), (
+            f"Expected DecisionMismatch (proves task ran past serialisation "
             f"and hit the DB), got {type(result.result).__name__}: {result.result}"
         )
 
