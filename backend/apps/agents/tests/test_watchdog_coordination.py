@@ -82,8 +82,19 @@ def test_cleanup_resets_when_only_failed_running_runs(django_user_model):
 
     app.refresh_from_db()
     running.refresh_from_db()
-    assert app.status == "review"
+    # Owner rule: the human review queue is only for bias flags. A stuck run
+    # goes back to PENDING (re-runnable), never to REVIEW.
+    assert app.status == "pending"
     assert running.status == AgentRun.Status.FAILED
+
+    from apps.loans.models import AuditLog
+
+    reset = AuditLog.objects.filter(
+        action="status_transition", resource_id=str(app.id), details__to_status="pending"
+    ).get()
+    assert reset.details["from_status"] == "processing"
+    assert reset.details["source"] == "stuck_cleanup"
+    assert reset.details["reason"]
 
 
 @CACHE_OVERRIDE

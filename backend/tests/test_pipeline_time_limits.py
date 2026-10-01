@@ -63,7 +63,7 @@ def test_soft_limit_in_a_step_reaches_the_task_and_resets_the_application(sample
 
     assert isinstance(result.result, SoftTimeLimitExceeded)
     sample_application.refresh_from_db()
-    assert sample_application.status != LoanApplication.Status.PROCESSING
+    assert sample_application.status == LoanApplication.Status.PENDING
     assert not AgentRun.objects.filter(application=sample_application, status=AgentRun.Status.RUNNING).exists()
 
 
@@ -83,7 +83,8 @@ def test_sweep_resets_application_left_processing_by_a_hard_kill(sample_applicat
     result = recover_stuck_processing_applications()
 
     sample_application.refresh_from_db()
-    assert sample_application.status == LoanApplication.Status.REVIEW
+    # Re-runnable PENDING, not the bias-only human review queue.
+    assert sample_application.status == LoanApplication.Status.PENDING
     assert result["recovered"] == [str(sample_application.pk)]
     assert AgentRun.objects.get(application=sample_application).status == AgentRun.Status.FAILED
 

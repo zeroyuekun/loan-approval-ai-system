@@ -50,8 +50,16 @@ class _OrchestrateTask(Task):
 _DEDUP_LOCK_TTL = 600
 
 
+_STUCK_RESET_REASON = "Pipeline task died or timed out mid-run; reset to pending so staff can re-run it"
+
+
 def _cleanup_stuck_application(application_id, clear_lock=False):
-    """Reset a stuck-'processing' application to REVIEW under a row lock.
+    """Reset a stuck-'processing' application to PENDING under a row lock.
+
+    PENDING, not REVIEW: the human review queue is only for bias flags, and a
+    dead task is not a bias finding. PENDING is re-runnable (the batch
+    orchestrate endpoint and a forced re-run both pick it up); the reason is
+    recorded on the status_transition AuditLog and the failed AgentRun.
 
     No-ops if a newer AgentRun is already COMPLETED for the application
     (another actor owns the work), so the watchdog, the orchestrator
@@ -86,13 +94,13 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
             AgentRun.objects.filter(
                 application_id=application_id,
                 status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
-            ).update(status=AgentRun.Status.FAILED, error="Task failed unexpectedly — application reset to review")
+            ).update(status=AgentRun.Status.FAILED, error=_STUCK_RESET_REASON)
 
-            # processing -> review is in ALLOWED_TRANSITIONS; route through the
+            # processing -> pending is in ALLOWED_TRANSITIONS; route through the
             # state machine so the reset produces a status_transition AuditLog.
             app.transition_to(
-                LoanApplication.Status.REVIEW,
-                details={"source": "stuck_cleanup"},
+                LoanApplication.Status.PENDING,
+                details={"source": "stuck_cleanup", "reason": _STUCK_RESET_REASON},
             )
 
         if clear_lock:
