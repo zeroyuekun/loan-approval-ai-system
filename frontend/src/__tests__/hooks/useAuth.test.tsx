@@ -212,4 +212,22 @@ describe('useAuth', () => {
     })
     expect(localStorage.getItem(DRAFT_KEY)).toBe(ownDraft)
   })
+  it('restores the session through a refresh when the access cookie has expired', async () => {
+    let meCalls = 0
+    server.use(
+      http.get(`${API_URL}/auth/me/`, () => {
+        meCalls++
+        if (meCalls === 1) return HttpResponse.json({ detail: 'Unauthorized' }, { status: 401 })
+        return HttpResponse.json(mockUser)
+      }),
+      http.post(`${API_URL}/auth/refresh/`, () => HttpResponse.json({ detail: 'Refreshed' })),
+    )
+
+    renderWithAuth()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('false')
+    })
+    expect(screen.getByTestId('user')).toHaveTextContent(mockUser.username)
+  })
 })

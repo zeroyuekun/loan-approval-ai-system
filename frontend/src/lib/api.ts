@@ -105,7 +105,11 @@ api.interceptors.request.use((config) => {
 // Response interceptor for token refresh via cookies
 let refreshPromise: Promise<void> | null = null
 
-// Paths where a 401 is expected and should NOT trigger a refresh/redirect cycle
+// Session-bootstrap paths (profile fetch on mount). A 401 here still gets one
+// refresh attempt, so a reload after the access cookie expires is rescued by
+// the refresh cookie. If that refresh fails the 401 propagates WITHOUT a hard
+// redirect: useAuth sets user=null and the layout routes to /login, which
+// avoids a reload loop on the login page itself.
 const AUTH_CHECK_PATHS = ['/auth/me/', '/auth/me/profile/']
 
 api.interceptors.response.use(
@@ -114,12 +118,6 @@ api.interceptors.response.use(
     const originalRequest = error.config
     const isRefreshRequest = originalRequest.url?.includes('/auth/refresh/')
     const isAuthCheck = AUTH_CHECK_PATHS.some((p) => originalRequest.url?.includes(p))
-
-    // For auth-check requests (profile fetch on mount), just let the 401 propagate
-    // so useAuth can set user=null and redirect via React Router, not a hard reload
-    if (error.response?.status === 401 && isAuthCheck) {
-      return Promise.reject(error)
-    }
 
     if (error.response?.status === 401 && !originalRequest._retry && !isRefreshRequest) {
       originalRequest._retry = true
@@ -133,15 +131,20 @@ api.interceptors.response.use(
           refreshPromise = axios.post(`${API_URL}/auth/refresh/`, {}, { withCredentials: true }).then(() => undefined)
         }
         await refreshPromise
-        return api(originalRequest)
       } catch {
-        // Refresh failed — clear auth state and redirect to login so the user
-        // is not left on a blank/stuck page.
-        clearAuthAndRedirect()
+        // Refresh failed. For normal requests, clear auth state and redirect
+        // to login so the user is not left on a blank/stuck page.
+        if (!isAuthCheck) clearAuthAndRedirect()
         return Promise.reject(error)
       } finally {
         refreshPromise = null
       }
+      // Replay outside the try: an error from the replayed request (a 404, a
+      // second 401) is that request's own failure, not a failed refresh.
+      return api(originalRequest)
+    }
+    if (error.response?.status === 401 && isAuthCheck) {
+      return Promise.reject(error)
     }
     // Retry transient failures (429 Too Many Requests, 503 Service Unavailable)
     const retryableStatus = [429, 503]
