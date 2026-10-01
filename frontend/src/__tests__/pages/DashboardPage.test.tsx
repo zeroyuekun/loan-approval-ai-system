@@ -57,12 +57,6 @@ const baseStats = {
   daily_volume: [],
   approval_trend: [],
   pipeline: { total: 0, completed: 0, failed: 0, escalated: 0, success_rate: 0 },
-  status_strip: {
-    drift: { level: 'none' as const, detail: 'PSI 0.05' },
-    fairness: { level: 'none' as const, detail: 'Min DIR 0.92' },
-    pending_review: { level: 'none' as const, detail: 'No pending reviews', count: 0, oldest_age_hours: null, sla_breach: false },
-    watchdog: { level: 'none' as const, detail: 'Watchdog healthy', last_check: '2026-05-25T12:00:00+00:00' },
-  },
 }
 
 describe('DashboardPage', () => {
