@@ -23,7 +23,7 @@ from apps.agents.services.api_budget import ApiBudgetGuard
 from apps.ml_engine.models import ModelVersion
 
 from .filters import AuditLogFilter, LoanApplicationFilter
-from .models import AuditLog, Complaint, DecisionReview, LoanApplication
+from .models import AuditLog, Complaint, DecisionReview, LoanApplication, LoanDecision
 from .serializers import (
     AuditLogSerializer,
     ComplaintSerializer,
@@ -131,13 +131,27 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
+        """Soft delete: the application and its decision evidence (decision,
+        bias reports, emails, agent runs) stay for the retention period;
+        enforce_retention purges them later. The audit row snapshots what
+        the deleted record was."""
         resource_id = str(instance.id)
+        decision = LoanDecision.objects.filter(application_id=instance.pk).first()
+        with transaction.atomic():
+            self._audit_and_delete(instance, resource_id, decision)
+
+    def _audit_and_delete(self, instance, resource_id, decision):
         AuditLog.objects.create(
             user=self.request.user,
             action="loan_deleted",
             resource_type="LoanApplication",
             resource_id=resource_id,
-            details={},
+            details={
+                "soft_delete": True,
+                "status": instance.status,
+                "decision_id": str(decision.pk) if decision else None,
+                "decision": decision.decision if decision else None,
+            },
             ip_address=self.request.META.get("REMOTE_ADDR"),
         )
         super().perform_destroy(instance)
@@ -370,7 +384,10 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = DecisionReview.objects.select_related("application", "requested_by")
+        # Reviews of a soft-deleted application go with it.
+        qs = DecisionReview.objects.select_related("application", "requested_by").filter(
+            application__deleted_at__isnull=True
+        )
         if not is_staff_role(user):
             qs = qs.filter(requested_by=user)
         application_id = self.request.query_params.get("application")

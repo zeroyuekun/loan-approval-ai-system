@@ -94,6 +94,7 @@ class EmailListView(APIView):
         queryset = (
             GeneratedEmail.objects.select_related("application", "application__applicant")
             .prefetch_related("guardrail_checks")
+            .filter(application__deleted_at__isnull=True)  # hidden with a soft-deleted application
             .order_by("-created_at")
         )
 

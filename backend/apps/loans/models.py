@@ -86,6 +86,12 @@ class AuditLog(models.Model):
 
 
 class LoanApplication(SoftDeleteModel):
+    # delete() soft-deletes: the decision, bias reports and emails CASCADE
+    # from this row and carry a 7-year retention (enforce_retention purges).
+    # CustomerProfile does not opt in: it is one-to-one with the user, so a
+    # soft-deleted row would block the get_or_create that recreates it.
+    SOFT_DELETE_ON_DELETE = True
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         PROCESSING = "processing", "Processing"

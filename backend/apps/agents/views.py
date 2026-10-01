@@ -36,6 +36,7 @@ class AgentRunListView(APIView):
                 Prefetch("next_best_offers", queryset=NextBestOffer.objects.order_by("-created_at")),
                 Prefetch("marketing_emails", queryset=MarketingEmail.objects.order_by("-created_at")),
             )
+            .filter(application__deleted_at__isnull=True)  # hidden with a soft-deleted application
             .order_by("-created_at")
         )
 
