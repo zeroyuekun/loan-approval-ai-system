@@ -42,18 +42,3 @@ export function useCreateApplication() {
     },
   })
 }
-
-export function useUpdateApplication() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({ id, data: updateData }: { id: string; data: Partial<LoanPayload> }) => {
-      const { data } = await loansApi.update(id, updateData)
-      return data
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['applications'] })
-      queryClient.invalidateQueries({ queryKey: ['application', data.id] })
-    },
-  })
-}

@@ -2,8 +2,8 @@
 
 import { useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { agentsApi, tasksApi } from '@/lib/api'
-import { AgentRun, TaskStatus } from '@/types'
+import { agentsApi } from '@/lib/api'
+import { AgentRun } from '@/types'
 
 /** Exponential backoff: 2s -> 4s -> 8s -> 16s -> 30s max */
 function nextBackoff(pollCount: number): number {
@@ -102,33 +102,6 @@ export function useForceRerun() {
         throw new Error(`Rate limited — try again in ${waitSec}s`)
       }
       throw error
-    },
-  })
-}
-
-export function useTaskStatus(taskId: string, options?: { enabled?: boolean }) {
-  const taskPollCountRef = useRef(0)
-
-  return useQuery<TaskStatus>({
-    queryKey: ['taskStatus', taskId],
-    queryFn: async () => {
-      const { data } = await tasksApi.getStatus(taskId)
-      if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
-        taskPollCountRef.current = 0
-      }
-      return data
-    },
-    enabled: !!taskId && (options?.enabled ?? true),
-    gcTime: 30_000, // 30s: polled data, drop fast after unmount
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      if (status === 'SUCCESS' || status === 'FAILURE') {
-        taskPollCountRef.current = 0
-        return false
-      }
-      const interval = nextBackoff(taskPollCountRef.current)
-      taskPollCountRef.current += 1
-      return interval
     },
   })
 }

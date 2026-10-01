@@ -54,7 +54,7 @@ def generate_and_train(label: str, generator, num_records: int, seed: int,
 
     # Train model
     print(f"  Training {algorithm.upper()} model...")
-    from apps.ml_engine.services.trainer import ModelTrainer
+    from apps.ml_engine.services.training.trainer import ModelTrainer
     trainer = ModelTrainer()
 
     t1 = time.time()
@@ -159,7 +159,7 @@ def main():
     )
     args = parser.parse_args()
 
-    from apps.ml_engine.services.data_generator import DataGenerator
+    from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # --- Baseline: hardcoded constants (current behavior) ---
@@ -171,7 +171,7 @@ def main():
 
         # --- Treatment: live-calibrated benchmarks ---
         print("\nFetching live Australian benchmarks...")
-        from apps.ml_engine.services.real_world_benchmarks import RealWorldBenchmarks
+        from apps.ml_engine.services.metrics.real_world_benchmarks import RealWorldBenchmarks
         svc = RealWorldBenchmarks()
         benchmarks = svc.get_calibration_snapshot()
         print(f"Snapshot assembled at {benchmarks['fetched_at']}")

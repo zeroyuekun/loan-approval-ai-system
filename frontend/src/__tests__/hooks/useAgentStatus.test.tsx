@@ -1,7 +1,7 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
-import { useAgentRun, useTaskStatus } from '@/hooks/useAgentStatus'
+import { useAgentRun } from '@/hooks/useAgentStatus'
 import { server } from '@/test/mocks/server'
 
 const API_URL = 'http://localhost:8000/api/v1'
@@ -110,47 +110,5 @@ describe('useAgentRun', () => {
     await waitFor(() => {
       expect(result.current.isError).toBe(true)
     })
-  })
-})
-
-describe('useTaskStatus', () => {
-  it('fetches task status', async () => {
-    server.use(
-      http.get(`${API_URL}/tasks/:taskId/status/`, () => {
-        return HttpResponse.json({
-          task_id: 'task-abc',
-          status: 'SUCCESS',
-          result: { agent_run_id: 'run-1' },
-        })
-      }),
-    )
-
-    const { result } = renderHook(() => useTaskStatus('task-abc'), {
-      wrapper: createWrapper(),
-    })
-
-    await waitFor(() => {
-      expect(result.current.data).toBeDefined()
-    })
-    expect(result.current.data?.status).toBe('SUCCESS')
-  })
-
-  it('does not fetch when disabled', () => {
-    const { result } = renderHook(
-      () => useTaskStatus('task-abc', { enabled: false }),
-      { wrapper: createWrapper() },
-    )
-
-    expect(result.current.data).toBeUndefined()
-    expect(result.current.isFetching).toBe(false)
-  })
-
-  it('does not fetch with empty taskId', () => {
-    const { result } = renderHook(() => useTaskStatus(''), {
-      wrapper: createWrapper(),
-    })
-
-    expect(result.current.data).toBeUndefined()
-    expect(result.current.isFetching).toBe(false)
   })
 })

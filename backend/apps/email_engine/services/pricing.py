@@ -174,11 +174,6 @@ def _sign_by_date(days_from_now=14):
     return date.today() + timedelta(days=days_from_now)
 
 
-def _format_date(d):
-    """Format date as 'DD Month YYYY' (Australian style)."""
-    return d.strftime("%-d %B %Y") if hasattr(d, "strftime") else str(d)
-
-
 def _format_date_windows(d):
     """Format date as 'D Month YYYY' — works on Windows (no %-d)."""
     try:

@@ -40,12 +40,12 @@ def generate_synthetic_data(num_records: int = 10000, seed: int = 42,
     print(f"Generating {num_records} records with random seed {seed}...")
 
     try:
-        from apps.ml_engine.services.data_generator import DataGenerator
+        from apps.ml_engine.services.datagen.data_generator import DataGenerator
 
         benchmarks = None
         if use_live_data:
             print("Fetching live Australian benchmarks (ABS, APRA, RBA)...")
-            from apps.ml_engine.services.real_world_benchmarks import RealWorldBenchmarks
+            from apps.ml_engine.services.metrics.real_world_benchmarks import RealWorldBenchmarks
             svc = RealWorldBenchmarks()
             benchmarks = svc.get_calibration_snapshot()
             print(f"Calibration snapshot assembled at {benchmarks['fetched_at']}")
