@@ -1,0 +1,10 @@
+# Copy to backend.hcl (gitignored) and run:
+#   terraform init -backend-config=backend.hcl
+# Create the bucket first, with versioning and default encryption on:
+#   aws s3 mb s3://<bucket> --region ap-southeast-2
+#   aws s3api put-bucket-versioning --bucket <bucket> --versioning-configuration Status=Enabled
+#   aws s3api put-public-access-block --bucket <bucket> --public-access-block-configuration \
+#     BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+bucket = "aussieloanai-terraform-state"
+key    = "production/terraform.tfstate"
+region = "ap-southeast-2"
