@@ -1,10 +1,16 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: loan-approval
+
+# The loan-approval-secrets Secret is deliberately NOT rendered from the repo,
+# so `kubectl apply -k k8s` can never ship placeholder credentials. Create it
+# out of band before the first apply (see secrets.env.example), or manage it
+# with External Secrets / Sealed Secrets.
 resources:
   - namespace.yaml
   - configmap.yaml
-  - secrets.yaml
+  - ml-models-pvc.yaml
+  - backend/migrate-job.yaml
   - backend/deployment.yaml
   - backend/service.yaml
   - backend/hpa.yaml
@@ -16,10 +22,14 @@ resources:
   - backend/pdb.yaml
   - celery/pdb-ml.yaml
   - celery/pdb-io.yaml
+  - backup-cronjob.yaml
   - network-policy.yaml
   - ingress.yaml
-commonLabels:
-  app.kubernetes.io/part-of: aussieloanai
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: aussieloanai
+    includeSelectors: true
 
 # Image tag pinning — CI must override these with the real SHA before deploying.
 # Usage:  kustomize edit set image \

@@ -27,6 +27,7 @@ backend/ml_models/*/
 # Environment
 .env
 *.env.local
+k8s/secrets.env
 
 # IDE
 .vscode/

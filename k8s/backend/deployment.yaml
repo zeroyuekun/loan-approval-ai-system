@@ -20,10 +20,46 @@ spec:
         app.kubernetes.io/component: api
         app.kubernetes.io/part-of: aussieloanai
     spec:
-      # Dockerfile: adduser (Debian) creates appuser at UID 1000
+      automountServiceAccountToken: false
+      # Dockerfile: adduser (Debian) creates appuser at UID/GID 1000.
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # `command:` below replaces the image ENTRYPOINT, so entrypoint.sh
+      # (migrate + admin bootstrap) never runs here. The db-migrate Job does
+      # that once per release; this initContainer holds the rollout until the
+      # schema matches the code in this image.
+      initContainers:
+        - name: wait-for-migrations
+          image: ghcr.io/OWNER/loan-approval-ai-system/backend:latest
+          command:
+            - sh
+            - -c
+            - until python manage.py migrate --check >/dev/null; do echo "waiting for db-migrate Job"; sleep 5; done
+          envFrom:
+            - configMapRef:
+                name: loan-approval-config
+            - secretRef:
+                name: loan-approval-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 250m
       containers:
         - name: backend
           image: ghcr.io/OWNER/loan-approval-ai-system/backend:latest
@@ -32,6 +68,9 @@ spec:
               protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           command:
             - gunicorn
             - config.wsgi:application
@@ -41,27 +80,55 @@ spec:
             - "4"
             - --threads
             - "2"
+          env:
+            # Root filesystem is read-only; libraries that write under $HOME
+            # (gunicorn's control socket, matplotlib's cache) use /tmp instead.
+            - name: HOME
+              value: /tmp
           envFrom:
             - configMapRef:
                 name: loan-approval-config
             - secretRef:
                 name: loan-approval-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: ml-models
+              mountPath: /app/ml_models
+              readOnly: true
+          # Probes send the Ingress Host (pod-IP Host headers fail ALLOWED_HOSTS)
+          # and X-Forwarded-Proto: https (production redirects plain HTTP).
           startupProbe:
             httpGet:
               path: /api/v1/health/
               port: 8000
+              httpHeaders:
+                - name: Host
+                  value: app.aussieloanai.com.au
+                - name: X-Forwarded-Proto
+                  value: https
             failureThreshold: 30
             periodSeconds: 2
           livenessProbe:
             httpGet:
               path: /api/v1/health/
               port: 8000
+              httpHeaders:
+                - name: Host
+                  value: app.aussieloanai.com.au
+                - name: X-Forwarded-Proto
+                  value: https
             periodSeconds: 15
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /api/v1/health/
               port: 8000
+              httpHeaders:
+                - name: Host
+                  value: app.aussieloanai.com.au
+                - name: X-Forwarded-Proto
+                  value: https
             periodSeconds: 10
             failureThreshold: 3
             initialDelaySeconds: 30
@@ -72,3 +139,13 @@ spec:
             limits:
               memory: 512Mi
               cpu: 500m
+      volumes:
+        # Root filesystem is read-only; gunicorn heartbeats and Django upload
+        # spooling go to /tmp.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        # Trained model artifacts, written by celery-worker-ml (ml-models-pvc.yaml).
+        - name: ml-models
+          persistentVolumeClaim:
+            claimName: ml-models

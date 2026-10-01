@@ -1,0 +1,23 @@
+# Shared store for trained model artifacts (settings.ML_MODELS_DIR =
+# /app/ml_models). Models are not baked into the image: celery-worker-ml
+# writes them when "Train Model" runs, and the backend and celery-worker-io
+# (which runs the decision pipeline) load them. Those are separate pods, so
+# the volume must be ReadWriteMany.
+#
+# On EKS that means the EFS CSI driver plus an EFS StorageClass; set
+# storageClassName to it. With only the default EBS class this claim stays
+# Pending and the pods that mount it do not start.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models
+  namespace: loan-approval
+  labels:
+    app.kubernetes.io/name: ml-models
+    app.kubernetes.io/part-of: aussieloanai
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi

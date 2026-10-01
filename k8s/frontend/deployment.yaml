@@ -20,10 +20,19 @@ spec:
         app.kubernetes.io/component: web
         app.kubernetes.io/part-of: aussieloanai
     spec:
-      # Dockerfile: Alpine adduser -S appuser (no explicit UID — typically 100).
-      # runAsUser is omitted here so the image's USER directive applies directly.
+      automountServiceAccountToken: false
+      # frontend/Dockerfile ends with `USER 100:101` (appuser/appgroup as
+      # created by Alpine `adduser -S`). The kubelet can only verify
+      # runAsNonRoot against a numeric UID; with `USER appuser` and no
+      # runAsUser it refuses to start the container (CreateContainerConfigError).
+      # build.yml's docker-build job fails if the image UID drifts from 100.
       securityContext:
         runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: frontend
           image: ghcr.io/OWNER/loan-approval-ai-system/frontend:latest
@@ -32,6 +41,21 @@ spec:
               protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # Root filesystem is read-only: point npm's cache/log dir at /tmp.
+            - name: HOME
+              value: /tmp
+            - name: NPM_CONFIG_CACHE
+              value: /tmp/.npm
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Next.js writes its image-optimisation and fetch cache here.
+            - name: next-cache
+              mountPath: /app/.next/cache
           livenessProbe:
             httpGet:
               path: /
@@ -50,3 +74,10 @@ spec:
             limits:
               memory: 256Mi
               cpu: 250m
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: next-cache
+          emptyDir:
+            sizeLimit: 256Mi
