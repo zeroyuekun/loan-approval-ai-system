@@ -278,6 +278,7 @@ class PipelineOrchestrator:
                 defaults={
                     "decision": prediction_result["prediction"],
                     "confidence": prediction_result["probability"],
+                    "risk_grade": prediction_result.get("risk_grade", ""),
                     "feature_importances": prediction_result["feature_importances"],
                     "shap_values": prediction_result.get("shap_values", {}),
                     "decision_waterfall": [],

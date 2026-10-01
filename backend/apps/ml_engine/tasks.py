@@ -386,6 +386,7 @@ def run_prediction_task(self, application_id):
         defaults={
             "decision": result["prediction"],
             "confidence": result["probability"],
+            "risk_grade": result.get("risk_grade", ""),
             "feature_importances": result["feature_importances"],
             "shap_values": result.get("shap_values", {}),
             "decision_waterfall": [],

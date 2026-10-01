@@ -362,6 +362,7 @@ class ModelPredictor:
         result = {
             "prediction": prediction_label,
             "probability": probability,
+            "risk_grade": compute_risk_grade(probability),
             "threshold_used": threshold,
             "effective_threshold": effective_threshold,
             "requires_human_review": requires_human_review,
