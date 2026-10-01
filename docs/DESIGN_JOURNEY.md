@@ -2,9 +2,9 @@
 
 *A first-person account of how the Loan Approval AI System evolved, by Neville Zeng.*
 
-This is the honest story behind the project: the decisions I made, the
-alternatives I weighed, and the things I would do differently if I were starting
-again. It isn't marketing copy. Each section follows the same template: what I
+This covers the decisions I made on the project, the alternatives I weighed,
+and the things I would do differently if I were starting again. Each section
+follows the same template: what I
 built, why I chose this approach, what I considered and rejected, and what I'd
 do differently. If you want the short version of a particular decision, skip to
 the matching ADR under `backend/docs/adr/` (legacy) or `docs/adr/` (new).
