@@ -8,7 +8,8 @@ logger = logging.getLogger(__name__)
 class EmailPersistenceService:
     """Single source of truth for email and guardrail persistence.
 
-    Eliminates duplication across orchestrator.py (3 locations) and tasks.py (1 location).
+    Used by email_engine.tasks, the agents email pipeline and human-review
+    handler, and the loans decision-review overturn path.
     """
 
     @staticmethod

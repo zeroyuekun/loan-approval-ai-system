@@ -16,6 +16,52 @@ class EmailGenerationThrottle(UserRateThrottle):
     rate = "10/hour"
 
 
+def _email_type(decision):
+    return "approval" if decision == "approved" else "denial"
+
+
+def _serialize_email(email, *, include_body):
+    """Shared response shape for the email list and detail endpoints.
+
+    ``body``/``html_body`` are KB-scale per record, so the list endpoint omits
+    them; clients fetch them from the single-email endpoint (/emails/<loan_id>/).
+    """
+    applicant = email.application.applicant
+    data = {
+        "id": str(email.id),
+        "application_id": str(email.application_id),
+        "applicant_id": applicant.id,
+        "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
+        "decision": email.decision,
+        "subject": email.subject,
+    }
+    if include_body:
+        data["body"] = email.body
+        data["html_body"] = render_html(email.body, email_type=_email_type(email.decision))
+    data.update(
+        {
+            "model_used": email.model_used,
+            "generation_time_ms": email.generation_time_ms,
+            "attempt_number": email.attempt_number,
+            "passed_guardrails": email.passed_guardrails,
+            "guardrail_checks": [
+                {
+                    "check_name": log.check_name,
+                    "passed": log.passed,
+                    "details": log.details,
+                    "category": log.category,
+                    # quality_score is a batch-computed value (not stored per-log).
+                    # Exposed as null here; callers should use the email-level score.
+                    "quality_score": None,
+                }
+                for log in email.guardrail_checks.all()
+            ],
+            "created_at": email.created_at.isoformat(),
+        }
+    )
+    return data
+
+
 class EmailListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -43,41 +89,7 @@ class EmailListView(APIView):
         offset = (page - 1) * page_size
         emails = queryset[offset : offset + page_size]
 
-        results = []
-        for email in emails:
-            guardrail_checks = [
-                {
-                    "check_name": log.check_name,
-                    "passed": log.passed,
-                    "details": log.details,
-                    "category": log.category,
-                    # quality_score is a batch-computed value (not stored per-log).
-                    # Exposed as null here; callers should use the email-level score.
-                    "quality_score": None,
-                }
-                for log in email.guardrail_checks.all()
-            ]
-            applicant = email.application.applicant
-
-            results.append(
-                {
-                    "id": str(email.id),
-                    "application_id": str(email.application_id),
-                    "applicant_id": applicant.id,
-                    "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
-                    "decision": email.decision,
-                    "subject": email.subject,
-                    # body and html_body are intentionally excluded from the list
-                    # response — they are KB-scale per record. Fetch them from the
-                    # single-email RETRIEVE endpoint (/emails/<loan_id>/) instead.
-                    "model_used": email.model_used,
-                    "generation_time_ms": email.generation_time_ms,
-                    "attempt_number": email.attempt_number,
-                    "passed_guardrails": email.passed_guardrails,
-                    "guardrail_checks": guardrail_checks,
-                    "created_at": email.created_at.isoformat(),
-                }
-            )
+        results = [_serialize_email(email, include_body=False) for email in emails]
 
         base_url = request.build_absolute_uri(request.path)
         next_url = f"{base_url}?page={page + 1}&page_size={page_size}" if offset + page_size < total else None
@@ -160,7 +172,7 @@ class SendLatestEmailView(APIView):
                 recipient,
                 locked.subject,
                 locked.body,
-                email_type="approval" if locked.decision == "approved" else "denial",
+                email_type=_email_type(locked.decision),
             )
             if result["sent"]:
                 locked.sent_at = timezone.now()
@@ -200,38 +212,4 @@ class EmailDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        guardrail_checks = [
-            {
-                "check_name": log.check_name,
-                "passed": log.passed,
-                "details": log.details,
-                "category": log.category,
-                # quality_score is a batch-computed value (not stored per-log).
-                # Exposed as null here to match the list endpoint shape.
-                "quality_score": None,
-            }
-            for log in email.guardrail_checks.all()
-        ]
-
-        applicant = email.application.applicant
-        return Response(
-            {
-                "id": str(email.id),
-                "application_id": str(email.application_id),
-                "applicant_id": applicant.id,
-                "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
-                "decision": email.decision,
-                "subject": email.subject,
-                "body": email.body,
-                "html_body": render_html(
-                    email.body,
-                    email_type="approval" if email.decision == "approved" else "denial",
-                ),
-                "model_used": email.model_used,
-                "generation_time_ms": email.generation_time_ms,
-                "attempt_number": email.attempt_number,
-                "passed_guardrails": email.passed_guardrails,
-                "guardrail_checks": guardrail_checks,
-                "created_at": email.created_at.isoformat(),
-            }
-        )
+        return Response(_serialize_email(email, include_body=True))

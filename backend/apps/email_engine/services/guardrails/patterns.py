@@ -1,7 +1,7 @@
 """Pattern constants used by GuardrailChecker.
 
-Extracted from the original monolithic guardrails.py so the check methods
-live in engine.py free of ~370 lines of regex tables. The class attrs on
+Kept in their own module so the check methods in engine.py stay free of the
+regex tables. The class attrs on
 GuardrailChecker re-export every name here, so `self.PROHIBITED_TERMS`
 and `GuardrailChecker.PROHIBITED_TERMS` both still work.
 """

@@ -4,9 +4,11 @@ from datetime import timedelta
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.email_engine.models import GeneratedEmail, GuardrailAnalytics, GuardrailLog
+from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.exceptions import RateLimited
 from apps.email_engine.services.persistence import EmailPersistenceService
 from apps.loans.models import AuditLog, LoanApplication
@@ -25,8 +27,6 @@ logger = logging.getLogger("email_engine.tasks")
 )
 def generate_email_task(self, application_id, decision):
     """Generate a decision email for a loan application."""
-    from apps.email_engine.services.email_generator import EmailGenerator
-
     # Idempotency: if email already generated for this application+decision, return it.
     # Report the TRUE sent state from the sent_at marker so callers don't think an
     # already-delivered email still needs sending on a redelivery.
@@ -39,7 +39,7 @@ def generate_email_task(self, application_id, decision):
             # killed after persist-before-send). Attempt delivery now using the
             # stored subject/body instead of returning 'done' — the row-locked
             # send below is idempotent, so this cannot double-send even under a
-            # redelivery race. (M6)
+            # redelivery race.
             application = LoanApplication.objects.select_related("applicant", "decision").get(pk=application_id)
             delivered = False
             if application.applicant.email:
@@ -101,8 +101,8 @@ def generate_email_task(self, application_id, decision):
     except (ConnectionError, TimeoutError, OSError):
         raise  # let Celery autoretry handle infrastructure errors
     except RateLimited as exc:
-        # The generator no longer blocks on time.sleep for 429s. Free the worker
-        # by scheduling a Celery retry instead of holding it inside time_limit.
+        # The generator raises RateLimited on a 429 instead of sleeping; free the
+        # worker by scheduling a Celery retry instead of holding it inside time_limit.
         raise self.retry(countdown=exc.retry_after, exc=exc) from exc
     except SoftTimeLimitExceeded:
         AuditLog.objects.create(
@@ -129,7 +129,7 @@ def generate_email_task(self, application_id, decision):
     # Send email to customer if guardrails passed. The send is idempotent: under
     # a row lock we only send when sent_at is unset, then persist sent_at. This
     # closes the acks_late window where a SIGKILLed-then-redelivered task could
-    # otherwise send a second decision email (M6).
+    # otherwise send a second decision email.
     email_sent = False
     if result["passed_guardrails"] and application.applicant.email:
         with transaction.atomic():
@@ -179,9 +179,7 @@ def compute_guardrail_analytics():
     week_end = now.date()
 
     # Aggregate guardrail results at the DB level — avoids loading all rows into
-    # Python memory (M15).
-    from django.db.models import Count, Q
-
+    # Python memory.
     analytics_qs = (
         GuardrailLog.objects.filter(
             created_at__date__gte=week_start,
@@ -196,39 +194,24 @@ def compute_guardrail_analytics():
         .order_by("check_name")
     )
 
-    # Build stats dict from aggregated queryset for downstream compatibility
-    stats = {
-        row["check_name"]: {
-            "total": row["total"],
-            "passed": row["passed"],
-            "failed": row["failed"],
-        }
-        for row in analytics_qs
-    }
-
-    # Compute retry rate (emails with attempt_number > 1)
-    total_emails = GeneratedEmail.objects.filter(
+    # Retry rate: share of the week's emails that needed more than one attempt.
+    email_counts = GeneratedEmail.objects.filter(
         created_at__date__gte=week_start,
         created_at__date__lt=week_end,
-    ).count()
-    retried_emails = GeneratedEmail.objects.filter(
-        created_at__date__gte=week_start,
-        created_at__date__lt=week_end,
-        attempt_number__gt=1,
-    ).count()
-    retry_rate = retried_emails / total_emails if total_emails > 0 else 0.0
+    ).aggregate(total=Count("id"), retried=Count("id", filter=Q(attempt_number__gt=1)))
+    total_emails = email_counts["total"]
+    retry_rate = email_counts["retried"] / total_emails if total_emails > 0 else 0.0
 
-    # Save analytics
     created = 0
-    for check_name, data in stats.items():
-        pass_rate = data["passed"] / data["total"] if data["total"] > 0 else 0.0
+    for row in analytics_qs:
+        pass_rate = row["passed"] / row["total"] if row["total"] > 0 else 0.0
         GuardrailAnalytics.objects.update_or_create(
             week_start=week_start,
-            check_name=check_name,
+            check_name=row["check_name"],
             defaults={
-                "total_runs": data["total"],
-                "pass_count": data["passed"],
-                "fail_count": data["failed"],
+                "total_runs": row["total"],
+                "pass_count": row["passed"],
+                "fail_count": row["failed"],
                 "pass_rate": pass_rate,
                 "retry_rate": retry_rate,
             },
