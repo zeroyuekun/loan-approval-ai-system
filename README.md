@@ -144,15 +144,17 @@ terraform/          # AWS infra-as-code — EKS, RDS Postgres, ElastiCache Redis
 
 | Decision | ADR |
 |----------|-----|
-| Gaussian copula synthetic data calibrated to ATO/ABS/APRA stats | [001](backend/docs/adr/001-synthetic-data-with-copula.md) |
-| XGBoost with monotonic constraints for regulatory consistency | [002](backend/docs/adr/002-xgboost-with-monotonic-constraints.md) |
-| Bias detection: deterministic regex -> junior LLM (moderate flags) -> human escalation; senior Opus review on marketing emails | [003](backend/docs/adr/003-hybrid-bias-detection.md) |
-| Temporal validation strategy with out-of-time splits | [004](backend/docs/adr/004-temporal-validation-strategy.md) |
-| Django over FastAPI | [005](backend/docs/adr/005-django-over-fastapi.md) |
-| Template-first email with $5/day Claude budget cap | [006](backend/docs/adr/006-template-first-email-with-cost-cap.md) |
-| WAT architecture (workflows, agents, tools) | [007](backend/docs/adr/007-wat-architecture.md) |
-| Security architecture | [008](backend/docs/adr/008-security-architecture.md) |
-| Pluggable email LLM backend + free-tier data-safety (no real client data to a training cloud AI) | [010](backend/docs/adr/010-pluggable-email-llm-backend-data-safety.md) |
+| Gaussian copula synthetic data calibrated to ATO/ABS/APRA stats | [001](docs/adr/001-synthetic-data-with-copula.md) |
+| XGBoost with monotonic constraints for regulatory consistency | [002](docs/adr/002-xgboost-with-monotonic-constraints.md) |
+| Bias detection: deterministic regex -> junior LLM (moderate flags) -> human escalation; senior Opus review on marketing emails | [003](docs/adr/003-hybrid-bias-detection.md) |
+| Temporal validation strategy with out-of-time splits | [004](docs/adr/004-temporal-validation-strategy.md) |
+| Django over FastAPI | [005](docs/adr/005-django-over-fastapi.md) |
+| Template-first email with $5/day Claude budget cap | [006](docs/adr/006-template-first-email-with-cost-cap.md) |
+| WAT architecture (workflows, agents, tools) | [007](docs/adr/007-wat-architecture.md) |
+| Security architecture | [008](docs/adr/008-security-architecture.md) |
+| Pluggable email LLM backend + free-tier data-safety (no real client data to a training cloud AI) | [010](docs/adr/010-pluggable-email-llm-backend-data-safety.md) |
+
+The full list of ADRs is in [docs/adr/README.md](docs/adr/README.md).
 
 <details>
 <summary><strong>ML model details</strong> (click to expand)</summary>

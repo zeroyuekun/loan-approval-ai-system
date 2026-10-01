@@ -21,6 +21,20 @@ Skip ADRs for routine implementation choices, library version bumps, or bug fixe
 
 ## Index
 
-- [001: XGBoost + Random Forest ensemble](001-xgboost-rf-ensemble.md)
+This is the only ADR series in the repo. ADRs 001 to 010 moved here from `backend/docs/` and kept their original numbers. ADR 011 was numbered 001 in this directory before the two series were merged.
 
-<!-- Append new ADRs here as they're written. -->
+| ADR | Decision | Date |
+|-----|----------|------|
+| [001](001-synthetic-data-with-copula.md) | Synthetic data generation with Gaussian copula | 2026-03-23 |
+| [002](002-xgboost-with-monotonic-constraints.md) | XGBoost with monotonic constraints | 2026-03-23 |
+| [003](003-hybrid-bias-detection.md) | Hybrid bias detection system | 2026-03-23 |
+| [004](004-temporal-validation-strategy.md) | Temporal validation strategy | 2026-03-23 |
+| [005](005-django-over-fastapi.md) | Django over FastAPI | 2026-04-01 |
+| [006](006-template-first-email-with-cost-cap.md) | Template-first email generation with cost cap | 2026-04-01 |
+| [007](007-wat-architecture.md) | WAT architecture (Workflows, Agents, Tools) | 2026-04-01 |
+| [008](008-security-architecture.md) | Security architecture | 2026-04-01 |
+| [009](009-dice-counterfactuals-over-binary-search.md) | DiCE counterfactuals over binary search | 2026-04-16 |
+| [010](010-pluggable-email-llm-backend-data-safety.md) | Pluggable email LLM backend (free Groq option) and the data-safety decision | 2026-06-10 |
+| [011](011-xgboost-rf-ensemble.md) | XGBoost + Random Forest ensemble for loan scoring | 2026-04-17 |
+
+<!-- Append new ADRs here as they're written. The next number is 012. -->

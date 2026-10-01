@@ -21,7 +21,7 @@ The system uses the Workflows-Agents-Tools (WAT) pattern. Workflows are markdown
 
 The split is useful because it keeps the probabilistic parts (Claude writing an email, SHAP picking reason codes) apart from the deterministic ones (guardrail checks, APRA buffer calculations, retention policy enforcement). Every probabilistic output has to pass a deterministic gate before it reaches a customer.
 
-The Django layout uses a service layer instead of fat views. Each app has `services/` modules that do the real work, and the views stay thin. Tests target the services. ADR 007 (`backend/docs/adr/007-wat-architecture.md`) has the reasoning.
+The Django layout uses a service layer instead of fat views. Each app has `services/` modules that do the real work, and the views stay thin. Tests target the services. ADR 007 (`docs/adr/007-wat-architecture.md`) has the reasoning.
 
 ## 3. Data: the big rewrite in v1.6.0
 

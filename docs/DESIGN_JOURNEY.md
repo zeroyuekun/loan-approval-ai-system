@@ -7,7 +7,7 @@ and the things I would do differently if I were starting again. Each section
 follows the same template: what I
 built, why I chose this approach, what I considered and rejected, and what I'd
 do differently. If you want the short version of a particular decision, skip to
-the matching ADR under `backend/docs/adr/` (legacy) or `docs/adr/` (new).
+the matching ADR under `docs/adr/`.
 
 ---
 

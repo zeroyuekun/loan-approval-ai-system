@@ -1,4 +1,4 @@
-# 001: XGBoost + Random Forest ensemble for loan scoring
+# 011: XGBoost + Random Forest ensemble for loan scoring
 
 - **Status:** Accepted
 - **Date:** 2026-04-17
