@@ -288,6 +288,15 @@ class DashboardStatsView(APIView):
         }
 
 
+def _audit_value(value):
+    """JSON-safe rendering of a model value for AuditLog details."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
 class ComplaintFilingThrottle(UserRateThrottle):
     """Tight cap on complaint filing — sensitive + spam vector."""
 
@@ -300,6 +309,12 @@ class ComplaintViewSet(viewsets.ModelViewSet):
 
     serializer_class = ComplaintSerializer
     permission_classes = [permissions.IsAuthenticated]
+    # No DELETE: a complaint is an IDR record (ASIC RG 271) that must be kept.
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    # Fields whose before/after values go into the audit row. Free text
+    # (subject, description, resolution) is recorded by name only.
+    _AUDITED_VALUES = ("status", "category", "loan_application_id", "resolved_at")
 
     def get_queryset(self):
         user = self.request.user
@@ -308,7 +323,7 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         return Complaint.objects.filter(complainant=user).select_related("loan_application")
 
     def get_permissions(self):
-        if self.action in ("update", "partial_update", "destroy"):
+        if self.action in ("update", "partial_update"):
             return [permissions.IsAuthenticated(), IsAdminOrOfficer()]
         return [permissions.IsAuthenticated()]
 
@@ -316,6 +331,29 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return [ComplaintFilingThrottle()]
         return super().get_throttles()
+
+    def perform_update(self, serializer):
+        """Staff edits are audited with every changed field."""
+        instance = serializer.instance
+        before = {f.attname: getattr(instance, f.attname) for f in instance._meta.concrete_fields}
+        with transaction.atomic():
+            updated = serializer.save()
+            changed = [name for name, old in before.items() if name != "updated_at" and getattr(updated, name) != old]
+            details = {"changed_fields": sorted(n.removesuffix("_id") for n in changed)}
+            for name in self._AUDITED_VALUES:
+                if name in changed:
+                    details[name.removesuffix("_id")] = {
+                        "from": _audit_value(before[name]),
+                        "to": _audit_value(getattr(updated, name)),
+                    }
+            AuditLog.objects.create(
+                user=self.request.user,
+                action="complaint_updated",
+                resource_type="Complaint",
+                resource_id=str(updated.pk),
+                details=details,
+                ip_address=self.request.META.get("REMOTE_ADDR"),
+            )
 
 
 class DecisionReviewFilingThrottle(UserRateThrottle):

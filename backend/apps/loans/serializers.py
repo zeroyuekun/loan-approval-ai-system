@@ -4,6 +4,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.models import CustomerProfile
+from apps.accounts.policy import is_staff_role
 from apps.accounts.serializers import UserSerializer
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
@@ -305,12 +306,24 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    # IDR workflow state: set by staff (or by the server on create), never by
+    # the complainant, so a complaint cannot be filed already closed.
+    STAFF_MANAGED_FIELDS = ("status", "resolution", "resolved_at")
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request is None or not is_staff_role(request.user):
+            for name in self.STAFF_MANAGED_FIELDS:
+                fields[name].read_only = True
+        return fields
+
     def validate_loan_application(self, value):
         if value is None:
             return value
         request = self.context["request"]
         user = request.user
-        if getattr(user, "role", None) in ("admin", "officer"):
+        if is_staff_role(user):
             return value
         if value.applicant_id != user.id:
             raise serializers.ValidationError("You can only file complaints on your own applications.")
