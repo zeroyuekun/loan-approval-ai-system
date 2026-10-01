@@ -19,6 +19,14 @@ if not ALLOWED_HOSTS:
         "Example: DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com"
     )
 
+# Client IP for throttling: the k8s nginx ingress is the one hop in front of
+# the backend and appends the TCP peer to X-Forwarded-For. Override with
+# TRUSTED_PROXY_COUNT when the topology differs (0 = no proxy in front).
+REST_FRAMEWORK = {  # noqa: F405
+    **REST_FRAMEWORK,  # noqa: F405
+    "NUM_PROXIES": int(os.environ.get("TRUSTED_PROXY_COUNT") or 1),
+}
+
 # Security settings
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_SECURE = True

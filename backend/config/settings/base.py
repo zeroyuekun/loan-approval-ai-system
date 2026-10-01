@@ -180,6 +180,13 @@ REST_FRAMEWORK = {
         "totp_verify": "5/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Reverse-proxy hops in front of Django that append to X-Forwarded-For.
+    # Throttles key on the client IP DRF derives from this: with None (the DRF
+    # default) the whole client-supplied header is the key, so a spoofed
+    # header got a fresh login/register/refresh bucket on every request.
+    # 0 = ignore X-Forwarded-For and use REMOTE_ADDR (compose publishes the
+    # backend directly). production.py defaults to 1 for the k8s ingress.
+    "NUM_PROXIES": _env_int("TRUSTED_PROXY_COUNT", 0),
 }
 
 # Simple JWT
