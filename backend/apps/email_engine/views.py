@@ -22,11 +22,29 @@ def _email_type(decision):
     return "approval" if decision == "approved" else "denial"
 
 
-def _serialize_email(email, *, include_body):
+def _is_staff(user):
+    return getattr(user, "role", None) in ("admin", "officer") or user.is_superuser
+
+
+def _visible_emails(user, queryset):
+    """Customers see only emails that were actually issued to them.
+
+    A row with ``sent_at`` unset is a draft: withheld by the guardrails, held by
+    the bias check, or not yet delivered. Its body may carry exactly the content
+    the withhold exists to stop (a hallucinated rate, prohibited wording).
+    """
+    if _is_staff(user):
+        return queryset
+    return queryset.filter(application__applicant=user, sent_at__isnull=False)
+
+
+def _serialize_email(email, *, include_body, staff=True):
     """Shared response shape for the email list and detail endpoints.
 
     ``body``/``html_body`` are KB-scale per record, so the list endpoint omits
     them; clients fetch them from the single-email endpoint (/emails/<loan_id>/).
+    Per-check guardrail details are internal compliance artefacts: customers get
+    an empty ``guardrail_checks`` list (same key, so the response shape holds).
     """
     applicant = email.application.applicant
     data = {
@@ -57,7 +75,9 @@ def _serialize_email(email, *, include_body):
                     "quality_score": None,
                 }
                 for log in email.guardrail_checks.all()
-            ],
+            ]
+            if staff
+            else [],
             "created_at": email.created_at.isoformat(),
         }
     )
@@ -76,8 +96,7 @@ class EmailListView(APIView):
             .order_by("-created_at")
         )
 
-        if user.role not in ("admin", "officer"):
-            queryset = queryset.filter(application__applicant=user)
+        queryset = _visible_emails(user, queryset)
 
         try:
             page = int(request.query_params.get("page", 1))
@@ -91,7 +110,8 @@ class EmailListView(APIView):
         offset = (page - 1) * page_size
         emails = queryset[offset : offset + page_size]
 
-        results = [_serialize_email(email, include_body=False) for email in emails]
+        staff = _is_staff(user)
+        results = [_serialize_email(email, include_body=False, staff=staff) for email in emails]
 
         base_url = request.build_absolute_uri(request.path)
         next_url = f"{base_url}?page={page + 1}&page_size={page_size}" if offset + page_size < total else None
@@ -217,7 +237,7 @@ class EmailDetailView(APIView):
         check_loan_access(request, loan_id)
 
         email = (
-            GeneratedEmail.objects.filter(application_id=loan_id)
+            _visible_emails(request.user, GeneratedEmail.objects.filter(application_id=loan_id))
             .select_related("application__applicant")
             .prefetch_related("guardrail_checks")
             .order_by("-created_at")
@@ -230,4 +250,4 @@ class EmailDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        return Response(_serialize_email(email, include_body=True))
+        return Response(_serialize_email(email, include_body=True, staff=_is_staff(request.user)))

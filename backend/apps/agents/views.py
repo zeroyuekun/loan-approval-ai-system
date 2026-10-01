@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrOfficer
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
-from apps.agents.serializers import AgentRunSerializer
+from apps.agents.serializers import agent_run_serializer_class
 from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 from apps.loans.permissions import check_loan_access
@@ -80,7 +80,8 @@ class AgentRunListView(APIView):
 
         # List endpoint drops marketing html_body to avoid re-rendering the
         # large regex HTML renderer per row in this paginated hot path.
-        results = AgentRunSerializer(runs, many=True, context={"include_html": False}).data
+        serializer_class = agent_run_serializer_class(user)
+        results = serializer_class(runs, many=True, context={"include_html": False}).data
 
         # Build next/previous URLs preserving all filter params
         base_url = request.build_absolute_uri(request.path)
@@ -285,7 +286,8 @@ class AgentRunView(APIView):
             )
 
         # Detail endpoint includes the rendered marketing html_body.
-        return Response(AgentRunSerializer(agent_run, context={"include_html": True}).data)
+        serializer_class = agent_run_serializer_class(request.user)
+        return Response(serializer_class(agent_run, context={"include_html": True}).data)
 
 
 class HumanReviewView(APIView):
