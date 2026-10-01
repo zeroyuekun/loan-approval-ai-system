@@ -52,25 +52,40 @@ export function useAgentRun(loanId: string, options?: { pipelineQueued?: boolean
   })
 }
 
+/** Friendly messages for orchestrate failures; anything else passes through. */
+function orchestrateError(error: any): Error {
+  // Surface throttle errors so the button doesn't just silently fail
+  if (error?.response?.status === 429) return rateLimitedError(error)
+  if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
+    return new Error('Request timed out — the backend may be starting up. Please try again.')
+  }
+  return error
+}
+
+function forceRerunError(error: any): Error {
+  const status = error?.response?.status
+  if (status === 403) return new Error('Force rerun requires staff role.')
+  if (status === 400) return new Error(error?.response?.data?.detail || 'A reason is required.')
+  if (status === 429) return rateLimitedError(error)
+  return error
+}
+
+// Errors are mapped inside mutationFn, not onError: TanStack Query ignores a
+// value thrown from onError (it becomes an unhandled rejection) and callers
+// still receive the original AxiosError.
 export function useOrchestrate() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async (loanId: string) => {
-      const { data } = await agentsApi.orchestrate(loanId)
-      return data
+      try {
+        const { data } = await agentsApi.orchestrate(loanId)
+        return data
+      } catch (error) {
+        throw orchestrateError(error)
+      }
     },
     onSuccess: (_data, loanId) => invalidateRunQueries(queryClient, loanId),
-    onError: (error: any) => {
-      // Surface throttle errors so the button doesn't just silently fail
-      if (error?.response?.status === 429) {
-        throw rateLimitedError(error)
-      }
-      if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
-        throw new Error('Request timed out — the backend may be starting up. Please try again.')
-      }
-      throw error
-    },
   })
 }
 
@@ -79,21 +94,13 @@ export function useForceRerun() {
 
   return useMutation({
     mutationFn: async ({ loanId, reason }: { loanId: string; reason: string }) => {
-      const { data } = await agentsApi.forceRerun(loanId, reason)
-      return data
+      try {
+        const { data } = await agentsApi.forceRerun(loanId, reason)
+        return data
+      } catch (error) {
+        throw forceRerunError(error)
+      }
     },
     onSuccess: (_data, variables) => invalidateRunQueries(queryClient, variables.loanId),
-    onError: (error: any) => {
-      if (error?.response?.status === 403) {
-        throw new Error('Force rerun requires staff role.')
-      }
-      if (error?.response?.status === 400) {
-        throw new Error(error?.response?.data?.detail || 'A reason is required.')
-      }
-      if (error?.response?.status === 429) {
-        throw rateLimitedError(error)
-      }
-      throw error
-    },
   })
 }
