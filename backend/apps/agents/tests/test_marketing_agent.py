@@ -803,3 +803,40 @@ class TestMarketingEmailPrompt:
 
     def test_prompt_forbids_patronising_phrasing(self):
         assert "you've proven" in MARKETING_EMAIL_PROMPT.lower()
+
+
+# ---------------------------------------------------------------------------
+# Voice: the follow-up reads like a person wrote it
+# ---------------------------------------------------------------------------
+
+MARKETING_STOCK_PHRASES = [
+    "simply reply",
+    "don't hesitate",
+    "we appreciate your interest",
+    "contact me directly",
+    "we'd love to help",
+    "tailored options",
+]
+
+
+class TestMarketingVoice:
+    def test_template_fallback_has_no_stock_phrases(self):
+        with patch.dict(os.environ, {}, clear=True):
+            agent = MarketingAgent()
+        result = agent._marketing_template_fallback(
+            _make_mock_application(), start_time=0.0, nbo_result=_sample_nbo_result()
+        )
+
+        body = result["body"].lower()
+        assert not [p for p in MARKETING_STOCK_PHRASES if p in body]
+        assert "call me on 1300 000 000" in body
+        assert "8:30am–5:30pm" in result["body"]
+
+    def test_prompt_template_has_no_stock_phrases(self):
+        block = MARKETING_EMAIL_PROMPT[MARKETING_EMAIL_PROMPT.index("=== EMAIL TEMPLATE") :].lower()
+        assert not [p for p in MARKETING_STOCK_PHRASES if p in block]
+
+    def test_nbo_fallback_message_has_no_stock_phrases(self):
+        from apps.agents.services.next_best_offer import NBO_FALLBACK_MESSAGE
+
+        assert not [p for p in MARKETING_STOCK_PHRASES if p in NBO_FALLBACK_MESSAGE.lower()]

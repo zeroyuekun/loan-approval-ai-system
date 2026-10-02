@@ -66,6 +66,8 @@ const SECTION_LABELS = [
   "We'd Still Like to Help:",
   'Attachments:',
   'Conditions of Approval:',
+  'The main factors in our decision:',
+  // Lead-in used by denial emails issued before 2026-10; kept so stored emails still render.
   'This decision was based on a thorough review of your financial profile, specifically:',
 ]
 const CLOSINGS = ['Kind regards,', 'Warm regards,']

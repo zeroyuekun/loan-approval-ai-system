@@ -266,27 +266,30 @@ class EmailGenerator:
     def _render_nbo_block(self, nbo_offer):
         """Render a neutral, factual alternative-offer teaser for denial emails.
 
-        No apology/emotion language (locked project rule). Returns "" when no
-        usable offer is supplied so the prompt is unchanged.
+        Delegates to ``template_fallback.render_nbo_block`` (shared by this
+        LLM prompt path and the deterministic template path).
+        """
+        from .template_fallback import render_nbo_block
+
+        return render_nbo_block(nbo_offer)
+
+    @staticmethod
+    def _add_nbo_context(context, nbo_offer):
+        """Add the next-best-offer figures to the guardrail context, if present.
+
+        Shared by the LLM path (``generate``) and the template path
+        (``generate_template`` / ``_generate_fallback``) so both whitelist the
+        teaser's dollar figure and rate against the hallucinated-numbers
+        guardrail (engine.py) the same way.
         """
         if not nbo_offer:
-            return ""
-        name = nbo_offer.get("name") or nbo_offer.get("type")
-        amount = nbo_offer.get("amount")
-        if not name or amount is None:
-            return ""
-        rate = nbo_offer.get("estimated_rate")
-        monthly = nbo_offer.get("monthly_repayment")
-        headline = f"${float(amount):,.0f}"
-        if rate:
-            headline += f" at {float(rate):.2f}% p.a."
-        if monthly:
-            headline += f", around ${float(monthly):,.0f}/month"
-        return (
-            "A specific option you may qualify for now:\n"
-            f"  •  {name}: {headline}\n"
-            "You can discuss this option using the contact details below."
-        )
+            return
+        nbo_amounts = nbo_offer_amounts([nbo_offer])
+        if nbo_amounts:
+            context["nbo_amounts"] = nbo_amounts
+        # The offer itself carries estimated_rate, so the teaser's
+        # "at X% p.a." is validated against the real rate (S1-F1).
+        context["nbo_offers"] = [nbo_offer]
 
     @staticmethod
     def _applicant_name(application):
@@ -307,15 +310,19 @@ class EmailGenerator:
             "decision": decision,
         }
 
-    def generate_template(self, application, decision):
+    def generate_template(self, application, decision, profile_context=None):
         """Issue the deterministic, guardrail-checked template email directly.
 
         Used by callers that must degrade without an LLM round trip (for
-        example on a provider 429 outside the Celery email task).
+        example on a provider 429 outside the Celery email task). ``profile_context``
+        carries ``nbo_offer`` for denials, exactly like the LLM path in ``generate()``.
         """
-        return self._generate_fallback(application, decision, self._base_context(application, decision), time.time())
+        context = self._base_context(application, decision)
+        if decision != "approved":
+            self._add_nbo_context(context, (profile_context or {}).get("nbo_offer"))
+        return self._generate_fallback(application, decision, context, time.time())
 
-    def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
+    def generate(self, application, decision, attempt=1, confidence=None, profile_context=None, bias_feedback=None):
         """Generate an approval/denial email for the given loan application."""
         # Reset retry state only on the first attempt (not recursive retries)
         if attempt == 1:
@@ -427,13 +434,16 @@ class EmailGenerator:
             )
             # Whitelist the teaser figures so the hallucinated-numbers guardrail
             # (engine.py:61) recognises them on the decision email.
-            if nbo_offer:
-                nbo_amounts = nbo_offer_amounts([nbo_offer])
-                if nbo_amounts:
-                    context["nbo_amounts"] = nbo_amounts
-                # The offer itself carries estimated_rate, so the teaser's
-                # "at X% p.a." is validated against the real rate (S1-F1).
-                context["nbo_offers"] = [nbo_offer]
+            self._add_nbo_context(context, nbo_offer)
+
+        if bias_feedback:
+            prompt += (
+                "\n\n=== COMPLIANCE REVIEW FEEDBACK ===\n"
+                "A compliance reviewer flagged an earlier draft of this email for possible bias:\n"
+                f"{_sanitize_prompt_input(bias_feedback, max_length=2000)}\n\n"
+                "Write the email again so none of these issues appear. Describe the application and "
+                "its circumstances, never the person. Keep every required section.\n"
+            )
 
         # Add retry feedback if not first attempt.
         # The feedback is structured to tell Claude exactly what failed,
@@ -573,7 +583,12 @@ class EmailGenerator:
                 )
             self._last_feedback = "\n".join(feedback_parts)
             return self.generate(
-                application, decision, attempt=attempt + 1, confidence=confidence, profile_context=profile_context
+                application,
+                decision,
+                attempt=attempt + 1,
+                confidence=confidence,
+                profile_context=profile_context,
+                bias_feedback=bias_feedback,
             )
 
         _record_email_metric(decision=decision, source="claude_api", passed_guardrails=all_passed)
@@ -711,6 +726,7 @@ class EmailGenerator:
 
             credit_score = getattr(application, "credit_score", None)
             debt_to_income = getattr(application, "debt_to_income", None)
+            nbo_offer = (context.get("nbo_offers") or [None])[0]
 
             result = generate_denial_template(
                 applicant_name,
@@ -721,6 +737,7 @@ class EmailGenerator:
                 credit_score=int(credit_score) if credit_score else None,
                 debt_to_income=float(debt_to_income) if debt_to_income else None,
                 employment_type=application.get_employment_type_display(),
+                nbo_offer=nbo_offer,
             )
 
         generation_time = int((time.time() - start_time) * 1000)

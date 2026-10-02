@@ -495,6 +495,16 @@ MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior AI review
 #   "off": explicit escape hatch — legacy fail-open with no special handling.
 BIAS_FAILURE_MODE = os.environ.get("BIAS_FAILURE_MODE", "block").lower()
 
+# Agent 2: rewrites a moderate-band flagged email once under a stricter
+# check (bias detector clean + senior reviewer approved with confidence)
+# before handing over to the deterministic template path.
+BIAS_AGENT2_ENABLED = os.environ.get("BIAS_AGENT2_ENABLED", "true").lower() == "true"
+BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE = 0.70
+# Agent 2 is skipped (the template path takes over) when less than this many
+# seconds remain before the pipeline task's soft time limit: a rewrite plus a
+# bias check plus a senior review can take minutes on a slow local LLM.
+BIAS_AGENT2_MIN_SECONDS_LEFT = 240
+
 # API Documentation (drf-spectacular)
 SPECTACULAR_SETTINGS = {
     "TITLE": "AussieLoanAI API",

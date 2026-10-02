@@ -30,6 +30,15 @@ describe('formatStepName', () => {
     expect(formatStepName('human_escalation_severe_bias')).toBe('Human Escalation (Severe Bias)')
     expect(formatStepName('human_escalation_after_retries')).toBe('Human Escalation (After Retries)')
     expect(formatStepName('human_escalation_low_confidence')).toBe('Human Escalation (Low Confidence)')
+    expect(formatStepName('human_escalation_moderate_bias')).toBe('Human Escalation (Moderate Bias)')
+  })
+
+  it('labels the moderate-bias template replacement step', () => {
+    expect(formatStepName('bias_regeneration')).toBe('Template Replacement (Bias Re-check)')
+  })
+
+  it('labels the Agent 2 rewrite step', () => {
+    expect(formatStepName('bias_agent2_regeneration')).toBe('Agent 2 Rewrite (Bias Re-check + Senior Review)')
   })
 })
 

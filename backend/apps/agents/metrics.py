@@ -59,3 +59,17 @@ bias_check_unavailable_total = Counter(
     "Bias check could not run; pipeline applied its failure policy",
     labelnames=["mode"],  # block | warn | off
 )
+
+
+# Agent 2 (the moderate-band rewrite) outcomes. `sent` = the rewrite passed the
+# bias check and the senior review and replaces the flagged email;
+# `handed_over_<reason>` = the template path took over (low_time,
+# budget_closed, no_rewrite, guardrails, bias_flagged, reviewer_rejected,
+# error); `skipped` = Agent 2 did not run (disabled, or the flagged email
+# already was the template). A high hand-over rate means Agent 2 costs API
+# calls without replacing emails.
+bias_agent2_outcomes_total = Counter(
+    "bias_agent2_outcomes",
+    "Agent 2 moderate-band rewrite outcomes",
+    labelnames=["outcome"],
+)

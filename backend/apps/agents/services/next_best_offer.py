@@ -31,6 +31,10 @@ def _extract_tool_result(response, fallback):
         return fallback
 
 
+# Shown when the LLM wording step is unavailable.
+NBO_FALLBACK_MESSAGE = "Thank you for applying with us. Based on your application, these products may suit you."
+
+
 class NextBestOfferGenerator:
     """Generates alternative offers for denied applicants based on their banking profile.
 
@@ -189,10 +193,7 @@ RULES:
                     {"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers
                 ],
                 "analysis": "We have identified alternative products based on your financial profile.",
-                "personalized_message": (
-                    "Thank you for your interest in banking with us. "
-                    "We have some tailored options that may suit your needs."
-                ),
+                "personalized_message": NBO_FALLBACK_MESSAGE,
             }
         except Exception as e:
             import logging as _logging
@@ -206,10 +207,7 @@ RULES:
                     {"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers
                 ],
                 "analysis": "We have identified alternative products based on your financial profile.",
-                "personalized_message": (
-                    "Thank you for your interest in banking with us. "
-                    "We have some tailored options that may suit your needs."
-                ),
+                "personalized_message": NBO_FALLBACK_MESSAGE,
             }
 
     def _format_precalculated_offers(self, offers):

@@ -61,7 +61,7 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
     orchestrate endpoint and a forced re-run both pick it up); the reason is
     recorded on the status_transition AuditLog and the failed AgentRun.
 
-    No-ops if a newer AgentRun is already COMPLETED for the application
+    No-ops if the application's latest AgentRun is COMPLETED
     (another actor owns the work), so the watchdog, the orchestrator
     stale-reset, and Celery autoretry cannot fight over the same state (L22).
 
@@ -83,11 +83,15 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
             if app is None:
                 return  # not stuck, or already moved on
 
-            # Another actor owns the work — do not stomp it.
-            if AgentRun.objects.filter(
-                application_id=application_id,
-                status=AgentRun.Status.COMPLETED,
-            ).exists():
+            # Another actor owns the work if the latest run completed. An older
+            # completed run does not: it is what a forced re-run replaced.
+            latest_status = (
+                AgentRun.objects.filter(application_id=application_id)
+                .order_by("-created_at")
+                .values_list("status", flat=True)
+                .first()
+            )
+            if latest_status == AgentRun.Status.COMPLETED:
                 logger.info("Application %s: cleanup skipped, a completed run owns it", application_id)
                 return
 
@@ -231,19 +235,9 @@ def resume_pipeline_task(self, agent_run_id, reviewer="", note="", action="appro
         with pipeline_deadline(self.soft_time_limit or _DEDUP_LOCK_TTL):
             agent_run = orchestrator.resume_after_review(agent_run_id, reviewer=reviewer, note=note, action=action)
     except (ConnectionError, TimeoutError, OSError):
-        raise
-    except Exception:
-        # Try to find the application_id from the agent run for cleanup
-        try:
-            from apps.agents.models import AgentRun
-
-            run = AgentRun.objects.get(pk=agent_run_id)
-            _cleanup_stuck_application(str(run.application_id))
-        except Exception:
-            logger.exception(
-                "resume_pipeline_cleanup_failed",
-                extra={"agent_run_id": str(agent_run_id)},
-            )
+        raise  # autoretried; the resume accepts the claimed run again
+    except Exception as exc:
+        _return_claimed_run_to_review(agent_run_id, f"Resume failed: {exc}")
         raise
 
     return {
@@ -252,6 +246,37 @@ def resume_pipeline_task(self, agent_run_id, reviewer="", note="", action="appro
         "total_time_ms": agent_run.total_time_ms,
         "num_steps": len(agent_run.steps),
     }
+
+
+def _return_claimed_run_to_review(agent_run_id, error):
+    """Put a claimed (RUNNING) review run back in the queue as ESCALATED.
+
+    The review view claims the run before dispatching the resume. If the
+    resume then dies, the application is still REVIEW but no ESCALATED run
+    lists it, so nothing could act on it. No-op once the resume has moved
+    the application on, or if the run is no longer the claimed one.
+    """
+    try:
+        from apps.agents.models import AgentRun
+        from apps.loans.models import LoanApplication
+
+        with transaction.atomic():
+            run = AgentRun.objects.select_for_update().filter(pk=agent_run_id).first()
+            if run is None or run.status != AgentRun.Status.RUNNING:
+                return
+            in_review = (
+                LoanApplication.objects.select_for_update()
+                .filter(pk=run.application_id, status=LoanApplication.Status.REVIEW)
+                .exists()
+            )
+            if not in_review:
+                return
+            run.status = AgentRun.Status.ESCALATED
+            run.error = str(error)[:2000]
+            run.save(update_fields=["status", "error", "updated_at"])
+        logger.warning("Agent run %s: resume failed, returned to the review queue", agent_run_id)
+    except Exception:
+        logger.exception("resume_return_to_review_failed", extra={"agent_run_id": str(agent_run_id)})
 
 
 # A run that is still PROCESSING this long after it was last touched cannot
@@ -285,7 +310,24 @@ def recover_stuck_processing_applications():
             recovered.append(str(application_id))
     if recovered:
         logger.warning("Recovered %d application(s) stuck in processing: %s", len(recovered), recovered)
-    return {"recovered": recovered}
+
+    # A hard-killed resume skips its except arm too: its claimed run stays
+    # RUNNING on a REVIEW application, so return it to the review queue.
+    from apps.agents.models import AgentRun
+
+    requeued = []
+    dead_resume_ids = AgentRun.objects.filter(
+        status=AgentRun.Status.RUNNING,
+        application__status=LoanApplication.Status.REVIEW,
+        updated_at__lt=cutoff,
+    ).values_list("pk", flat=True)[:100]
+    for run_id in dead_resume_ids:
+        _return_claimed_run_to_review(run_id, "Resume task died or timed out; returned to the review queue")
+        if AgentRun.objects.filter(pk=run_id, status=AgentRun.Status.ESCALATED).exists():
+            requeued.append(str(run_id))
+    if requeued:
+        logger.warning("Returned %d dead review resume(s) to the queue: %s", len(requeued), requeued)
+    return {"recovered": recovered, "requeued": requeued}
 
 
 @shared_task(name="apps.agents.tasks.compute_pipeline_sla", time_limit=300, soft_time_limit=270)

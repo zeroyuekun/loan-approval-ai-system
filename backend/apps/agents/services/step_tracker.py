@@ -22,6 +22,10 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(
         "ml_prediction": 30_000,
         "email_generation": 60_000,
         "bias_check": 60_000,
+        "bias_regeneration": 60_000,
+        # Rewrite + bias check + senior review: one generation, one detector
+        # call and one review call, each budgeted like its own step.
+        "bias_agent2_regeneration": 180_000,
         "ai_email_review": 60_000,
         "email_delivery": 30_000,
         "next_best_offers": 60_000,
@@ -32,6 +36,7 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(
         "marketing_email_delivery": 30_000,
         "human_escalation": 5_000,
         "human_escalation_severe_bias": 5_000,
+        "human_escalation_moderate_bias": 5_000,
         "human_escalation_low_confidence": 5_000,
         "human_review_approved": 5_000,
         "human_review_denied": 5_000,
@@ -66,6 +71,14 @@ def pipeline_deadline(seconds):
         yield
     finally:
         _PIPELINE_DEADLINE.reset(token)
+
+
+def seconds_until_deadline():
+    """Seconds left before the pipeline's soft deadline, or None outside a deadline scope."""
+    deadline = _PIPELINE_DEADLINE.get()
+    if deadline is None:
+        return None
+    return deadline - time.monotonic()
 
 
 def raise_if_past_deadline():

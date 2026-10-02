@@ -69,7 +69,8 @@ class BiasReport(models.Model):
     bias_score = models.FloatField()  # 0-100
     deterministic_score = models.FloatField(null=True, default=None)
     llm_raw_score = models.FloatField(null=True, default=None)
-    score_source = models.CharField(max_length=20, default="composite")  # 'deterministic', 'llm', 'composite'
+    # deterministic, deterministic_weighted, llm_false_positive, composite
+    score_source = models.CharField(max_length=32, default="composite")
     categories = models.JSONField(default=list)  # ['gender', 'age', etc.]
     analysis = models.TextField()
     flagged = models.BooleanField(default=False)

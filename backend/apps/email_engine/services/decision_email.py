@@ -60,7 +60,14 @@ def bias_hold_reason(application_id, email=None):
     * ``email`` is an unsent draft with a flagged bias report: the pipeline
       withheld it, so re-sending it would bypass the bias check. A flagged
       draft that the pipeline then sent has ``sent_at`` set and is not held.
+    * ``email`` is an unsent Agent 2 rewrite the senior reviewer has not
+      approved: its report has ``ai_review_approved=False`` from the moment it
+      is persisted until the review approves it, so a rejected rewrite, or one
+      whose review never finished (a time limit or crash mid-Agent 2), stays
+      held. Reports with no senior review (``None``) do not hold a draft.
     """
+    from django.db.models import Q
+
     from apps.agents.models import AgentRun
     from apps.loans.models import LoanApplication
 
@@ -70,7 +77,11 @@ def bias_hold_reason(application_id, email=None):
     )
     if under_review:
         return "Application is under human review; the review outcome issues the decision email"
-    if email is not None and email.sent_at is None and email.bias_reports.filter(flagged=True).exists():
+    if (
+        email is not None
+        and email.sent_at is None
+        and email.bias_reports.filter(Q(flagged=True) | Q(ai_review_approved=False)).exists()
+    ):
         return (
             "The stored draft was held back by the bias check and cannot be sent; "
             "re-run the pipeline to issue a freshly screened email"
@@ -118,11 +129,50 @@ def generate_decision_email(
         if on_rate_limit == "raise":
             raise
         logger.warning("Application %s: email LLM rate limited — issuing the template decision email", application.pk)
-        result = generator.generate_template(application, decision)
+        result = generator.generate_template(application, decision, profile_context=profile_context)
 
+    return result, _persist(application, decision, result)
+
+
+def regenerate_decision_email(application, decision, *, confidence, profile_context, bias_feedback, generator=None):
+    """Second-agent rewrite of a bias-flagged email. Returns the generator result, NOT persisted.
+
+    The caller (``run_agent2``) persists the rewrite with
+    ``persist_decision_email`` only after the bias detector has scored it, in
+    the same transaction as its bias report, so a rewrite never exists in the
+    database without the report that holds it from the staff send paths until
+    the senior review approves it. A template result (LLM unavailable, budget
+    gate, guardrail exhaustion) is handed over to the template replacement
+    path, which persists its own template. RateLimited propagates.
+    """
+    generator = generator or EmailGenerator()
+    return generator.generate(
+        application, decision, confidence=confidence, profile_context=profile_context, bias_feedback=bias_feedback
+    )
+
+
+def persist_decision_email(application, decision, result):
+    """Persist a generated decision email and its guardrail logs. Returns the ``GeneratedEmail``."""
+    return _persist(application, decision, result)
+
+
+def generate_template_decision_email(application, decision, *, profile_context=None, generator=None):
+    """Generate and persist the deterministic template email. Returns ``(result, generated_email)``.
+
+    Used when the bias check flags an LLM-written email: the template is the
+    replacement that gets a second bias check before anything is sent.
+    ``profile_context`` carries ``nbo_offer`` for denials, so the replacement
+    still carries the next-best offer.
+    """
+    generator = generator or EmailGenerator()
+    result = generator.generate_template(application, decision, profile_context=profile_context)
+    return result, _persist(application, decision, result)
+
+
+def _persist(application, decision, result):
     generated_email = EmailPersistenceService.save_generated_email(application, decision, result)
     EmailPersistenceService.save_guardrail_logs(generated_email, result.get("guardrail_results", []))
-    return result, generated_email
+    return generated_email
 
 
 def deliver_decision_email(generated_email):
