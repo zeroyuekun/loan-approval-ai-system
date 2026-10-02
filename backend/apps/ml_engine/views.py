@@ -53,8 +53,10 @@ class ModelMetricsView(APIView):
     permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
-        """Return metrics for the active model."""
-        model_version = ModelVersion.objects.filter(is_active=True).first()
+        """Return metrics for the active model (the unified champion)."""
+        from apps.ml_engine.services.model_selector import monitoring_model_version
+
+        model_version = monitoring_model_version()
         if not model_version:
             return Response(
                 {"error": "No active model found"},
@@ -426,7 +428,9 @@ class DriftReportListView(APIView):
     permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
-        active_model = ModelVersion.objects.filter(is_active=True).first()
+        from apps.ml_engine.services.model_selector import monitoring_model_version
+
+        active_model = monitoring_model_version()
         if not active_model:
             return Response(
                 {"error": "No active model found"},

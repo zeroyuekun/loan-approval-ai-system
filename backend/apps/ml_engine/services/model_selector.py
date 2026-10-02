@@ -75,6 +75,21 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
     return selected
 
 
+def monitoring_model_version():
+    """The model the metrics and drift dashboards describe.
+
+    The unified segment's main champion (highest traffic, then newest); if no
+    unified model is active, the newest active model. A plain
+    ``filter(is_active=True).first()`` would switch the dashboards to whichever
+    segment model was trained last.
+    """
+    active = ModelVersion.objects.filter(is_active=True)
+    return (
+        active.filter(segment=SEGMENT_UNIFIED).order_by("-traffic_percentage", "-created_at").first()
+        or active.order_by("-created_at").first()
+    )
+
+
 @dataclass
 class PromotionDecision:
     """Outcome of a champion-challenger promotion gate evaluation."""

@@ -398,12 +398,16 @@ def check_fairness_violations(self):
 
 @shared_task(bind=True, name="apps.ml_engine.tasks.compute_weekly_drift_report", time_limit=600, soft_time_limit=580)
 def compute_weekly_drift_report(self):
-    """Compute weekly drift report comparing recent predictions to training distribution."""
-    active_version = ModelVersion.objects.filter(is_active=True).first()
-    if not active_version:
+    """Weekly drift report for EVERY active model (each segment, each challenger),
+    comparing its recent predictions to its training score distribution."""
+    active_versions = list(ModelVersion.objects.filter(is_active=True).order_by("segment", "-created_at"))
+    if not active_versions:
         logger.warning("No active model version found; skipping drift report.")
         return {"status": "skipped", "reason": "no_active_model"}
+    return {"status": "completed", "reports": [_weekly_drift_report_for(mv) for mv in active_versions]}
 
+
+def _weekly_drift_report_for(active_version):
     now = timezone.now().date()
     period_end = now
     period_start = now - timedelta(days=7)
@@ -416,8 +420,8 @@ def compute_weekly_drift_report(self):
 
     num_predictions = predictions.count()
     if num_predictions == 0:
-        logger.info("No predictions in the last 7 days; skipping drift report.")
-        return {"status": "skipped", "reason": "no_predictions"}
+        logger.info("No predictions in the last 7 days for model %s; skipping drift report.", active_version.id)
+        return {"model_version_id": str(active_version.id), "status": "skipped", "reason": "no_predictions"}
 
     probabilities = np.array(list(predictions.values_list("probability", flat=True)), dtype=float)
 
@@ -480,6 +484,7 @@ def compute_weekly_drift_report(self):
         )
 
     return {
+        "model_version_id": str(active_version.id),
         "status": "completed",
         "report_id": str(report.id),
         "psi_score": psi_score,
