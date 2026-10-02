@@ -107,3 +107,9 @@ def test_scrub_event_redacts_pii_in_log_and_breadcrumb_messages():
     assert result["logentry"]["params"] == ["[EMAIL_REDACTED]", 3]
     assert result["logentry"]["formatted"] == "login failed for [EMAIL_REDACTED]"
     assert result["breadcrumbs"]["values"][0]["message"] == "called [PHONE_REDACTED] about [EMAIL_REDACTED]"
+
+
+def test_scrub_event_redacts_pii_in_exception_messages():
+    event = {"exception": {"values": [{"type": "ValueError", "value": "no account for jane.doe@example.com"}]}}
+    scrubbed = scrub_event(event, {})
+    assert "jane.doe@example.com" not in scrubbed["exception"]["values"][0]["value"]

@@ -65,6 +65,8 @@ def scrub_event(event, hint):
             for value in container.get("values") or ():
                 if isinstance(value, dict):
                     _strip_frame_vars(value.get("stacktrace"))
+                    if isinstance(value.get("value"), str):
+                        value["value"] = redact_pii(value["value"])
 
     if isinstance(event.get("message"), str):
         event["message"] = redact_pii(event["message"])
