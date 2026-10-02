@@ -62,7 +62,7 @@ JSON
 }
 
 echo "[smoke] Starting docker compose..."
-(cd "${REPO_ROOT}" && docker compose up -d)
+(cd "${REPO_ROOT}" && docker compose up -d --wait --wait-timeout 600)
 
 echo "[smoke] Waiting for /api/v1/health/ to return 200..."
 for i in {1..60}; do

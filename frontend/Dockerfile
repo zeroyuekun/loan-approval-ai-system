@@ -19,7 +19,25 @@ COPY . .
 
 RUN npm run build
 
-# --- Production stage ---
+# --- Development stage (docker compose only, never shipped) ---
+# docker-compose.yml runs `npm ci && npm run dev` against bind-mounted
+# sources, which needs the npm that the runner stage removes.
+FROM node:22-alpine AS dev
+
+WORKDIR /app
+RUN chown node:node /app
+USER node
+
+COPY --chown=node:node package*.json ./
+RUN npm ci
+
+COPY --chown=node:node . .
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]
+
+# --- Production stage (the default target: keep it last) ---
 FROM node:22-alpine AS runner
 
 # Patch Alpine base packages (zlib CVE-2026-22184)
