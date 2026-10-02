@@ -568,6 +568,7 @@ blocking defaults, or before overriding one back to advisory.
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` | `enforce` | Hard-fail P-codes in `services/credit_policy.py` decline the application whatever the model says; refer P-codes are recorded on the decision (the human review queue is only for bias flags). If the overlay cannot be evaluated in enforce mode, the prediction step fails and the application returns to pending. |
 | `DECISION_OVERTURN_GATE_MODE` | `off` | `second_approver` | Maker/checker control on officer overturns of denials at/above `DECISION_OVERTURN_THRESHOLD` (default `$100,000`). `second_approver` blocks high-value overturns at the API pending an out-of-band dual-approval process; `2fa` (weaker) requires the acting officer to hold a verified TOTP device. Below-threshold overturns are never gated. |
 | `BIAS_FAILURE_MODE` | `block` | `block` | If bias detection is unavailable, the decision email is withheld and the application rolled back to pending. |
+| `ENFORCE_2FA_FOR_STAFF` | `false` | `true` | Admin and officer API calls return 403 `2fa_enrolment_required` until the user has a confirmed TOTP device; the frontend sends them to `/dashboard/two-factor` to enrol. Accepts only `true` or `false`. |
 
 The first two gate `train_model_task`, which runs rarely (on the retraining
 cadence). The third gates **every prediction** that hits the policy overlay,

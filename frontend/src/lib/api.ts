@@ -112,6 +112,10 @@ let refreshPromise: Promise<void> | null = null
 // avoids a reload loop on the login page itself.
 const AUTH_CHECK_PATHS = ['/auth/me/', '/auth/me/profile/']
 
+// backend: apps/accounts/policy.py StaffEnrolmentRequired
+const TWO_FACTOR_ENROLMENT_CODE = '2fa_enrolment_required'
+const TWO_FACTOR_PATH = '/dashboard/two-factor'
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -144,6 +148,15 @@ api.interceptors.response.use(
       return api(originalRequest)
     }
     if (error.response?.status === 401 && isAuthCheck) {
+      return Promise.reject(error)
+    }
+    // Staff account without a confirmed authenticator while the backend
+    // enforces 2FA: every staff API call is refused until it enrols, so send
+    // the user to enrolment instead of toasting each refused request.
+    if (error.response?.status === 403 && error.response?.data?.code === TWO_FACTOR_ENROLMENT_CODE) {
+      if (typeof window !== 'undefined' && window.location.pathname !== TWO_FACTOR_PATH) {
+        window.location.assign(TWO_FACTOR_PATH)
+      }
       return Promise.reject(error)
     }
     // Retry transient failures (429 Too Many Requests, 503 Service Unavailable)

@@ -35,6 +35,7 @@ GATES = (
     "DECISION_OVERTURN_GATE_MODE",
     "BIAS_FAILURE_MODE",
     "ML_ALLOW_UNHASHED_MODELS",
+    "ENFORCE_2FA_FOR_STAFF",
 )
 
 
@@ -64,6 +65,7 @@ def test_production_gates_default_to_block():
         "DECISION_OVERTURN_GATE_MODE": "second_approver",
         "BIAS_FAILURE_MODE": "block",
         "ML_ALLOW_UNHASHED_MODELS": "False",
+        "ENFORCE_2FA_FOR_STAFF": "True",
     }
 
 
@@ -82,6 +84,16 @@ def test_an_empty_env_value_means_the_production_default():
     """compose passes ${VAR:-} as an empty string when unset."""
     values = _values(_settings("config.settings.production", **PROD_ENV, ML_VALIDATION_SIGNOFF_GATE_MODE=""))
     assert values["ML_VALIDATION_SIGNOFF_GATE_MODE"] == "block"
+
+
+def test_production_enforces_staff_2fa_unless_explicitly_disabled():
+    """Staff 2FA is a fail-closed control: empty means the production default."""
+    assert _values(_settings("config.settings.production", **PROD_ENV, ENFORCE_2FA_FOR_STAFF=""))[
+        "ENFORCE_2FA_FOR_STAFF"
+    ] == "True"
+    assert _values(_settings("config.settings.production", **PROD_ENV, ENFORCE_2FA_FOR_STAFF="false"))[
+        "ENFORCE_2FA_FOR_STAFF"
+    ] == "False"
 
 
 @pytest.mark.parametrize("name", ["ML_FAIRNESS_GATE_MODE", "CREDIT_POLICY_OVERLAY_MODE", "DECISION_OVERTURN_GATE_MODE"])
@@ -107,4 +119,5 @@ def test_development_keeps_its_advisory_defaults():
         "DECISION_OVERTURN_GATE_MODE": "off",
         "BIAS_FAILURE_MODE": "block",
         "ML_ALLOW_UNHASHED_MODELS": "True",
+        "ENFORCE_2FA_FOR_STAFF": "False",
     }

@@ -367,9 +367,8 @@ ML_STANDALONE_PREDICT_ENABLED = os.environ.get("ML_STANDALONE_PREDICT_ENABLED", 
 #
 # ENFORCE_2FA_FOR_STAFF — when "true", IsAdmin / IsAdminOrOfficer /
 # IsLoanOfficer permissions require the user to have a confirmed TOTP
-# device. Off by default so existing tests (and any pre-rollout
-# environments) keep working. Flip to "true" in production AFTER all
-# admin/officer accounts are enrolled in TOTP via /api/v1/auth/2fa/setup/.
+# device. Off here for development and tests; production.py defaults it
+# to on, and the frontend sends un-enrolled staff to /dashboard/two-factor.
 #
 # ALLOW_2FA_BYPASS — break-glass switch that skips the OTP check at
 # login for users who already have a TOTP device. Every bypass is

@@ -72,6 +72,19 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Audit Log')).not.toBeInTheDocument()
   })
 
+  it('links staff to two-factor enrolment', () => {
+    render(<Sidebar {...defaultProps} />)
+    expect(screen.getByRole('link', { name: /two-factor/i })).toHaveAttribute('href', '/dashboard/two-factor')
+  })
+
+  it('does not show two-factor enrolment to customers', () => {
+    vi.mocked(useAuth).mockReturnValue({
+      user: { username: 'jane', first_name: 'Jane', last_name: 'Doe', role: 'customer' },
+    } as ReturnType<typeof useAuth>)
+    render(<Sidebar {...defaultProps} />)
+    expect(screen.queryByRole('link', { name: /two-factor/i })).not.toBeInTheDocument()
+  })
+
   it('shows user display name in user card', () => {
     render(<Sidebar {...defaultProps} />)
     expect(screen.getByText('Admin User')).toBeInTheDocument()

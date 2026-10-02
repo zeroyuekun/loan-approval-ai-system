@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ShieldCheck } from 'lucide-react'
 import { authApi } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -23,12 +23,14 @@ function secretFrom(uri: string): string | null {
 
 /**
  * TOTP enrolment for staff. Login sends officers and admins here when the
- * backend flags `requires_2fa_setup`; once confirmed, every later login asks
+ * backend flags `requires_2fa_setup`, and the API client does on any
+ * `2fa_enrolment_required` refusal; once confirmed, every later login asks
  * for a code from the authenticator app.
  */
 export default function TwoFactorSetupPage() {
   const [code, setCode] = useState('')
   const [confirmed, setConfirmed] = useState(false)
+  const queryClient = useQueryClient()
 
   const status = useQuery({
     queryKey: ['twoFactorStatus'],
@@ -39,7 +41,14 @@ export default function TwoFactorSetupPage() {
   })
   const verify = useMutation({
     mutationFn: async (token: string) => (await authApi.twoFactorVerify(token)).data,
-    onSuccess: () => setConfirmed(true),
+    onSuccess: () => {
+      setConfirmed(true)
+      // Keep the cached status in step: coming back to this page must show
+      // "on", not offer a setup the backend would refuse.
+      queryClient.setQueryData(['twoFactorStatus'], (old: { enabled: boolean; required: boolean } | undefined) =>
+        old ? { ...old, enabled: true } : { enabled: true, required: true },
+      )
+    },
   })
 
   const enabled = confirmed || status.data?.enabled

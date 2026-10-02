@@ -7,8 +7,7 @@ import TwoFactorSetupPage from '@/app/dashboard/two-factor/page'
 
 const API_URL = 'http://localhost:8000/api/v1'
 
-function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function renderPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={client}>
       <TwoFactorSetupPage />
@@ -54,6 +53,25 @@ describe('TwoFactorSetupPage', () => {
 
     expect(await screen.findByText(/two-factor authentication is on/i)).toBeInTheDocument()
     expect(verifiedWith).toEqual({ token: '123456' })
+  })
+
+  it('records the confirmed device in the cached status, so returning to the page shows it is on', async () => {
+    server.use(
+      http.get(`${API_URL}/auth/2fa/status/`, () => HttpResponse.json({ enabled: false, required: true })),
+      http.post(`${API_URL}/auth/2fa/setup/`, () =>
+        HttpResponse.json({ provisioning_uri: 'otpauth://totp/x?secret=ABC', qr_code_base64: null, detail: '' }),
+      ),
+      http.post(`${API_URL}/auth/2fa/verify/`, () => HttpResponse.json({ detail: 'ok', confirmed: true })),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const user = userEvent.setup()
+    renderPage(client)
+    await user.click(await screen.findByRole('button', { name: /set up authenticator/i }))
+    await user.type(await screen.findByLabelText('6-digit code'), '123456')
+    await user.click(screen.getByRole('button', { name: /confirm/i }))
+    await screen.findByText(/two-factor authentication is on/i)
+
+    expect(client.getQueryData(['twoFactorStatus'])).toMatchObject({ enabled: true })
   })
 
   it('shows the server message when the code is rejected', async () => {

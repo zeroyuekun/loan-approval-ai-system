@@ -151,4 +151,54 @@ describe('api interceptors', () => {
     // window.location.assign('/login') must have been called
     expect(assignSpy).toHaveBeenCalledWith('/login')
   })
+  describe('staff 2FA enrolment (403 code 2fa_enrolment_required)', () => {
+    function stubLocation(pathname: string) {
+      const assignSpy = vi.fn()
+      Object.defineProperty(window, 'location', {
+        value: { ...window.location, pathname, assign: assignSpy },
+        writable: true,
+        configurable: true,
+      })
+      return assignSpy
+    }
+
+    function enrolmentRequired() {
+      return HttpResponse.json(
+        { detail: 'Two-factor authentication must be set up', code: '2fa_enrolment_required' },
+        { status: 403 },
+      )
+    }
+
+    it('sends the user to the enrolment page', async () => {
+      const assignSpy = stubLocation('/dashboard')
+      server.use(http.get(`${API_URL}/loans/`, enrolmentRequired))
+
+      const api = await getApi()
+      await expect(api.get('/loans/')).rejects.toThrow()
+
+      expect(assignSpy).toHaveBeenCalledWith('/dashboard/two-factor')
+    })
+
+    it('does not redirect again when already on the enrolment page', async () => {
+      const assignSpy = stubLocation('/dashboard/two-factor')
+      server.use(http.get(`${API_URL}/loans/`, enrolmentRequired))
+
+      const api = await getApi()
+      await expect(api.get('/loans/')).rejects.toThrow()
+
+      expect(assignSpy).not.toHaveBeenCalled()
+    })
+
+    it('leaves other 403s alone', async () => {
+      const assignSpy = stubLocation('/dashboard')
+      server.use(
+        http.get(`${API_URL}/loans/`, () => HttpResponse.json({ detail: 'Forbidden' }, { status: 403 })),
+      )
+
+      const api = await getApi()
+      await expect(api.get('/loans/')).rejects.toThrow()
+
+      expect(assignSpy).not.toHaveBeenCalled()
+    })
+  })
 })

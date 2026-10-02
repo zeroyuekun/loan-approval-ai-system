@@ -81,6 +81,10 @@ DECISION_OVERTURN_GATE_MODE = _gate_mode(
     "DECISION_OVERTURN_GATE_MODE", "second_approver", ("off", "2fa", "second_approver")
 )
 BIAS_FAILURE_MODE = _gate_mode("BIAS_FAILURE_MODE", "block", ("warn", "block", "off"))
+# Staff (admin/officer) API access requires a confirmed TOTP device. An
+# un-enrolled staff user can still reach the enrolment endpoints, and the
+# frontend routes them there; set "false" only for a reviewed exception.
+ENFORCE_2FA_FOR_STAFF = _gate_mode("ENFORCE_2FA_FOR_STAFF", "true", ("true", "false")) == "true"
 # Never load a model artefact without a stored SHA-256, whatever DJANGO_DEBUG says.
 ML_ALLOW_UNHASHED_MODELS = False
 
