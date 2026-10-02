@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
 import { LoanApplication } from '@/types'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatMaybeMasked, formatDate } from '@/lib/utils'
 
 interface RecentApplicationsProps {
   applications: LoanApplication[]
@@ -39,7 +39,7 @@ export function RecentApplications({ applications }: RecentApplicationsProps) {
                       {app.applicant.first_name} {app.applicant.last_name}
                     </Link>
                   </TableCell>
-                  <TableCell>{formatCurrency(app.loan_amount)}</TableCell>
+                  <TableCell>{formatMaybeMasked(app.loan_amount)}</TableCell>
                   <TableCell>
                     <ApplicationStatusBadge status={app.status} decision={app.decision} />
                   </TableCell>

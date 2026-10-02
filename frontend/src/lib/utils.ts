@@ -11,6 +11,15 @@ export function formatCurrency(amount: number): string {
   return AUD_FORMATTER.format(amount)
 }
 
+/**
+ * Format a money value that may arrive pre-masked. Customer-facing endpoints
+ * replace amounts with a bracket string (e.g. "Under $50,000"); that string is
+ * shown as-is, since formatting it as a number would render "$NaN".
+ */
+export function formatMaybeMasked(amount: number | string): string {
+  return typeof amount === 'string' ? amount : formatCurrency(amount)
+}
+
 export function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`
 }

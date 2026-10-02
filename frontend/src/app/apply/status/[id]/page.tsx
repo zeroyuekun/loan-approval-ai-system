@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
-import { formatCurrency, formatDate, formatPurpose } from '@/lib/utils'
+import { formatMaybeMasked, formatDate, formatPurpose } from '@/lib/utils'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
 import { DecisionReviewStatus } from '@/components/applications/DecisionReviewStatus'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
@@ -341,7 +341,7 @@ export default function CustomerApplicationStatusPage() {
           <CardContent className="space-y-3">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Loan Amount</span>
-              <span className="font-semibold">{formatCurrency(application.loan_amount)}</span>
+              <span className="font-semibold">{formatMaybeMasked(application.loan_amount)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Loan Term</span>
@@ -349,7 +349,7 @@ export default function CustomerApplicationStatusPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Annual Income</span>
-              <span>{formatCurrency(application.annual_income)}</span>
+              <span>{formatMaybeMasked(application.annual_income)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Credit Score</span>

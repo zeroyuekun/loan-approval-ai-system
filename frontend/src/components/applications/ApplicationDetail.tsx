@@ -205,7 +205,7 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
 
         <TabsContent value="repayment">
           <RepaymentCalculator
-            loanAmount={application.loan_amount}
+            loanAmount={Number(application.loan_amount)}
             loanTermMonths={application.loan_term_months}
           />
         </TabsContent>

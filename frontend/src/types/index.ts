@@ -159,9 +159,10 @@ export interface StaffCustomerDetail {
 export interface LoanApplication {
   id: string;
   applicant: User;
-  annual_income: number;
-  credit_score: number;
-  loan_amount: number;
+  // Customer-facing responses mask these as bracket/band strings
+  annual_income: number | string;
+  credit_score: number | string;
+  loan_amount: number | string;
   loan_term_months: number;
   debt_to_income: number;
   employment_length: number;
@@ -170,7 +171,7 @@ export interface LoanApplication {
   has_cosigner: boolean;
   property_value: number | null;
   deposit_amount: number | null;
-  monthly_expenses: number | null;
+  monthly_expenses: number | string | null;
   existing_credit_card_limit: number;
   number_of_dependants: number;
   employment_type: 'payg_permanent' | 'payg_casual' | 'self_employed' | 'contract';
