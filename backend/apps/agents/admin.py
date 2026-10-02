@@ -1,10 +1,15 @@
 from django.contrib import admin
 
+from apps.common.admin import ViewOnlyModelAdmin
+
 from .models import AgentRun, APICallLog, BiasReport, NextBestOffer
 
 
 @admin.register(AgentRun)
-class AgentRunAdmin(admin.ModelAdmin):
+class AgentRunAdmin(ViewOnlyModelAdmin):
+    """View-only: a run's status changes only through the pipeline and the
+    audited human-review workflow."""
+
     list_display = ("id", "application", "status", "total_time_ms", "created_at")
     list_filter = ("status",)
     search_fields = ("application__applicant__username",)
@@ -12,7 +17,10 @@ class AgentRunAdmin(admin.ModelAdmin):
 
 
 @admin.register(BiasReport)
-class BiasReportAdmin(admin.ModelAdmin):
+class BiasReportAdmin(ViewOnlyModelAdmin):
+    """View-only: clearing `flagged` or a score by hand would release a
+    decision email the bias review held back."""
+
     list_display = ("id", "agent_run", "bias_score", "flagged", "requires_human_review", "created_at")
     list_filter = ("flagged", "requires_human_review")
     readonly_fields = ("id", "created_at")
