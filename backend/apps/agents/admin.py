@@ -27,13 +27,17 @@ class BiasReportAdmin(ViewOnlyModelAdmin):
 
 
 @admin.register(NextBestOffer)
-class NextBestOfferAdmin(admin.ModelAdmin):
+class NextBestOfferAdmin(ViewOnlyModelAdmin):
+    """View-only: the offers the pipeline made to a declined customer."""
+
     list_display = ("id", "agent_run", "application", "created_at")
     readonly_fields = ("id", "created_at")
 
 
 @admin.register(APICallLog)
-class APICallLogAdmin(admin.ModelAdmin):
+class APICallLogAdmin(ViewOnlyModelAdmin):
+    """View-only: the APP 8 record of each cross-border LLM call."""
+
     list_display = ("id", "service", "provider", "model_used", "loan_application", "timestamp")
     list_filter = ("service", "provider", "destination_country")
     search_fields = ("loan_application__id", "service")

@@ -31,6 +31,17 @@ def _audit_admin_change(request, action, instance, before, **kwargs):
     )
 
 
+def _audit_admin_delete(request, instance):
+    AuditLog.objects.create(
+        user=request.user,
+        action="loan_deleted",
+        resource_type=type(instance).__name__,
+        resource_id=str(instance.pk),
+        details={"source": "django_admin", "status": instance.status},
+        ip_address=request.META.get("REMOTE_ADDR"),
+    )
+
+
 @admin.register(LoanApplication)
 class LoanApplicationAdmin(admin.ModelAdmin):
     list_display = (
@@ -97,6 +108,20 @@ class LoanApplicationAdmin(admin.ModelAdmin):
                 request,
                 "Application queued, but applicant has no email on file — no decision email will be sent.",
             )
+
+    def delete_model(self, request, obj):
+        # delete() soft-deletes; record it in the hash chain like every other
+        # admin write, not only in Django's LogEntry.
+        with transaction.atomic():
+            super().delete_model(request, obj)
+            _audit_admin_delete(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        with transaction.atomic():
+            deleted = list(queryset)
+            super().delete_queryset(request, queryset)
+            for obj in deleted:
+                _audit_admin_delete(request, obj)
 
 
 @admin.register(LoanDecision)
@@ -173,6 +198,9 @@ class DecisionReviewAdmin(admin.ModelAdmin):
         "resolution_note",
     )
     actions = ["mark_upheld", "mark_overturned"]
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # a contestability record; resolved through the actions below, never deleted
 
     @admin.action(description="Uphold selected decisions (no change to loan)")
     def mark_upheld(self, request, queryset):
