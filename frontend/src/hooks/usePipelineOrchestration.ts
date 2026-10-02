@@ -49,10 +49,10 @@ export function usePipelineOrchestration(
   // queued state before Celery creates the new AgentRun.
   useEffect(() => {
     // Only react while waiting for a queued pipeline. pipelineQueued is the
-    // waiting flag, not preRunAgentId: that is null when the application had
-    // no run before the click, and then any run that appears is the new one.
+    // waiting flag, not preRunAgentId, which is null when the application had
+    // no run before the click.
     if (!agentRun || !pipelineQueued) return
-    const isNewRun = preRunAgentId === null || agentRun.id !== preRunAgentId
+    const isNewRun = agentRun.id !== preRunAgentId
     const isTerminal = ['completed', 'failed', 'escalated'].includes(agentRun.status)
     if (isNewRun && isTerminal) {
       setPipelineQueued(false)
