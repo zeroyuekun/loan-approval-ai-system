@@ -103,10 +103,21 @@ def generate_email_task(self, application_id, decision, regenerate=False):
 
     application = LoanApplication.objects.select_related("applicant", "decision").get(pk=application_id)
 
+    profile_context = None
+    if decision == "denied":
+        # Same next-best offer the orchestrator gives a denial (no API call,
+        # best-effort). Imported here: email_engine does not import the agents
+        # app at module level.
+        from apps.agents.services.email_pipeline import build_denial_email_context
+
+        profile_context = build_denial_email_context(application, None)
+
     try:
         # on_rate_limit="raise": this task can reschedule itself, so a 429
         # retries the LLM later instead of taking the template now.
-        result, email = generate_decision_email(application, decision, on_rate_limit="raise")
+        result, email = generate_decision_email(
+            application, decision, profile_context=profile_context, on_rate_limit="raise"
+        )
     except (ConnectionError, TimeoutError, OSError):
         raise  # let Celery autoretry handle infrastructure errors
     except RateLimited as exc:
