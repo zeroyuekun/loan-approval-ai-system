@@ -13,14 +13,22 @@ its flagged bias report, which ``bias_hold_reason`` already refuses to send.
 
 The decision is already on record when these paths run, so a hold does not
 move the application into the review queue (the review queue resumes REVIEW
-applications only). The screening is recorded on its own AgentRun, because a
-BiasReport belongs to a run.
+applications only).
+
+A BiasReport belongs to a run. The screening's reports go on the
+application's latest run (the pipeline or review run that reached the
+decision), whose status is left alone, and the screening is appended to its
+steps as one ``decision_email_reissue`` step. A run of its own would become
+the application's latest run: the Pipeline tab, the run list, the SLA stats
+and the "latest run" idempotency checks would all read a stub. Only an
+application with no run at all gets one, completed when the screening ends.
 """
 
 import logging
 import time
 
 from django.conf import settings
+from django.db import transaction
 
 from apps.agents.models import AgentRun
 from apps.email_engine.services.decision_email import deliver_decision_email
@@ -35,6 +43,9 @@ from .step_tracker import StepTracker
 logger = logging.getLogger("agents.decision_email_screening")
 
 
+REISSUE_STEP = "decision_email_reissue"
+
+
 def _bias_failure_mode():
     mode = getattr(settings, "BIAS_FAILURE_MODE", "block").lower()
     return mode if mode in ("block", "warn", "off") else "block"
@@ -47,9 +58,10 @@ def screen_and_deliver_decision_email(application, decision, email_result, gener
     ``body``, ``passed_guardrails`` and ``template_fallback`` are read).
     Returns ``{"sent": bool, "held_reason": str|None, "generated_email": ...,
     "agent_run": AgentRun|None}``; ``generated_email`` is the email that was
-    sent or held, which is the template when it replaced a flagged email.
-    Delivery exceptions propagate (the Celery task retries infrastructure
-    errors), after the run is marked failed.
+    sent or held, which is the template when it replaced a flagged email, and
+    ``agent_run`` is the run the screening was recorded on. Delivery
+    exceptions propagate (the Celery task retries infrastructure errors),
+    after the screening is recorded as failed.
     """
     outcome = {"sent": False, "held_reason": None, "generated_email": generated_email, "agent_run": None}
     if not email_result.get("passed_guardrails"):
@@ -57,8 +69,12 @@ def screen_and_deliver_decision_email(application, decision, email_result, gener
 
     tracker = StepTracker()
     start_time = time.time()
-    agent_run = AgentRun.objects.create(application=application, status=AgentRun.Status.RUNNING)
+    agent_run = AgentRun.objects.filter(application=application).order_by("-created_at").first()
+    own_run = agent_run is None
+    if own_run:
+        agent_run = AgentRun.objects.create(application=application, status=AgentRun.Status.RUNNING)
     outcome["agent_run"] = agent_run
+    reissue = tracker.start_step(REISSUE_STEP)
     steps = []
     try:
         held_reason = None
@@ -132,17 +148,44 @@ def screen_and_deliver_decision_email(application, decision, email_result, gener
             else:
                 steps.append(tracker.fail_step(step, delivery["error"] or "Send failed"))
     except BaseException as exc:
-        agent_run.status = AgentRun.Status.FAILED
-        agent_run.error = f"Decision email screening failed: {exc}"
+        if own_run:
+            agent_run.status = AgentRun.Status.FAILED
+            agent_run.error = f"Decision email screening failed: {exc}"
+            agent_run.steps = steps
+            agent_run.total_time_ms = int((time.time() - start_time) * 1000)
+            agent_run.save()
+        else:
+            _append_step(agent_run, StepTracker.post_decision_failure_step(REISSUE_STEP, exc))
+        raise
+
+    if own_run:
+        # Completed either way; a hold is recorded on the run like a guardrail withhold.
+        agent_run.status = AgentRun.Status.COMPLETED
+        agent_run.error = f"Decision email held: {outcome['held_reason']}" if outcome["held_reason"] else ""
         agent_run.steps = steps
         agent_run.total_time_ms = int((time.time() - start_time) * 1000)
         agent_run.save()
-        raise
-
-    # Completed either way; a hold is recorded on the run like a guardrail withhold.
-    agent_run.status = AgentRun.Status.COMPLETED
-    agent_run.error = f"Decision email held: {outcome['held_reason']}" if outcome["held_reason"] else ""
-    agent_run.steps = steps
-    agent_run.total_time_ms = int((time.time() - start_time) * 1000)
-    agent_run.save()
+    else:
+        _append_step(
+            agent_run,
+            tracker.complete_step(
+                reissue,
+                result_summary={
+                    "decision": decision,
+                    "sent": outcome["sent"],
+                    "reason": outcome["held_reason"],
+                    "template_fallback": outcome["generated_email"].template_fallback,
+                    "steps": [{"step_name": s["step_name"], "status": s["status"]} for s in steps],
+                },
+            ),
+        )
     return outcome
+
+
+def _append_step(agent_run, step):
+    """Add the screening to an existing run's steps under a row lock, leaving its status alone."""
+    with transaction.atomic():
+        locked = AgentRun.objects.select_for_update().get(pk=agent_run.pk)
+        locked.steps = [*(locked.steps or []), step]
+        locked.save(update_fields=["steps", "updated_at"])
+    agent_run.steps = locked.steps

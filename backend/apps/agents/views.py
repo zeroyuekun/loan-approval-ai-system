@@ -291,7 +291,13 @@ class AgentRunView(APIView):
         agent_run = (
             AgentRun.objects.filter(application_id=loan_id)
             .select_related("application__applicant")
-            .prefetch_related("bias_reports", "next_best_offers", "marketing_emails")
+            .prefetch_related(
+                # Newest first, as in the run list: a run can hold several
+                # reports (a replacement, an Agent 2 rewrite, a later reissue).
+                Prefetch("bias_reports", queryset=BiasReport.objects.order_by("-created_at")),
+                "next_best_offers",
+                "marketing_emails",
+            )
             .order_by("-created_at")
             .first()
         )

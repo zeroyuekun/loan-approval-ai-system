@@ -372,6 +372,40 @@ def overturnable(sample_application, officer_user):
 
 
 @pytest.fixture
+def pipeline_run(overturnable):
+    """The completed pipeline run that denied the application."""
+    from apps.agents.models import AgentRun
+
+    review, _ = overturnable
+    return AgentRun.objects.create(
+        application=review.application,
+        status=AgentRun.Status.COMPLETED,
+        steps=[{"step_name": "ml_prediction", "status": "completed"}],
+    )
+
+
+def _overturn_with_severe_bias(review, officer, django_capture_on_commit_callbacks):
+    """Overturn, running the queued email task in-process with a severe bias finding."""
+    from apps.email_engine.tasks import generate_email_task
+    from apps.loans.services.decision_review import apply_review_outcome
+
+    send = MagicMock(return_value={"sent": True})
+
+    def _run_now(*args, **kwargs):
+        return generate_email_task.apply(args=args, kwargs=kwargs).get()
+
+    with (
+        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch(BIAS_ANALYZE, return_value=_severe_bias()) as analyze,
+        patch(SENDER, send),
+        patch("apps.email_engine.tasks.generate_email_task.delay", side_effect=_run_now),
+        django_capture_on_commit_callbacks(execute=True),
+    ):
+        apply_review_outcome(review, officer=officer, outcome="overturned", note="manual approve")
+    return analyze, send
+
+
+@pytest.fixture
 def decided_approved(sample_application):
     sample_application.status = "approved"
     sample_application.save(update_fields=["status"])
@@ -459,28 +493,59 @@ def test_redelivery_bias_checks_a_draft_that_was_never_screened(decided_approved
 def test_overturn_approval_email_is_bias_checked(overturnable, django_capture_on_commit_callbacks):
     """The overturn issues its approval email through the bias-checked path:
     a severely flagged LLM email is held, not sent."""
-    from apps.email_engine.tasks import generate_email_task
-    from apps.loans.services.decision_review import apply_review_outcome
-
     review, officer = overturnable
-    send = MagicMock(return_value={"sent": True})
 
-    def _run_now(*args, **kwargs):
-        return generate_email_task.apply(args=args, kwargs=kwargs).get()
-
-    with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
-        patch(BIAS_ANALYZE, return_value=_severe_bias()) as analyze,
-        patch(SENDER, send),
-        patch("apps.email_engine.tasks.generate_email_task.delay", side_effect=_run_now),
-        django_capture_on_commit_callbacks(execute=True),
-    ):
-        apply_review_outcome(review, officer=officer, outcome="overturned", note="manual approve")
+    analyze, send = _overturn_with_severe_bias(review, officer, django_capture_on_commit_callbacks)
 
     assert analyze.call_count == 1, "the overturn approval email skipped the bias check"
     assert send.call_count == 0
     email = GeneratedEmail.objects.get(application=review.application, decision="approved")
     assert email.sent_at is None
+
+
+@LOCMEM
+@pytest.mark.django_db
+def test_overturn_screening_is_recorded_on_the_existing_run(
+    overturnable, pipeline_run, django_capture_on_commit_callbacks
+):
+    """The screening's bias report goes on the run that decided the application.
+    No new AgentRun: one would become the application's latest run."""
+    from apps.agents.models import AgentRun, BiasReport
+
+    review, officer = overturnable
+    runs_before = AgentRun.objects.filter(application=review.application).count()
+
+    _overturn_with_severe_bias(review, officer, django_capture_on_commit_callbacks)
+
+    assert AgentRun.objects.filter(application=review.application).count() == runs_before, (
+        "the screening created a run of its own"
+    )
+    email = GeneratedEmail.objects.get(application=review.application, decision="approved")
+    report = BiasReport.objects.get(email=email)
+    assert report.agent_run_id == pipeline_run.pk
+    assert report.flagged is True
+    pipeline_run.refresh_from_db()
+    assert pipeline_run.status == AgentRun.Status.COMPLETED  # status left alone
+    assert pipeline_run.steps[-1]["step_name"] == "decision_email_reissue"
+    assert pipeline_run.steps[-1]["result_summary"]["sent"] is False
+
+
+@LOCMEM
+@pytest.mark.django_db
+def test_run_view_still_shows_the_pipeline_run_after_a_screening(
+    overturnable, pipeline_run, officer_user, django_capture_on_commit_callbacks
+):
+    review, officer = overturnable
+
+    _overturn_with_severe_bias(review, officer, django_capture_on_commit_callbacks)
+
+    client = APIClient()
+    client.force_authenticate(user=officer_user)
+    resp = client.get(f"/api/v1/agents/runs/{review.application_id}/")
+    assert resp.status_code == 200, resp.data
+    assert resp.data["id"] == str(pipeline_run.pk), "the Pipeline tab shows a screening stub, not the pipeline run"
+    assert resp.data["steps"][0]["step_name"] == "ml_prediction"
+    assert [r["flagged"] for r in resp.data["bias_reports"]] == [True]
 
 
 @pytest.mark.django_db
