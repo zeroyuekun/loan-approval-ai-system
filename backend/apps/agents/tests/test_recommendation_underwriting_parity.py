@@ -14,26 +14,40 @@ conftest.py), no database.
 
 import pytest
 
-from apps.ml_engine.services.datagen.underwriting_engine import UnderwritingEngine
 
-# One income inside each of the five HEM brackets (<45k, <60k, <120k, <180k, 180k+).
-INCOMES = [30000.0, 50000.0, 90000.0, 150000.0, 250000.0]
-STATES = sorted(UnderwritingEngine.STATE_HEM_MULTIPLIER)
-
-
-@pytest.mark.parametrize("state", STATES)
-@pytest.mark.parametrize("dependants", [0, 1, 2, 3, 4])
-@pytest.mark.parametrize("applicant_type", ["single", "couple"])
-@pytest.mark.parametrize("income", INCOMES)
-def test_hem_matches_underwriting_engine(make_snapshot, income, applicant_type, dependants, state):
+# CustomerSnapshot gets its HEM from UnderwritingEngine.get_hem, so comparing
+# the two would compare a function with itself. These cases instead pin that
+# every argument reaches the lookup, against values worked out by hand from
+# HEM_TABLE x STATE_HEM_MULTIPLIER (truncated to whole dollars).
+@pytest.mark.parametrize(
+    "applicant_type, dependants, income, state, expected_hem",
+    [
+        # State multiplier: the same household in four states.
+        ("single", 0, 90000.0, "NSW", 2357),  # mid 2050 x 1.15
+        ("single", 0, 90000.0, "VIC", 2214),  # mid 2050 x 1.08
+        ("single", 0, 90000.0, "SA", 1886),  # mid 2050 x 0.92
+        ("single", 0, 90000.0, "QLD", 2050),  # mid 2050 x 1.00
+        # Couple vs single, same income and state.
+        ("couple", 0, 90000.0, "NSW", 3392),  # mid 2950 x 1.15
+        # Dependants 3 and 4 have their own rows; 5+ uses the 4 row.
+        ("couple", 3, 90000.0, "NSW", 4830),  # mid 4200 x 1.15
+        ("single", 4, 150000.0, "QLD", 4300),  # high 4300 x 1.00
+        ("single", 5, 50000.0, "TAS", 2835),  # low (4 row) 3150 x 0.90
+        # The outer income brackets.
+        ("single", 0, 30000.0, "QLD", 1400),  # very_low 1400 x 1.00
+        ("couple", 2, 250000.0, "WA", 5460),  # very_high 5200 x 1.05
+    ],
+)
+def test_hem_passes_household_income_and_state_to_the_lookup(
+    make_snapshot, applicant_type, dependants, income, state, expected_hem
+):
     snap = make_snapshot(
         annual_income=income,
         applicant_type=applicant_type,
         number_of_dependants=dependants,
         state=state,
     )
-    expected = UnderwritingEngine().get_hem(applicant_type, dependants, income, state)
-    assert snap.hem_expenses == expected
+    assert snap.hem_expenses == expected_hem
 
 
 @pytest.mark.parametrize(
@@ -63,4 +77,4 @@ def test_state_defaults_to_nsw_when_not_supplied(make_snapshot):
     # The shared factory's defaults carry no ``state``.
     snap = make_snapshot()
     assert snap.state == "NSW"
-    assert snap.hem_expenses == UnderwritingEngine().get_hem("single", 0, snap.annual_income, "NSW")
+    assert snap.hem_expenses == 2875  # single, no dependants, $120k (high 2500) x NSW 1.15
