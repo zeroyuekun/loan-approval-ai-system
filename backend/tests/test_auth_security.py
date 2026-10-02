@@ -386,6 +386,9 @@ def hash_calls(monkeypatch):
     call encode(), so each entry is one hash."""
     from django.contrib.auth.hashers import Argon2PasswordHasher
 
+    from apps.accounts.views import _dummy_password_hash
+
+    _dummy_password_hash()  # built once per process, before counting starts
     calls = []
     for name in ("encode", "verify"):
         original = getattr(Argon2PasswordHasher, name)

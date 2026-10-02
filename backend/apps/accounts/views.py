@@ -1,3 +1,4 @@
+import functools
 import logging
 from datetime import timedelta
 
@@ -213,6 +214,13 @@ class RegisterView(generics.CreateAPIView):
         return response
 
 
+@functools.cache
+def _dummy_password_hash():
+    # On first use rather than at import, so processes that never serve a
+    # login (Celery workers, management commands) skip an Argon2 hash.
+    return make_password("dummy-timing-equalizer")
+
+
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = (AllowAny,)
@@ -226,11 +234,9 @@ class LoginView(generics.GenericAPIView):
 
     # Every branch of post() spends exactly one password hash, so the response
     # time does not tell a caller whether the account exists or is locked.
-    # Branches that never reach a real password check verify against this.
-    _DUMMY_HASH = make_password("dummy-timing-equalizer")
-
+    # Branches that never reach a real password check verify against a dummy.
     def _burn_hash(self, password):
-        check_password(str(password), self._DUMMY_HASH)
+        check_password(str(password), _dummy_password_hash())
 
     def post(self, request, *args, **kwargs):
         generic_error = {"detail": "Invalid username or password."}
