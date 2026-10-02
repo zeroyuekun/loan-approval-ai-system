@@ -10,7 +10,8 @@ import { DecisionReviewStatus } from './DecisionReviewStatus'
 interface DenialExplanationPanelProps {
   denialReasons: Array<{ code: string; reason: string; feature: string }>
   counterfactuals: Array<{ changes: Record<string, number>; statement: string }>
-  creditScore: number | null
+  // Customers receive a masked band string (e.g. "Average (500-699)"), staff the number
+  creditScore: number | string | null
   applicationId?: string
   admDisclosure?: AdmDisclosure | null
 }
@@ -58,9 +59,13 @@ export function DenialExplanationPanel({
             <div className="rounded-lg border p-3 text-sm">
               <span className="text-muted-foreground">Credit score: </span>
               <span className="font-semibold">{creditScore}</span>
-              <span className="text-muted-foreground"> — </span>
-              <span className="font-medium">{getEquifaxBand(creditScore)}</span>
-              <span className="text-muted-foreground"> (Equifax AU band)</span>
+              {typeof creditScore === 'number' && (
+                <>
+                  <span className="text-muted-foreground"> — </span>
+                  <span className="font-medium">{getEquifaxBand(creditScore)}</span>
+                  <span className="text-muted-foreground"> (Equifax AU band)</span>
+                </>
+              )}
             </div>
           )}
 

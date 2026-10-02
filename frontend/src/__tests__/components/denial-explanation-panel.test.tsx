@@ -139,4 +139,12 @@ describe('DenialExplanationPanel', () => {
     rerender(<DenialExplanationPanel {...defaultProps} creditScore={900} />)
     expect(screen.getByText(/Excellent/)).toBeInTheDocument()
   })
+
+  it('shows a customer-masked score band as given, without deriving an Equifax band', () => {
+    render(<DenialExplanationPanel {...defaultProps} creditScore="Average (500-699)" />)
+
+    expect(screen.getByText('Average (500-699)')).toBeInTheDocument()
+    expect(screen.queryByText(/Excellent/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Equifax AU band/)).not.toBeInTheDocument()
+  })
 })
