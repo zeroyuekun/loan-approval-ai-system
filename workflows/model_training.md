@@ -8,15 +8,15 @@ Train and retrain Random Forest (RF) and XGBoost classification models on loan a
 
 ## Required inputs
 
-- Loan dataset in CSV format (synthetic via `tools/generate_synthetic_data.py` or real export)
+- Loan dataset in CSV format (synthetic via `python manage.py generate_data`, see `workflows/data_generation.md`, or a real export)
 - Required columns: `income`, `credit_score`, `loan_amount`, `debt_to_income`, `employment_length`, `purpose`, `home_ownership`, `annual_income`, `has_cosigner`, `approved`
 
 ## Tools
 
 | Tool | Location | Purpose |
 |------|----------|---------|
-| Standalone trainer | `tools/train_model.py` | CLI script for local training outside Django |
-| Django service trainer | `backend/apps/ml_engine/services/trainer.py` | Training service used by Celery tasks |
+| Management command | `backend/apps/ml_engine/management/commands/train_model.py` | `python manage.py train_model`: same path as the dashboard's Train Model button (training lock, `ModelVersion` registration, governance gates) |
+| Django service trainer | `backend/apps/ml_engine/services/training/trainer.py` | Training service used by the command and the Celery task |
 
 ## Steps
 
@@ -31,7 +31,7 @@ Train and retrain Random Forest (RF) and XGBoost classification models on loan a
    - XGBoost: `Optuna` Bayesian optimization (TPE sampler, 50 trials) with a wider search space: max_depth [4-10], learning_rate [0.01-0.15], reg_lambda [1-50]
    - Use 3-fold stratified cross-validation, scoring on `roc_auc`
 5. **Evaluate.** Run the best model against the validation set first, then the test set. Print the classification report, confusion matrix, and AUC-ROC.
-6. **Save.** Serialize the best model with `joblib.dump()` to `backend/ml_models/` (or `--output-dir`). Include the scaler and encoders in the same pipeline or save them as separate artifacts.
+6. **Save.** The trainer serializes the model bundle with `joblib.dump()` to `backend/ml_models/` and registers a `ModelVersion`; it is activated only if the governance gates pass.
 
 ## Expected outputs
 
@@ -51,13 +51,15 @@ Train and retrain Random Forest (RF) and XGBoost classification models on loan a
 
 ## CLI usage
 
+Run from `backend/` (or prefix with `docker-compose exec backend`). One algorithm per run:
+
 ```bash
-# Train both algorithms on synthetic data
-python tools/train_model.py --data-path .tmp/synthetic_loans.csv --algorithm both --output-dir backend/ml_models
+# Train XGBoost (the default) on the default .tmp/synthetic_loans.csv
+python manage.py train_model --algorithm xgb --data-path .tmp/synthetic_loans.csv
 
-# Train only Random Forest
-python tools/train_model.py --algorithm rf
+# Train Random Forest
+python manage.py train_model --algorithm rf
 
-# Train only XGBoost
-python tools/train_model.py --algorithm xgb
+# Train a per-segment model (default segment: unified)
+python manage.py train_model --algorithm xgb --segment personal
 ```
