@@ -1,14 +1,28 @@
+# Daily logical backup of the application database to a PVC.
+#
+# The dump logic is inline (POSIX sh) rather than mounting scripts/backup.sh:
+# kustomize cannot load files from outside k8s/, and the postgres alpine image
+# has no bash. It mirrors scripts/backup.sh (7 daily + 4 weekly gzip dumps),
+# but writes to a .partial file and renames it only after pg_dump succeeds,
+# so a failed run never leaves a truncated file that rotation counts as a
+# good backup.
+#
+# The client major version must be >= the server's: RDS (terraform/rds.tf)
+# and compose both run PostgreSQL 17, and pg_dump 16 refuses a 17 server.
+# Watch for failures with kube-state-metrics: kube_job_status_failed{job_name=~"postgres-backup.*"} > 0
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: postgres-backup
   namespace: loan-approval
   labels:
-    app: loan-approval
-    component: backup
+    app.kubernetes.io/name: postgres-backup
+    app.kubernetes.io/component: backup
+    app.kubernetes.io/part-of: aussieloanai
 spec:
-  # Daily at 2:00 AM AEST (UTC+10) = 16:00 UTC previous day
-  schedule: "0 16 * * *"
+  # 02:00 every day in Sydney time. With timeZone set, the schedule is read in
+  # that zone (no manual UTC offset).
+  schedule: "0 2 * * *"
   timeZone: "Australia/Sydney"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 7
@@ -20,48 +34,81 @@ spec:
       template:
         metadata:
           labels:
-            app: loan-approval
-            component: backup
+            app.kubernetes.io/name: postgres-backup
+            app.kubernetes.io/component: backup
+            # Required: the egress allow-rules in network-policy.yaml select
+            # on this label; without it default-deny blocks the DB connection.
+            app.kubernetes.io/part-of: aussieloanai
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          # postgres:*-alpine runs as the `postgres` user, UID/GID 70.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            fsGroup: 70
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: pg-backup
-              image: postgres:16-alpine
+              image: postgres:17-alpine
               command:
                 - /bin/sh
-                - -c
-                - /scripts/backup.sh /backups
-              envFrom:
-                - secretRef:
-                    name: loan-approval-secrets
+                - -ec
+                - |
+                  ts=$(date +%Y%m%d_%H%M%S)
+                  mkdir -p /backups/daily /backups/weekly
+                  out="/backups/daily/${PGDATABASE}_${ts}.sql.gz"
+                  echo "dumping ${PGDATABASE}@${PGHOST}:${PGPORT} to ${out}"
+                  # pipefail is not POSIX: check pg_dump's status via a marker file.
+                  rm -f /tmp/pg_dump.ok
+                  { pg_dump --no-owner --no-privileges --format=plain && touch /tmp/pg_dump.ok; } \
+                    | gzip > "${out}.partial"
+                  [ -f /tmp/pg_dump.ok ] || { echo "pg_dump failed"; rm -f "${out}.partial"; exit 1; }
+                  mv "${out}.partial" "${out}"
+                  echo "backup complete: $(du -h "${out}" | cut -f1)"
+                  if [ "$(date +%u)" -eq 7 ]; then
+                    cp "${out}" "/backups/weekly/${PGDATABASE}_weekly_${ts}.sql.gz"
+                  fi
+                  ls -1t /backups/daily/*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm -f
+                  ls -1t /backups/weekly/*.sql.gz 2>/dev/null | tail -n +5 | xargs -r rm -f
               env:
                 - name: PGHOST
-                  # Must match the postgres Service metadata.name in k8s manifests
-                  # and POSTGRES_HOST in configmap.yaml (both are "postgres").
-                  value: "postgres"
+                  valueFrom:
+                    configMapKeyRef:
+                      name: loan-approval-config
+                      key: POSTGRES_HOST
                 - name: PGPORT
-                  value: "5432"
+                  valueFrom:
+                    configMapKeyRef:
+                      name: loan-approval-config
+                      key: POSTGRES_PORT
+                - name: PGDATABASE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: loan-approval-config
+                      key: POSTGRES_DB
                 - name: PGUSER
                   valueFrom:
                     secretKeyRef:
                       name: loan-approval-secrets
                       key: POSTGRES_USER
-                - name: PGDATABASE
-                  valueFrom:
-                    secretKeyRef:
-                      name: loan-approval-secrets
-                      key: POSTGRES_DB
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: loan-approval-secrets
                       key: POSTGRES_PASSWORD
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
               volumeMounts:
-                - name: backup-volume
+                - name: backups
                   mountPath: /backups
-                - name: scripts
-                  mountPath: /scripts
-                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
               resources:
                 requests:
                   cpu: 100m
@@ -70,10 +117,27 @@ spec:
                   cpu: 500m
                   memory: 512Mi
           volumes:
-            - name: backup-volume
+            - name: backups
               persistentVolumeClaim:
-                claimName: postgres-backup-pvc
-            - name: scripts
-              configMap:
-                name: backup-scripts
-                defaultMode: 0755
+                claimName: postgres-backup
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
+---
+# Backups hold customer PII. Use an encrypted StorageClass (e.g. EBS gp3 with
+# encrypted: "true") and copy the dumps off-cluster for disaster recovery.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backup
+  namespace: loan-approval
+  labels:
+    app.kubernetes.io/name: postgres-backup
+    app.kubernetes.io/component: backup
+    app.kubernetes.io/part-of: aussieloanai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

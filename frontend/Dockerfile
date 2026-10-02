@@ -38,7 +38,7 @@ COPY --from=builder --chown=appuser:appgroup /app/.next ./.next
 COPY --from=builder --chown=appuser:appgroup /app/public ./public
 COPY --from=builder --chown=appuser:appgroup /app/next.config.js ./
 
-USER appuser
+USER 100:101
 
 EXPOSE 3000
 

@@ -1,0 +1,71 @@
+# Runs database migrations (and the optional admin bootstrap) once per
+# release, through the image's own entrypoint.sh. The backend and worker
+# Deployments wait in an initContainer until `migrate --check` passes, so new
+# code never serves against an old schema, and only this one pod migrates
+# (Django takes no cross-process lock, so per-replica migrate would race).
+#
+# A Job's pod template is immutable. ttlSecondsAfterFinished removes the
+# finished Job so the next `kubectl apply -k` creates it again with the new
+# image tag. If a run failed and the Job still exists, inspect it, then
+# `kubectl -n loan-approval delete job db-migrate` and re-apply.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: loan-approval
+  labels:
+    app.kubernetes.io/name: db-migrate
+    app.kubernetes.io/component: migrations
+    app.kubernetes.io/part-of: aussieloanai
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-migrate
+        app.kubernetes.io/component: migrations
+        app.kubernetes.io/part-of: aussieloanai
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ghcr.io/OWNER/loan-approval-ai-system/backend:latest
+          # No `command:`, so the image ENTRYPOINT (entrypoint.sh) runs
+          # `manage.py migrate` and creates DJANGO_SUPERUSER_* if set, then
+          # execs these args and exits.
+          args:
+            - echo
+            - migrations applied
+          envFrom:
+            - configMapRef:
+                name: loan-approval-config
+            - secretRef:
+                name: loan-approval-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

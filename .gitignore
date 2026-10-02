@@ -27,6 +27,17 @@ backend/ml_models/*/
 # Environment
 .env
 *.env.local
+k8s/secrets.env
+
+# Terraform: state and variable files can hold secrets; never commit them
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+terraform/backend.hcl
+crash.log
 
 # IDE
 .vscode/

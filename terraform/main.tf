@@ -2,7 +2,8 @@
 # Provisions: EKS cluster, RDS PostgreSQL, ElastiCache Redis
 
 terraform {
-  required_version = ">= 1.5"
+  # 1.10+ for S3-native state locking (use_lockfile).
+  required_version = ">= 1.10"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -10,12 +11,16 @@ terraform {
     }
   }
 
-  # Remote state — uncomment for production
-  # backend "s3" {
-  #   bucket = "aussieloanai-terraform-state"
-  #   key    = "production/terraform.tfstate"
-  #   region = "ap-southeast-2"
-  # }
+  # Remote, encrypted, locked state. State holds sensitive values (the Redis
+  # AUTH token, resource ids), so there is deliberately no local default:
+  # bucket/key/region come from a backend config file at init time:
+  #   terraform init -backend-config=backend.hcl   (see backend.hcl.example)
+  # Without it, `terraform init` stops and asks for the bucket instead of
+  # silently writing terraform.tfstate next to the code.
+  backend "s3" {
+    encrypt      = true
+    use_lockfile = true
+  }
 }
 
 provider "aws" {
@@ -72,8 +77,8 @@ resource "aws_iam_role" "eks_cluster" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "eks.amazonaws.com" }
     }]
   })
@@ -94,8 +99,8 @@ resource "aws_iam_role" "eks_nodes" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "ec2.amazonaws.com" }
     }]
   })
