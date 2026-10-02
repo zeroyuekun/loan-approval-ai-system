@@ -123,6 +123,23 @@ def generate_decision_email(
     return result, _persist(application, decision, result)
 
 
+def regenerate_decision_email(application, decision, *, confidence, profile_context, bias_feedback, generator=None):
+    """Second-agent rewrite of a bias-flagged email. Returns ``(result, generated_email)``.
+
+    A template result (LLM unavailable, budget gate, guardrail exhaustion) is
+    returned with ``None`` and not persisted: the caller hands over to the
+    template replacement path, which persists its own template. RateLimited
+    propagates.
+    """
+    generator = generator or EmailGenerator()
+    result = generator.generate(
+        application, decision, confidence=confidence, profile_context=profile_context, bias_feedback=bias_feedback
+    )
+    if result.get("template_fallback"):
+        return result, None
+    return result, _persist(application, decision, result)
+
+
 def generate_template_decision_email(application, decision, *, generator=None):
     """Generate and persist the deterministic template email. Returns ``(result, generated_email)``.
 

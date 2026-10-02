@@ -315,7 +315,7 @@ class EmailGenerator:
         """
         return self._generate_fallback(application, decision, self._base_context(application, decision), time.time())
 
-    def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
+    def generate(self, application, decision, attempt=1, confidence=None, profile_context=None, bias_feedback=None):
         """Generate an approval/denial email for the given loan application."""
         # Reset retry state only on the first attempt (not recursive retries)
         if attempt == 1:
@@ -434,6 +434,15 @@ class EmailGenerator:
                 # The offer itself carries estimated_rate, so the teaser's
                 # "at X% p.a." is validated against the real rate (S1-F1).
                 context["nbo_offers"] = [nbo_offer]
+
+        if bias_feedback:
+            prompt += (
+                "\n\n=== COMPLIANCE REVIEW FEEDBACK ===\n"
+                "A compliance reviewer flagged an earlier draft of this email for possible bias:\n"
+                f"{_sanitize_prompt_input(bias_feedback, max_length=2000)}\n\n"
+                "Write the email again so none of these issues appear. Describe the application and "
+                "its circumstances, never the person. Keep every required section.\n"
+            )
 
         # Add retry feedback if not first attempt.
         # The feedback is structured to tell Claude exactly what failed,
@@ -573,7 +582,12 @@ class EmailGenerator:
                 )
             self._last_feedback = "\n".join(feedback_parts)
             return self.generate(
-                application, decision, attempt=attempt + 1, confidence=confidence, profile_context=profile_context
+                application,
+                decision,
+                attempt=attempt + 1,
+                confidence=confidence,
+                profile_context=profile_context,
+                bias_feedback=bias_feedback,
             )
 
         _record_email_metric(decision=decision, source="claude_api", passed_guardrails=all_passed)
