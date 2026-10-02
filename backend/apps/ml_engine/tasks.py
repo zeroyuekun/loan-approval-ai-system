@@ -337,6 +337,7 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
 )
 def run_prediction_task(self, application_id):
     """Run ML prediction on a loan application."""
+    from apps.ml_engine.services.model_selector import NoActiveModelError
     from apps.ml_engine.services.scoring.predictor import ModelPredictor
 
     application = LoanApplication.objects.get(pk=application_id)
@@ -353,21 +354,17 @@ def run_prediction_task(self, application_id):
     try:
         predictor = ModelPredictor.for_application(application)
         result = predictor.predict(application)
-    except ValueError as e:
-        # No active model available — not a transient error; do not retry.
-        # Revert to pending so the application can be processed once a model
-        # is activated, and return a structured skipped result.
-        logger.error(
-            "run_prediction_task: no active model for application %s — %s",
-            application_id,
-            e,
-        )
-        application.status = "pending"
-        application.save(update_fields=["status"])
+    except NoActiveModelError as e:
+        # Not transient; do not retry. Back to pending (audited) so the
+        # application can be processed once a model is activated.
+        logger.error("run_prediction_task: no active model for application %s — %s", application_id, e)
+        application.transition_to("pending", details={"reason": "no_active_model", "error": str(e)[:500]})
         return {"status": "skipped", "reason": "no_active_model", "detail": str(e)}
-    except Exception:
-        # Revert status so the application isn't stuck in 'processing'
-        application.transition_to("pending", details={"reason": "prediction_failed"})
+    except Exception as e:
+        # Anything else (artefact integrity failure, path rejection, input
+        # validation, consistency failure, transient I/O) surfaces: revert so
+        # the application isn't stuck in 'processing', then re-raise.
+        application.transition_to("pending", details={"reason": "prediction_failed", "error": str(e)[:500]})
         raise
 
     # Save prediction log
@@ -394,15 +391,12 @@ def run_prediction_task(self, application_id):
         },
     )
 
-    # Flag borderline cases for human review ONLY when the standalone path is
-    # explicitly enabled. The standalone task creates no escalated AgentRun, so
-    # a 'review' transition here would be unresumable and would leave the ADM
-    # disclosure stale. Default: apply the raw decision.
-    standalone_enabled = getattr(settings, "ML_STANDALONE_PREDICT_ENABLED", False)
-    if standalone_enabled and result.get("requires_human_review"):
-        application.transition_to("review")
-    else:
-        application.transition_to(result["prediction"])
+    # Apply the model decision. Refer reasons (borderline / drift / policy
+    # refer) never route to the review queue, which is only for bias flags.
+    application.transition_to(
+        result["prediction"],
+        details={"refer_reasons": result.get("refer_reasons") or []},
+    )
 
     return {
         "application_id": str(application_id),

@@ -8,11 +8,14 @@ during Arm C Phase 1. It:
 - In shadow mode, emits a `credit_policy_shadow_disagreement` warning if the
   hypothetical enforce decision would have differed.
 - Builds the `policy_payload` dict.
-- In enforce mode + refer, sets `requires_human_review=True`.
+- In enforce mode + refer, keeps the model decision and reports the refer
+  codes in the payload (the human review queue is only for bias flags).
 - Persists D6 referral audit fields (`referral_status`, `referral_codes`,
   `referral_rationale`) on the `LoanApplication` if the policy referred.
-- Fail-open on any exception: returns the unchanged label and an
-  `{passed: None, mode: "off", error: ...}` payload.
+- On an exception in shadow/off mode (where the overlay cannot change the
+  decision) returns the unchanged label and an `{passed: None, mode: "off",
+  error: ...}` payload. In enforce mode it raises: a hard-fail decline that
+  could not be evaluated must not ship as the model's approval.
 
 Tests mock the `credit_policy` module functions rather than exercising real
 rule evaluation — the overlay behaviour is already covered by
@@ -24,7 +27,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from apps.ml_engine.services.scoring.policy_overlay import apply_policy_overlay
+import pytest
+
+from apps.ml_engine.services.scoring.policy_overlay import PolicyOverlayUnavailable, apply_policy_overlay
 
 
 class _FakeReferralStatus:
@@ -88,7 +93,7 @@ def _patch_policy(*, evaluate_result, current_mode, apply_overlay_to_decision):
 
 
 class TestApplyPolicyOverlay:
-    def test_shadow_pass_leaves_label_and_review_flag_unchanged(self):
+    def test_shadow_pass_leaves_label_unchanged(self):
         app = _mk_application()
         mv = _mk_model_version()
         result = _FakePolicyResult(passed=True)
@@ -98,15 +103,13 @@ class TestApplyPolicyOverlay:
             current_mode="shadow",
             apply_overlay_to_decision=lambda label, _r, _m: label,
         ):
-            label, review, payload = apply_policy_overlay(
+            label, payload = apply_policy_overlay(
                 application=app,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
         assert label == "approved"
-        assert review is False
         assert payload["passed"] is True
         assert payload["mode"] == "shadow"
         assert payload["changed_model_decision"] is False
@@ -124,17 +127,16 @@ class TestApplyPolicyOverlay:
             current_mode="enforce",
             apply_overlay_to_decision=_overlay,
         ):
-            label, review, payload = apply_policy_overlay(
+            label, payload = apply_policy_overlay(
                 application=app,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
         assert label == "denied"
         assert payload["changed_model_decision"] is True
 
-    def test_enforce_refer_sets_requires_human_review(self):
+    def test_enforce_refer_keeps_model_decision_and_reports_refer_codes(self):
         app = _mk_application()
         mv = _mk_model_version()
         result = _FakePolicyResult(passed=False, refers=("P08",))
@@ -144,14 +146,16 @@ class TestApplyPolicyOverlay:
             current_mode="enforce",
             apply_overlay_to_decision=lambda label, _r, _m: label,
         ):
-            label, review, _payload = apply_policy_overlay(
+            out = apply_policy_overlay(
                 application=app,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
-        assert review is True
+        label, payload = out
+        assert label == "approved"
+        assert payload["mode"] == "enforce"
+        assert payload["refers"] == ["P08"]
 
     def test_shadow_mode_logs_disagreement_when_enforce_would_differ(self):
         app = _mk_application()
@@ -169,11 +173,10 @@ class TestApplyPolicyOverlay:
             ),
             patch("apps.ml_engine.services.scoring.policy_overlay.logger") as log,
         ):
-            label, _review, _payload = apply_policy_overlay(
+            label, _payload = apply_policy_overlay(
                 application=app,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
         # Shadow mode: label stays "approved"; disagreement logged.
@@ -198,7 +201,6 @@ class TestApplyPolicyOverlay:
                 application=app,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
         assert app.referral_status == _FakeReferralStatus.REFERRED
@@ -223,11 +225,10 @@ class TestApplyPolicyOverlay:
             apply_overlay_to_decision=lambda label, _r, _m: label,
         ):
             # Must not raise.
-            label, _review, _payload = apply_policy_overlay(
+            label, _payload = apply_policy_overlay(
                 application=app,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
         assert label == "approved"
@@ -242,36 +243,55 @@ class TestApplyPolicyOverlay:
             apply_overlay_to_decision=lambda label, _r, _m: label,
         ):
             # Must not raise even though application is None.
-            label, _review, _payload = apply_policy_overlay(
+            label, _payload = apply_policy_overlay(
                 application=None,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
         assert label == "approved"
 
-    def test_outer_exception_returns_fail_open_payload(self):
-        """If credit_policy.evaluate itself raises, overlay must not crash prediction."""
+    def test_outer_exception_in_shadow_mode_returns_fail_open_payload(self):
+        """In shadow mode the overlay never changes the decision, so a broken
+        policy engine must not crash prediction."""
         app = _mk_application()
         mv = _mk_model_version()
 
-        with patch(
-            "apps.ml_engine.services.scoring.policy_overlay._policy.evaluate",
-            side_effect=RuntimeError("policy engine broken"),
+        with (
+            patch("apps.ml_engine.services.scoring.policy_overlay._policy.current_mode", return_value="shadow"),
+            patch(
+                "apps.ml_engine.services.scoring.policy_overlay._policy.evaluate",
+                side_effect=RuntimeError("policy engine broken"),
+            ),
         ):
-            label, review, payload = apply_policy_overlay(
+            label, payload = apply_policy_overlay(
                 application=app,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
         assert label == "approved"
-        assert review is False
         assert payload["passed"] is None
         assert payload["mode"] == "off"
         assert "policy engine broken" in payload["error"]
+
+    def test_outer_exception_in_enforce_mode_raises(self):
+        """In enforce mode the overlay can decline (bankruptcy, DTI > 8, LVR > 1).
+        If it cannot be evaluated the approval must not ship unchecked: raise so
+        the pipeline fails the prediction step and the application goes back
+        to PENDING for a re-run."""
+        app = _mk_application()
+        mv = _mk_model_version()
+
+        with (
+            patch("apps.ml_engine.services.scoring.policy_overlay._policy.current_mode", return_value="enforce"),
+            patch(
+                "apps.ml_engine.services.scoring.policy_overlay._policy.evaluate",
+                side_effect=RuntimeError("policy engine broken"),
+            ),
+            pytest.raises(PolicyOverlayUnavailable),
+        ):
+            apply_policy_overlay(application=app, model_version=mv, prediction_label="approved")
 
     def test_shadow_refer_only_logs_if_hypothetical_differs(self):
         """Shadow-mode disagreement log must fire only when enforce would actually
@@ -296,7 +316,6 @@ class TestApplyPolicyOverlay:
                 application=app,
                 model_version=mv,
                 prediction_label="approved",
-                requires_human_review=False,
             )
 
         assert not any("credit_policy_shadow_disagreement" in str(call) for call in log.warning.call_args_list)

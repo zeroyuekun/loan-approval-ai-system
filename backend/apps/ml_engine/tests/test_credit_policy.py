@@ -315,8 +315,10 @@ def test_overlay_enforce_flips_denied_to_denied_on_hardfail(hardfail_result):
     assert cp.apply_overlay_to_decision("denied", hardfail_result, cp.OVERLAY_MODE_ENFORCE) == "denied"
 
 
-def test_overlay_enforce_flips_approved_to_review_on_refer(refer_result):
-    assert cp.apply_overlay_to_decision("approved", refer_result, cp.OVERLAY_MODE_ENFORCE) == "review"
+def test_overlay_enforce_keeps_approved_on_refer(refer_result):
+    # The human review queue is only for bias flags: a refer is recorded on the
+    # decision, it does not turn the decision into "review".
+    assert cp.apply_overlay_to_decision("approved", refer_result, cp.OVERLAY_MODE_ENFORCE) == "approved"
 
 
 def test_overlay_enforce_does_not_flip_denied_to_review_on_refer(refer_result):

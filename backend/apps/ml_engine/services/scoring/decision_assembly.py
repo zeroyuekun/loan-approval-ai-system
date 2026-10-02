@@ -16,14 +16,19 @@ Assembly steps:
    (e.g. employment-type) threshold, and any `group_thresholds` left in an
    older model artefact are ignored.
 2. Derive the `approved`/`denied` label.
-3. Flag borderline cases (within 10pp of the effective threshold) and
-   drift=severe cases for human review.
+3. Record refer reasons: borderline cases (within `_BORDERLINE_MARGIN` of
+   the threshold) and severe feature drift. A refer reason does NOT change
+   the decision or route it to human review — that queue is only for bias
+   flags. It is kept on the decision record so the decision stays
+   explainable.
 4. Compute the D4 pricing tier. A pricing-tier decline overrides an
    otherwise-approved model result (PD above the top cutoff means the
    bank won't write the loan even if the model says approve).
 
-Fail-open on pricing: a pricing-engine exception returns `{tier:
-"unavailable", approved: True}` so the scoring pipeline continues.
+Pricing failure: the tier can only turn an approval into a decline, so on an
+approval a pricing-engine exception raises `PricingUnavailable` (the pipeline
+fails the prediction step and the application returns to PENDING for a
+re-run); on a denial the denial stands and the gap is a refer reason.
 """
 
 from __future__ import annotations
@@ -33,16 +38,20 @@ import os
 
 from apps.ml_engine.services.scoring.pricing_engine import get_tier
 
-__all__ = ["assemble_decision"]
+__all__ = ["PricingUnavailable", "assemble_decision"]
 
 logger = logging.getLogger(__name__)
 
 
 # Borderline margin: applications within this many probability points of the
-# effective threshold are routed to human review. Default 0.05 (0.10 flagged
+# threshold are recorded with a BORDERLINE refer reason. Default 0.05 (0.10 flagged
 # ~20% of all applications, far too broad for operational use); override via
 # ML_BORDERLINE_MARGIN to tune without a redeploy.
 _BORDERLINE_MARGIN = float(os.environ.get("ML_BORDERLINE_MARGIN", "0.05"))
+
+
+class PricingUnavailable(RuntimeError):
+    """The pricing gate could not be evaluated for a model approval."""
 
 
 def assemble_decision(
@@ -55,7 +64,8 @@ def assemble_decision(
     """Assemble the post-probability decision state.
 
     Returns a dict with keys: `probability`, `threshold`,
-    `prediction_label`, `requires_human_review`, `pricing_payload`.
+    `prediction_label`, `refer_reasons` (list of `{code, detail}`),
+    `pricing_payload`.
     """
     threshold = model_version.optimal_threshold
     if threshold is None:
@@ -71,12 +81,39 @@ def assemble_decision(
 
     prediction_label = "approved" if probability >= threshold else "denied"
 
-    requires_human_review = abs(probability - threshold) <= _BORDERLINE_MARGIN
-    if any(w.get("severity") == "drift" for w in drift_warnings):
-        requires_human_review = True
+    refer_reasons: list[dict] = []
+    if abs(probability - threshold) <= _BORDERLINE_MARGIN:
+        refer_reasons.append(
+            {
+                "code": "BORDERLINE",
+                "detail": (
+                    f"Probability {probability:.4f} is within {_BORDERLINE_MARGIN:.2f} "
+                    f"of the {threshold:.4f} approval threshold"
+                ),
+            }
+        )
+    drifted = [w.get("feature") for w in drift_warnings if w.get("severity") == "drift"]
+    if drifted:
+        refer_reasons.append(
+            {
+                "code": "FEATURE_DRIFT",
+                "detail": "Outside the training distribution (|z| > 4): " + ", ".join(str(f) for f in drifted),
+            }
+        )
 
     try:
         pricing_tier = get_tier(pd_score=1.0 - probability, segment=segment)
+    except Exception as exc:
+        if prediction_label == "approved":
+            # Fail closed: the pricing tier is a hard risk gate that can
+            # DECLINE a model approval, so an approval it could not check must
+            # not ship. Raised to the pipeline, which returns the application
+            # to PENDING for a re-run.
+            raise PricingUnavailable(f"Pricing tier could not be computed for an approval: {exc}") from exc
+        logger.warning("Pricing tier computation failed on a denial — denial stands", exc_info=True)
+        pricing_payload = {"tier": "unavailable", "approved": False}
+        refer_reasons.append({"code": "PRICING_UNAVAILABLE", "detail": f"Pricing tier could not be computed: {exc}"})
+    else:
         pricing_payload = pricing_tier.to_dict()
         if not pricing_tier.approved and prediction_label == "approved":
             logger.info(
@@ -85,21 +122,11 @@ def assemble_decision(
                 pricing_tier.segment,
             )
             prediction_label = "denied"
-    except Exception:
-        # Fail-safe: the pricing tier is a hard risk gate that can DECLINE a
-        # model-approved application (PD above the bank's writeable cutoff). A
-        # transient failure must NOT read as a clean approve — flag the decision
-        # for human review and never report the gate as approved. (Routing here
-        # mirrors how requires_human_review already handles drift/borderline; it
-        # is not the bias-detection queue.)
-        logger.warning("Pricing tier computation failed — flagging for human review (fail-safe)", exc_info=True)
-        pricing_payload = {"tier": "unavailable", "approved": False}
-        requires_human_review = True
 
     return {
         "probability": probability,
         "threshold": threshold,
         "prediction_label": prediction_label,
-        "requires_human_review": requires_human_review,
+        "refer_reasons": refer_reasons,
         "pricing_payload": pricing_payload,
     }

@@ -8,13 +8,17 @@ behaviour:
    capture the enforce hypothetical for every request.
 2. In shadow mode, emit a `credit_policy_shadow_disagreement` warning when
    the enforce-mode overlay would have changed the model decision.
-3. In enforce mode, escalate referrals via `requires_human_review=True`
-   (orthogonal to the bias queue, which stays bias-only per user preference).
+3. Referrals never change the decision or route it to human review (that
+   queue is only for bias flags); the caller records enforce-mode refer codes
+   as refer reasons on the decision.
 4. Write D6 audit-trail fields (`referral_status`, `referral_codes`,
    `referral_rationale`) on the `LoanApplication` when the policy refers,
    wrapped in its own try/except so persistence failures can't break scoring.
-5. Fail-open: any exception raised during evaluation/apply returns the
-   unchanged label and a `{passed: None, mode: "off", error: ...}` payload.
+5. Failure: in `shadow`/`off` mode the overlay cannot change the decision,
+   so an exception returns the unchanged label and a `{passed: None, mode:
+   "off", error: ...}` payload. In `enforce` mode it can decline (bankruptcy,
+   DTI, LVR), so an exception raises `PolicyOverlayUnavailable`: the pipeline
+   fails the prediction step and the application returns to PENDING.
 """
 
 from __future__ import annotations
@@ -23,9 +27,13 @@ import logging
 
 from apps.ml_engine.services.scoring import credit_policy as _policy
 
-__all__ = ["apply_policy_overlay"]
+__all__ = ["PolicyOverlayUnavailable", "apply_policy_overlay"]
 
 logger = logging.getLogger(__name__)
+
+
+class PolicyOverlayUnavailable(RuntimeError):
+    """The enforce-mode credit-policy overlay could not be evaluated."""
 
 
 def apply_policy_overlay(
@@ -33,8 +41,7 @@ def apply_policy_overlay(
     application,
     model_version,
     prediction_label: str,
-    requires_human_review: bool,
-) -> tuple[str, bool, dict]:
+) -> tuple[str, dict]:
     """Evaluate the D3 overlay and return the post-overlay decision deltas.
 
     Args:
@@ -44,15 +51,17 @@ def apply_policy_overlay(
         model_version: `ModelVersion` row — used only for logging metadata
             (the `model_version` extra field on shadow-disagreement warnings).
         prediction_label: The champion model's raw decision before the overlay.
-        requires_human_review: Whether the model itself flagged borderline
-            confidence. Returned unchanged unless enforce-mode refer escalates.
 
     Returns:
-        `(final_prediction_label, updated_requires_human_review, policy_payload)`.
+        `(final_prediction_label, policy_payload)`. The payload carries the
+        mode and the refer codes.
+
+    Raises:
+        PolicyOverlayUnavailable: in enforce mode, when evaluation fails.
     """
+    policy_mode = _policy.current_mode()
     try:
         policy_result = _policy.evaluate(application)
-        policy_mode = _policy.current_mode()
         final_prediction = _policy.apply_overlay_to_decision(prediction_label, policy_result, policy_mode)
 
         if policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
@@ -77,9 +86,6 @@ def apply_policy_overlay(
             "changed_model_decision": final_prediction != prediction_label,
         }
 
-        if policy_mode == _policy.OVERLAY_MODE_ENFORCE and policy_result.has_refer:
-            requires_human_review = True
-
         if policy_result.has_refer and application is not None:
             try:
                 application.referral_status = application.ReferralStatus.REFERRED
@@ -100,13 +106,15 @@ def apply_policy_overlay(
                     },
                 )
 
-        return final_prediction, requires_human_review, policy_payload
+        return final_prediction, policy_payload
 
     except Exception as exc:
+        if policy_mode == _policy.OVERLAY_MODE_ENFORCE:
+            logger.error("credit_policy_evaluate_failed in enforce mode — failing closed", exc_info=True)
+            raise PolicyOverlayUnavailable(f"Credit policy overlay could not be evaluated: {exc}") from exc
         logger.warning("credit_policy_evaluate_failed", exc_info=True)
         return (
             prediction_label,
-            requires_human_review,
             {
                 "passed": None,
                 "mode": "off",

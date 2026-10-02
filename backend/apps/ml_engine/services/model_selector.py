@@ -20,6 +20,10 @@ MAX_ECE_THRESHOLD = 0.03  # Expected calibration error ceiling
 AUC_REGRESSION_TOLERANCE = 0.02  # Candidate AUC must not drop more than 2pp
 
 
+class NoActiveModelError(ValueError):
+    """No active model version serves the requested segment (or unified)."""
+
+
 def select_model_version(segment: str = SEGMENT_UNIFIED):
     """Select a model version using weighted random by traffic_percentage.
 
@@ -31,7 +35,8 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
 
     Single active model: returns it immediately (fast path).
     Multiple active models (same segment): weighted random selection.
-    No active models in segment and no unified fallback: raises ValueError.
+    No active models in segment and no unified fallback: raises
+    NoActiveModelError (a ValueError).
     """
     active_models = list(
         ModelVersion.objects.filter(is_active=True, traffic_percentage__gt=0, segment=segment).order_by("-created_at")
@@ -49,7 +54,7 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
         )
 
     if not active_models:
-        raise ValueError(
+        raise NoActiveModelError(
             f"No active model version found for segment '{segment}' (and no "
             "unified fallback available). Train a model first."
         )

@@ -7,7 +7,9 @@ during Arm C Phase 1. Given the model's raw positive-class probability, it:
   fallback with a warning).
 - Applies that one threshold to every applicant (no per-group thresholds).
 - Derives the `approved`/`denied` label.
-- Flags borderline cases + drift=severe cases for human review.
+- Records borderline and severe-drift cases as refer reasons. They do not
+  route to human review (that queue is only for bias flags); the model
+  decision stands and the reason is kept on the decision record.
 - Calls the D4 pricing engine, which may further decline an approved label
   when PD is above the top tier cutoff.
 
@@ -20,7 +22,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from apps.ml_engine.services.scoring.decision_assembly import assemble_decision
+import pytest
+
+from apps.ml_engine.services.scoring.decision_assembly import PricingUnavailable, assemble_decision
 
 
 def _mk_version(optimal_threshold=0.5, id_="mv-1"):
@@ -58,7 +62,7 @@ class TestAssembleDecision:
         assert result["prediction_label"] == "approved"
         assert result["probability"] == 0.8
         assert result["threshold"] == 0.6
-        assert result["requires_human_review"] is False
+        assert result["refer_reasons"] == []
 
     def test_denied_below_threshold(self):
         mv = _mk_version(optimal_threshold=0.6)
@@ -86,7 +90,7 @@ class TestAssembleDecision:
         log.warning.assert_called_once()
         assert "optimal_threshold" in log.warning.call_args.args[0]
 
-    def test_borderline_within_5pp_flags_review(self):
+    def test_borderline_within_5pp_is_a_refer_reason(self):
         # _BORDERLINE_MARGIN was reduced from 0.10 to 0.05 (M11).
         # Use 0.53 so |0.53 - 0.5| = 0.03 is clearly inside the 5pp window.
         mv = _mk_version(optimal_threshold=0.5)
@@ -98,10 +102,11 @@ class TestAssembleDecision:
                 segment="personal",
             )
 
-        # |0.53 - 0.5| = 0.03 <= 0.05 → borderline
-        assert result["requires_human_review"] is True
+        # |0.53 - 0.5| = 0.03 <= 0.05 → borderline: recorded, decision stands
+        assert result["prediction_label"] == "approved"
+        assert [r["code"] for r in result["refer_reasons"]] == ["BORDERLINE"]
 
-    def test_drift_severity_escalates_review(self):
+    def test_drift_severity_is_a_refer_reason(self):
         mv = _mk_version(optimal_threshold=0.5)
         with _patch_pricing():
             result = assemble_decision(
@@ -111,8 +116,9 @@ class TestAssembleDecision:
                 segment="personal",
             )
 
-        # Not borderline, but drift severity forces review.
-        assert result["requires_human_review"] is True
+        # Not borderline, but drift severity is recorded; decision stands.
+        assert result["prediction_label"] == "approved"
+        assert [r["code"] for r in result["refer_reasons"]] == ["FEATURE_DRIFT"]
 
     def test_pricing_tier_can_override_approved_to_denied(self):
         mv = _mk_version(optimal_threshold=0.5)
@@ -140,26 +146,45 @@ class TestAssembleDecision:
 
         assert result["prediction_label"] == "denied"
 
-    def test_pricing_failure_is_failsafe_and_flags_review(self):
+    def test_pricing_failure_on_an_approval_raises(self):
+        """The pricing tier is a hard risk gate that can DECLINE a model
+        approval. If it cannot be computed the approval must not ship
+        unchecked, and it cannot go to human review (that queue is bias-only):
+        raise, so the pipeline fails the prediction step and the application
+        returns to PENDING for a re-run."""
         mv = _mk_version(optimal_threshold=0.5)
-        with patch(
-            "apps.ml_engine.services.scoring.decision_assembly.get_tier",
-            side_effect=RuntimeError("pricing engine broken"),
+        with (
+            patch(
+                "apps.ml_engine.services.scoring.decision_assembly.get_tier",
+                side_effect=RuntimeError("pricing engine broken"),
+            ),
+            pytest.raises(PricingUnavailable),
         ):
-            result = assemble_decision(
+            assemble_decision(
                 probability_positive=0.8,
                 model_version=mv,
                 drift_warnings=[],
                 segment="personal",
             )
 
-        # Fail-SAFE (review G2): the pricing tier is a hard risk gate that can
-        # decline a model approval, so a transient failure must NOT read as a
-        # clean approve. The model's own label is preserved, but the gate is
-        # reported not-approved and the decision is flagged for human review.
-        assert result["prediction_label"] == "approved"
+    def test_pricing_failure_on_a_denial_keeps_the_denial(self):
+        """Pricing can only turn an approval into a decline, so a denial does
+        not depend on it: the denial stands and the gap is recorded."""
+        mv = _mk_version(optimal_threshold=0.5)
+        with patch(
+            "apps.ml_engine.services.scoring.decision_assembly.get_tier",
+            side_effect=RuntimeError("pricing engine broken"),
+        ):
+            result = assemble_decision(
+                probability_positive=0.2,
+                model_version=mv,
+                drift_warnings=[],
+                segment="personal",
+            )
+
+        assert result["prediction_label"] == "denied"
         assert result["pricing_payload"] == {"tier": "unavailable", "approved": False}
-        assert result["requires_human_review"] is True
+        assert [r["code"] for r in result["refer_reasons"]] == ["PRICING_UNAVAILABLE"]
 
     def test_probability_rounded_to_four_places(self):
         mv = _mk_version(optimal_threshold=0.5)
@@ -187,6 +212,6 @@ class TestAssembleDecision:
             "probability",
             "threshold",
             "prediction_label",
-            "requires_human_review",
+            "refer_reasons",
             "pricing_payload",
         }

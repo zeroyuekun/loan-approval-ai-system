@@ -14,7 +14,7 @@ What makes it different:
 - Bias detection runs in 3 layers: a regex pre-screen, then a Claude review, then human escalation. Each generated email gets a bias score from 0 to 100.
 - Every Claude-generated decision email goes through 18 deterministic guardrails (19 for a marketing email). They catch prohibited language, hallucinated dollar amounts, and aggressive tone, check that the required regulatory elements are present, and more.
 - Email generation is template-first, and Claude spend is capped at $5/day, so cost control is part of the production design from the start.
-- Every applicant is told how their decision was made (solely automated, assisted, or human-decided) and can request a human review. Borderline, drift, and policy-"refer" cases go to an officer before any automated email is sent.
+- Every applicant is told how their decision was made (solely automated, assisted, or human-decided) and can request a human review. Borderline, drift, and policy-"refer" cases keep the model decision and carry the reason on the decision record; only bias flags go to an officer.
 
 Most of the work went into the compliance layer: APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure, and Privacy Act automated-decision (ADM) transparency.
 
@@ -66,7 +66,7 @@ flowchart TD
     class F,L ok
 ```
 
-Failed steps put the application into "review" with a log of where it broke. Stuck pipelines auto-recover after 5 minutes. Borderline scores, severe drift, or a policy "refer" rule route an application to human review before any decision email is sent, so an automated message never goes out on a case that needs an officer.
+A failed prediction step returns the application to "pending" so it can be re-run, with the failure recorded in the audit log and the decision waterfall. Stuck pipelines auto-recover after 5 minutes. Borderline scores, severe drift, or a policy "refer" rule do not hold the decision: the model decision is applied and each reason is written to the decision waterfall and the audit log. The human review queue is only for bias flags.
 
 On a denial, alternatives reach the customer through two emails. The decision email itself carries one deterministic alternative-offer teaser (the best-scoring product and its headline figure, validated by the same hallucinated-number guardrail as the rest of the letter), so the customer has a concrete next step straight away. The full personalised offer set follows as a separate marketing follow-up email (step 6) with its own bias and senior-review gate. Splitting it out keeps the regulated decision letter concise.
 

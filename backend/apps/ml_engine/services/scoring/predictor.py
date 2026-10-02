@@ -333,7 +333,7 @@ class ModelPredictor:
         probability = decision["probability"]
         threshold = decision["threshold"]
         prediction_label = decision["prediction_label"]
-        requires_human_review = decision["requires_human_review"]
+        refer_reasons = decision["refer_reasons"]
         pricing_payload = decision["pricing_payload"]
 
         # Expected Loss (EL = PD x LGD x EAD) — Basel III / APRA APS 113
@@ -351,19 +351,25 @@ class ModelPredictor:
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
         # === Credit policy overlay + referral audit ======
-        prediction_label, requires_human_review, policy_payload = _apply_policy_overlay_helper(
+        prediction_label, policy_payload = _apply_policy_overlay_helper(
             application=application,
             model_version=self.model_version,
             prediction_label=prediction_label,
-            requires_human_review=requires_human_review,
         )
+        if policy_payload.get("mode") == "enforce":
+            rationale = policy_payload.get("rationale_by_code") or {}
+            for code in policy_payload.get("refers") or []:
+                refer_reasons.append({"code": f"POLICY_REFER_{code}", "detail": rationale.get(code, "")})
 
         result = {
             "prediction": prediction_label,
             "probability": probability,
             "risk_grade": compute_risk_grade(probability),
             "threshold_used": threshold,
-            "requires_human_review": requires_human_review,
+            # Why this decision deserves a second look (borderline, drift,
+            # policy refer, pricing gap). Recorded on the decision; it does not
+            # change the decision or route it to human review (bias-only).
+            "refer_reasons": refer_reasons,
             "feature_importances": importances,
             "shap_values": shap_values_dict,
             "shap_available": shap_available,

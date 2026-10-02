@@ -50,8 +50,18 @@ def test_predict_endpoint_enabled_when_flag_on(django_user_model, monkeypatch):
     assert r.data["status"] == "prediction_queued"
 
 
-@pytest.mark.django_db
-def test_task_applies_decision_not_review_when_flag_off(django_user_model):
+def _run_task(app, predictor=None, *, for_application_side_effect=None):
+    kwargs = {"return_value": predictor} if predictor is not None else {"side_effect": for_application_side_effect}
+    with patch("apps.ml_engine.services.scoring.predictor.ModelPredictor.for_application", **kwargs):
+        from apps.ml_engine.tasks import run_prediction_task
+
+        return run_prediction_task.run(str(app.id))  # synchronous, no Celery broker
+
+
+@pytest.mark.parametrize("flag", [False, True])
+def test_task_applies_decision_with_refer_reasons_whatever_the_flag(django_user_model, flag):
+    """Refer reasons (borderline / drift / policy refer) never send the
+    application to the review queue: that queue is only for bias flags."""
     cust, app = _denied_customer_app(django_user_model)
     fake = {
         "prediction": "denied",
@@ -60,13 +70,39 @@ def test_task_applies_decision_not_review_when_flag_off(django_user_model):
         "feature_importances": {"credit_score": 0.3},
         "shap_values": {},
         "processing_time_ms": 10,
-        "requires_human_review": True,
+        "refer_reasons": [{"code": "BORDERLINE", "detail": "near threshold"}],
     }
     predictor = MagicMock()
     predictor.predict.return_value = fake
-    with patch("apps.ml_engine.services.scoring.predictor.ModelPredictor.for_application", return_value=predictor):
-        from apps.ml_engine.tasks import run_prediction_task
-
-        run_prediction_task.run(str(app.id))  # synchronous, no Celery broker
+    with override_settings(ML_STANDALONE_PREDICT_ENABLED=flag):
+        _run_task(app, predictor)
     app.refresh_from_db()
-    assert app.status == "denied"  # NOT 'review' (would be unresumable)
+    assert app.status == "denied"
+
+
+def test_task_no_active_model_returns_to_pending_through_the_state_machine(django_user_model):
+    from apps.loans.models import AuditLog
+    from apps.ml_engine.services.model_selector import NoActiveModelError
+
+    cust, app = _denied_customer_app(django_user_model)
+    result = _run_task(app, for_application_side_effect=NoActiveModelError("no model"))
+
+    assert result["reason"] == "no_active_model"
+    app.refresh_from_db()
+    assert app.status == "pending"
+    last = AuditLog.objects.filter(resource_id=str(app.id), action="status_transition").latest("timestamp")
+    assert last.details["to_status"] == "pending"
+    assert last.details["reason"] == "no_active_model"
+
+
+def test_task_integrity_failure_is_not_reported_as_no_active_model(django_user_model):
+    """A tampered artefact (hash mismatch) is an incident, not "no model":
+    it must surface (raise) after the application is returned to pending."""
+    cust, app = _denied_customer_app(django_user_model)
+    with pytest.raises(ValueError, match="integrity"):
+        _run_task(
+            app,
+            for_application_side_effect=ValueError("Model file integrity check failed: expected hash ab..., got cd..."),
+        )
+    app.refresh_from_db()
+    assert app.status == "pending"

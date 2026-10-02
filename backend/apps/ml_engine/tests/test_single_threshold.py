@@ -83,7 +83,7 @@ def stub_predictor(monkeypatch):
     monkeypatch.setattr(
         predictor_mod,
         "_apply_policy_overlay_helper",
-        lambda **k: (k["prediction_label"], k["requires_human_review"], {"passed": True, "mode": "off"}),
+        lambda **k: (k["prediction_label"], {"passed": True, "mode": "off"}),
     )
     monkeypatch.setattr("apps.ml_engine.services.scoring.decision_assembly.get_tier", lambda **k: _approving_tier())
     return p

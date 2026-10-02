@@ -31,7 +31,7 @@ def _prediction(decision="approved", probability=0.85, model_version_id=None):
         "model_version": model_version_id or "00000000-0000-0000-0000-000000000001",
         "feature_importances": {"credit_score": 0.35, "annual_income": 0.25, "dti": 0.15},
         "processing_time_ms": 42,
-        "requires_human_review": False,
+        "refer_reasons": [],
     }
 
 
@@ -206,18 +206,29 @@ def test_denied_with_nbo(sample_application, orch_mocks):
 
 @CACHE_OVERRIDE
 @pytest.mark.django_db
-def test_ml_prediction_failure(sample_application, orch_mocks):
-    """Predictor raises -> run failed, app set to review."""
-    orch_mocks["predictor"].return_value.predict.side_effect = Exception("Model unavailable")
+@pytest.mark.parametrize("error", [Exception("Model unavailable"), ConnectionError("model store unreachable")])
+def test_ml_prediction_failure(sample_application, orch_mocks, error):
+    """Predictor raises -> run failed, app back to PENDING (re-runnable), reason recorded.
+
+    The human review queue is only for bias flags, so a prediction failure
+    (transient or unexpected) must not park the application there."""
+    orch_mocks["predictor"].return_value.predict.side_effect = error
 
     from apps.agents.services.orchestrator import PipelineOrchestrator
+    from apps.loans.models import AuditLog
 
     run = PipelineOrchestrator().orchestrate(sample_application.pk)
 
     assert run.status == "failed"
     sample_application.refresh_from_db()
-    assert sample_application.status == "review"
+    assert sample_application.status == "pending"
     orch_mocks["email_gen"].return_value.generate.assert_not_called()
+    last = AuditLog.objects.filter(resource_id=str(sample_application.pk), action="status_transition").latest(
+        "timestamp"
+    )
+    assert last.details["to_status"] == "pending"
+    assert last.details["source"] == "orchestrator_ml_prediction_failure"
+    assert str(error) in last.details["error"]
 
 
 @CACHE_OVERRIDE

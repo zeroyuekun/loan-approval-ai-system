@@ -101,6 +101,24 @@ class PipelineOrchestrator:
             logger.warning("Counterfactual generation failed in orchestrator: %s", e)
             return []
 
+    @staticmethod
+    def _return_to_pending_after_ml_failure(application, reason, error):
+        """Send the application back to PENDING so the pipeline can be re-run.
+
+        A prediction failure is not a bias flag, so it does not belong in the
+        human review queue. The audited transition records why.
+        """
+        with transaction.atomic():
+            application.refresh_from_db()
+            application.transition_to(
+                LoanApplication.Status.PENDING,
+                details={
+                    "source": "orchestrator_ml_prediction_failure",
+                    "reason": reason,
+                    "error": str(error)[:500],
+                },
+            )
+
     # ------------------------------------------------------------------
     # Idempotent status restore
     # ------------------------------------------------------------------
@@ -277,7 +295,7 @@ class PipelineOrchestrator:
                 details={
                     "prediction": prediction_result["prediction"],
                     "probability": round(prediction_result["probability"], 4),
-                    "requires_human_review": prediction_result.get("requires_human_review", False),
+                    "refer_reasons": prediction_result.get("refer_reasons", []),
                 },
             )
 
@@ -353,12 +371,7 @@ class PipelineOrchestrator:
             self._save_waterfall(application, waterfall)
             step = self._fail_step(step, str(e), failure_category="transient")
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
-            with transaction.atomic():
-                application.refresh_from_db()
-                application.transition_to(
-                    LoanApplication.Status.REVIEW,
-                    details={"source": "orchestrator_ml_prediction_failure", "reason": "transient"},
-                )
+            self._return_to_pending_after_ml_failure(application, "transient", e)
             return agent_run
         except Exception as e:
             logger.critical("Application %s: UNEXPECTED failure at ml_prediction: %s", application_id, e, exc_info=True)
@@ -373,12 +386,7 @@ class PipelineOrchestrator:
             self._save_waterfall(application, waterfall)
             step = self._fail_step(step, str(e), failure_category=None)
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
-            with transaction.atomic():
-                application.refresh_from_db()
-                application.transition_to(
-                    LoanApplication.Status.REVIEW,
-                    details={"source": "orchestrator_ml_prediction_failure", "reason": "unexpected"},
-                )
+            self._return_to_pending_after_ml_failure(application, "unexpected", e)
             return agent_run
 
         steps.append(step)
@@ -417,41 +425,23 @@ class PipelineOrchestrator:
                 step = self._fail_step(step, str(e))
             steps.append(step)
 
-        # Borderline / severe-drift / policy-"refer" predictions must be
-        # decided by a human. Escalate BEFORE the email pipeline so no
-        # automated decision email is generated or sent for these cases.
-        if prediction_result.get("requires_human_review"):
-            waterfall.append(
-                self._waterfall_entry(
-                    "final_decision",
-                    "fail",
-                    "ESCALATED_HUMAN_REVIEW",
-                    "Prediction flagged for human review (borderline / drift / policy refer) — "
-                    "escalated before any automated decision was issued",
+        # Borderline / severe-drift / policy-"refer" / pricing-gap reasons do
+        # NOT go to the human review queue (that queue is only for bias flags).
+        # The model decision stands; each reason is recorded on the decision
+        # waterfall and the AuditLog so the decision stays explainable.
+        refer_reasons = prediction_result.get("refer_reasons") or []
+        if refer_reasons:
+            for reason in refer_reasons:
+                waterfall.append(
+                    self._waterfall_entry("referral", "flag", reason.get("code", "REFER"), reason.get("detail", ""))
                 )
-            )
             self._save_waterfall(application, waterfall)
-
-            step = self._start_step("human_review_required")
-            step = self._complete_step(
-                step,
-                result_summary={
-                    "review_category": "requires_human_review",
-                    "reason": "borderline / drift / policy refer",
-                },
+            AuditLog.objects.create(
+                action="decision_referral_recorded",
+                resource_type="LoanApplication",
+                resource_id=str(application.pk),
+                details={"decision": decision, "refer_reasons": refer_reasons},
             )
-            steps.append(step)
-
-            with transaction.atomic():
-                application.refresh_from_db()
-                application.transition_to(
-                    LoanApplication.Status.REVIEW,
-                    details={"source": "orchestrator_requires_human_review"},
-                )
-            agent_run.status = "escalated"
-            self._finalize_run(agent_run, steps, start_time)
-            logger.info("Application %s: escalated to human review (requires_human_review)", application_id)
-            return agent_run
 
         # Steps 2-4: Email generation, bias check, delivery (delegated)
         steps, email_result, generated_email, bias_result, escalated = self._email_pipeline.run(
