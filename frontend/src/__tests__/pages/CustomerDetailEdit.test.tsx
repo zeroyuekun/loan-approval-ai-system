@@ -2,25 +2,12 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
+import { useParams } from 'next/navigation'
 import { AuthContext } from '@/lib/auth'
 import { server } from '@/test/mocks/server'
 import { mockUser, mockCustomerUser, mockCustomerProfile } from '@/test/mocks/handlers'
 
 const API_URL = 'http://localhost:8000/api/v1'
-
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    refresh: vi.fn(),
-    prefetch: vi.fn(),
-  }),
-  useParams: () => ({ id: '2' }),
-  usePathname: () => '/dashboard/customers/2',
-  useSearchParams: () => new URLSearchParams(),
-}))
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -67,6 +54,10 @@ function setup(detail: Record<string, unknown> = staffDetail) {
 }
 
 describe('Customer detail page admin edit', () => {
+  beforeEach(() => {
+    vi.mocked(useParams).mockReturnValue({ id: '2' })
+  })
+
   it('sends only the changed field, leaving empty server values untouched', async () => {
     const captured = setup()
     const user = userEvent.setup()

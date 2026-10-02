@@ -1,18 +1,12 @@
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
+import { useParams } from 'next/navigation'
 import { AuthContext } from '@/lib/auth'
 import { server } from '@/test/mocks/server'
 import { mockCustomerUser, mockLoanApplication } from '@/test/mocks/handlers'
 
 const API_URL = 'http://localhost:8000/api/v1'
-
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
-  useParams: () => ({ id: 'loan-1' }),
-  usePathname: () => '/apply/status/loan-1',
-  useSearchParams: () => new URLSearchParams(),
-}))
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -47,6 +41,10 @@ function renderWithProviders(ui: React.ReactElement) {
 }
 
 describe('Customer application status page', () => {
+  beforeEach(() => {
+    vi.mocked(useParams).mockReturnValue({ id: 'loan-1' })
+  })
+
   it('shows masked money values verbatim instead of $NaN', async () => {
     server.use(http.get(`${API_URL}/loans/loan-1/`, () => HttpResponse.json(maskedApplication)))
     renderWithProviders(<CustomerApplicationStatusPage />)

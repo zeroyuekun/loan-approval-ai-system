@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { authApi, loansApi } from '@/lib/api'
@@ -50,6 +50,7 @@ import {
 } from 'lucide-react'
 import { useCustomerActivity } from '@/hooks/useCustomerActivity'
 import { buildProfilePatch } from '@/lib/profilePatch'
+import { useSeededForm } from '@/hooks/useSeededForm'
 
 function BoolIndicator({ value, label }: { value: boolean; label: string }) {
   return (
@@ -253,9 +254,6 @@ export default function CustomerProfilePage() {
   const [expandedEmail, setExpandedEmail] = useState<string | null>(null)
   const [expandedRun, setExpandedRun] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
-  const [editData, setEditData] = useState<EditableFields>({})
-  // What the form was seeded with, so a save sends only the fields that changed
-  const [initialEditData, setInitialEditData] = useState<EditableFields>({})
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const isAdmin = currentUser?.role === 'admin'
@@ -280,10 +278,77 @@ export default function CustomerProfilePage() {
 
   const { data: activity, isLoading: activityLoading } = useCustomerActivity(userId)
 
+  // Seeded from the server profile; the admin's edits are layered on top so a
+  // refetch never overwrites a field that is being edited.
+  const seed = useMemo<EditableFields | undefined>(
+    () =>
+      profile
+        ? {
+            date_of_birth: profile.date_of_birth ?? null,
+            phone: profile.phone || '',
+            address_line_1: profile.address_line_1 || '',
+            address_line_2: profile.address_line_2 || '',
+            suburb: profile.suburb || '',
+            state: profile.state || '',
+            postcode: profile.postcode || '',
+            marital_status: profile.marital_status || '',
+            residency_status: profile.residency_status || '',
+            primary_id_type: profile.primary_id_type || '',
+            secondary_id_type: profile.secondary_id_type || '',
+            tax_file_number_provided: profile.tax_file_number_provided,
+            is_politically_exposed: profile.is_politically_exposed,
+            savings_balance: Number(profile.savings_balance),
+            checking_balance: Number(profile.checking_balance),
+            account_tenure_years: profile.account_tenure_years,
+            loyalty_tier: profile.loyalty_tier || '',
+            num_products: profile.num_products,
+            has_credit_card: profile.has_credit_card,
+            has_mortgage: profile.has_mortgage,
+            has_auto_loan: profile.has_auto_loan,
+            on_time_payment_pct: profile.on_time_payment_pct,
+            previous_loans_repaid: profile.previous_loans_repaid,
+            // Employment
+            employer_name: profile.employer_name || '',
+            occupation: profile.occupation || '',
+            industry: profile.industry || '',
+            employment_status: profile.employment_status || '',
+            years_in_current_role: profile.years_in_current_role ?? null,
+            previous_employer: profile.previous_employer || '',
+            // Income
+            gross_annual_income: profile.gross_annual_income ?? null,
+            other_income: profile.other_income ?? null,
+            other_income_source: profile.other_income_source || '',
+            partner_annual_income: profile.partner_annual_income ?? null,
+            // Assets
+            estimated_property_value: Number(profile.estimated_property_value) || 0,
+            vehicle_value: Number(profile.vehicle_value) || 0,
+            savings_other_institutions: Number(profile.savings_other_institutions) || 0,
+            investment_value: Number(profile.investment_value) || 0,
+            superannuation_balance: Number(profile.superannuation_balance) || 0,
+            // Liabilities
+            other_loan_repayments_monthly: Number(profile.other_loan_repayments_monthly) || 0,
+            other_credit_card_limits: Number(profile.other_credit_card_limits) || 0,
+            rent_or_board_monthly: Number(profile.rent_or_board_monthly) || 0,
+            // Living Situation
+            housing_situation: profile.housing_situation || '',
+            time_at_current_address_years: profile.time_at_current_address_years ?? null,
+            number_of_dependants: profile.number_of_dependants ?? 0,
+            previous_suburb: profile.previous_suburb || '',
+            previous_state: profile.previous_state || '',
+            previous_postcode: profile.previous_postcode || '',
+            // Contact
+            preferred_contact_method: profile.preferred_contact_method || '',
+          }
+        : undefined,
+    [profile],
+  )
+  const { form: editData, updateField: handleEditField, resetEdits } = useSeededForm(seed)
+
   const updateMutation = useMutation({
     mutationFn: (data: EditableFields) => authApi.updateCustomerDetail(userId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customerDetail', userId] })
+      // Saved: drop local edits once the refetched server values are in
+      void queryClient.invalidateQueries({ queryKey: ['customerDetail', userId] }).then(resetEdits)
       setEditing(false)
       setSaveError(null)
     },
@@ -292,82 +357,21 @@ export default function CustomerProfilePage() {
     },
   })
 
-  const handleEditField = (field: keyof EditableFields, value: any) => {
-    setEditData((prev) => ({ ...prev, [field]: value }))
-  }
-
   const startEditing = () => {
     if (!profile) return
-    const seed: EditableFields = {
-      date_of_birth: profile.date_of_birth ?? null,
-      phone: profile.phone || '',
-      address_line_1: profile.address_line_1 || '',
-      address_line_2: profile.address_line_2 || '',
-      suburb: profile.suburb || '',
-      state: profile.state || '',
-      postcode: profile.postcode || '',
-      marital_status: profile.marital_status || '',
-      residency_status: profile.residency_status || '',
-      primary_id_type: profile.primary_id_type || '',
-      secondary_id_type: profile.secondary_id_type || '',
-      tax_file_number_provided: profile.tax_file_number_provided,
-      is_politically_exposed: profile.is_politically_exposed,
-      savings_balance: Number(profile.savings_balance),
-      checking_balance: Number(profile.checking_balance),
-      account_tenure_years: profile.account_tenure_years,
-      loyalty_tier: profile.loyalty_tier || '',
-      num_products: profile.num_products,
-      has_credit_card: profile.has_credit_card,
-      has_mortgage: profile.has_mortgage,
-      has_auto_loan: profile.has_auto_loan,
-      on_time_payment_pct: profile.on_time_payment_pct,
-      previous_loans_repaid: profile.previous_loans_repaid,
-      // Employment
-      employer_name: profile.employer_name || '',
-      occupation: profile.occupation || '',
-      industry: profile.industry || '',
-      employment_status: profile.employment_status || '',
-      years_in_current_role: profile.years_in_current_role ?? null,
-      previous_employer: profile.previous_employer || '',
-      // Income
-      gross_annual_income: profile.gross_annual_income ?? null,
-      other_income: profile.other_income ?? null,
-      other_income_source: profile.other_income_source || '',
-      partner_annual_income: profile.partner_annual_income ?? null,
-      // Assets
-      estimated_property_value: Number(profile.estimated_property_value) || 0,
-      vehicle_value: Number(profile.vehicle_value) || 0,
-      savings_other_institutions: Number(profile.savings_other_institutions) || 0,
-      investment_value: Number(profile.investment_value) || 0,
-      superannuation_balance: Number(profile.superannuation_balance) || 0,
-      // Liabilities
-      other_loan_repayments_monthly: Number(profile.other_loan_repayments_monthly) || 0,
-      other_credit_card_limits: Number(profile.other_credit_card_limits) || 0,
-      rent_or_board_monthly: Number(profile.rent_or_board_monthly) || 0,
-      // Living Situation
-      housing_situation: profile.housing_situation || '',
-      time_at_current_address_years: profile.time_at_current_address_years ?? null,
-      number_of_dependants: profile.number_of_dependants ?? 0,
-      previous_suburb: profile.previous_suburb || '',
-      previous_state: profile.previous_state || '',
-      previous_postcode: profile.previous_postcode || '',
-      // Contact
-      preferred_contact_method: profile.preferred_contact_method || '',
-    }
-    setInitialEditData(seed)
-    setEditData(seed)
+    resetEdits()
     setSaveError(null)
     setEditing(true)
   }
 
   const cancelEditing = () => {
     setEditing(false)
-    setEditData({})
+    resetEdits()
     setSaveError(null)
   }
 
   const saveChanges = () => {
-    updateMutation.mutate(buildProfilePatch(initialEditData, editData))
+    updateMutation.mutate(buildProfilePatch(seed, editData))
   }
 
   if (profileLoading) {

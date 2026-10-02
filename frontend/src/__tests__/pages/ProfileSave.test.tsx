@@ -9,19 +9,6 @@ import { mockUser, mockCustomerProfile } from '@/test/mocks/handlers'
 
 const API_URL = 'http://localhost:8000/api/v1'
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    refresh: vi.fn(),
-    prefetch: vi.fn(),
-  }),
-  usePathname: () => '/dashboard/profile',
-  useSearchParams: () => new URLSearchParams(),
-}))
-
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
@@ -36,6 +23,16 @@ const serverProfile = {
   primary_id_number_masked: '****3456',
   secondary_id_number_masked: '****9012',
 }
+
+// [name, page, save button label]
+const PAGES_WITH_ID_NUMBERS: Array<[string, ComponentType, RegExp]> = [
+  ['dashboard profile', DashboardProfilePage, /save changes/i],
+  ['apply profile', ApplyProfilePage, /save & continue/i],
+]
+const ALL_PROFILE_PAGES: Array<[string, ComponentType, RegExp]> = [
+  ...PAGES_WITH_ID_NUMBERS,
+  ['apply profile edit', EditProfilePage, /save changes/i],
+]
 
 function renderPage(Page: ComponentType) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -68,41 +65,8 @@ function capturePatch() {
   return captured
 }
 
-describe.each([
-  ['dashboard profile', DashboardProfilePage, /save changes/i],
-  ['apply profile', ApplyProfilePage, /save & continue/i],
-])('%s page ID numbers', (_name, Page, saveLabel) => {
-  it('does not send ID numbers the user did not type, so saving keeps the stored IDs', async () => {
-    const captured = capturePatch()
-    const user = userEvent.setup()
-    renderPage(Page)
-
-    const phone = await screen.findByDisplayValue('0412345678')
-    await user.clear(phone)
-    await user.type(phone, '0499999999')
-    await user.click(screen.getByRole('button', { name: saveLabel }))
-
-    await waitFor(() => expect(captured.body).not.toBeNull())
-    expect(captured.body).toHaveProperty('phone', '0499999999')
-    expect(captured.body).not.toHaveProperty('primary_id_number')
-    expect(captured.body).not.toHaveProperty('secondary_id_number')
-  })
-
-  it('shows the masked stored ID as a placeholder and sends a newly typed ID number', async () => {
-    const captured = capturePatch()
-    const user = userEvent.setup()
-    renderPage(Page)
-
-    const primary = await screen.findByPlaceholderText('****3456')
-    expect(screen.getByPlaceholderText('****9012')).toBeInTheDocument()
-    await user.type(primary, 'DL998877')
-    await user.click(screen.getByRole('button', { name: saveLabel }))
-
-    await waitFor(() => expect(captured.body).not.toBeNull())
-    expect(captured.body).toHaveProperty('primary_id_number', 'DL998877')
-    expect(captured.body).not.toHaveProperty('secondary_id_number')
-  })
-
+describe.each(ALL_PROFILE_PAGES)('%s page save', (_name, Page, saveLabel) => {
+  // The exact-body assertion also proves untyped ID numbers are not sent.
   it('sends only the fields the user changed, so empty server values are not rewritten', async () => {
     const captured = capturePatch()
     server.use(
@@ -141,31 +105,19 @@ describe.each([
   })
 })
 
-describe('apply profile edit page', () => {
-  it('sends only the changed field', async () => {
+describe.each(PAGES_WITH_ID_NUMBERS)('%s page ID numbers', (_name, Page, saveLabel) => {
+  it('shows the masked stored ID as a placeholder and sends a newly typed ID number', async () => {
     const captured = capturePatch()
     const user = userEvent.setup()
-    renderPage(EditProfilePage)
+    renderPage(Page)
 
-    const phone = await screen.findByDisplayValue('0412345678')
-    await user.clear(phone)
-    await user.type(phone, '0499999999')
-    await user.click(screen.getByRole('button', { name: /save changes/i }))
-
-    await waitFor(() => expect(captured.body).not.toBeNull())
-    expect(captured.body).toEqual({ phone: '0499999999' })
-  })
-
-  it('sends null, not an empty string, for a cleared number field', async () => {
-    const captured = capturePatch()
-    const user = userEvent.setup()
-    renderPage(EditProfilePage)
-
-    await screen.findByDisplayValue('0412345678')
-    await user.clear(screen.getByLabelText(/gross annual income/i))
-    await user.click(screen.getByRole('button', { name: /save changes/i }))
+    const primary = await screen.findByPlaceholderText('****3456')
+    expect(screen.getByPlaceholderText('****9012')).toBeInTheDocument()
+    await user.type(primary, 'DL998877')
+    await user.click(screen.getByRole('button', { name: saveLabel }))
 
     await waitFor(() => expect(captured.body).not.toBeNull())
-    expect(captured.body).toEqual({ gross_annual_income: null })
+    expect(captured.body).toHaveProperty('primary_id_number', 'DL998877')
+    expect(captured.body).not.toHaveProperty('secondary_id_number')
   })
 })
