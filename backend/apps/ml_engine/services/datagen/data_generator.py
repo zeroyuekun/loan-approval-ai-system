@@ -86,9 +86,9 @@ class DataGenerator:
     APPLICANT_TYPE_WEIGHTS = [0.42, 0.58]
 
     # APRA serviceability buffer (3% above product rate)
-    ASSESSMENT_BUFFER = 0.03
+    ASSESSMENT_BUFFER = UnderwritingEngine.ASSESSMENT_BUFFER
     BASE_RATE = 0.065  # ~6.5% average variable rate (2025/2026)
-    FLOOR_RATE = 0.0575  # Big 4 floor rate (~5.75%)
+    FLOOR_RATE = UnderwritingEngine.FLOOR_RATE  # Big 4 floor rate (~5.75%)
 
     # Temporal rate modelling — product rate = cash rate + spread
     RATE_SPREAD_OVER_CASH = 2.15  # Big 4 avg spread over RBA cash rate (%)

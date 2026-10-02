@@ -23,6 +23,7 @@ import pandas as pd
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.ml_engine.models import ModelValidationReport, ModelVersion
+from apps.ml_engine.services.model_selector import NoActiveModelError, champion_model_version
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +74,10 @@ class Command(BaseCommand):
         self.stdout.write(f"Loaded holdout dataset: {len(df)} samples")
 
         # Get champion model
-        champion = ModelVersion.objects.filter(is_active=True).first()
-        if not champion:
-            raise CommandError("No active (champion) model found")
+        try:
+            champion = champion_model_version()
+        except NoActiveModelError as err:
+            raise CommandError("No active (champion) model found") from err
 
         self.stdout.write(f"Champion: {champion}")
 

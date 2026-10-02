@@ -3,6 +3,7 @@
 import logging
 import random
 from dataclasses import dataclass, field
+from operator import attrgetter
 
 from django.conf import settings
 
@@ -22,6 +23,9 @@ MAX_ECE_THRESHOLD = 0.03  # Expected calibration error ceiling
 AUC_REGRESSION_TOLERANCE = 0.02  # Candidate AUC must not drop more than 2pp
 MAX_OVERFIT_GAP = 0.05  # Train-vs-validation AUC gap ceiling (gate 5)
 
+# Champion ranking within a pool: most traffic first, newest on a tie.
+CHAMPION_ORDERING = ("-traffic_percentage", "-created_at")
+
 
 class NoActiveModelError(ValueError):
     """No active model version serves the requested segment (or unified)."""
@@ -33,8 +37,7 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
     Scoped to `segment` so per-segment A/B tests (e.g. two personal-loan
     challengers) don't interfere with mortgage models. When `segment` is
     non-unified and no active model exists in that segment, the call falls
-    back to the unified segment — mirroring
-    `segmentation.select_active_model_for_segment`.
+    back to the unified segment.
 
     Single active model: returns it immediately (fast path).
     Multiple active models (same segment): weighted random selection.
@@ -89,7 +92,7 @@ def champion_model_version(segment: str = SEGMENT_UNIFIED):
     for pool_segment in dict.fromkeys((segment, SEGMENT_UNIFIED)):
         champion = (
             ModelVersion.objects.filter(is_active=True, traffic_percentage__gt=0, segment=pool_segment)
-            .order_by("-traffic_percentage", "-created_at")
+            .order_by(*CHAMPION_ORDERING)
             .first()
         )
         if champion is not None:
@@ -100,19 +103,23 @@ def champion_model_version(segment: str = SEGMENT_UNIFIED):
     )
 
 
-def monitoring_model_version():
-    """The model the metrics and drift dashboards describe.
+def pick_monitoring_model(active_models):
+    """The monitoring model among ``active_models`` (listed in CHAMPION_ORDERING).
 
-    The unified segment's main champion (highest traffic, then newest); if no
-    unified model is active, the newest active model. A plain
-    ``filter(is_active=True).first()`` would switch the dashboards to whichever
-    segment model was trained last.
+    The unified segment's main champion; if no unified model is active, the
+    newest active model. None for an empty list.
     """
-    active = ModelVersion.objects.filter(is_active=True)
-    return (
-        active.filter(segment=SEGMENT_UNIFIED).order_by("-traffic_percentage", "-created_at").first()
-        or active.order_by("-created_at").first()
-    )
+    unified = next((m for m in active_models if m.segment == SEGMENT_UNIFIED), None)
+    return unified or max(active_models, key=attrgetter("created_at"), default=None)
+
+
+def monitoring_model_version():
+    """The model the metrics and drift dashboards describe (see pick_monitoring_model).
+
+    Taking the first row of every active model would switch the dashboards to
+    whichever segment model or challenger was trained last.
+    """
+    return pick_monitoring_model(list(ModelVersion.objects.filter(is_active=True).order_by(*CHAMPION_ORDERING)))
 
 
 @dataclass
