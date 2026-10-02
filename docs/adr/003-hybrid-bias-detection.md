@@ -92,9 +92,13 @@ The moderate band now works like this:
   cost) and runs the bias check on the template. A clean template is sent. A
   flagged template, a template that fails its guardrails, or a flagged email that
   already was the template puts the application in the human-review queue.
-- On the human-review resume path a reviewer has already cleared the run, so the
-  template is sent unless it is severe. Holding it again for a moderate score
-  would send the run back to the queue it came from, again and again.
-- The flagged LLM text is never sent, in either path.
+- The human-review resume path and the standalone screening apply the same
+  rule: the template is sent only if it checks clean, otherwise the email is
+  held. A reviewer clearing the run does not clear an email written after the
+  review. (The resume used to send a moderately flagged template, to keep the
+  run out of the queue it came from; a run whose template keeps checking
+  flagged now goes back to that queue.)
+- The flagged LLM text is never sent, in any path.
 
-The code is `replace_flagged_email` in `apps/agents/services/email_pipeline.py`.
+The code is `replace_flagged_email` and `screen_bias` in
+`apps/agents/services/email_pipeline.py`.

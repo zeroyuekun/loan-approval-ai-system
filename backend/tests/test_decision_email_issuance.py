@@ -466,6 +466,32 @@ def test_generate_email_task_replaces_a_flagged_email_with_the_template(decided_
 
 @LOCMEM
 @pytest.mark.django_db
+def test_screening_counts_an_unavailable_bias_check(decided_approved):
+    """The bias_check_unavailable alert covers the standalone screening, not
+    only the pipeline: an outage there withholds the email and is counted."""
+    from apps.agents.metrics import bias_check_unavailable_total
+    from apps.email_engine.tasks import generate_email_task
+
+    counter = bias_check_unavailable_total.labels(mode="block")
+    before = counter._value.get()
+    send = MagicMock(return_value={"sent": True})
+    with (
+        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch(BIAS_ANALYZE, side_effect=RuntimeError("detector down")),
+        patch(SENDER, send),
+        override_settings(BIAS_FAILURE_MODE="block"),
+    ):
+        result = generate_email_task.apply(
+            args=(str(decided_approved.pk), "approved"), kwargs={"regenerate": True}
+        ).get()
+
+    assert counter._value.get() == before + 1
+    send.assert_not_called()
+    assert result["held_reason"].startswith("Bias check unavailable")
+
+
+@LOCMEM
+@pytest.mark.django_db
 def test_redelivery_bias_checks_a_draft_that_was_never_screened(decided_approved):
     """A stored draft with no bias report (the check was down, or the worker
     died before it ran) is screened before the redelivery path sends it."""

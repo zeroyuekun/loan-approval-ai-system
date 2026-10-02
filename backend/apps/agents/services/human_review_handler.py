@@ -1,7 +1,6 @@
 import logging
 import time
 
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -15,10 +14,8 @@ from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action
 
 from .api_budget import bind_api_call_context
 from .bias.core import BiasDetector
-from .bias.thresholds import is_severe
-from .bias_records import bias_context, save_bias_report
 from .context_builder import ApplicationContextBuilder
-from .email_pipeline import build_denial_email_context, replace_flagged_email
+from .email_pipeline import build_denial_email_context, screen_bias
 from .marketing_pipeline import MarketingPipelineService
 from .step_tracker import StepTracker
 
@@ -177,124 +174,65 @@ class HumanReviewHandler:
             steps.append(step)
             email_result = None  # nothing to bias-check or deliver
 
-        # Re-run bias detection on the regenerated email. The original pipeline
-        # ran bias detection before sending; the resume path must mirror this
-        # check so a regenerated email cannot bypass bias screening by going
-        # through the human-review flow.
-        if email_result and email_result.get("passed_guardrails"):
-            step_bias = self.tracker.start_step("bias_check_resume")
-            try:
-                bias_detector = BiasDetector()
-                bias_result = bias_detector.analyze(email_result["body"], bias_context(application, decision))
-                # Persist the report against the email, as the pipeline does,
-                # so a withheld draft is identifiable as bias-held later.
-                save_bias_report(agent_run, generated_email, bias_result)
-                step_bias = self.tracker.complete_step(
-                    step_bias,
-                    result_summary={
-                        "bias_score": bias_result["score"],
-                        "flagged": bias_result["flagged"],
-                    },
-                )
-                steps.append(step_bias)
-
-                # A severe finding re-escalates, as in the pipeline. A moderate
-                # one gets the template as a replacement, which is sent unless
-                # it is severe too: a reviewer has already cleared this run, so
-                # holding it again for a moderate score would loop it through
-                # the review queue for good. The flagged LLM text never ships.
-                held_reason = None
-                review_threshold = getattr(settings, "BIAS_THRESHOLD_REVIEW", 60)
-                if is_severe(bias_result["score"], review_threshold):
-                    held_reason = f"Resumed email re-flagged by bias detector (score={bias_result['score']})"
-                elif bias_result["flagged"]:
-                    try:
-                        replacement = replace_flagged_email(
-                            application,
-                            agent_run,
-                            decision,
-                            email_result,
-                            generated_email,
-                            bias_result,
-                            bias_detector,
-                            self.tracker,
-                            steps,
-                            profile_context=email_context,
-                        )
-                    except Exception as exc:
-                        # The flagged original must not ship, whatever BIAS_FAILURE_MODE says.
-                        logger.error("Agent run %s: bias re-check of the replacement failed: %s", agent_run_id, exc)
-                        replacement = None
-                    if replacement is None or is_severe(replacement[2]["score"], review_threshold):
-                        held_reason = (
-                            f"Resumed email flagged by bias detector (score={bias_result['score']}) "
-                            "and no sendable replacement"
-                        )
-                    else:
-                        email_result, generated_email, bias_result = replacement
-
-                if held_reason:
-                    logger.warning(
-                        "Agent run %s: %s — re-escalating application %s", agent_run_id, held_reason, application.id
-                    )
-                    step_hold = self.tracker.start_step("email_delivery")
-                    step_hold = self.tracker.complete_step(
-                        step_hold,
-                        result_summary={
-                            "sent": False,
-                            "reason": "Bias detected on resume — re-escalating",
-                        },
-                    )
-                    steps.append(step_hold)
-                    with transaction.atomic():
-                        application.refresh_from_db()
-                        if application.status not in (
-                            LoanApplication.Status.REVIEW,
-                            LoanApplication.Status.PENDING,
-                        ):
-                            application.status = LoanApplication.Status.REVIEW
-                            application.save(update_fields=["status"])
-                    agent_run.status = "escalated"
-                    agent_run.error = f"{held_reason} — re-escalated"
-                    self.tracker.finalize_run(agent_run, steps, start_time)
-                    return agent_run
-
-            except Exception as exc:
-                step_bias = self.tracker.fail_step(step_bias, str(exc), failure_category="transient")
-                steps.append(step_bias)
-                # BIAS_FAILURE_MODE as in the pipeline: warn/off fail open and
-                # send. In block mode the email is withheld; the run goes back
-                # to ESCALATED rather than to PENDING (the pipeline's hold) so
-                # the reviewer's decision, already on record for a deny, stays
+        # Re-run bias detection on the regenerated email, with the verdict the
+        # standalone screening uses, so a regenerated email cannot bypass bias
+        # screening by going through the human-review flow. The flagged LLM
+        # text never ships, and its replacement only if it checks clean.
+        if email_result:
+            screening = screen_bias(
+                application,
+                agent_run,
+                decision,
+                email_result,
+                generated_email,
+                detector_class=BiasDetector,
+                tracker=self.tracker,
+                steps=steps,
+                profile_context=email_context,
+                step_name="bias_check_resume",
+            )
+            if screening.check_error is not None and screening.held_reason:
+                # BIAS_FAILURE_MODE=block. The run goes back to ESCALATED
+                # rather than to PENDING (the pipeline's hold) so the
+                # reviewer's decision, already on record for a deny, stays
                 # actionable from the queue it came from.
-                mode = getattr(settings, "BIAS_FAILURE_MODE", "block").lower()
-                if mode in ("warn", "off"):
-                    logger.error(
-                        "Agent run %s: bias check failed on resume — failing open (%s): %s", agent_run_id, mode, exc
+                logger.error(
+                    "Agent run %s: bias check failed on resume — re-escalating: %s", agent_run_id, screening.check_error
+                )
+                agent_run.status = "escalated"
+                agent_run.error = f"Bias check failed on resume — withheld for safety: {screening.check_error}"
+                self.tracker.finalize_run(agent_run, steps, start_time)
+                return agent_run
+            if screening.held_reason:
+                logger.warning(
+                    "Agent run %s: %s — re-escalating application %s",
+                    agent_run_id,
+                    screening.held_reason,
+                    application.id,
+                )
+                step_hold = self.tracker.start_step("email_delivery")
+                steps.append(
+                    self.tracker.complete_step(
+                        step_hold, result_summary={"sent": False, "reason": "Bias detected on resume — re-escalating"}
                     )
-                else:
-                    logger.error("Agent run %s: bias check failed on resume — re-escalating: %s", agent_run_id, exc)
-                    agent_run.status = "escalated"
-                    agent_run.error = f"Bias check failed on resume — withheld for safety: {exc}"
-                    self.tracker.finalize_run(agent_run, steps, start_time)
-                    return agent_run
+                )
+                with transaction.atomic():
+                    application.refresh_from_db()
+                    if application.status not in (LoanApplication.Status.REVIEW, LoanApplication.Status.PENDING):
+                        application.status = LoanApplication.Status.REVIEW
+                        application.save(update_fields=["status"])
+                agent_run.status = "escalated"
+                agent_run.error = f"{screening.held_reason} — re-escalated"
+                self.tracker.finalize_run(agent_run, steps, start_time)
+                return agent_run
+            email_result, generated_email = screening.email_result, screening.generated_email
 
         # Send the decision email (once; stamps sent_at so a later standalone
         # generate/send for the same decision does not email the customer again).
         if email_result:
             step = self.tracker.start_step("email_delivery")
             try:
-                outcome = deliver_decision_email(generated_email)
-                if outcome["sent"] or outcome["already_sent"]:
-                    step = self.tracker.complete_step(
-                        step, result_summary={"sent": True, "recipient": outcome["recipient"]}
-                    )
-                elif outcome["recipient"] is None:
-                    step = self.tracker.complete_step(
-                        step, result_summary={"sent": False, "reason": "No recipient email"}
-                    )
-                else:
-                    step = self.tracker.fail_step(step, outcome["error"] or "Send failed")
+                step = self.tracker.record_delivery(step, deliver_decision_email(generated_email))
             except (ConnectionError, TimeoutError, OSError) as e:
                 logger.error("Agent run %s: %s email delivery failed: %s", agent_run_id, decision, e)
                 step = self.tracker.fail_step(step, str(e), failure_category="transient")
