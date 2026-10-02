@@ -4,8 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { loansApi, type LoanPayload } from '@/lib/api'
 import { LoanApplication, PaginatedResponse } from '@/types'
 
-export function useApplications(params?: Record<string, any>) {
-  return useQuery<PaginatedResponse<LoanApplication>>({
+// The loans endpoints answer by role: staff get LoanApplication, customers get
+// CustomerLoanApplication (masked money and score), so customer pages pass it as T.
+export function useApplications<T = LoanApplication>(params?: Record<string, any>) {
+  return useQuery<PaginatedResponse<T>>({
     queryKey: ['applications', params],
     queryFn: async () => {
       const { data } = await loansApi.list(params)
@@ -14,11 +16,11 @@ export function useApplications(params?: Record<string, any>) {
   })
 }
 
-export function useApplication(
+export function useApplication<T = LoanApplication>(
   id: string,
-  options?: { refetchInterval?: number | false | ((query: { state: { data?: LoanApplication } }) => number | false) },
+  options?: { refetchInterval?: number | false | ((query: { state: { data?: T } }) => number | false) },
 ) {
-  return useQuery<LoanApplication>({
+  return useQuery<T>({
     queryKey: ['application', id],
     queryFn: async () => {
       const { data } = await loansApi.get(id)
