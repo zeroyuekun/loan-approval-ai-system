@@ -40,7 +40,16 @@ def build_denial_email_context(application, profile_context):
 
 
 def replace_flagged_email(
-    application, agent_run, decision, email_result, generated_email, bias_result, detector, tracker, steps
+    application,
+    agent_run,
+    decision,
+    email_result,
+    generated_email,
+    bias_result,
+    detector,
+    tracker,
+    steps,
+    profile_context=None,
 ):
     """Swap a moderate-band flagged email for the template and bias-check the template.
 
@@ -52,7 +61,9 @@ def replace_flagged_email(
     so the caller decides whether it may be sent. A flagged email that already
     is the template comes back unchanged, because regenerating it gives the
     same text. Returns None when the template failed its guardrails. Exceptions
-    from the bias check propagate after the step is recorded.
+    from the bias check propagate after the step is recorded. ``profile_context``
+    carries ``nbo_offer`` for denials, so the replacement template still carries
+    the next-best offer.
     """
     step = tracker.start_step("bias_regeneration")
     if email_result.get("template_fallback"):
@@ -63,7 +74,9 @@ def replace_flagged_email(
         )
         return email_result, generated_email, bias_result
     try:
-        result, generated_email = generate_template_decision_email(application, decision)
+        result, generated_email = generate_template_decision_email(
+            application, decision, profile_context=profile_context
+        )
         if not result.get("passed_guardrails"):
             steps.append(
                 tracker.complete_step(
@@ -276,6 +289,7 @@ class EmailPipelineService:
                         bias_detector,
                         self.tracker,
                         steps,
+                        profile_context=profile_context,
                     )
                 except Exception as e:
                     # The flagged original must not ship, so a failed re-check holds

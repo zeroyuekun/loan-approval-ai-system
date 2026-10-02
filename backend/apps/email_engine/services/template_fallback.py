@@ -551,6 +551,34 @@ This communication is confidential and intended solely for the named recipient.
     return {"subject": subject, "body": body}
 
 
+def render_nbo_block(nbo_offer):
+    """Render a neutral, factual alternative-offer teaser for denial emails.
+
+    Shared by the LLM prompt path (``EmailGenerator._render_nbo_block``
+    delegates here) and the deterministic template path below. No
+    apology/emotion language (locked project rule). Returns "" when no usable
+    offer is supplied so the caller's output is unchanged.
+    """
+    if not nbo_offer:
+        return ""
+    name = nbo_offer.get("name") or nbo_offer.get("type")
+    amount = nbo_offer.get("amount")
+    if not name or amount is None:
+        return ""
+    rate = nbo_offer.get("estimated_rate")
+    monthly = nbo_offer.get("monthly_repayment")
+    headline = f"${float(amount):,.0f}"
+    if rate:
+        headline += f" at {float(rate):.2f}% p.a."
+    if monthly:
+        headline += f", around ${float(monthly):,.0f}/month"
+    return (
+        "A specific option you may qualify for now:\n"
+        f"  •  {name}: {headline}\n"
+        "You can discuss this option using the contact details below."
+    )
+
+
 def generate_denial_template(
     applicant_name,
     loan_amount,
@@ -560,6 +588,7 @@ def generate_denial_template(
     credit_score=None,
     debt_to_income=None,
     employment_type=None,
+    nbo_offer=None,
 ):
     """Generate a denial email matching the Claude-generated format exactly."""
     loan_label = _loan_label(purpose)
@@ -608,6 +637,9 @@ def generate_denial_template(
 
     steps_text = "\n".join(step_bullets)
 
+    offer_block = render_nbo_block(nbo_offer)
+    offer_text = f"{offer_block}\n\n" if offer_block else ""
+
     body = f"""Dear {first},
 
 Thank you for applying for a ${loan_amount:,.2f} {loan_label} with AussieLoanAI.
@@ -632,7 +664,7 @@ You are entitled to a free copy of your credit report within 90 days of this not
 
 We'd Still Like to Help:
 
-If a different loan product or a smaller amount might suit you better, I'd be happy to talk through your options.
+{offer_text}If a different loan product or a smaller amount might suit you better, I'd be happy to talk through your options.
 
 If you have questions about this decision, call me on 1300 000 000 (Mon\u2013Fri, 8:30am\u20135:30pm AEST) or reply to this email.
 Thanks for coming to us, {first}. When you're ready, we'd like to help you find the right option.

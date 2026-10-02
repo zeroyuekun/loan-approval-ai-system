@@ -219,6 +219,7 @@ class HumanReviewHandler:
                             bias_detector,
                             self.tracker,
                             steps,
+                            profile_context=email_context,
                         )
                     except Exception as exc:
                         # The flagged original must not ship, whatever BIAS_FAILURE_MODE says.

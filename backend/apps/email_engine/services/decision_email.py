@@ -129,7 +129,7 @@ def generate_decision_email(
         if on_rate_limit == "raise":
             raise
         logger.warning("Application %s: email LLM rate limited — issuing the template decision email", application.pk)
-        result = generator.generate_template(application, decision)
+        result = generator.generate_template(application, decision, profile_context=profile_context)
 
     return result, _persist(application, decision, result)
 
@@ -156,14 +156,16 @@ def persist_decision_email(application, decision, result):
     return _persist(application, decision, result)
 
 
-def generate_template_decision_email(application, decision, *, generator=None):
+def generate_template_decision_email(application, decision, *, profile_context=None, generator=None):
     """Generate and persist the deterministic template email. Returns ``(result, generated_email)``.
 
     Used when the bias check flags an LLM-written email: the template is the
     replacement that gets a second bias check before anything is sent.
+    ``profile_context`` carries ``nbo_offer`` for denials, so the replacement
+    still carries the next-best offer.
     """
     generator = generator or EmailGenerator()
-    result = generator.generate_template(application, decision)
+    result = generator.generate_template(application, decision, profile_context=profile_context)
     return result, _persist(application, decision, result)
 
 
