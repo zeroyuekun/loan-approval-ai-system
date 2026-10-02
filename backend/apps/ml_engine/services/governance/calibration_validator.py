@@ -5,16 +5,13 @@ Performs three-way calibration checking:
 2. External: system's actual default rate vs APRA published benchmarks
 3. Combined: overall calibration assessment with recommendations
 
-This addresses SR 11-7's requirement for "outcomes analysis" and provides
-evidence that the model's predictions are grounded in real-world Australian
-lending performance data published by APRA.
+This addresses SR 11-7's "outcomes analysis" requirement with APRA lending-performance evidence.
+Not yet called by the application pipeline; exercised by its own tests only.
 
 References:
     - APRA Quarterly ADI Property Exposures: apra.gov.au
     - SR 11-7 (Federal Reserve, 2011): outcomes analysis requirement
     - RBA Financial Stability Review: rba.gov.au/publications/fsr/
-
-Not yet called by the application pipeline; exercised by its own tests only.
 """
 
 import logging
