@@ -17,6 +17,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.agents.models import AgentRun, MarketingEmail
+from apps.common.http import client_ip
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.html_renderer import render_html
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
@@ -84,7 +85,7 @@ def _audit_user_event(request, user, action, details=None):
         resource_type="CustomUser",
         resource_id=str(user.id),
         details=details or {},
-        ip_address=request.META.get("REMOTE_ADDR"),
+        ip_address=client_ip(request),
     )
 
 
@@ -340,7 +341,7 @@ class StaffCustomerProfileView(generics.RetrieveUpdateAPIView):
                 "customer_username": profile.user.username,
                 "updated_fields": list(serializer.validated_data.keys()),
             },
-            ip_address=self.request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(self.request),
         )
 
 

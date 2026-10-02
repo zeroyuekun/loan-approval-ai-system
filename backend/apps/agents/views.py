@@ -18,6 +18,7 @@ from apps.agents.services.human_review_actions import (
     apply_human_review_action,
 )
 from apps.agents.tasks import orchestrate_pipeline_task
+from apps.common.http import client_ip
 from apps.loans.models import AuditLog, LoanApplication
 from apps.loans.permissions import check_loan_access
 
@@ -179,7 +180,7 @@ class OrchestrateView(APIView):
             resource_type="LoanApplication",
             resource_id=str(loan_id),
             details=audit_details,
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return Response(
@@ -272,7 +273,7 @@ class BatchOrchestrateView(APIView):
                 "skipped_count": skipped,
                 "application_ids": [t["application_id"] for t in tasks],
             },
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         body = {"queued": len(tasks), "tasks": tasks}
@@ -341,7 +342,7 @@ class HumanReviewView(APIView):
                 action=action,
                 user=request.user,
                 note=request.data.get("note", ""),
-                ip_address=request.META.get("REMOTE_ADDR"),
+                ip_address=client_ip(request),
             )
         except HumanReviewRejected as exc:
             return Response({"error": str(exc)}, status=exc.status_code)

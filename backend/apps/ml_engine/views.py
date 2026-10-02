@@ -10,6 +10,7 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
+from apps.common.http import client_ip
 from apps.loans.models import AuditLog
 from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
@@ -50,7 +51,7 @@ class PredictView(APIView):
             resource_type="LoanApplication",
             resource_id=str(loan_id),
             details={"task_id": task.id},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return Response(
@@ -144,7 +145,7 @@ class TrainModelView(APIView):
             resource_type="ModelVersion",
             resource_id="pending",
             details={"algorithm": algorithm, "task_id": task.id},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return Response(
@@ -311,7 +312,7 @@ class ModelActivateView(APIView):
                 actor=request.user,
                 source="api",
                 force=force,
-                ip_address=request.META.get("REMOTE_ADDR"),
+                ip_address=client_ip(request),
             )
         except ActivationRefused as exc:
             return _refused_response(exc)
@@ -351,7 +352,7 @@ class ModelTrafficView(APIView):
             )
 
         try:
-            set_traffic(version, int(traffic), actor=request.user, ip_address=request.META.get("REMOTE_ADDR"))
+            set_traffic(version, int(traffic), actor=request.user, ip_address=client_ip(request))
         except ActivationRefused as exc:
             return _refused_response(exc)
         except ValidationError as e:
@@ -522,7 +523,7 @@ class AdhocScoreView(APIView):
             resource_type="ModelVersion",
             resource_id=result["model_version"],
             details={"fields": sorted(serializer.validated_data.keys())},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return Response(result, status=status.HTTP_200_OK)
