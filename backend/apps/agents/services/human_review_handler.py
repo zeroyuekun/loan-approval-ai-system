@@ -16,8 +16,9 @@ from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action
 from .api_budget import bind_api_call_context
 from .bias.core import BiasDetector
 from .bias.thresholds import is_severe
+from .bias_records import bias_context, save_bias_report
 from .context_builder import ApplicationContextBuilder
-from .email_pipeline import bias_context, build_denial_email_context, replace_flagged_email, save_bias_report
+from .email_pipeline import build_denial_email_context, replace_flagged_email
 from .marketing_pipeline import MarketingPipelineService
 from .step_tracker import StepTracker
 

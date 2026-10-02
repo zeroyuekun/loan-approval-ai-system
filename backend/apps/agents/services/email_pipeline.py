@@ -15,7 +15,7 @@ from apps.loans.models import LoanApplication
 from .bias.thresholds import is_severe
 from .bias_agent2 import run_agent2
 from .bias_detector import BiasDetector
-from .bias_records import bias_context, save_bias_report  # noqa: F401 - re-exported
+from .bias_records import bias_context, save_bias_report
 from .recommendation_engine import RecommendationEngine
 from .step_tracker import StepTracker
 
@@ -44,8 +44,10 @@ def replace_flagged_email(
 ):
     """Swap a moderate-band flagged email for the template and bias-check the template.
 
-    A flagged LLM email is never sent as written. The deterministic template is
-    the one replacement tried; it costs no API call. Returns the template as
+    A flagged LLM email is never sent as written. This is the fallback when
+    Agent 2's rewrite was skipped or handed over. Generating the deterministic
+    template costs no API call; its bias re-check can still call the LLM when
+    the pre-screen finds something ambiguous. Returns the template as
     ``(email_result, generated_email, bias_result)``, with its own bias result,
     so the caller decides whether it may be sent. A flagged email that already
     is the template comes back unchanged, because regenerating it gives the
@@ -234,8 +236,11 @@ class EmailPipelineService:
             )
             return steps, email_result, generated_email, bias_result, True
 
-        # Moderate band: flagged, below the severe threshold. Replace the email
-        # with the template and send only if the replacement checks clean.
+        # Moderate band: flagged, below the severe threshold. The flagged email
+        # is never sent. Agent 2 tries a rewrite first (sent only if the bias
+        # check is clean and the senior reviewer approves it); if it hands over,
+        # the template replaces the email and is sent only if it checks clean.
+        # Otherwise the application is held for human review.
         if bias_result.get("flagged"):
             agent2 = run_agent2(
                 application,

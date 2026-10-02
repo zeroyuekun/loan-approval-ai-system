@@ -211,7 +211,10 @@ def test_regenerated_result_is_a_template_returns_none(processing_denied, agent_
     reviewer_cls.return_value.review.assert_not_called()
     assert len(steps) == 1
     assert steps[0]["step_name"] == "bias_agent2_regeneration"
-    assert steps[0]["result_summary"]["regenerated"] is False
+    assert steps[0]["result_summary"] == {
+        "regenerated": False,
+        "reason": "No LLM rewrite was produced (LLM unavailable or guardrails exhausted)",
+    }
     assert not GeneratedEmail.objects.filter(application=processing_denied).exists()
 
 

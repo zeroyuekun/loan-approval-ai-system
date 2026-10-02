@@ -74,7 +74,7 @@ def run_agent2(
             bias_feedback=_feedback(bias_result),
         )
         if result.get("template_fallback"):
-            return hand_over("no_rewrite", "The LLM was unavailable, so no rewrite was written")
+            return hand_over("no_rewrite", "No LLM rewrite was produced (LLM unavailable or guardrails exhausted)")
         if not result.get("passed_guardrails"):
             return hand_over("guardrails", "The rewrite failed its guardrails")
 
