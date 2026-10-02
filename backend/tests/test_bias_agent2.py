@@ -463,3 +463,43 @@ def test_a_closed_api_budget_hands_over_without_calling_the_generator(processing
     regen.assert_not_called()
     assert len(steps) == 1
     assert steps[0]["result_summary"] == {"regenerated": False, "reason": "API budget closed"}
+
+
+# ---------------------------------------------------------------------------
+# Senior reviewer call: cost and APP 8 metadata, neutral rejection wording
+# ---------------------------------------------------------------------------
+
+
+def _review_once(monkeypatch):
+    from apps.agents.services.bias.reviewer import AIEmailReviewer
+
+    captured = {}
+
+    def _fake_guarded_call(client, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop after the call is built")
+
+    monkeypatch.setattr("apps.agents.services.bias.helpers.guarded_api_call", _fake_guarded_call)
+    monkeypatch.setattr("apps.agents.services.bias.reviewer._make_anthropic_client", lambda: MagicMock())
+    AIEmailReviewer().review(
+        "BODY",
+        {"score": 5, "analysis": "x", "categories": []},
+        {"purpose": "home", "decision": "denied", "loan_amount": 100000},
+    )
+    return captured
+
+
+def test_senior_review_call_carries_service_and_pii_metadata(monkeypatch):
+    captured = _review_once(monkeypatch)
+
+    assert captured["_service"] == "bias_agent2_review"
+    assert captured["_pii_categories"] == ["name", "loan_amount", "credit_assessment"]
+
+
+def test_senior_review_prompt_does_not_promise_a_human_review(monkeypatch):
+    """In Agent 2 a rejection hands over to the template, not to a human."""
+    prompt = _review_once(monkeypatch)["messages"][0]["content"]
+
+    assert "the email will not be sent as written" in prompt
+    assert "human review" not in prompt.lower()
+    assert "human escalation" not in prompt.lower()
