@@ -24,6 +24,4 @@ django-prometheus>=2.5.0
 sentry-sdk[django,celery]>=2.19
 drf-spectacular>=0.28
 django-csp>=4.0
-django-otp>=1.5
-qrcode>=8.0
 cachetools>=5.3,<6

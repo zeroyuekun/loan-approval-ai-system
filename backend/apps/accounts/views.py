@@ -24,7 +24,6 @@ from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 from .authentication import CookieJWTAuthentication
 from .models import CustomerProfile, CustomUser
 from .permissions import IsAdminOrOfficer
-from .policy import is_staff_role
 from .serializers import (
     AdminCustomerProfileUpdateSerializer,
     CustomerProfileSerializer,
@@ -256,67 +255,11 @@ class LoginView(generics.GenericAPIView):
         user = serializer.validated_data["user"]
         user.reset_failed_logins()
 
-        # ------------------------------------------------------------------
-        # 2FA gate.
-        #
-        # - User has a confirmed TOTP device → require otp_token in the
-        #   request body. Missing → 200 with {"requires_2fa": True} so the
-        #   frontend can prompt for the code. Invalid → 400.
-        # - User is admin/officer without a confirmed TOTP device →
-        #   issue the JWT but flag requires_2fa_setup so the frontend
-        #   can nudge enrolment via /2fa/setup/.
-        # - Customer → no gate.
-        # - ALLOW_2FA_BYPASS env var skips the OTP check (break-glass).
-        #   Audit-logged whenever invoked.
-        # ------------------------------------------------------------------
-        bypass = getattr(django_settings, "ALLOW_2FA_BYPASS", False)
-        has_totp = user.has_confirmed_totp()
-
-        if has_totp and not bypass:
-            otp_token = (request.data.get("otp_token") or "").strip()
-            if not otp_token:
-                # Step 1 of two-step login: signal frontend to prompt
-                # for the OTP and resubmit. NO JWT issued yet.
-                _audit_user_event(request, user, "login_2fa_required")
-                return Response(
-                    {
-                        "requires_2fa": True,
-                        "detail": "Two-factor authentication code required.",
-                    }
-                )
-
-            from django_otp.plugins.otp_totp.models import TOTPDevice
-
-            device = TOTPDevice.objects.filter(user=user, confirmed=True).first()
-            if not device or not device.verify_token(otp_token):
-                user.record_failed_login()
-                _audit_user_event(request, user, "login_2fa_invalid", {"failed_attempts": user.failed_login_attempts})
-                return Response(
-                    {"detail": "Invalid two-factor authentication code."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
         _record_activity(user.pk)
         refresh = RefreshToken.for_user(user)
+        _audit_user_event(request, user, "login_success")
 
-        # Pick the audit action: success, success-via-bypass, or
-        # success-without-2fa-setup. Helps incident response trace
-        # which login flow each token came from.
-        if has_totp and bypass:
-            audit_action = "login_2fa_bypassed"
-        elif is_staff_role(user) and not has_totp:
-            audit_action = "login_success_no_2fa_setup"
-        else:
-            audit_action = "login_success"
-
-        _audit_user_event(request, user, audit_action)
-
-        body = {"user": UserSerializer(user).data}
-        if is_staff_role(user) and not has_totp:
-            # Frontend uses this flag to redirect to /2fa/setup/.
-            body["requires_2fa_setup"] = True
-
-        response = Response(body)
+        response = Response({"user": UserSerializer(user).data})
         _set_jwt_cookies(response, refresh.access_token, refresh)
         rotate_token(request)
         get_csrf_token(request)
@@ -326,7 +269,6 @@ class LoginView(generics.GenericAPIView):
 class UserProfileView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     permission_classes = (IsAuthenticated,)
-    allow_unenrolled_staff = True  # the frontend bootstraps the session (and the enrolment redirect) from it
 
     def get_object(self):
         return self.request.user
@@ -707,7 +649,6 @@ class LogoutView(generics.GenericAPIView):
 
     permission_classes = (AllowAny,)
     authentication_classes = ()
-    allow_unenrolled_staff = True
 
     def post(self, request, *args, **kwargs):
         # Try cookie first, then request body (backwards compat)

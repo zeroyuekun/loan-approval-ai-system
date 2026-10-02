@@ -70,8 +70,6 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_filters",
     "django_celery_results",
-    "django_otp",
-    "django_otp.plugins.otp_totp",
     # Local apps
     "apps.accounts",
     "apps.loans",
@@ -92,7 +90,6 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
@@ -177,7 +174,6 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "20/min",
         "user": "60/min",
-        "totp_verify": "5/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # Reverse-proxy hops in front of Django that append to X-Forwarded-For.
@@ -368,23 +364,6 @@ ML_STANDALONE_PREDICT_ENABLED = os.environ.get("ML_STANDALONE_PREDICT_ENABLED", 
     "1",
     "yes",
 )
-
-# Two-factor authentication
-# (spec: docs/superpowers/specs/2026-05-25-security-gap-closure-design.md).
-#
-# ENFORCE_2FA_FOR_STAFF — when "true", IsAdmin / IsAdminOrOfficer /
-# IsLoanOfficer permissions require the user to have a confirmed TOTP
-# device. Off by default so existing tests (and any pre-rollout
-# environments) keep working. Flip to "true" in production AFTER all
-# admin/officer accounts are enrolled in TOTP via /api/v1/auth/2fa/setup/.
-#
-# ALLOW_2FA_BYPASS — break-glass switch that skips the OTP check at
-# login for users who already have a TOTP device. Every bypass is
-# logged in AuditLog as `login_2fa_bypassed`. Set to "true" only during
-# documented incident response and remove from the env immediately
-# after — see docs/SECRETS_ROTATION.md (planned).
-ENFORCE_2FA_FOR_STAFF = os.environ.get("ENFORCE_2FA_FOR_STAFF", "false").lower() == "true"
-ALLOW_2FA_BYPASS = os.environ.get("ALLOW_2FA_BYPASS", "false").lower() == "true"
 
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"
