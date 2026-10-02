@@ -110,17 +110,17 @@ def _max_psi(mv: ModelVersion) -> float:
     """Return the largest per-feature PSI recorded at training time.
 
     Reads from `training_metadata.psi_by_feature`. If it is missing (older
-    model with no recorded stability data) this returns +inf so the gate
-    refuses to promote.
+    model with no recorded stability data) or malformed (non-numeric values)
+    this returns +inf so the gate refuses to promote: no evidence is not a pass.
     """
     meta = getattr(mv, "training_metadata", None) or {}
     by_feature = meta.get("psi_by_feature") or {}
     if not by_feature:
         return float("inf")
     try:
-        return float(max(by_feature.values()))
+        return float(max(float(v) for v in by_feature.values()))
     except (ValueError, TypeError):
-        return 0.0
+        return float("inf")
 
 
 def promote_if_eligible(

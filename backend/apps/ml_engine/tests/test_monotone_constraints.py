@@ -120,3 +120,12 @@ class TestConstrainedFeatureNames:
         names = constrained_feature_names()
         for expected in ("credit_score", "debt_to_income", "lvr"):
             assert expected in names
+
+
+def test_sklearn_params_kwarg_check_compares_versions_numerically():
+    """``"1.10" >= "1.4"`` is False as strings; it must compare as versions."""
+    from apps.ml_engine.services.training.trainer import _sklearn_accepts_cv_params
+
+    assert _sklearn_accepts_cv_params("1.10.0")
+    assert _sklearn_accepts_cv_params("1.4")
+    assert not _sklearn_accepts_cv_params("1.3.2")

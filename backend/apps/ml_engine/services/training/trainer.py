@@ -35,6 +35,16 @@ from .monotone_constraints import (
 logger = logging.getLogger(__name__)
 
 
+def _sklearn_accepts_cv_params(version: str) -> bool:
+    """Whether cross_val_score takes ``params=`` (scikit-learn >= 1.4).
+
+    Compared as versions: as strings "1.10" < "1.4".
+    """
+    from packaging.version import Version
+
+    return Version(version) >= Version("1.4")
+
+
 class _CalibratedModel:
     """Wraps a fitted classifier with probability calibration.
 
@@ -1264,7 +1274,7 @@ class ModelTrainer:
             # On older environments every Optuna trial silently crashes without it.
             import sklearn as _sklearn
 
-            if cv_fit_params and _sklearn.__version__ >= "1.4":
+            if cv_fit_params and _sklearn_accepts_cv_params(_sklearn.__version__):
                 scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
             else:
                 # sklearn <1.4: pass sample_weight via fit_params (deprecated in 1.4)

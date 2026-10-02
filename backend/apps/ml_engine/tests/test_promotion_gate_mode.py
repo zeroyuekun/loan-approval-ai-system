@@ -199,3 +199,14 @@ def test_promotion_gate_blocked_is_runtime_error():
     """The outer train_model_task wrapper catches RuntimeError to release
     the training lock; PromotionGateBlocked must satisfy that contract."""
     assert issubclass(PromotionGateBlocked, RuntimeError)
+
+
+def test_max_psi_fails_closed_on_malformed_psi_data():
+    """M10: missing PSI data returned +inf (refuse) but malformed data
+    returned 0.0 (pass)."""
+    from types import SimpleNamespace
+
+    from apps.ml_engine.services.model_selector import _max_psi
+
+    mv = SimpleNamespace(training_metadata={"psi_by_feature": {"income": "n/a", "age": None}})
+    assert _max_psi(mv) == float("inf")
