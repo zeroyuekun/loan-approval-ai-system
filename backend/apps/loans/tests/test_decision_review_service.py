@@ -103,3 +103,60 @@ def test_withdraw_already_resolved_raises(django_user_model):
     apply_review_outcome(review, officer=officer, outcome="upheld", note="stands")
     with pytest.raises(ValueError):
         withdraw_review(review, user=review.requested_by)
+
+
+def _officer_owned_denied_review(django_user_model):
+    """A staff user who is also a borrower: their own application was declined
+    by the model (no human decider on the audit trail) and they filed the
+    review themselves."""
+    officer = django_user_model.objects.create_user(username="oc", password="x", role="officer", email="oc@x.com")
+    app = LoanApplication.objects.create(
+        applicant=officer,
+        annual_income=50000,
+        credit_score=500,
+        loan_amount=30000,
+        debt_to_income=5,
+        employment_length=1,
+        purpose="personal",
+        home_ownership="rent",
+        status="denied",
+    )
+    LoanDecision.objects.create(application=app, decision="denied", confidence=0.9)
+    review = DecisionReview.objects.create(
+        application=app, requested_by=officer, reason="disagree", status=DecisionReview.Status.UNDER_REVIEW
+    )
+    return app, officer, review
+
+
+@pytest.mark.parametrize("outcome", ["overturned", "upheld"])
+def test_officer_cannot_resolve_a_review_of_their_own_application(django_user_model, monkeypatch, outcome):
+    from django.core.exceptions import PermissionDenied
+
+    import apps.loans.services.decision_review as svc
+
+    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
+    app, officer, review = _officer_owned_denied_review(django_user_model)
+    with pytest.raises(PermissionDenied):
+        apply_review_outcome(review, officer=officer, outcome=outcome, note="approving myself")
+    review.refresh_from_db()
+    app.refresh_from_db()
+    assert review.status == DecisionReview.Status.UNDER_REVIEW
+    assert app.status == "denied"
+    assert app.decision.decision == "denied"
+
+
+def test_officer_who_filed_the_review_cannot_resolve_it(django_user_model, monkeypatch):
+    """Filing a review on someone else's behalf and then resolving it is the
+    same self-dealing: the requester is not an independent reviewer."""
+    from django.core.exceptions import PermissionDenied
+
+    import apps.loans.services.decision_review as svc
+
+    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
+    app, officer, review = _denied_with_review(django_user_model)
+    review.requested_by = officer
+    review.save(update_fields=["requested_by"])
+    with pytest.raises(PermissionDenied):
+        apply_review_outcome(review, officer=officer, outcome="overturned", note="x")
+    app.refresh_from_db()
+    assert app.status == "denied"

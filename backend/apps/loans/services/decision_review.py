@@ -73,6 +73,12 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
         if locked.status in _TERMINAL:
             raise ValueError(f"DecisionReview already resolved ({locked.status})")
 
+        # Conflict of interest: staff can also be borrowers, and the person who
+        # applied for the loan or filed the review is not an independent
+        # reviewer of it, whatever their role.
+        if officer.pk in (locked.application.applicant_id, locked.requested_by_id):
+            raise PermissionDenied("You cannot resolve a review of your own application or a review you filed.")
+
         # Four-eyes / maker-checker: the officer who made the original loan
         # decision (i.e. who last manually transitioned this application to
         # 'denied') must not be the same person who resolves the review.

@@ -354,6 +354,13 @@ class HumanReviewView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
 
+            # Staff can also be borrowers; nobody reviews their own application.
+            if agent_run.application.applicant_id == request.user.pk:
+                return Response(
+                    {"error": "You cannot review a run for your own application."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             # A run left escalated by an older pipeline must not act on an
             # application a later run has already decided.
             application_status = (
