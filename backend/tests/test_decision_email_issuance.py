@@ -20,27 +20,10 @@ from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.exceptions import RateLimited
 from apps.loans.models import LoanDecision
+from tests.conftest import passing_email_result, use_locmem_cache
 
 SENDER = "apps.email_engine.services.sender.send_decision_email"
 HUMAN_REVIEW = "apps.agents.services.human_review_handler"
-LOCMEM = override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
-
-
-def _passing(decision="approved"):
-    return {
-        "subject": f"Your loan decision ({decision})",
-        "body": "Dear Customer, body text.",
-        "prompt_used": "p",
-        "guardrail_results": [],
-        "passed_guardrails": True,
-        "quality_score": 100,
-        "generation_time_ms": 5,
-        "attempt_number": 1,
-        "template_fallback": False,
-        "input_tokens": 10,
-        "output_tokens": 20,
-        "model_used": "claude-sonnet-4-6",
-    }
 
 
 def _clean_bias():
@@ -170,7 +153,7 @@ def _deny(run, officer_user, *, bias_result, send):
     client = APIClient()
     client.force_authenticate(user=officer_user)
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("denied")),
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("denied")),
         patch(f"{HUMAN_REVIEW}.BiasDetector") as bias,
         patch(f"{HUMAN_REVIEW}.MarketingPipelineService") as mkt,
         patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
@@ -185,7 +168,7 @@ def _deny(run, officer_user, *, bias_result, send):
     return resp, bias
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db(transaction=True)
 def test_human_review_deny_sends_bias_checked_denial_email(escalated_agent_run, officer_user):
     """A2: the reviewer's denial goes through the same issue path as every
@@ -218,7 +201,7 @@ def test_human_review_deny_sends_bias_checked_denial_email(escalated_agent_run, 
     assert transition.user_id == officer_user.pk
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db(transaction=True)
 def test_human_review_deny_withholds_a_bias_flagged_denial_email(escalated_agent_run, officer_user):
     app = escalated_agent_run.application
@@ -244,7 +227,7 @@ def _resume(run_id):
     return PipelineOrchestrator().resume_after_review(run_id)
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_resume_denied_sends_denial_before_marketing(escalated_agent_run):
     decision = escalated_agent_run.application.decision
@@ -259,7 +242,7 @@ def test_resume_denied_sends_denial_before_marketing(escalated_agent_run):
         return steps
 
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("denied")),
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("denied")),
         patch(f"{HUMAN_REVIEW}.BiasDetector") as bias,
         patch(f"{HUMAN_REVIEW}.MarketingPipelineService") as mkt,
         patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
@@ -275,7 +258,7 @@ def test_resume_denied_sends_denial_before_marketing(escalated_agent_run):
     assert GeneratedEmail.objects.get(application=escalated_agent_run.application, decision="denied").sent_at
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_resume_follow_up_failure_after_the_denial_email_keeps_the_decision(escalated_agent_run):
     """The marketing follow-up hits the soft time limit after the denial email
@@ -290,7 +273,7 @@ def test_resume_follow_up_failure_after_the_denial_email_keeps_the_decision(esca
     decision.save()
     send = MagicMock(return_value={"sent": True})
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("denied")),
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("denied")),
         patch(f"{HUMAN_REVIEW}.BiasDetector") as bias,
         patch(f"{HUMAN_REVIEW}.MarketingPipelineService.run", side_effect=SoftTimeLimitExceeded()),
         patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
@@ -308,14 +291,14 @@ def test_resume_follow_up_failure_after_the_denial_email_keeps_the_decision(esca
     assert send.call_count == 1
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_resume_approved_stamps_sent_at_so_no_duplicate_send(escalated_agent_run):
     from apps.email_engine.tasks import generate_email_task
 
     send = MagicMock(return_value={"sent": True})
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("approved")),
         patch(f"{HUMAN_REVIEW}.BiasDetector") as bias,
         patch(SENDER, send),
     ):
@@ -357,7 +340,12 @@ def _moderate_bias():
 
 
 def _template(decision="approved"):
-    return {**_passing(decision), "subject": "Template subject", "body": "Template body.", "template_fallback": True}
+    return {
+        **passing_email_result(decision),
+        "subject": "Template subject",
+        "body": "Template body.",
+        "template_fallback": True,
+    }
 
 
 @pytest.fixture
@@ -400,7 +388,7 @@ def _overturn_with_severe_bias(review, officer, django_capture_on_commit_callbac
         return generate_email_task.apply(args=args, kwargs=kwargs).get()
 
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("approved")),
         patch(BIAS_ANALYZE, return_value=_severe_bias()) as analyze,
         patch(SENDER, send),
         patch("apps.email_engine.tasks.generate_email_task.delay", side_effect=_run_now),
@@ -418,7 +406,7 @@ def decided_approved(sample_application):
     return sample_application
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_generate_email_task_holds_a_severely_biased_email(decided_approved):
     from apps.agents.models import BiasReport
@@ -427,7 +415,7 @@ def test_generate_email_task_holds_a_severely_biased_email(decided_approved):
 
     send = MagicMock(return_value={"sent": True})
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("approved")),
         patch(BIAS_ANALYZE, return_value=_severe_bias()) as analyze,
         patch(SENDER, send),
     ):
@@ -446,14 +434,14 @@ def test_generate_email_task_holds_a_severely_biased_email(decided_approved):
     assert AuditLog.objects.filter(action="decision_email_held", resource_id=str(email.pk)).exists()
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_generate_email_task_replaces_a_flagged_email_with_the_template(decided_approved):
     from apps.email_engine.tasks import generate_email_task
 
     send = MagicMock(return_value={"sent": True})
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("approved")),
         patch.object(EmailGenerator, "generate_template", return_value=_template("approved")),
         patch(BIAS_ANALYZE, side_effect=[_moderate_bias(), _clean_bias()]) as analyze,
         patch(SENDER, send),
@@ -469,7 +457,7 @@ def test_generate_email_task_replaces_a_flagged_email_with_the_template(decided_
     assert GeneratedEmail.objects.get(pk=result["email_id"]).template_fallback is True
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_screening_counts_an_unavailable_bias_check(decided_approved):
     """The bias_check_unavailable alert covers the standalone screening, not
@@ -481,7 +469,7 @@ def test_screening_counts_an_unavailable_bias_check(decided_approved):
     before = counter._value.get()
     send = MagicMock(return_value={"sent": True})
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("approved")),
         patch(BIAS_ANALYZE, side_effect=RuntimeError("detector down")),
         patch(SENDER, send),
         override_settings(BIAS_FAILURE_MODE="block"),
@@ -495,7 +483,7 @@ def test_screening_counts_an_unavailable_bias_check(decided_approved):
     assert result["held_reason"].startswith("Bias check unavailable")
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_redelivery_bias_checks_a_draft_that_was_never_screened(decided_approved):
     """A stored draft with no bias report (the check was down, or the worker
@@ -519,7 +507,7 @@ def test_redelivery_bias_checks_a_draft_that_was_never_screened(decided_approved
     assert result["email_sent"] is False
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_overturn_approval_email_is_bias_checked(overturnable, django_capture_on_commit_callbacks):
     """The overturn issues its approval email through the bias-checked path:
@@ -534,7 +522,7 @@ def test_overturn_approval_email_is_bias_checked(overturnable, django_capture_on
     assert email.sent_at is None
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_overturn_screening_is_recorded_on_the_existing_run(
     overturnable, pipeline_run, django_capture_on_commit_callbacks
@@ -561,7 +549,7 @@ def test_overturn_screening_is_recorded_on_the_existing_run(
     assert pipeline_run.steps[-1]["result_summary"]["sent"] is False
 
 
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 def test_run_view_still_shows_the_pipeline_run_after_a_screening(
     overturnable, pipeline_run, officer_user, django_capture_on_commit_callbacks
@@ -587,7 +575,7 @@ def test_overturn_queues_the_approval_email_after_commit(overturnable, django_ca
 
     review, officer = overturnable
     with (
-        patch.object(EmailGenerator, "generate", return_value=_passing("approved")) as generate,
+        patch.object(EmailGenerator, "generate", return_value=passing_email_result("approved")) as generate,
         patch(SENDER, MagicMock(return_value={"sent": True})),
         patch("apps.email_engine.tasks.generate_email_task.delay") as delay,
     ):
@@ -606,7 +594,7 @@ def test_persisted_model_used_is_the_actual_backend(decided_denied):
     """Known issue: model_used was hardcoded to claude-sonnet-4-6 for every email."""
     from apps.email_engine.services.decision_email import generate_decision_email
 
-    result = {**_passing("denied"), "model_used": "ollama:llama3.2:3b"}
+    result = {**passing_email_result("denied"), "model_used": "ollama:llama3.2:3b"}
     with patch.object(EmailGenerator, "generate", return_value=result):
         _, email = generate_decision_email(decided_denied, "denied")
     assert email.model_used == "ollama:llama3.2:3b"

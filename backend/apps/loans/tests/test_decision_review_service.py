@@ -47,10 +47,7 @@ def test_uphold_stamps_human_involvement_assisted(django_user_model):
     assert decision.human_involvement == LoanDecision.HumanInvolvement.ASSISTED
 
 
-def test_overturn_approves_and_audits(django_user_model, monkeypatch):
-    import apps.loans.services.decision_review as svc
-
-    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
+def test_overturn_approves_and_audits(django_user_model):
     app, officer, review = _denied_with_review(django_user_model)
     apply_review_outcome(review, officer=officer, outcome="overturned", note="manual approve")
     review.refresh_from_db()
@@ -105,89 +102,50 @@ def test_withdraw_already_resolved_raises(django_user_model):
         withdraw_review(review, user=review.requested_by)
 
 
-def _officer_owned_denied_review(django_user_model):
-    """A staff user who is also a borrower: their own application was declined
-    by the model (no human decider on the audit trail) and they filed the
-    review themselves."""
-    officer = django_user_model.objects.create_user(username="oc", password="x", role="officer", email="oc@x.com")
-    app = LoanApplication.objects.create(
-        applicant=officer,
-        annual_income=50000,
-        credit_score=500,
-        loan_amount=30000,
-        debt_to_income=5,
-        employment_length=1,
-        purpose="personal",
-        home_ownership="rent",
-        status="denied",
-    )
-    LoanDecision.objects.create(application=app, decision="denied", confidence=0.9)
-    review = DecisionReview.objects.create(
-        application=app, requested_by=officer, reason="disagree", status=DecisionReview.Status.UNDER_REVIEW
-    )
-    return app, officer, review
+def _make_officer_a_party(party, app, officer, review):
+    if party == "applicant":  # staff can also be borrowers
+        app.applicant = officer
+        app.save(update_fields=["applicant"])
+    elif party == "filer":  # filed the review on someone's behalf
+        review.requested_by = officer
+        review.save(update_fields=["requested_by"])
+    elif party == "decider":  # denied it by hand, recorded on the transition
+        AuditLog.objects.create(
+            user=officer,
+            action="status_transition",
+            resource_type="LoanApplication",
+            resource_id=str(app.id),
+            details={"from_status": "review", "to_status": "denied"},
+        )
+    else:  # a human-review deny from before the transition recorded the reviewer
+        AuditLog.objects.create(
+            user=officer,
+            action="human_review_deny",
+            resource_type="AgentRun",
+            resource_id="00000000-0000-0000-0000-000000000001",
+            details={"note": "n", "application_id": str(app.id), "original_decision": "approved"},
+        )
+        AuditLog.objects.create(
+            user=None,
+            action="status_transition",
+            resource_type="LoanApplication",
+            resource_id=str(app.id),
+            details={"from_status": "review", "to_status": "denied"},
+        )
 
 
-@pytest.mark.parametrize("outcome", ["overturned", "upheld"])
-def test_officer_cannot_resolve_a_review_of_their_own_application(django_user_model, monkeypatch, outcome):
+@pytest.mark.parametrize("outcome", ["upheld", "overturned"])
+@pytest.mark.parametrize("party", ["applicant", "filer", "decider", "historical_human_review_decider"])
+def test_an_officer_who_is_a_party_cannot_resolve_the_review(django_user_model, party, outcome):
     from django.core.exceptions import PermissionDenied
 
-    import apps.loans.services.decision_review as svc
+    app, officer, review = _denied_with_review(django_user_model)
+    _make_officer_a_party(party, app, officer, review)
 
-    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
-    app, officer, review = _officer_owned_denied_review(django_user_model)
     with pytest.raises(PermissionDenied):
-        apply_review_outcome(review, officer=officer, outcome=outcome, note="approving myself")
+        apply_review_outcome(review, officer=officer, outcome=outcome, note="x")
     review.refresh_from_db()
     app.refresh_from_db()
     assert review.status == DecisionReview.Status.UNDER_REVIEW
     assert app.status == "denied"
     assert app.decision.decision == "denied"
-
-
-def test_officer_who_filed_the_review_cannot_resolve_it(django_user_model, monkeypatch):
-    """Filing a review on someone else's behalf and then resolving it is the
-    same self-dealing: the requester is not an independent reviewer."""
-    from django.core.exceptions import PermissionDenied
-
-    import apps.loans.services.decision_review as svc
-
-    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
-    app, officer, review = _denied_with_review(django_user_model)
-    review.requested_by = officer
-    review.save(update_fields=["requested_by"])
-    with pytest.raises(PermissionDenied):
-        apply_review_outcome(review, officer=officer, outcome="overturned", note="x")
-    app.refresh_from_db()
-    assert app.status == "denied"
-
-
-@pytest.mark.parametrize("outcome", ["upheld", "overturned"])
-def test_reviewer_who_denied_through_human_review_cannot_resolve_the_review(django_user_model, monkeypatch, outcome):
-    """A human-review deny is recorded against the AgentRun, and the pipeline
-    then moves the application to denied with no user on the transition. The
-    four-eyes check must still recognise the reviewer as the decider."""
-    from django.core.exceptions import PermissionDenied
-
-    import apps.loans.services.decision_review as svc
-
-    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
-    app, officer, review = _denied_with_review(django_user_model)
-    AuditLog.objects.create(
-        user=officer,
-        action="human_review_deny",
-        resource_type="AgentRun",
-        resource_id="00000000-0000-0000-0000-000000000001",
-        details={"note": "n", "application_id": str(app.id), "original_decision": "approved"},
-    )
-    AuditLog.objects.create(
-        user=None,
-        action="status_transition",
-        resource_type="LoanApplication",
-        resource_id=str(app.id),
-        details={"from_status": "review", "to_status": "denied"},
-    )
-    with pytest.raises(PermissionDenied):
-        apply_review_outcome(review, officer=officer, outcome=outcome, note="x")
-    review.refresh_from_db()
-    assert review.status == DecisionReview.Status.UNDER_REVIEW

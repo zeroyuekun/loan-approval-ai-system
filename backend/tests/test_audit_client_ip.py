@@ -13,8 +13,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.common.http import client_ip
 from apps.loans.models import AuditLog
-
-LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+from tests.conftest import LOCMEM_CACHES
 
 
 def _rest_framework(num_proxies):
@@ -26,7 +25,7 @@ def _rest_framework(num_proxies):
 @pytest.mark.django_db
 def test_login_audit_row_records_the_forwarded_client_address():
     CustomUser.objects.create_user(username="ipuser", email="ip@x.com", password="Str0ng!Passw0rd#", role="customer")
-    with override_settings(REST_FRAMEWORK=_rest_framework(1), CACHES=LOCMEM):
+    with override_settings(REST_FRAMEWORK=_rest_framework(1), CACHES=LOCMEM_CACHES):
         resp = APIClient().post(
             "/api/v1/auth/login/",
             {"username": "ipuser", "password": "Str0ng!Passw0rd#"},

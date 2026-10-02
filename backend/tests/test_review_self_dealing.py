@@ -8,16 +8,14 @@ for themselves.
 from unittest.mock import patch
 
 import pytest
-from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.agents.models import AgentRun
 from apps.loans.models import AuditLog
+from tests.conftest import use_locmem_cache
 
-LOCMEM = override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
 
-
-@LOCMEM
+@use_locmem_cache
 @pytest.mark.django_db
 @pytest.mark.parametrize("action", ["approve", "deny", "regenerate"])
 def test_officer_cannot_review_a_run_for_their_own_application(
