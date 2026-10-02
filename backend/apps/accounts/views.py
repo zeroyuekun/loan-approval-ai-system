@@ -1,3 +1,4 @@
+import functools
 import logging
 from datetime import timedelta
 
@@ -10,8 +11,10 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.html import escape
 from rest_framework import generics, status
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -187,6 +190,8 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = (AllowAny,)
     authentication_classes = ()  # a stale access cookie must not 401 registration
+    # JSON only (see LoginView).
+    parser_classes = (JSONParser,)
     throttle_classes = (RegisterRateThrottle,)
 
     def create(self, request, *args, **kwargs):
@@ -209,22 +214,35 @@ class RegisterView(generics.CreateAPIView):
         return response
 
 
+@functools.cache
+def _dummy_password_hash():
+    # On first use rather than at import, so processes that never serve a
+    # login (Celery workers, management commands) skip an Argon2 hash.
+    return make_password("dummy-timing-equalizer")
+
+
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = (AllowAny,)
     authentication_classes = ()  # a stale access cookie must not 401 login
+    # JSON only. With no authentication there is no CSRF check, and a plain
+    # HTML form on another site can post form-encoded data cross-site but not
+    # JSON, so accepting forms would let that site sign a visitor in to an
+    # account of its choosing.
+    parser_classes = (JSONParser,)
     throttle_classes = (LoginRateThrottle,)
 
-    # Dummy password used to burn CPU time when the username doesn't exist,
-    # so that the response timing is indistinguishable from a real lookup.
-    _DUMMY_HASH = make_password("dummy-timing-equalizer")
+    # Every branch of post() spends exactly one password hash, so the response
+    # time does not tell a caller whether the account exists or is locked.
+    # Branches that never reach a real password check verify against a dummy.
+    def _burn_hash(self, password):
+        check_password(str(password), _dummy_password_hash())
 
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
         generic_error = {"detail": "Invalid username or password."}
-
-        # Check if account is locked before attempting authentication
         username = request.data.get("username", "")
+        password = request.data.get("password", "")
+
         user_obj = None
         if username:
             # Resolve the acting user the SAME way LoginSerializer does (it
@@ -235,21 +253,21 @@ class LoginView(generics.GenericAPIView):
                 user_obj = CustomUser.objects.filter(email=username).first()
             else:
                 user_obj = CustomUser.objects.filter(username=username).first()
-            if user_obj is None:
-                # Perform a dummy password check to equalise timing
-                check_password(request.data.get("password", ""), self._DUMMY_HASH)
 
-        if user_obj and user_obj.is_locked:
-            _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
+        if user_obj is None or user_obj.is_locked:
+            # Not authenticate(): it hashes for a missing user too, which would make two.
+            self._burn_hash(password)
+            if user_obj is not None:
+                _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
+        serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            # Record failed login attempt
-            if user_obj:
-                user_obj.record_failed_login()
-                _audit_user_event(
-                    request, user_obj, "login_failed", {"failed_attempts": user_obj.failed_login_attempts}
-                )
+            if api_settings.NON_FIELD_ERRORS_KEY not in serializer.errors:
+                # A missing or blank field fails before authenticate() runs.
+                self._burn_hash(password)
+            user_obj.record_failed_login()
+            _audit_user_event(request, user_obj, "login_failed", {"failed_attempts": user_obj.failed_login_attempts})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
         user = serializer.validated_data["user"]
