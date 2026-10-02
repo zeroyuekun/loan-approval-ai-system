@@ -61,6 +61,9 @@ from apps.ml_engine.services.training.feature_prep import (
     FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
 )
 from apps.ml_engine.services.training.feature_prep import (
+    clip_to_training_range as _clip_to_training_range_helper,
+)
+from apps.ml_engine.services.training.feature_prep import (
     safe_get_state as _safe_get_state_helper,
 )
 from apps.ml_engine.services.training.feature_prep import (
@@ -297,6 +300,17 @@ class ModelPredictor:
             error_msgs = "; ".join(e["message"] for e in consistency["errors"])
             raise ValueError(f"Data consistency check failed: {error_msgs}")
 
+        # Per-application drift flags on the applicant's actual values (APRA
+        # CPG 235 ongoing monitoring), taken before any clipping for the model.
+        drift_warnings = self._check_feature_drift(features)
+
+        # A value beyond the training range on a column with no policy limit is
+        # scored at the edge of that range rather than rejected.
+        clipped_features = _clip_to_training_range_helper(
+            features, self.reference_distribution, hard_bounds=FEATURE_BOUNDS
+        )
+        drift_warnings.extend(clipped_features)
+
         df = pd.DataFrame([features])
         features_df = df.copy()  # preserve raw features for counterfactual generation
 
@@ -319,10 +333,6 @@ class ModelPredictor:
         # NOTE: processing_time_ms is computed at the end of predict() so the
         # metric reflects full wall-clock latency including SHAP, stress tests,
         # counterfactuals, and shadow scoring — not just predict_proba().
-
-        # Per-application drift flags: check if key features are far outside
-        # the training distribution (APRA CPG 235 ongoing monitoring)
-        drift_warnings = self._check_feature_drift(features)
 
         decision = _assemble_decision_helper(
             probability_positive=float(probabilities[1]),
@@ -378,6 +388,7 @@ class ModelPredictor:
             "model_version": str(self.model_version.id),
             "consistency_warnings": consistency["warnings"],
             "drift_warnings": drift_warnings,
+            "clipped_features": clipped_features,
             "expected_loss": expected_loss,
             "stress_test": stress_results,
             "confidence_interval": confidence_interval,

@@ -13,6 +13,7 @@ import pytest
 
 from apps.ml_engine.services.training.feature_prep import (
     ApplicationValidationError,
+    clip_to_training_range,
     safe_get_state,
     validate_input,
 )
@@ -112,3 +113,57 @@ def test_validate_input_multiple_errors_reported_together():
     msg = str(exc_info.value)
     assert "annual_income" in msg
     assert "credit_score" in msg
+
+
+def test_training_quantiles_never_reject_a_column_without_a_hard_bound():
+    """I5: the bundle's (p1, p99) training quantiles used to become the only
+    bound for 12 columns with no service limit, so a $6,000/month renter or a
+    $70k HECS balance raised ApplicationValidationError and the applicant got
+    no decision. Quantiles may widen a hard bound; they never reject alone."""
+    user = {"monthly_rent": (300.0, 5488.0), "hecs_debt_balance": (0.0, 68_604.0)}
+    validate_input({"monthly_rent": 6000, "hecs_debt_balance": 70_000}, HARD, user_bounds=user)
+
+
+def test_a_column_without_a_hard_bound_still_rejects_nan():
+    with pytest.raises(ApplicationValidationError, match="nan/inf"):
+        validate_input({"monthly_rent": math.nan}, HARD, user_bounds={"monthly_rent": (300.0, 5488.0)})
+
+
+# ---------------------------------------------------------------------------
+# clip_to_training_range
+# ---------------------------------------------------------------------------
+
+REF = {
+    # percentiles[0] / [-1] are the training min / max
+    "monthly_rent": {"percentiles": [200.0, 900.0, 1500.0, 2200.0, 8000.0], "mean": 1600.0, "std": 700.0},
+    "annual_income": {"percentiles": [20_000.0, 90_000.0, 900_000.0], "mean": 95_000.0, "std": 40_000.0},
+}
+
+
+def test_clip_brings_a_value_above_the_training_max_back_to_the_max():
+    features = {"monthly_rent": 12_000.0}
+    clipped = clip_to_training_range(features, REF, hard_bounds=HARD)
+    assert features["monthly_rent"] == 8000.0
+    assert clipped == [
+        {
+            "feature": "monthly_rent",
+            "value": 12_000.0,
+            "clipped_to": 8000.0,
+            "severity": "warning",
+            "message": (
+                "monthly_rent value (12,000.00) is outside the training range [200.00, 8,000.00]; scored as 8,000.00"
+            ),
+        }
+    ]
+
+
+def test_clip_leaves_in_range_values_and_hard_bounded_columns_alone():
+    features = {"monthly_rent": 1000.0, "annual_income": 5_000_000.0}
+    assert clip_to_training_range(features, REF, hard_bounds=HARD) == []
+    assert features == {"monthly_rent": 1000.0, "annual_income": 5_000_000.0}
+
+
+def test_clip_without_a_reference_distribution_is_a_no_op():
+    features = {"monthly_rent": 12_000.0}
+    assert clip_to_training_range(features, {}, hard_bounds=HARD) == []
+    assert features["monthly_rent"] == 12_000.0
