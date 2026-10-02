@@ -154,7 +154,9 @@ class ModelPredictor:
 
         self.imputation_values = bundle.get("imputation_values", DEFAULT_IMPUTATION_VALUES)
         self.feature_bounds = bundle.get("feature_bounds", {})
-        self.group_thresholds = bundle.get("group_thresholds", {})
+        # One approval threshold for every applicant: ModelVersion.optimal_threshold.
+        # Older bundles may still carry per-employment-type "group_thresholds";
+        # they are deliberately not read.
         self.conformal_scores = bundle.get("conformal_scores", np.array([]))
         self.consistency_checker = DataConsistencyChecker()
         from ..metrics import MetricsService
@@ -325,14 +327,11 @@ class ModelPredictor:
         decision = _assemble_decision_helper(
             probability_positive=float(probabilities[1]),
             model_version=self.model_version,
-            group_thresholds=self.group_thresholds,
-            employment_type=features.get("employment_type", ""),
             drift_warnings=drift_warnings,
             segment=features.get("purpose", "personal"),
         )
         probability = decision["probability"]
         threshold = decision["threshold"]
-        effective_threshold = decision["effective_threshold"]
         prediction_label = decision["prediction_label"]
         requires_human_review = decision["requires_human_review"]
         pricing_payload = decision["pricing_payload"]
@@ -364,7 +363,6 @@ class ModelPredictor:
             "probability": probability,
             "risk_grade": compute_risk_grade(probability),
             "threshold_used": threshold,
-            "effective_threshold": effective_threshold,
             "requires_human_review": requires_human_review,
             "feature_importances": importances,
             "shap_values": shap_values_dict,

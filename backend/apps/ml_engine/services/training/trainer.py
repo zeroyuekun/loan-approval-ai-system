@@ -944,8 +944,8 @@ class ModelTrainer:
         self._conformal_scores = np.sort(np.abs(y_val_prob - y_val.values))
 
         # Evaluate on the test set at the OPERATING threshold the system deploys
-        # (the cost-optimal threshold the per-group fairness search is anchored
-        # to), NOT the model's 0.5 cutoff — which would describe a classifier the
+        # for every applicant (the cost-optimal threshold chosen on validation),
+        # NOT the model's 0.5 cutoff — which would describe a classifier the
         # serving path never runs. AUC/Gini/KS/Brier/ECE are threshold-independent.
         y_prob = model.predict_proba(X_test)[:, 1]
         y_pred = (y_prob >= optimal_threshold).astype(int)
@@ -1040,7 +1040,15 @@ class ModelTrainer:
             "xgb_lift_over_baseline": xgb_lift_over_baseline,
             "optimal_threshold": optimal_threshold,
             "calibration_method": getattr(model, "calibration_method", "unknown"),
-            "group_thresholds": getattr(self, "_group_thresholds", {}),
+            # The decision rule actually deployed: one threshold for every
+            # applicant, chosen on the validation split. Fairness metrics and
+            # the fairness gate are computed at this same threshold.
+            "decision_threshold": {
+                "value": optimal_threshold,
+                "applies_to": "all_applicants",
+                "selected_on": "validation",
+                "method": "cost_optimal",
+            },
             "iv_features_selected": len(iv_result.get("selected_features", [])),
             "iv_features_excluded_weak": len(iv_result.get("excluded_weak", [])),
             "iv_features_excluded_leakage": len(iv_result.get("excluded_leakage", [])),
@@ -1087,46 +1095,6 @@ class ModelTrainer:
                     )
                     fairness_metrics[col] = fairness_result
         metrics["fairness"] = fairness_metrics
-
-        # Post-processing: per-group threshold adjustment for employment_type
-        # Ensures disparate impact meets EEOC 80% rule (DI >= 0.80)
-        group_thresholds = {}
-        target_di = getattr(settings, "ML_FAIRNESS_TARGET_DI", 0.80)
-
-        if "employment_type" in fairness_metrics and "employment_type" in df_test_raw.columns:
-            emp_groups = fairness_metrics["employment_type"]["groups"]
-            max_approval = max(g["predicted_approval_rate"] for g in emp_groups.values())
-            target_approval = max_approval * target_di
-
-            # Use raw test data for group membership (before one-hot encoding)
-            test_emp_values = df_test_raw["employment_type"].values
-
-            for group_name, group_data in emp_groups.items():
-                if group_data["predicted_approval_rate"] >= target_approval:
-                    group_thresholds[group_name] = optimal_threshold
-                else:
-                    group_mask = test_emp_values == group_name
-                    group_probs = y_prob[group_mask]
-                    if len(group_probs) == 0:
-                        group_thresholds[group_name] = optimal_threshold
-                        continue
-                    # Lower threshold until approval rate meets target
-                    for t in np.arange(optimal_threshold, 0.05, -0.01):
-                        rate = float((group_probs >= t).mean())
-                        if rate >= target_approval:
-                            group_thresholds[group_name] = float(round(t, 2))
-                            break
-                    else:
-                        group_thresholds[group_name] = 0.05  # floor
-
-            logger.info(
-                "Per-group fairness thresholds: %s (target DI: %.2f, target approval: %.3f)",
-                group_thresholds,
-                target_di,
-                target_approval,
-            )
-
-        self._group_thresholds = group_thresholds
 
         # WOE/IV analysis on RAW (unscaled) data so bin edges are in
         # interpretable units (credit_score 650-750, not z-scores).
@@ -1371,7 +1339,6 @@ class ModelTrainer:
             # coverage. Stored as sorted array for fast quantile lookup.
             "conformal_scores": getattr(self, "_conformal_scores", np.array([])),
             "feature_bounds": getattr(self, "_feature_bounds", {}),
-            "group_thresholds": getattr(self, "_group_thresholds", {}),
         }
         # Self-healing: validate pipeline consistency before saving
         self._validate_pipeline_consistency(bundle)

@@ -2,8 +2,8 @@
 
 Carved out of `ModelPredictor.predict()` during Arm C Phase 1. Given the
 model's raw positive-class probability plus the context needed for threshold
-resolution and pricing, returns all six decision-assembly fields in a single
-dict so the caller doesn't have to thread six locals across the remainder of
+resolution and pricing, returns the decision-assembly fields in a single
+dict so the caller doesn't have to thread them across the remainder of
 `predict()`.
 
 Assembly steps:
@@ -12,12 +12,13 @@ Assembly steps:
    authoritative; falling back to 0.5 logs a loud warning — a missing
    threshold means the model wasn't properly validated, which is a
    disparate-impact risk (APRA CPG 235).
-2. Apply the per-employment-type group threshold if configured (EEOC
-   80% rule compliance).
-3. Derive the `approved`/`denied` label.
-4. Flag borderline cases (within 10pp of the effective threshold) and
+   The same threshold applies to every applicant: there is no per-group
+   (e.g. employment-type) threshold, and any `group_thresholds` left in an
+   older model artefact are ignored.
+2. Derive the `approved`/`denied` label.
+3. Flag borderline cases (within 10pp of the effective threshold) and
    drift=severe cases for human review.
-5. Compute the D4 pricing tier. A pricing-tier decline overrides an
+4. Compute the D4 pricing tier. A pricing-tier decline overrides an
    otherwise-approved model result (PD above the top cutoff means the
    bank won't write the loan even if the model says approve).
 
@@ -48,14 +49,12 @@ def assemble_decision(
     *,
     probability_positive: float,
     model_version,
-    group_thresholds: dict | None,
-    employment_type: str,
     drift_warnings: list,
     segment: str,
 ) -> dict:
     """Assemble the post-probability decision state.
 
-    Returns a dict with keys: `probability`, `threshold`, `effective_threshold`,
+    Returns a dict with keys: `probability`, `threshold`,
     `prediction_label`, `requires_human_review`, `pricing_payload`.
     """
     threshold = model_version.optimal_threshold
@@ -70,13 +69,9 @@ def assemble_decision(
 
     probability = round(float(probability_positive), 4)
 
-    effective_threshold = threshold
-    if group_thresholds and employment_type in group_thresholds:
-        effective_threshold = group_thresholds[employment_type]
+    prediction_label = "approved" if probability >= threshold else "denied"
 
-    prediction_label = "approved" if probability >= effective_threshold else "denied"
-
-    requires_human_review = abs(probability - effective_threshold) <= _BORDERLINE_MARGIN
+    requires_human_review = abs(probability - threshold) <= _BORDERLINE_MARGIN
     if any(w.get("severity") == "drift" for w in drift_warnings):
         requires_human_review = True
 
@@ -104,7 +99,6 @@ def assemble_decision(
     return {
         "probability": probability,
         "threshold": threshold,
-        "effective_threshold": effective_threshold,
         "prediction_label": prediction_label,
         "requires_human_review": requires_human_review,
         "pricing_payload": pricing_payload,

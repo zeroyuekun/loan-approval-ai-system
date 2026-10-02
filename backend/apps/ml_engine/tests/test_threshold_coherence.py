@@ -13,11 +13,12 @@ cost-optimal-anchored group thresholds, so the disparate-impact guarantee the
 trainer computed did NOT hold at inference, and the displayed metrics described
 a classifier the system never runs.
 
-The fix collapses these to ONE operating point: the cost-optimal threshold the
-group search is anchored to (``metrics["optimal_threshold"]``). It is persisted
-as the base, and the headline classification + fairness metrics are reported at
-it. These tests pin that coherence on both persistence paths (sync management
-command and Celery task) and the reporting contract.
+The fix collapses these to ONE operating point: the cost-optimal threshold
+chosen on the validation split (``metrics["optimal_threshold"]``). It is
+persisted as the base, applied to every applicant (no per-group thresholds),
+recorded in training_metadata, and the headline classification + fairness
+metrics are reported at it. These tests pin that coherence on both persistence
+paths (sync management command and Celery task) and the reporting contract.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock
 
+import joblib
 import pytest
 from django.core.management import call_command
 
@@ -43,27 +45,33 @@ def small_csv(tmp_path):
 
 
 def _assert_threshold_coherent(mv: ModelVersion) -> None:
-    """The persisted base threshold must equal the cost-optimal anchor the
-    per-group fairness search used, and every group threshold must be that
-    anchor or a downward adjustment from it."""
+    """One operating threshold, recorded where an auditor reads it.
+
+    The persisted base threshold must equal the cost-optimal threshold chosen
+    on the validation split, training_metadata must record that single
+    threshold as the rule for every applicant, and neither the metadata nor
+    the saved bundle may carry per-group thresholds (they were fitted on the
+    test split and applied at serving while the metadata showed {}).
+    """
     assert mv.optimal_threshold is not None, "optimal_threshold must be persisted"
-    anchor = mv.training_metadata["optimal_threshold"]
+    meta = mv.training_metadata
+    anchor = meta["optimal_threshold"]
     assert mv.optimal_threshold == anchor, (
-        f"persisted optimal_threshold ({mv.optimal_threshold}) must equal the "
-        f"group-threshold anchor ({anchor}); a mismatch means the disparate-impact "
-        f"guarantee does not hold at serving time"
+        f"persisted optimal_threshold ({mv.optimal_threshold}) must equal the threshold training selected ({anchor})"
     )
-    group_thresholds = mv.training_metadata.get("group_thresholds", {})
-    for group, threshold in group_thresholds.items():
-        assert threshold <= mv.optimal_threshold + 1e-9, (
-            f"group '{group}' threshold {threshold} exceeds the base anchor "
-            f"{mv.optimal_threshold} — the fairness search only walks the "
-            f"threshold DOWN from the anchor, never up"
-        )
+    assert meta["decision_threshold"] == {
+        "value": anchor,
+        "applies_to": "all_applicants",
+        "selected_on": "validation",
+        "method": "cost_optimal",
+    }
+    assert "group_thresholds" not in meta
+    bundle = joblib.load(mv.file_path)
+    assert "group_thresholds" not in bundle
 
 
 @pytest.mark.django_db
-def test_command_persists_threshold_anchored_to_group_search(small_csv):
+def test_command_persists_one_threshold_for_every_applicant(small_csv):
     call_command("train_model", algorithm="rf", data_path=small_csv)
     mv = ModelVersion.objects.filter(is_active=True).order_by("-id").first()
     assert mv is not None
@@ -75,7 +83,7 @@ def test_command_persists_threshold_anchored_to_group_search(small_csv):
 
 
 @pytest.mark.django_db
-def test_celery_task_persists_threshold_anchored_to_group_search(small_csv):
+def test_celery_task_persists_one_threshold_for_every_applicant(small_csv):
     from apps.ml_engine.tasks import _do_train
 
     # _do_train takes (task, algorithm, data_path, lock, *, segment); the task

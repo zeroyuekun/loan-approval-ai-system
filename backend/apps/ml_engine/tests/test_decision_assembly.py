@@ -5,14 +5,13 @@ during Arm C Phase 1. Given the model's raw positive-class probability, it:
 
 - Resolves the approval threshold (model_version.optimal_threshold or 0.5
   fallback with a warning).
-- Applies the per-employment-type group threshold if configured
-  (EEOC 80% rule compliance).
+- Applies that one threshold to every applicant (no per-group thresholds).
 - Derives the `approved`/`denied` label.
 - Flags borderline cases + drift=severe cases for human review.
 - Calls the D4 pricing engine, which may further decline an approved label
   when PD is above the top tier cutoff.
 
-All six output fields are returned as a single dict so the caller doesn't
+All output fields are returned as a single dict so the caller doesn't
 have to thread them through its own locals.
 """
 
@@ -52,8 +51,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.8,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -61,7 +58,6 @@ class TestAssembleDecision:
         assert result["prediction_label"] == "approved"
         assert result["probability"] == 0.8
         assert result["threshold"] == 0.6
-        assert result["effective_threshold"] == 0.6
         assert result["requires_human_review"] is False
 
     def test_denied_below_threshold(self):
@@ -70,8 +66,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.3,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -84,8 +78,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.7,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -93,22 +85,6 @@ class TestAssembleDecision:
         assert result["threshold"] == 0.5
         log.warning.assert_called_once()
         assert "optimal_threshold" in log.warning.call_args.args[0]
-
-    def test_group_threshold_overrides_default(self):
-        mv = _mk_version(optimal_threshold=0.6)
-        with _patch_pricing():
-            result = assemble_decision(
-                probability_positive=0.55,
-                model_version=mv,
-                group_thresholds={"casual": 0.4},
-                employment_type="casual",
-                drift_warnings=[],
-                segment="personal",
-            )
-
-        # Default threshold would deny at 0.55 < 0.6; casual group threshold 0.4 approves.
-        assert result["effective_threshold"] == 0.4
-        assert result["prediction_label"] == "approved"
 
     def test_borderline_within_5pp_flags_review(self):
         # _BORDERLINE_MARGIN was reduced from 0.10 to 0.05 (M11).
@@ -118,8 +94,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.53,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -133,8 +107,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.90,  # well clear of threshold
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[{"severity": "drift"}],
                 segment="personal",
             )
@@ -148,8 +120,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.85,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -164,8 +134,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.2,  # model already denies
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -181,8 +149,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.8,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -201,8 +167,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.123456789,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -215,8 +179,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.5,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -224,7 +186,6 @@ class TestAssembleDecision:
         assert set(result.keys()) == {
             "probability",
             "threshold",
-            "effective_threshold",
             "prediction_label",
             "requires_human_review",
             "pricing_payload",

@@ -35,9 +35,9 @@ def model_version_metric_fields(metrics: dict) -> dict:
         ks_statistic=metrics.get("ks_statistic"),
         log_loss_value=metrics.get("log_loss"),
         ece=metrics.get("calibration_data", {}).get("ece"),
-        # Persist the SAME operating threshold the per-group fairness search
-        # is anchored to (cost-optimal), so the disparate-impact guarantee
-        # holds at serving and the reported metrics match deployment.
+        # Persist the single operating threshold training selected on the
+        # validation split (cost-optimal). Scoring applies it to every
+        # applicant, so the reported and fairness metrics match deployment.
         optimal_threshold=metrics.get("optimal_threshold"),
         confusion_matrix=metrics["confusion_matrix"],
         feature_importances=metrics["feature_importances"],
