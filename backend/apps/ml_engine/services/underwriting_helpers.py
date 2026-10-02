@@ -9,9 +9,16 @@ They are called at the SAME point in sequence in ``compute_approval``, threading
 the same ``rng`` in the same draw order, so the approval labels are byte-for-byte
 identical. The determinism snapshot test
 (``tests/test_underwriting_compute_approval.py``) guards this invariant.
+
+``apply_tenure_shading``, ``marginal_tax`` and ``EXISTING_DEBT_MONTHLY_RATE``
+are also used by the recommendation engine, so denial offers are sized with
+the rules that label the training data.
 """
 
 import numpy as np
+
+# Monthly servicing on existing (non-new-loan) debt: ~6% over 20 years.
+EXISTING_DEBT_MONTHLY_RATE = 0.0072
 
 
 def simulate_latent_signals(df, n, rng):
@@ -67,6 +74,29 @@ def apply_tenure_shading(base_shade, employment_type, employment_length):
     shade = np.where(self_employed & (employment_length < 1), 0.65, shade)
     shade = np.where(casual & (employment_length >= 2), 1.00, shade)
     return np.where(casual & (employment_length < 1), 0.60, shade)
+
+
+def marginal_tax(annual_income):
+    """Annual income tax at the Stage 3 resident rates (from 1 July 2024).
+    Works element-wise on arrays/Series or on a scalar (a 0-d array), so both
+    engines deduct the same tax. No rng draws."""
+    return np.where(
+        annual_income <= 18200,
+        0,
+        np.where(
+            annual_income <= 45000,
+            (annual_income - 18200) * 0.16,
+            np.where(
+                annual_income <= 135000,
+                4288 + (annual_income - 45000) * 0.30,
+                np.where(
+                    annual_income <= 190000,
+                    31288 + (annual_income - 135000) * 0.37,
+                    51638 + (annual_income - 190000) * 0.45,
+                ),
+            ),
+        ),
+    )
 
 
 def compute_effective_expenses(df, get_hem):

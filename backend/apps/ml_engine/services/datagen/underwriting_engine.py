@@ -305,28 +305,11 @@ class UnderwritingEngine:
             / ((1 + monthly_rate) ** term_months - 1)
         )
 
-        # Australian marginal tax rates (Stage 3 tax cuts, effective 1 July 2024)
-        annual_inc = df["annual_income"]
-        annual_tax = np.where(
-            annual_inc <= 18200,
-            0,
-            np.where(
-                annual_inc <= 45000,
-                (annual_inc - 18200) * 0.16,
-                np.where(
-                    annual_inc <= 135000,
-                    4288 + (annual_inc - 45000) * 0.30,
-                    np.where(
-                        annual_inc <= 190000, 31288 + (annual_inc - 135000) * 0.37, 51638 + (annual_inc - 190000) * 0.45
-                    ),
-                ),
-            ),
-        )
-        monthly_tax = annual_tax / 12
+        monthly_tax = _helpers.marginal_tax(df["annual_income"]) / 12
 
-        # Existing debt servicing: existing_dti * income, serviced at ~6% over 20yr
+        # Existing debt servicing: existing_dti * income
         total_existing_debt = df["annual_income"] * existing_dti
-        existing_debt_monthly = total_existing_debt * 0.0072
+        existing_debt_monthly = total_existing_debt * _helpers.EXISTING_DEBT_MONTHLY_RATE
 
         # Credit card commitment: 3% of total limit
         credit_card_monthly = df["existing_credit_card_limit"] * self.CREDIT_CARD_MONTHLY_RATE

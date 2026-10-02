@@ -4,10 +4,11 @@ Calculates which products the customer qualifies for using APRA serviceability
 rules and real Australian lending criteria. All amounts, rates, and eligibility
 are computed deterministically — the LLM only writes messaging text.
 
-Serviceability inputs (HEM benchmark, income shading, APRA assessment buffer
-and floor rate) come from ``UnderwritingEngine``, the rules that label the
-training data, so an offer is sized with the same expense floor and the same
-shaded income the model learned from.
+Serviceability inputs (HEM benchmark, income shading, tax, existing-debt
+servicing, APRA assessment buffer and floor rate) come from
+``UnderwritingEngine`` and its helpers, the rules that label the training
+data, so an offer is sized with the same expense floor and the same shaded
+income the model learned from.
 """
 
 import logging
@@ -15,7 +16,11 @@ import math
 from dataclasses import dataclass, field
 
 from apps.ml_engine.services.datagen.underwriting_engine import UnderwritingEngine
-from apps.ml_engine.services.underwriting_helpers import apply_tenure_shading
+from apps.ml_engine.services.underwriting_helpers import (
+    EXISTING_DEBT_MONTHLY_RATE,
+    apply_tenure_shading,
+    marginal_tax,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +95,7 @@ class CustomerSnapshot:
         shade = float(apply_tenure_shading(base_shade, self.employment_type, self.employment_length))
         self.shaded_monthly_income = (self.annual_income * shade) / 12
 
-        annual_tax = _calculate_tax(self.annual_income)
-        self.monthly_tax = annual_tax / 12
+        self.monthly_tax = float(marginal_tax(self.annual_income)) / 12
 
         self.hem_expenses = UnderwritingEngine().get_hem(
             self.applicant_type,
@@ -101,12 +105,11 @@ class CustomerSnapshot:
         )
         self.effective_expenses = max(self.monthly_expenses, self.hem_expenses)
 
-        # Existing debt servicing: replicate data_generator logic
         # debt_to_income includes the new loan; existing_dti = dti - (loan_amount / income)
         new_loan_dti = self.loan_amount / self.annual_income if self.annual_income > 0 else 0
         existing_dti = max(self.debt_to_income - new_loan_dti, 0)
         total_existing_debt = self.annual_income * existing_dti
-        self.existing_debt_monthly = total_existing_debt * 0.0072
+        self.existing_debt_monthly = total_existing_debt * EXISTING_DEBT_MONTHLY_RATE
 
         self.credit_card_monthly = self.existing_credit_card_limit * CREDIT_CARD_MONTHLY_RATE
 
@@ -149,20 +152,6 @@ class ProductRecommendation:
 # ---------------------------------------------------------------------------
 # Standalone calculation helpers
 # ---------------------------------------------------------------------------
-
-
-def _calculate_tax(annual_income: float) -> float:
-    """Australian Stage 3 marginal tax. Returns annual tax amount."""
-    if annual_income <= 18200:
-        return 0.0
-    elif annual_income <= 45000:
-        return (annual_income - 18200) * 0.16
-    elif annual_income <= 135000:
-        return 4288 + (annual_income - 45000) * 0.30
-    elif annual_income <= 190000:
-        return 31288 + (annual_income - 135000) * 0.37
-    else:
-        return 51638 + (annual_income - 190000) * 0.45
 
 
 def _get_risk_tier(credit_score: int) -> str:
