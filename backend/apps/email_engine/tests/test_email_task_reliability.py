@@ -397,6 +397,7 @@ def test_a_concurrent_run_for_the_same_decision_sends_once(monkeypatch, sample_a
 
     def _generate(self, application, decision, *a, **kw):
         if not inner:
+            inner["started"] = True  # only the outer run starts a second one
             inner["result"] = email_tasks.generate_email_task.apply(args=(str(application.pk), decision)).get()
         return _passing_denial()
 

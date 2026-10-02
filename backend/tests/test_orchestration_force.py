@@ -119,6 +119,7 @@ class TestOrchestrationForceGuard:
         loan_app.status = "review"
         loan_app.save(update_fields=["status"])
         AgentRun.objects.create(application_id=loan_app.id, status=AgentRun.Status.ESCALATED)
+        mock_delay.return_value.id = "should-not-dispatch"
         client = APIClient()
         client.force_authenticate(user=customer)
         resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
@@ -132,6 +133,7 @@ class TestOrchestrationForceGuard:
         loan_app.status = "approved"
         loan_app.save(update_fields=["status"])
         AgentRun.objects.create(application_id=loan_app.id, status=AgentRun.Status.FAILED)
+        mock_delay.return_value.id = "should-not-dispatch"
         client = APIClient()
         client.force_authenticate(user=customer)
         resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
