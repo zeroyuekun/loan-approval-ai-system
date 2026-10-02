@@ -6,6 +6,7 @@ from rest_framework import serializers
 from apps.accounts.models import CustomerProfile
 from apps.accounts.policy import is_staff_role
 from apps.accounts.serializers import UserSerializer
+from apps.common.http import client_ip
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
 from .models import AuditLog, Complaint, DecisionReview, FraudCheck, LoanApplication, LoanDecision
@@ -374,7 +375,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
                 "loan_application_id": str(loan_app.id) if loan_app else None,
                 "on_behalf_of_id": on_behalf_of_id,
             },
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return instance
@@ -430,6 +431,6 @@ class DecisionReviewSerializer(serializers.ModelSerializer):
             resource_type="DecisionReview",
             resource_id=str(instance.id),
             details={"application_id": str(instance.application_id)},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
         return instance

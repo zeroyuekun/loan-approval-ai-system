@@ -18,6 +18,11 @@ describe('PipelineControls', () => {
     expect(screen.getByText('Run AI Pipeline')).toBeInTheDocument()
   })
 
+  it('shows "Run AI Pipeline" when the first dispatch failed (queue_failed), since it never ran', () => {
+    render(<PipelineControls {...defaultProps} applicationStatus="queue_failed" />)
+    expect(screen.getByText('Run AI Pipeline')).toBeInTheDocument()
+  })
+
   it('shows "Re-run AI Pipeline" for non-pending status', () => {
     render(<PipelineControls {...defaultProps} applicationStatus="approved" />)
     expect(screen.getByText('Re-run AI Pipeline')).toBeInTheDocument()

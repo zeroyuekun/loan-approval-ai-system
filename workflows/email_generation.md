@@ -9,7 +9,7 @@ Use the Claude API to write approval and denial emails for loan applicants. The 
 | Tool | Location | Purpose |
 |------|----------|---------|
 | Email generator service | `backend/apps/email_engine/services/email_generator.py` | Django service for Claude API email generation |
-| Guardrails module | `backend/apps/email_engine/services/guardrails.py` | Post-generation compliance checks |
+| Guardrails package | `backend/apps/email_engine/services/guardrails/` | Post-generation compliance checks |
 | API connectivity test | `tools/test_claude_api.py` | Verify Claude API access before running pipeline |
 
 ## Steps

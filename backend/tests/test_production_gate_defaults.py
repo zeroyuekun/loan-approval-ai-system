@@ -108,3 +108,9 @@ def test_development_keeps_its_advisory_defaults():
         "BIAS_FAILURE_MODE": "block",
         "ML_ALLOW_UNHASHED_MODELS": "True",
     }
+
+
+def test_production_maps_the_legacy_2fa_overturn_mode_to_second_approver():
+    """Two-factor authentication was removed; an old env file must keep a gate."""
+    values = _values(_settings("config.settings.production", **PROD_ENV, DECISION_OVERTURN_GATE_MODE="2fa"))
+    assert values["DECISION_OVERTURN_GATE_MODE"] == "second_approver"

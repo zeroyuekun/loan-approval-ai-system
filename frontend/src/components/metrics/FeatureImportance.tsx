@@ -132,7 +132,7 @@ const CATEGORY_PREFIXES = Object.keys(CATEGORY_GROUPS).sort((a, b) => b.length -
 
 const TOP_N = 20
 
-function formatFeatureName(s: string): string {
+export function formatFeatureName(s: string): string {
   return FEATURE_LABELS[s] ?? titleCase(s)
 }
 

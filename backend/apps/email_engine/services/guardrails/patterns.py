@@ -330,7 +330,7 @@ PSYCHOLOGY_REFRAMES = {
     "weak_closings": [
         (
             re.compile(r"\bwe wish you (?:well|all the best|good luck|the best)\b", re.IGNORECASE),
-            "use specific warmth: \"Thanks for coming to us, [Name]. We'd love to help you find the right option when you're ready.\"",
+            "use specific warmth: \"Thanks for coming to us, [Name]. When you're ready, we'd like to help you find the right option.\"",
             "Peak-end rule: generic well-wishes feel dismissive",
         ),
         (

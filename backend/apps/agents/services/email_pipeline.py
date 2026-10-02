@@ -1,15 +1,21 @@
 import logging
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.db import transaction
 
 from apps.agents.exceptions import LLMServiceError
-from apps.agents.metrics import bias_check_unavailable_total
-from apps.agents.models import BiasReport
-from apps.email_engine.services.decision_email import deliver_decision_email, generate_decision_email
+from apps.email_engine.services.decision_email import (
+    deliver_decision_email,
+    generate_decision_email,
+    generate_template_decision_email,
+)
 from apps.loans.models import LoanApplication
 
+from .bias.thresholds import bias_failure_mode, is_severe
+from .bias_agent2 import run_agent2
 from .bias_detector import BiasDetector
+from .bias_records import bias_context, save_bias_report
 from .recommendation_engine import RecommendationEngine
 from .step_tracker import StepTracker
 
@@ -31,6 +37,155 @@ def build_denial_email_context(application, profile_context):
     except Exception as exc:  # noqa: BLE001 — teaser is best-effort
         logger.warning("Application %s: NBO teaser unavailable: %s", application.pk, exc)
     return profile_context
+
+
+def replace_flagged_email(
+    application,
+    agent_run,
+    decision,
+    email_result,
+    generated_email,
+    bias_result,
+    detector,
+    tracker,
+    steps,
+    profile_context=None,
+):
+    """Swap a moderate-band flagged email for the template and bias-check the template.
+
+    A flagged LLM email is never sent as written. This is the fallback when
+    Agent 2's rewrite was skipped or handed over. Generating the deterministic
+    template costs no API call; its bias re-check can still call the LLM when
+    the pre-screen finds something ambiguous. Returns the template as
+    ``(email_result, generated_email, bias_result)``, with its own bias result,
+    so the caller decides whether it may be sent. A flagged email that already
+    is the template comes back unchanged, because regenerating it gives the
+    same text. Returns None when the template failed its guardrails. Exceptions
+    from the bias check propagate after the step is recorded. ``profile_context``
+    carries ``nbo_offer`` for denials, so the replacement template still carries
+    the next-best offer.
+    """
+    step = tracker.start_step("bias_regeneration")
+    if email_result.get("template_fallback"):
+        steps.append(
+            tracker.complete_step(
+                step, result_summary={"replaced": False, "reason": "The flagged email is already the template"}
+            )
+        )
+        return email_result, generated_email, bias_result
+    try:
+        result, generated_email = generate_template_decision_email(
+            application, decision, profile_context=profile_context
+        )
+        if not result.get("passed_guardrails"):
+            steps.append(
+                tracker.complete_step(
+                    step, result_summary={"replaced": False, "reason": "The template failed its guardrails"}
+                )
+            )
+            return None
+        new_bias = detector.analyze(result["body"], bias_context(application, decision))
+        save_bias_report(agent_run, generated_email, new_bias)
+    except Exception as exc:
+        steps.append(tracker.fail_step(step, str(exc), failure_category="transient"))
+        raise
+    steps.append(
+        tracker.complete_step(
+            step,
+            result_summary={
+                "replaced": True,
+                "previous_score": bias_result.get("score"),
+                "bias_score": new_bias["score"],
+                "flagged": new_bias["flagged"],
+            },
+        )
+    )
+    return result, generated_email, new_bias
+
+
+@dataclass
+class BiasScreening:
+    """What ``screen_bias`` settled: the email that may be sent, or why none may."""
+
+    email_result: dict
+    generated_email: object
+    bias_result: dict | None
+    held_reason: str | None = None
+    # Set when the bias check itself could not run, whatever BIAS_FAILURE_MODE did about it.
+    check_error: Exception | None = None
+
+
+def screen_bias(
+    application,
+    agent_run,
+    decision,
+    email_result,
+    generated_email,
+    *,
+    detector_class,
+    tracker,
+    steps,
+    profile_context=None,
+    step_name="bias_check",
+):
+    """Bias-check a persisted decision email and settle which email, if any, may be sent.
+
+    The verdict shared by the paths that have no Agent 2 rewrite (the
+    standalone screening and the human-review resume): the report is saved
+    against the email; a severe score holds it; a flagged one is replaced by
+    the template, which is sent only if its own check is not flagged; anything
+    else holds. When the check cannot run, BIAS_FAILURE_MODE decides: ``block``
+    holds, ``warn``/``off`` let the email through. Each caller maps a hold to
+    its own state. ``detector_class`` is the caller's ``BiasDetector`` name, so
+    a test patching it in the caller's module reaches the check.
+    """
+    step = tracker.start_step(step_name)
+    try:
+        detector = detector_class()
+        bias_result = detector.analyze(email_result["body"], bias_context(application, decision))
+        save_bias_report(agent_run, generated_email, bias_result)
+    except Exception as exc:
+        steps.append(tracker.fail_step(step, str(exc), failure_category="transient"))
+        mode = bias_failure_mode()
+        logger.error("Application %s: bias check failed (%s): %s", application.pk, mode, exc)
+        held_reason = f"Bias check unavailable ({exc})" if mode == "block" else None
+        return BiasScreening(email_result, generated_email, None, held_reason=held_reason, check_error=exc)
+    steps.append(
+        tracker.complete_step(
+            step, result_summary={"bias_score": bias_result["score"], "flagged": bias_result["flagged"]}
+        )
+    )
+
+    score = bias_result["score"]
+    review_threshold = getattr(settings, "BIAS_THRESHOLD_REVIEW", 60)
+    if is_severe(score, review_threshold):
+        held_reason = f"Severe bias detected (score {score} >= {review_threshold})"
+        return BiasScreening(email_result, generated_email, bias_result, held_reason=held_reason)
+    if not bias_result["flagged"]:
+        return BiasScreening(email_result, generated_email, bias_result)
+
+    # The flagged text never ships, whatever BIAS_FAILURE_MODE says: the
+    # template replaces it and is sent only if its own check is clean.
+    try:
+        replacement = replace_flagged_email(
+            application,
+            agent_run,
+            decision,
+            email_result,
+            generated_email,
+            bias_result,
+            detector,
+            tracker,
+            steps,
+            profile_context=profile_context,
+        )
+    except Exception as exc:
+        logger.error("Application %s: bias re-check of the replacement failed: %s", application.pk, exc)
+        replacement = None
+    if replacement is None or replacement[2].get("flagged"):
+        held_reason = f"Bias flagged (score {score}) and no clean replacement email"
+        return BiasScreening(email_result, generated_email, bias_result, held_reason=held_reason)
+    return BiasScreening(*replacement)
 
 
 class EmailPipelineService:
@@ -119,25 +274,8 @@ class EmailPipelineService:
         step = self.tracker.start_step("bias_check")
         try:
             bias_detector = BiasDetector()
-            context = {
-                "loan_amount": float(application.loan_amount),
-                "purpose": application.get_purpose_display(),
-                "decision": decision,
-            }
-            bias_result = bias_detector.analyze(email_result["body"], context)
-
-            BiasReport.objects.create(
-                agent_run=agent_run,
-                email=generated_email,
-                bias_score=bias_result["score"],
-                deterministic_score=bias_result.get("deterministic_score"),
-                llm_raw_score=bias_result.get("llm_raw_score"),
-                score_source=bias_result.get("score_source", "composite"),
-                categories=bias_result["categories"],
-                analysis=bias_result["analysis"],
-                flagged=bias_result["flagged"],
-                requires_human_review=bias_result["requires_human_review"],
-            )
+            bias_result = bias_detector.analyze(email_result["body"], bias_context(application, decision))
+            save_bias_report(agent_run, generated_email, bias_result)
 
             step = self.tracker.complete_step(
                 step,
@@ -183,46 +321,88 @@ class EmailPipelineService:
 
         # Bias score at/above review threshold — escalate to human review.
         # Inclusive bound: a score equal to the threshold must escalate.
-        if bias_score >= bias_threshold_review:
-            waterfall.append(
-                StepTracker.waterfall_entry(
-                    "final_decision",
-                    "fail",
-                    "ESCALATED_SEVERE_BIAS",
-                    f"Severe bias detected (score {bias_score} >= {bias_threshold_review}), escalated to human review",
-                )
+        if is_severe(bias_score, bias_threshold_review):
+            self._escalate_for_bias(
+                application,
+                agent_run,
+                steps,
+                waterfall,
+                code="ESCALATED_SEVERE_BIAS",
+                step_name="human_escalation_severe_bias",
+                reason=f"Severe bias detected (score {bias_score} >= {bias_threshold_review})",
+                bias_score=bias_score,
             )
-            StepTracker.save_waterfall(application, waterfall)
-
-            step = self.tracker.start_step("human_escalation_severe_bias")
-            step = self.tracker.complete_step(
-                step,
-                result_summary={
-                    "bias_score": bias_score,
-                    "reason": f"Severe bias detected (score >= {bias_threshold_review}), escalated directly to human reviewer",
-                },
-            )
-            steps.append(step)
-            logger.warning("Application %s: severe bias (score=%s), escalating", application_id, bias_score)
-
-            step = self.tracker.start_step("human_review_required")
-            step = self.tracker.complete_step(
-                step,
-                result_summary={
-                    "review_category": "bias_escalation",
-                    "reason": f"Severe bias detected (score {bias_score})",
-                },
-            )
-            steps.append(step)
-
-            with transaction.atomic():
-                application.refresh_from_db()
-                application.transition_to(
-                    LoanApplication.Status.REVIEW,
-                    details={"source": "email_pipeline_bias_escalation", "bias_score": bias_score},
-                )
-            agent_run.status = "escalated"
             return steps, email_result, generated_email, bias_result, True
+
+        # Moderate band: flagged, below the severe threshold. The flagged email
+        # is never sent. Agent 2 tries a rewrite first (sent only if the bias
+        # check is clean and the senior reviewer approves it); if it hands over,
+        # the template replaces the email and is sent only if it checks clean.
+        # Otherwise the application is held for human review.
+        if bias_result.get("flagged"):
+            agent2 = run_agent2(
+                application,
+                agent_run,
+                decision,
+                email_result,
+                bias_result,
+                confidence=prediction_result["probability"],
+                profile_context=profile_context,
+                tracker=self.tracker,
+                steps=steps,
+            )
+            if agent2 is not None:
+                email_result, generated_email, bias_result = agent2
+                waterfall.append(
+                    StepTracker.waterfall_entry(
+                        "bias_agent2_regeneration",
+                        "pass",
+                        "EMAIL_REGENERATED_AGENT2",
+                        f"Flagged email (score {bias_score}) rewritten by Agent 2; the rewrite passed the bias "
+                        f"check (score {bias_result.get('score', 0)}) and the senior review",
+                    )
+                )
+            else:
+                try:
+                    replacement = replace_flagged_email(
+                        application,
+                        agent_run,
+                        decision,
+                        email_result,
+                        generated_email,
+                        bias_result,
+                        bias_detector,
+                        self.tracker,
+                        steps,
+                        profile_context=profile_context,
+                    )
+                except Exception as e:
+                    # The flagged original must not ship, so a failed re-check holds
+                    # the run for review in every BIAS_FAILURE_MODE.
+                    logger.error("Application %s: bias re-check of the replacement failed: %s", application_id, e)
+                    replacement = None
+                if replacement is None or replacement[2].get("flagged"):
+                    self._escalate_for_bias(
+                        application,
+                        agent_run,
+                        steps,
+                        waterfall,
+                        code="ESCALATED_MODERATE_BIAS",
+                        step_name="human_escalation_moderate_bias",
+                        reason=f"Bias flagged (score {bias_score}) and no clean replacement email",
+                        bias_score=bias_score,
+                    )
+                    return steps, email_result, generated_email, bias_result, True
+                email_result, generated_email, bias_result = replacement
+                waterfall.append(
+                    StepTracker.waterfall_entry(
+                        "bias_regeneration",
+                        "pass",
+                        "EMAIL_REPLACED",
+                        f"Flagged email (score {bias_score}) replaced by the template, which checked clean "
+                        f"(score {bias_result.get('score', 0)})",
+                    )
+                )
 
         # Guardrail failure — log it and skip email delivery, but do NOT
         # escalate to human review.  Only bias flags trigger escalation.
@@ -263,17 +443,7 @@ class EmailPipelineService:
             # sent_at, so the standalone task's redelivery path cannot re-send.
             step = self.tracker.start_step("email_delivery")
             try:
-                outcome = deliver_decision_email(generated_email)
-                if outcome["sent"] or outcome["already_sent"]:
-                    step = self.tracker.complete_step(
-                        step, result_summary={"sent": True, "recipient": outcome["recipient"]}
-                    )
-                elif outcome["recipient"] is None:
-                    step = self.tracker.complete_step(
-                        step, result_summary={"sent": False, "reason": "No recipient email"}
-                    )
-                else:
-                    step = self.tracker.fail_step(step, outcome["error"] or "Send failed")
+                step = self.tracker.record_delivery(step, deliver_decision_email(generated_email))
             except (ConnectionError, TimeoutError, OSError) as e:
                 logger.error("Application %s: email delivery failed: %s", application_id, e)
                 step = self.tracker.fail_step(step, str(e), failure_category="transient")
@@ -285,6 +455,34 @@ class EmailPipelineService:
             steps.append(step)
 
         return steps, email_result, generated_email, bias_result, False
+
+    def _escalate_for_bias(self, application, agent_run, steps, waterfall, *, code, step_name, reason, bias_score):
+        """Withhold the email and put the application in the human-review queue."""
+        waterfall.append(
+            StepTracker.waterfall_entry("final_decision", "fail", code, f"{reason}, escalated to human review")
+        )
+        StepTracker.save_waterfall(application, waterfall)
+
+        step = self.tracker.start_step(step_name)
+        steps.append(
+            self.tracker.complete_step(
+                step, result_summary={"bias_score": bias_score, "reason": f"{reason}, escalated to human reviewer"}
+            )
+        )
+        logger.warning("Application %s: %s, escalating", application.pk, reason)
+
+        step = self.tracker.start_step("human_review_required")
+        steps.append(
+            self.tracker.complete_step(step, result_summary={"review_category": "bias_escalation", "reason": reason})
+        )
+
+        with transaction.atomic():
+            application.refresh_from_db()
+            application.transition_to(
+                LoanApplication.Status.REVIEW,
+                details={"source": "email_pipeline_bias_escalation", "bias_score": bias_score},
+            )
+        agent_run.status = "escalated"
 
     @staticmethod
     def _legacy_failopen_bias_result(exc):
@@ -304,14 +502,7 @@ class EmailPipelineService:
         None to proceed fail-open (warn/off modes). Never auto-ships a decision
         with bias detection effectively off.
         """
-        mode = getattr(settings, "BIAS_FAILURE_MODE", "block").lower()
-        if mode not in ("block", "warn", "off"):
-            logger.warning("Unknown BIAS_FAILURE_MODE=%r — defaulting to 'block'", mode)
-            mode = "block"
-
-        bias_check_unavailable_total.labels(mode=mode).inc()
-
-        if mode != "block":
+        if bias_failure_mode() != "block":
             # warn/off: alert recorded above; proceed with legacy fail-open.
             return None
 

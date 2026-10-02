@@ -8,8 +8,8 @@ Generate 10,000 realistic synthetic loan application records for model training 
 
 | Tool | Location | Purpose |
 |------|----------|---------|
-| Standalone generator | `tools/generate_synthetic_data.py` | CLI script for generating CSV outside Django |
-| Django service | `backend/apps/ml_engine/services/data_generator.py` | Service used by management commands and API |
+| Management command | `backend/apps/ml_engine/management/commands/generate_data.py` | `python manage.py generate_data`: writes the CSV and optionally seeds demo applications |
+| Django service | `backend/apps/ml_engine/services/datagen/data_generator.py` | `DataGenerator`, used by the management command and the API |
 
 ## Feature specifications (Australian standards)
 
@@ -140,7 +140,7 @@ If composite + noise < 0.35: denied
 
 ## Steps
 
-1. **Set the random seed.** Use `numpy.random.seed(42)` for reproducibility (the CLI can override it).
+1. **Set the random seed.** `DataGenerator.generate` defaults to `random_seed=42` for reproducibility.
 2. **Generate features.** Create each feature column from the distributions above.
 3. **Clip values.** Make sure every value falls within its specified range.
 4. **Calculate approval.** Apply the 8-step assessment pipeline.
@@ -157,18 +157,20 @@ If composite + noise < 0.35: denied
 
 ## CLI usage
 
-```bash
-# Generate default 10,000 records
-python tools/generate_synthetic_data.py
+Run from `backend/` (or prefix with `docker-compose exec backend`):
 
-# Generate custom count
-python tools/generate_synthetic_data.py --num-records 50000
+```bash
+# 10,000 records to the default .tmp/synthetic_loans.csv, CSV only (no DB rows)
+python manage.py generate_data --num-records 10000 --create-db-records 0
+
+# Default 50,000 records, plus 100 demo LoanApplication rows in the DB
+python manage.py generate_data
 
 # Custom output path
-python tools/generate_synthetic_data.py --output-path data/training_data.csv
+python manage.py generate_data --output data/training_data.csv
 
-# Custom random seed
-python tools/generate_synthetic_data.py --seed 123
+# Calibrate distributions against live ABS / APRA / RBA benchmarks
+python manage.py generate_data --use-live-data
 ```
 
 ## Edge cases

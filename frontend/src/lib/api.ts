@@ -2,6 +2,7 @@ import axios from 'axios'
 import { toast } from 'sonner'
 import { resetClientState } from '@/lib/clientState'
 import { resolveApiUrl } from '@/lib/csp'
+import { AdhocScoreFields, AdhocScoreResult } from '@/types'
 
 // API parameter and payload types
 interface PaginationParams {
@@ -62,6 +63,13 @@ export interface LoanPayload {
 // Production builds without NEXT_PUBLIC_API_URL use the same-origin /api/v1
 // path rather than baking in localhost (see lib/csp.ts).
 const API_URL = resolveApiUrl(process.env.NEXT_PUBLIC_API_URL, process.env.NODE_ENV)
+
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** The caller handles a 404 itself, so the error interceptor does not toast it. */
+    expectNotFound?: boolean
+  }
+}
 
 const api = axios.create({
   baseURL: API_URL,
@@ -156,8 +164,11 @@ api.interceptors.response.use(
       return api(originalRequest)
     }
 
-    // Show toast for non-401 errors (401s handled by refresh logic)
-    if (error.response?.status && error.response.status !== 401) {
+    // Show toast for non-401 errors (401s handled by refresh logic), except a
+    // 404 the request declared it handles itself (expectNotFound).
+    const status = error.response?.status
+    const isExpectedNotFound = status === 404 && originalRequest.expectNotFound
+    if (status && status !== 401 && !isExpectedNotFound) {
       const message = error.response?.data?.detail
         || error.response?.data?.error
         || error.message
@@ -187,7 +198,7 @@ export async function withNotFoundFallback<T, F>(request: () => Promise<T>, fall
 
 // Auth
 export const authApi = {
-  login: (data: { username: string; password: string; otp_token?: string }) => api.post('/auth/login/', data),
+  login: (data: { username: string; password: string }) => api.post('/auth/login/', data),
   register: (data: RegisterPayload) => api.post('/auth/register/', data),
   getProfile: () => api.get('/auth/me/'),
   getCustomerProfile: () => api.get('/auth/me/profile/'),
@@ -197,11 +208,6 @@ export const authApi = {
   listCustomers: (params?: PaginationParams) => api.get('/auth/customers/', { params }),
   getCustomerActivity: (userId: number) => api.get(`/auth/customers/${userId}/activity/`),
   getCsrfToken: () => api.get('/auth/csrf/'),
-  // TOTP enrolment for staff (backend: accounts/views_2fa.py)
-  twoFactorStatus: () => api.get<{ enabled: boolean; required: boolean }>('/auth/2fa/status/'),
-  twoFactorSetup: () =>
-    api.post<{ provisioning_uri: string; qr_code_base64: string | null; detail: string }>('/auth/2fa/setup/'),
-  twoFactorVerify: (token: string) => api.post<{ detail: string; confirmed: boolean }>('/auth/2fa/verify/', { token }),
 }
 
 // Loans
@@ -217,17 +223,21 @@ export const loansApi = {
 // ML
 export const mlApi = {
   predict: (loanId: string) => api.post(`/ml/predict/${loanId}/`),
-  getMetrics: () => api.get('/ml/models/active/metrics/'),
+  // 404 = no active model yet; callers wrap these in withNotFoundFallback
+  getMetrics: () => api.get('/ml/models/active/metrics/', { expectNotFound: true }),
+  scoreApplicant: (fields: AdhocScoreFields) => api.post<AdhocScoreResult>('/ml/models/active/score/', fields),
   trainModel: (algorithm: string) => api.post('/ml/models/train/', { algorithm }),
-  getModelCard: () => api.get('/ml/models/active/model-card/'),
-  getDriftReports: (limit?: number) => api.get('/ml/models/active/drift-reports/', { params: { limit: limit || 12 } }),
+  getModelCard: () => api.get('/ml/models/active/model-card/', { expectNotFound: true }),
+  getDriftReports: (limit?: number) =>
+    api.get('/ml/models/active/drift-reports/', { params: { limit: limit || 12 }, expectNotFound: true }),
 }
 
 // Email
 export const emailApi = {
   list: (params?: PaginationParams) => api.get('/emails/', { params }),
   generate: (loanId: string) => api.post(`/emails/generate/${loanId}/`),
-  get: (loanId: string) => api.get(`/emails/${loanId}/`),
+  // 404 = no email generated yet; the application page hides the email panel
+  get: (loanId: string) => api.get(`/emails/${loanId}/`, { expectNotFound: true }),
   sendLatest: (loanId: string) => api.post(`/emails/send/${loanId}/`),
 }
 
@@ -241,7 +251,8 @@ export const agentsApi = {
     }),
   orchestrateAll: (recheck?: boolean) => api.post(`/agents/orchestrate-all/${recheck ? '?recheck=true' : ''}`, null, { timeout: 60000 }),
   getRuns: (params?: PaginationParams) => api.get('/agents/runs/', { params }),
-  getRun: (loanId: string) => api.get(`/agents/runs/${loanId}/`),
+  // 404 = the pipeline has not run yet; useAgentRun polls through it
+  getRun: (loanId: string) => api.get(`/agents/runs/${loanId}/`, { expectNotFound: true }),
   submitReview: (runId: string, data: { action: 'approve' | 'deny' | 'regenerate'; note?: string }) =>
     api.post(`/agents/review/${runId}/`, data),
 }

@@ -26,7 +26,7 @@ Do not open public GitHub issues for security vulnerabilities. Use responsible d
 - Passwords are hashed with Argon2 (PBKDF2 fallback)
 - Three roles (admin, officer, customer) with permission checks on every endpoint
 - Token rotation: 60-minute access tokens, 7-day refresh tokens with rotation and blacklisting
-- Progressive account lockout: 1 min, 5 min, 30 min, 1440 min after consecutive failed logins
+- Progressive account lockout: 1 min after 5 failed logins, 5 min after 8, 15 min after 10. Failures more than 15 minutes apart start a new count, so occasional wrong passwords cannot keep an account locked
 
 ### Rate limiting
 

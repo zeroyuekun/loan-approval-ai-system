@@ -7,6 +7,7 @@ import { ModelMetrics } from '@/types'
 
 export function DiagnosticsTab({ metrics }: { metrics: ModelMetrics }) {
   const metadataRows = curateMetadata(metrics.training_metadata)
+  const hasValAuc = metrics.training_metadata?.val_auc != null
   const scalars = [
     { label: 'Gini', value: metrics.gini_coefficient },
     { label: 'KS Statistic', value: metrics.ks_statistic },
@@ -49,6 +50,13 @@ export function DiagnosticsTab({ metrics }: { metrics: ModelMetrics }) {
                 ))}
               </div>
             </CardContent>
+            {hasValAuc && (
+              <p className="px-6 pb-4 text-xs text-muted-foreground">
+                The validation split used for the overfitting gap above is the same split used for early
+                stopping, probability calibration and threshold choice, so this gap can understate true
+                overfitting; the train-vs-test gap is the independent check.
+              </p>
+            )}
           </Card>
         )}
       </div>

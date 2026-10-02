@@ -12,6 +12,7 @@ from apps.agents.models import AgentRun
 from apps.loans.models import AuditLog, FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
+from apps.ml_engine.services.scoring.decision_assembly import PRICING_TIER_DECLINE, decline_overrides
 from apps.ml_engine.services.scoring.predictor import ModelPredictor
 from apps.ml_engine.services.scoring.segmentation import derive_segment
 
@@ -71,7 +72,7 @@ class PipelineOrchestrator:
         return self._step_tracker.finalize_run(agent_run, steps, start_time, error)
 
     def _run_nbo_and_marketing_pipeline(self, application, agent_run, steps, denial_reasons, profile_context):
-        return self._marketing_pipeline.run(application, agent_run, steps, denial_reasons, profile_context)
+        return self._marketing_pipeline.run_best_effort(application, agent_run, steps, denial_reasons, profile_context)
 
     # ------------------------------------------------------------------
     # Counterfactual generation (denied applications only)
@@ -183,7 +184,16 @@ class PipelineOrchestrator:
                     status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
                 ).update(status=AgentRun.Status.FAILED, error="Stale pipeline — automatically cleared")
                 application.transition_to("pending", details={"source": "stale_pipeline_reset"})
+            elif application.status == LoanApplication.Status.QUEUE_FAILED:
+                # Started by hand after the first dispatch failed: this run is the retry.
+                application.release_queue_failed(source="orchestrator_retry")
             application.transition_to("processing", details={"source": "orchestrator_pipeline"})
+            # A forced re-run or batch recheck replaces any run still waiting
+            # for review; left ESCALATED, it would stay in the queue and a
+            # reviewer could act on a decision this run is about to replace.
+            AgentRun.objects.filter(application=application, status=AgentRun.Status.ESCALATED).update(
+                status=AgentRun.Status.FAILED, error="Superseded by a newer pipeline run"
+            )
 
         # Refetch with profile (nullable) outside the lock — select_for_update
         # cannot be combined with outer joins on nullable relations in PostgreSQL.
@@ -331,19 +341,29 @@ class PipelineOrchestrator:
                 dti_check = ("pass", "DTI_WITHIN_LIMIT", f"Debt-to-income ratio {dti:.2f} within cap of {dti_cap}")
             waterfall.append(self._waterfall_entry("policy_rules", *dti_check))
 
-            # ML prediction waterfall entry
+            # ML prediction waterfall entry: the model's own decision. A pricing
+            # or credit-policy decline of a model approval is its own entry
+            # with the rule's code, which the denial email reads (saved now, so
+            # it is on the decision before the email step).
             prob = prediction_result["probability"]
-            ml_result = "pass" if prediction_result["prediction"] == "approved" else "fail"
+            overrides = decline_overrides(prediction_result)
+            model_label = "approved" if overrides else prediction_result["prediction"]
+            ml_result = "pass" if model_label == "approved" else "fail"
             ml_reason = "MODEL_APPROVED" if ml_result == "pass" else "MODEL_DENIED"
             waterfall.append(
                 self._waterfall_entry(
                     "ml_prediction",
                     ml_result,
                     ml_reason,
-                    f"Model prediction: {prediction_result['prediction']} "
+                    f"Model prediction: {model_label} "
                     f"(confidence={prob:.4f}, model={prediction_result['model_version']})",
                 )
             )
+            for override in overrides:
+                stage = "pricing" if override["code"] == PRICING_TIER_DECLINE else "policy_rules"
+                waterfall.append(self._waterfall_entry(stage, "fail", override["code"], override["detail"]))
+            if overrides:
+                self._save_waterfall(application, waterfall)
 
             step = self._complete_step(
                 step,
@@ -472,7 +492,32 @@ class PipelineOrchestrator:
                 )
             return agent_run
 
-        # Step 5: NBO + Marketing pipeline (if denied)
+        # Final decision waterfall entry
+        final_reason = "APPROVED" if decision == "approved" else "DENIED"
+        waterfall.append(
+            self._waterfall_entry(
+                "final_decision",
+                "pass" if decision == "approved" else "fail",
+                final_reason,
+                f"Pipeline completed with decision: {decision}",
+            )
+        )
+
+        # No escalation — apply the ML decision directly. Before the follow-up
+        # below: the customer may already have the decision email, and a
+        # follow-up failure that left the application re-runnable would send
+        # them a second one on the re-run.
+        self._save_waterfall(application, waterfall)
+
+        with transaction.atomic():
+            application.refresh_from_db()
+            application.transition_to(
+                decision,
+                details={"source": "orchestrator_final_decision"},
+            )
+
+        # Step 5: NBO + Marketing pipeline (if denied), best-effort: the
+        # decision is applied and announced.
         if decision == "denied":
             denial_reasons = ""
             shap_vals = prediction_result.get("shap_values")
@@ -488,34 +533,8 @@ class PipelineOrchestrator:
                 )[:3]
                 denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
 
-            steps = self._run_nbo_and_marketing_pipeline(
-                application,
-                agent_run,
-                steps,
-                denial_reasons,
-                profile_context,
-            )
+            steps = self._run_nbo_and_marketing_pipeline(application, agent_run, steps, denial_reasons, profile_context)
 
-        # Final decision waterfall entry
-        final_reason = "APPROVED" if decision == "approved" else "DENIED"
-        waterfall.append(
-            self._waterfall_entry(
-                "final_decision",
-                "pass" if decision == "approved" else "fail",
-                final_reason,
-                f"Pipeline completed with decision: {decision}",
-            )
-        )
-
-        # No escalation — apply the ML decision directly.
-        self._save_waterfall(application, waterfall)
-
-        with transaction.atomic():
-            application.refresh_from_db()
-            application.transition_to(
-                decision,
-                details={"source": "orchestrator_final_decision"},
-            )
         agent_run.status = "completed"
         self._finalize_run(agent_run, steps, start_time)
         logger.info(
@@ -526,6 +545,8 @@ class PipelineOrchestrator:
 
         return agent_run
 
-    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve"):
+    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve", reviewer_id=None):
         with api_call_context(agent_run_id=agent_run_id):
-            return self._human_review_handler.resume_after_review(agent_run_id, reviewer, note, action=action)
+            return self._human_review_handler.resume_after_review(
+                agent_run_id, reviewer, note, action=action, reviewer_id=reviewer_id
+            )

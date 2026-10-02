@@ -76,10 +76,10 @@ ML_PROMOTION_GATE_MODE = _gate_mode("ML_PROMOTION_GATE_MODE", "block", ("warn", 
 ML_VALIDATION_SIGNOFF_GATE_MODE = _gate_mode("ML_VALIDATION_SIGNOFF_GATE_MODE", "block", ("warn", "block", "off"))
 CREDIT_POLICY_OVERLAY_MODE = _gate_mode("CREDIT_POLICY_OVERLAY_MODE", "enforce", ("off", "shadow", "enforce"))
 # "second_approver" refuses high-value overturns at the API (dual approval is
-# out of band); "2fa" is the weaker alternative an operator may choose.
-DECISION_OVERTURN_GATE_MODE = _gate_mode(
-    "DECISION_OVERTURN_GATE_MODE", "second_approver", ("off", "2fa", "second_approver")
-)
+# out of band). The legacy "2fa" value maps to it: two-factor authentication
+# was removed, and an old env file must not turn the gate off.
+_overturn_mode = _gate_mode("DECISION_OVERTURN_GATE_MODE", "second_approver", ("off", "2fa", "second_approver"))
+DECISION_OVERTURN_GATE_MODE = "second_approver" if _overturn_mode == "2fa" else _overturn_mode
 BIAS_FAILURE_MODE = _gate_mode("BIAS_FAILURE_MODE", "block", ("warn", "block", "off"))
 # Never load a model artefact without a stored SHA-256, whatever DJANGO_DEBUG says.
 ML_ALLOW_UNHASHED_MODELS = False

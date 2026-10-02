@@ -16,6 +16,7 @@ from django.utils import timezone
 from apps.loans.models import AuditLog, DecisionReview, LoanApplication, LoanDecision
 
 from .overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+from .reviewer_independence import assert_independent_reviewer
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,6 @@ def _enforce_overturn_gate(application, officer) -> None:
         amount=float(application.loan_amount or 0),
         threshold=getattr(settings, "DECISION_OVERTURN_THRESHOLD", 100000.0),
         mode=normalize_overturn_mode(getattr(settings, "DECISION_OVERTURN_GATE_MODE", "off")),
-        officer_has_2fa=officer.has_confirmed_totp(),
     )
     if not gate["allowed"]:
         raise OverturnGateBlocked(gate["reason"])
@@ -44,17 +44,25 @@ _TERMINAL = {DecisionReview.Status.UPHELD, DecisionReview.Status.OVERTURNED, Dec
 
 
 def _send_approval_email(application) -> None:
-    """Re-generate + send the approval email after an overturn. Best-effort:
-    a delivery failure must not roll back the approved decision."""
-    try:
-        # Shared issuance service: template fallback on provider trouble, and a
-        # row-locked send that stamps sent_at so a later generate/send does not
-        # email the customer a second approval.
-        from apps.email_engine.services.decision_email import issue_decision_email
+    """Queue the approval email for after the overturn commits. Best-effort:
+    a dispatch failure must not roll back the approved decision.
 
-        issue_decision_email(application, "approved", confidence=application.decision.confidence)
-    except Exception:  # noqa: BLE001 — email is best-effort post-override
-        logger.exception("Approval email after overturn failed for application %s", application.id)
+    The email task generates, bias-checks and sends it (template fallback on
+    provider trouble, a row-locked send that stamps sent_at). Running that
+    here would hold the HTTP request or the admin action open for an LLM call
+    and an SMTP round trip.
+    """
+    application_id = str(application.pk)
+
+    def _dispatch():
+        try:
+            from apps.email_engine.tasks import generate_email_task
+
+            generate_email_task.delay(application_id, "approved", regenerate=True)
+        except Exception:  # noqa: BLE001 — email is best-effort post-override
+            logger.exception("Approval email after overturn could not be queued for application %s", application_id)
+
+    transaction.on_commit(_dispatch)
 
 
 def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note: str) -> DecisionReview:
@@ -66,26 +74,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
         if locked.status in _TERMINAL:
             raise ValueError(f"DecisionReview already resolved ({locked.status})")
 
-        # Four-eyes / maker-checker: the officer who made the original loan
-        # decision (i.e. who last manually transitioned this application to
-        # 'denied') must not be the same person who resolves the review.
-        # Automated ML decisions have user=None and are therefore exempt.
-        original_decider_id = (
-            AuditLog.objects.filter(
-                resource_type="LoanApplication",
-                resource_id=str(locked.application_id),
-                action="status_transition",
-                details__to_status="denied",
-                user__isnull=False,
-            )
-            .order_by("-timestamp")
-            .values_list("user_id", flat=True)
-            .first()
-        )
-        if original_decider_id is not None and original_decider_id == officer.pk:
-            raise PermissionDenied(
-                "An officer cannot resolve their own decision — four-eyes policy requires a second approver."
-            )
+        assert_independent_reviewer(officer, locked.application, review=locked)
 
         locked.assigned_officer = officer
         locked.resolution_note = note
@@ -103,8 +92,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
                 decision = LoanDecision.objects.select_for_update().get(application_id=locked.application_id)
             except LoanDecision.DoesNotExist:
                 decision = None
-            if decision is not None and decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
-                decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+            if decision is not None and decision.mark_human(LoanDecision.HumanInvolvement.ASSISTED):
                 decision.save(update_fields=["human_involvement"])
         else:
             try:
@@ -142,7 +130,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
                 raise ValueError("No decision record exists for this application") from exc
             decision.decision = "approved"
             decision.reasoning = f"Officer override via decision review {locked.id}: {note}".strip()
-            decision.human_involvement = LoanDecision.HumanInvolvement.OVERRIDDEN
+            decision.mark_human(LoanDecision.HumanInvolvement.OVERRIDDEN)
             decision.save(update_fields=["decision", "reasoning", "human_involvement"])
             try:
                 # denied -> processing -> approved (validated transitions, each audited)

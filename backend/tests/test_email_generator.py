@@ -557,3 +557,117 @@ class TestEmailBackendSelection:
         lowered = result["body"].lower()
         for banned in ("sorry", "apologis", "disappoint"):
             assert banned not in lowered
+
+
+class TestDenialReasonsForRuleDeclines:
+    """A denial made by a pricing or credit-policy rule over a model approval
+    names that rule, not the model's attributions (which explain an approval)."""
+
+    _SHAP = {"credit_score": -0.4, "annual_income": 0.2}
+    _IMPORTANCES = {"credit_score": 0.5, "annual_income": 0.3}
+
+    def test_a_pricing_decline_is_the_stated_reason(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        waterfall = [
+            {"step": "ml_prediction", "result": "pass", "reason_code": "MODEL_APPROVED", "detail": ""},
+            {"step": "pricing", "result": "fail", "reason_code": "PRICING_TIER_DECLINE", "detail": "PD 0.15"},
+        ]
+        reasons = EmailGenerator()._format_denial_reasons(
+            self._IMPORTANCES, shap_values=self._SHAP, decision_waterfall=waterfall
+        )
+
+        assert reasons == EmailGenerator.DECLINE_RULE_REASON_MAP["PRICING_TIER_DECLINE"]
+
+    def test_a_policy_hard_fail_is_the_stated_reason(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        waterfall = [{"step": "policy_rules", "result": "fail", "reason_code": "POLICY_DECLINE_P03", "detail": "x"}]
+        reasons = EmailGenerator()._format_denial_reasons(
+            self._IMPORTANCES, shap_values=self._SHAP, decision_waterfall=waterfall
+        )
+
+        assert "bankruptcy" in reasons
+        for banned in ("sorry", "apolog", "disappoint"):
+            assert banned not in reasons.lower()
+
+    def test_a_model_denial_still_uses_the_attributions(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        waterfall = [{"step": "ml_prediction", "result": "fail", "reason_code": "MODEL_DENIED", "detail": ""}]
+        reasons = EmailGenerator()._format_denial_reasons(
+            self._IMPORTANCES, shap_values=self._SHAP, decision_waterfall=waterfall
+        )
+
+        assert reasons == EmailGenerator.DENIAL_REASON_MAP["credit_score"]
+
+    def test_rule_reasons_pass_the_prohibited_language_guardrail(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+        from apps.email_engine.services.guardrails.engine import GuardrailChecker
+
+        checker = GuardrailChecker()
+        for reason in EmailGenerator.DECLINE_RULE_REASON_MAP.values():
+            assert checker.check_prohibited_language(reason)["passed"], reason
+
+
+class TestQuotedRateFollowsTheRiskTier:
+    """The quoted rate stays inside the band of the model's risk tier
+    (PD = 1 - decision confidence), whatever the bureau score says."""
+
+    @staticmethod
+    def _application(purpose="personal", credit_score=800, confidence=0.78):
+        from types import SimpleNamespace
+
+        decision = SimpleNamespace(confidence=confidence) if confidence is not None else None
+        return SimpleNamespace(
+            purpose=purpose,
+            credit_score=credit_score,
+            loan_amount=Decimal("20000"),
+            loan_term_months=36,
+            employment_type="payg_permanent",
+            decision=decision,
+        )
+
+    def test_high_pd_personal_loan_is_not_quoted_a_prime_rate(self):
+        from apps.email_engine.services.pricing import calculate_loan_pricing
+
+        # PD 0.22 is personal tier D (19.0-24.0%); the 800 bureau score alone
+        # quoted 8.74%.
+        pricing = calculate_loan_pricing(self._application(confidence=0.78))
+
+        assert pricing["interest_rate_number"] >= 19.0
+        assert pricing["risk_tier"] == "D"
+
+    def test_repayment_and_comparison_rate_use_the_held_rate(self):
+        from apps.email_engine.services.pricing import _comparison_rate_irr, _monthly_repayment, calculate_loan_pricing
+
+        pricing = calculate_loan_pricing(self._application(confidence=0.78))
+        rate = pricing["interest_rate_number"]
+
+        assert pricing["monthly_payment_number"] == _monthly_repayment(20000.0, rate, 36)
+        assert pricing["comparison_rate_number"] == _comparison_rate_irr(30_000.0, rate, 60, 250.0)
+
+    def test_a_low_pd_keeps_the_credit_band_rate_inside_the_tier(self):
+        from apps.email_engine.services.pricing import calculate_loan_pricing
+
+        # PD 0.02 is tier A (7.0-9.5%); the 800-score personal rate is 8.74%.
+        pricing = calculate_loan_pricing(self._application(confidence=0.98))
+
+        assert pricing["interest_rate_number"] == 8.74
+        assert pricing["risk_tier"] == "A"
+
+    def test_an_overturned_approval_beyond_every_tier_gets_the_top_band(self):
+        from apps.email_engine.services.pricing import calculate_loan_pricing
+
+        pricing = calculate_loan_pricing(self._application(confidence=0.4))
+
+        assert pricing["interest_rate_number"] >= 19.0
+        assert pricing["risk_tier"] == "D"
+
+    def test_no_decision_on_record_leaves_the_credit_band_rate(self):
+        from apps.email_engine.services.pricing import calculate_loan_pricing
+
+        pricing = calculate_loan_pricing(self._application(confidence=None))
+
+        assert pricing["interest_rate_number"] == 8.74
+        assert pricing["risk_tier"] is None

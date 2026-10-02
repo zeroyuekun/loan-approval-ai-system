@@ -163,3 +163,91 @@ class TestStaffCustomerActivityView:
         url = reverse("staff-customer-activity", kwargs={"user_id": customer_user.id})
         response = authed_officer_client.get(url)
         assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_activity_returns_raw_text_and_the_full_bias_report(authed_officer_client, customer_user):
+    """React escapes text itself: an HTML-escaped subject showed up on screen
+    as &#x27; and &amp;. The bias report carries the same fields as the
+    agent-run endpoints."""
+    from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
+    from apps.email_engine.models import GeneratedEmail
+    from apps.loans.models import LoanApplication
+
+    application = LoanApplication.objects.create(
+        applicant=customer_user,
+        annual_income=50000,
+        credit_score=700,
+        loan_amount=20000,
+        debt_to_income=2,
+        employment_length=3,
+        purpose="personal",
+        home_ownership="rent",
+    )
+    GeneratedEmail.objects.create(
+        application=application, decision="approved", subject="Tom's loan & you", body="Hi Tom & co", prompt_used="p"
+    )
+    run = AgentRun.objects.create(application=application, status="completed", steps=[])
+    BiasReport.objects.create(
+        agent_run=run, report_type="decision", bias_score=12, deterministic_score=10, score_source="llm", analysis="ok"
+    )
+    NextBestOffer.objects.create(agent_run=run, application=application, analysis="a")
+    MarketingEmail.objects.create(
+        agent_run=run, application=application, subject="Rates & offers for O'Brien", body="b", prompt_used="p"
+    )
+
+    url = reverse("staff-customer-activity", kwargs={"user_id": customer_user.id})
+    data = authed_officer_client.get(url).json()
+
+    assert data["emails"][0]["subject"] == "Tom's loan & you"
+    assert data["emails"][0]["body"] == "Hi Tom & co"
+    run_data = data["agent_runs"][0]
+    assert run_data["marketing_emails"][0]["subject"] == "Rates & offers for O'Brien"
+    assert run_data["marketing_emails"][0]["html_body"]
+    report = run_data["bias_reports"][0]
+    assert {"report_type", "deterministic_score", "score_source"} <= set(report)
+    assert report["deterministic_score"] == 10
+    assert report["score_source"] == "llm"
+    assert run_data["next_best_offers"][0]["analysis"] == "a"
+
+
+def _activity_queries(customer, count):
+    """Queries customer_activity runs for ``count`` emails and runs."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.accounts.services.customer_activity import customer_activity
+    from apps.agents.models import AgentRun, BiasReport
+    from apps.email_engine.models import GeneratedEmail, GuardrailLog
+    from apps.loans.models import LoanApplication
+
+    for _ in range(count):
+        application = LoanApplication.objects.create(
+            applicant=customer,
+            annual_income=50000,
+            credit_score=700,
+            loan_amount=20000,
+            debt_to_income=2,
+            employment_length=3,
+            purpose="personal",
+            home_ownership="rent",
+        )
+        email = GeneratedEmail.objects.create(
+            application=application, decision="approved", subject="s", body="b", prompt_used="p"
+        )
+        GuardrailLog.objects.create(email=email, check_name="c", passed=True, details="")
+        run = AgentRun.objects.create(application=application, status="completed", steps=[])
+        BiasReport.objects.create(agent_run=run, report_type="decision", bias_score=1, analysis="ok")
+    with CaptureQueriesContext(connection) as queries:
+        result = customer_activity(customer)
+    assert len(result["emails"]) == len(result["agent_runs"]) == count
+    return len(queries)
+
+
+@pytest.mark.django_db
+def test_activity_query_count_does_not_grow_with_the_rows(django_user_model):
+    """The sliced querysets keep their prefetches: no query per email or run."""
+    one = django_user_model.objects.create_user(username="act_one", password="x", role="customer")
+    three = django_user_model.objects.create_user(username="act_three", password="x", role="customer")
+
+    assert _activity_queries(three, 3) == _activity_queries(one, 1)

@@ -15,11 +15,17 @@ De-identified: every EncryptedCharField on the profile (DOB, phone, address,
 ID numbers, employer, incomes) plus the plain-text location, employment and
 income-source fields; the user's username, name, email and phone (account
 deactivated); application free text; decision and marketing email
-subject/body/prompt. Decision facts (amounts, scores, outcomes) stay for
-aggregate analytics.
+subject/body/prompt; the customer's complaints and decision-review requests;
+next-best-offer text; pipeline step summaries; bias-report analysis and
+guardrail details. Decision facts (amounts, scores, outcomes, step names and
+timings) stay for aggregate analytics.
+
+Account activity: login and token refresh record last_login, so a customer
+who still signs in is not treated as closed.
 
 Runs weekly from apps.loans.tasks.enforce_data_retention. Idempotent:
-de-identified users are not selected again.
+CustomUser.deidentified_at marks a processed user (never the email domain,
+which the user can set).
 
 Not covered: AuditLog details written before this change can hold a
 username (e.g. ``register``). The audit chain hashes details, so scrubbing
@@ -36,9 +42,9 @@ from django.utils import timezone
 
 from apps.accounts.fields import EncryptedCharField
 from apps.accounts.models import CustomerProfile, CustomUser
-from apps.agents.models import MarketingEmail
-from apps.email_engine.models import GeneratedEmail
-from apps.loans.models import AuditLog, LoanApplication
+from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
+from apps.email_engine.models import GeneratedEmail, GuardrailLog
+from apps.loans.models import AuditLog, Complaint, DecisionReview, LoanApplication
 
 RETENTION = timedelta(days=7 * 365)
 DEIDENTIFIED_EMAIL_DOMAIN = "deidentified.local"
@@ -93,12 +99,10 @@ class Command(BaseCommand):
         cutoff = timezone.now() - RETENTION
         self.stdout.write(f"Retention cutoff: {cutoff.date()}")
 
-        # Account-level staleness first (cheap, in SQL). API users never hit
-        # Django's login(), so a NULL last_login falls back to created_at.
-        candidates = (
-            CustomUser.objects.filter(role="customer")
-            .exclude(email__endswith=f"@{DEIDENTIFIED_EMAIL_DOMAIN}")
-            .filter(Q(last_login__lt=cutoff) | Q(last_login__isnull=True, created_at__lt=cutoff))
+        # Account-level staleness first (cheap, in SQL). Login and refresh set
+        # last_login; a NULL (never signed in) falls back to created_at.
+        candidates = CustomUser.objects.filter(role="customer", deidentified_at__isnull=True).filter(
+            Q(last_login__lt=cutoff) | Q(last_login__isnull=True, created_at__lt=cutoff)
         )
 
         eligible = []
@@ -137,6 +141,20 @@ class Command(BaseCommand):
         marketing = MarketingEmail.objects.filter(application_id__in=app_ids).update(
             subject=REDACTED_TEXT[:200], body=REDACTED_TEXT, prompt_used=""
         )
+        Complaint.objects.filter(Q(complainant=user) | Q(loan_application_id__in=app_ids)).update(
+            subject=REDACTED_TEXT[:200], description=REDACTED_TEXT, resolution=""
+        )
+        DecisionReview.objects.filter(application_id__in=app_ids).update(reason=REDACTED_TEXT, resolution_note="")
+        NextBestOffer.objects.filter(application_id__in=app_ids).update(
+            analysis=REDACTED_TEXT, personalized_message="", marketing_message=""
+        )
+        BiasReport.objects.filter(agent_run__application_id__in=app_ids).update(analysis=REDACTED_TEXT)
+        GuardrailLog.objects.filter(email__application_id__in=app_ids).update(details="")
+        # Step summaries can quote the email (subject, findings); keep the
+        # step names, statuses and timings the SLA metrics read.
+        for run in AgentRun.objects.filter(application_id__in=app_ids).only("pk", "steps"):
+            steps = [{k: v for k, v in step.items() if k != "result_summary"} for step in (run.steps or [])]
+            AgentRun.objects.filter(pk=run.pk).update(steps=steps)
 
         user.username = f"deidentified_{user.pk}"
         user.first_name = "REDACTED"
@@ -144,7 +162,10 @@ class Command(BaseCommand):
         user.email = f"redacted_{user.pk}@{DEIDENTIFIED_EMAIL_DOMAIN}"
         user.phone = ""
         user.is_active = False
-        user.save(update_fields=["username", "first_name", "last_name", "email", "phone", "is_active"])
+        user.deidentified_at = timezone.now()
+        user.save(
+            update_fields=["username", "first_name", "last_name", "email", "phone", "is_active", "deidentified_at"]
+        )
 
         AuditLog.objects.create(
             user=None,  # system action — no acting officer

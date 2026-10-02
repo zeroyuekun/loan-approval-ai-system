@@ -1010,6 +1010,12 @@ class ModelTrainer:
                 overfitting_gap,
             )
 
+        # The overfitting gate uses no test data: it judges the train-vs-validation
+        # gap. The train-vs-test gap above stays as the final independent figure.
+        # y_val_prob is the calibrated model's validation output computed above.
+        val_auc = round(float(roc_auc_score(y_val, y_val_prob)), 4)
+        overfitting_gap_val = round(train_auc - val_auc, 4)
+
         # Logistic-regression baseline on core credit features. Lets us report
         # the XGBoost lift over a simple scorecard — the credit-risk interview
         # question "how much better is your model than credit_score alone?"
@@ -1036,6 +1042,8 @@ class ModelTrainer:
             "training_time_seconds": training_time,
             "overfitting_gap": overfitting_gap,
             "train_auc": round(train_auc, 4),
+            "val_auc": val_auc,
+            "overfitting_gap_val": overfitting_gap_val,
             "n_features": len(feature_cols),
             "cv_auc_mean": cv_mean,
             "cv_auc_std": cv_std,

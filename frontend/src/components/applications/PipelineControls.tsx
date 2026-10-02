@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Bot, Loader2, Trash2 } from 'lucide-react'
 import { ForceRerunDialog } from '@/components/agents/ForceRerunDialog'
+import { isAwaitingPipeline } from '@/lib/utils'
 
 interface PipelineControlsProps {
   applicationStatus: string
@@ -66,7 +67,7 @@ export function PipelineControls({
             ) : (
               <>
                 <Bot className="mr-2 h-4 w-4" />
-                {applicationStatus === 'pending' ? 'Run AI Pipeline' : 'Re-run AI Pipeline'}
+                {isAwaitingPipeline(applicationStatus) ? 'Run AI Pipeline' : 'Re-run AI Pipeline'}
               </>
             )}
           </Button>

@@ -116,6 +116,20 @@ class ModelVersion(models.Model):
     def __str__(self):
         return f"{self.get_algorithm_display()} v{self.version} (active={self.is_active})"
 
+    def stale_metrics_threshold(self):
+        """The threshold the stored metrics were computed at, if not the serving one.
+
+        Migration 0010 moved legacy models to their validation-chosen
+        threshold but could not recompute the confusion matrix, precision /
+        recall or fairness ratios, which still describe the old cutoff
+        (``training_metadata["metrics_threshold"]``). None when they match or
+        nothing was recorded.
+        """
+        computed = (self.training_metadata or {}).get("metrics_threshold")
+        if isinstance(computed, bool) or not isinstance(computed, (int, float)) or self.optimal_threshold is None:
+            return None
+        return float(computed) if abs(computed - self.optimal_threshold) > 1e-9 else None
+
     def clean(self):
         super().clean()
         if self.file_path:

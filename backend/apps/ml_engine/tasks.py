@@ -219,7 +219,12 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
         mv.save(update_fields=["training_metadata"])
 
     release_train_lock(lock)
-    return {"model_version_id": str(mv.id), "metrics": metrics, "activated": not blocked_gates}
+    return {
+        "model_version_id": str(mv.id),
+        "metrics": metrics,
+        "activated": not blocked_gates,
+        "activation_blocked": blocked_gates,
+    }
 
 
 def _gate_metadata(mv, gates: dict, blocked_gates: list[str]) -> dict:
@@ -389,10 +394,27 @@ def check_fairness_violations(self):
     else:
         logger.info("Fairness check passed: all active models above %.0f%% DI threshold", threshold * 100)
 
+    # A DI ratio computed at another threshold says nothing about the cutoff
+    # the model serves at (legacy rows after migration 0010).
+    stale = [
+        {"model_version": str(mv.id), "version": mv.version, "computed_at": t, "serving_at": mv.optimal_threshold}
+        for mv in active_models
+        if (t := mv.stale_metrics_threshold()) is not None
+    ]
+    if stale:
+        logger.warning("Fairness check: %d active model(s) serve on metrics from another threshold", len(stale))
+        AuditLog.objects.create(
+            action="fairness_metrics_stale",
+            resource_type="ModelVersion",
+            resource_id=",".join(m["model_version"] for m in stale),
+            details={"models": stale, "checked_at": timezone.now().isoformat()},
+        )
+
     return {
         "status": "violations_found" if violations else "all_clear",
         "violation_count": len(violations),
         "violations": violations,
+        "stale_metrics": stale,
     }
 
 

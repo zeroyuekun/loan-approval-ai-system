@@ -55,7 +55,7 @@ SHAP runs on the active model to produce the feature importances shown in the da
 
 ## References
 
-- `backend/apps/ml_engine/services/trainer.py`: model training entry point.
+- `backend/apps/ml_engine/services/training/trainer.py`: model training entry point.
 - `backend/apps/ml_engine/models.py`: `ModelVersion` with `is_active` flag.
-- `backend/apps/ml_engine/services/predictor.py`: inference.
+- `backend/apps/ml_engine/services/scoring/predictor.py`: inference.
 - Optuna tuning notes: `project_ml_accuracy_context.md` (internal).

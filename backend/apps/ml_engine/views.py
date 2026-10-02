@@ -1,3 +1,5 @@
+import logging
+
 import redis
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError
@@ -8,13 +10,22 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
+from apps.common.http import client_ip
 from apps.loans.models import AuditLog
 from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
+from apps.ml_engine.services.model_selector import NoActiveModelError
+from apps.ml_engine.services.scoring.adhoc import AdhocApplicantSerializer, input_error_detail, score_applicant
+from apps.ml_engine.services.scoring.policy_overlay import PolicyOverlayUnavailable
 from apps.ml_engine.tasks import TRAIN_LOCK_KEY, run_prediction_task, train_model_task
+
+logger = logging.getLogger(__name__)
 
 
 class PredictionThrottle(UserRateThrottle):
+    # Own scope so this cap doesn't share the global UserRateThrottle's
+    # "throttle_user_<id>" cache key (see accounts.views.RefreshRateThrottle).
+    scope = "ml_predict"
     rate = "10/hour"
 
 
@@ -40,7 +51,7 @@ class PredictView(APIView):
             resource_type="LoanApplication",
             resource_id=str(loan_id),
             details={"task_id": task.id},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return Response(
@@ -134,7 +145,7 @@ class TrainModelView(APIView):
             resource_type="ModelVersion",
             resource_id="pending",
             details={"algorithm": algorithm, "task_id": task.id},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return Response(
@@ -161,8 +172,7 @@ class ModelDriftView(APIView):
     def get(self, request):
         """Compute PSI for recent applications vs training distribution."""
         from apps.ml_engine.services.governance.drift_monitor import compute_on_demand_feature_psi
-        from apps.ml_engine.services.model_selector import select_model_version
-        from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
+        from apps.ml_engine.services.model_selector import monitoring_model_version
 
         try:
             days = int(request.query_params.get("days", 30))
@@ -175,10 +185,11 @@ class ModelDriftView(APIView):
         # ModelPredictor (which joblib.load-s the model bundle) only to throw
         # the model object away before compute_on_demand_feature_psi builds its
         # own ModelPredictor internally.  One joblib.load per drift check.
-        try:
-            model_version = select_model_version(segment=SEGMENT_UNIFIED)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        # Same model as the metrics page (monitoring_model_version), not the
+        # weighted A/B draw, so the report never flips to a challenger.
+        model_version = monitoring_model_version()
+        if model_version is None:
+            return Response({"error": "No active model found"}, status=status.HTTP_404_NOT_FOUND)
 
         result = compute_on_demand_feature_psi(model_version, days=days)
 
@@ -301,7 +312,7 @@ class ModelActivateView(APIView):
                 actor=request.user,
                 source="api",
                 force=force,
-                ip_address=request.META.get("REMOTE_ADDR"),
+                ip_address=client_ip(request),
             )
         except ActivationRefused as exc:
             return _refused_response(exc)
@@ -341,7 +352,7 @@ class ModelTrafficView(APIView):
             )
 
         try:
-            set_traffic(version, int(traffic), actor=request.user, ip_address=request.META.get("REMOTE_ADDR"))
+            set_traffic(version, int(traffic), actor=request.user, ip_address=client_ip(request))
         except ActivationRefused as exc:
             return _refused_response(exc)
         except ValidationError as e:
@@ -365,8 +376,14 @@ class ModelCompareView(APIView):
     def get(self, request):
         from django.db.models import Avg, Count
 
-        active_models = ModelVersion.objects.filter(is_active=True)
-        if active_models.count() < 2:
+        from apps.ml_engine.services.model_selector import CHAMPION_ORDERING, pick_monitoring_model
+
+        # Champion first, then the rest by traffic and age — a fixed order so
+        # the agreement rate below always compares the champion with its peer.
+        ranked = list(ModelVersion.objects.filter(is_active=True).order_by(*CHAMPION_ORDERING))
+        champion = pick_monitoring_model(ranked)
+        active_models = [champion, *(m for m in ranked if m is not champion)] if champion else []
+        if len(active_models) < 2:
             return Response(
                 {"message": "Need at least 2 active models for comparison"},
                 status=status.HTTP_200_OK,
@@ -466,3 +483,53 @@ class DriftReportListView(APIView):
             )
 
         return Response(data)
+
+
+class AdhocScoreThrottle(UserRateThrottle):
+    # Own scope: without it the cap shares "throttle_user_<id>" with the
+    # global UserRateThrottle and both limits count each other's requests.
+    scope = "adhoc_score"
+    rate = "30/hour"
+
+
+class AdhocScoreView(APIView):
+    """Score one applicant's facts against the active model.
+
+    Builds nothing durable: no `LoanApplication` row, no referral-audit
+    save, no shadow-scoring `PredictionLog` row (see `ModelPredictor.predict
+    (..., persist=False)`). Staff-only — this is an underwriting tool, not
+    a customer-facing pre-qualification endpoint.
+    """
+
+    permission_classes = [IsAdminOrOfficer]
+    throttle_classes = [AdhocScoreThrottle]
+
+    def post(self, request):
+        serializer = AdhocApplicantSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = score_applicant(serializer.validated_data)
+        except NoActiveModelError:  # a ValueError subclass, so it must come first
+            return Response({"detail": "No active model"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except PolicyOverlayUnavailable as exc:
+            # Class name only: the exception text can carry applicant figures.
+            logger.warning("adhoc_score_unavailable: %s", type(exc).__name__)
+            return Response(
+                {"detail": "Credit policy rules are unavailable right now. Try again shortly."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except ValueError as exc:
+            logger.warning("adhoc_score_rejected: %s", type(exc).__name__)
+            return Response({"detail": input_error_detail(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="adhoc_score",
+            resource_type="ModelVersion",
+            resource_id=result["model_version"],
+            details={"fields": sorted(serializer.validated_data.keys())},
+            ip_address=client_ip(request),
+        )
+
+        return Response(result, status=status.HTTP_200_OK)

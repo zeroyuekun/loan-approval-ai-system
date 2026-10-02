@@ -21,7 +21,7 @@ Implement a layered security architecture covering authentication, encryption, i
 - **JWT with HttpOnly cookies:** access tokens (60-minute expiry) and refresh tokens (7-day expiry) are stored in HttpOnly, Secure, SameSite=Lax cookies. No tokens go in localStorage, which eliminates XSS token theft.
 - **Refresh token rotation:** each refresh issues a new refresh token and blacklists the previous one. Token reuse is detected as a compromise signal.
 - **Role-based access control (RBAC):** three roles (`admin`, `officer`, `customer`) with object-level permissions. Customers see only their own applications, officers see all applications, and admins have full access including deletion.
-- **Two-factor authentication:** OTP-based 2FA for admin and officer accounts. Customers can optionally enable it.
+- **Two-factor authentication:** removed on 2026-10-03 at the owner's request. Staff accounts rely on passwords, login throttling and account lockout. High-value overturns stay behind the `second_approver` gate.
 
 ### Encryption
 

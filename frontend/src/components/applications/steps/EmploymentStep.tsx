@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectItem } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { FormData } from '@/hooks/useApplicationForm'
+import { EMPLOYMENT_TYPE_OPTIONS } from '@/lib/loanFieldOptions'
 
 interface EmploymentStepProps {
   register: UseFormRegister<FormData>
@@ -22,10 +23,9 @@ export function EmploymentStep({ register, errors }: EmploymentStepProps) {
           <div>
             <Label htmlFor="employment_type">Employment Type</Label>
             <Select id="employment_type" {...register('employment_type')}>
-              <SelectItem value="payg_permanent">PAYG Full-Time/Permanent</SelectItem>
-              <SelectItem value="payg_casual">PAYG Casual</SelectItem>
-              <SelectItem value="self_employed">Self-Employed (ABN)</SelectItem>
-              <SelectItem value="contract">Fixed-Term Contract</SelectItem>
+              {EMPLOYMENT_TYPE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
             </Select>
             {errors.employment_type && <p className="text-sm text-destructive mt-1">{errors.employment_type.message}</p>}
           </div>

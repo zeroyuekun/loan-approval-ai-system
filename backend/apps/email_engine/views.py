@@ -11,10 +11,9 @@ from apps.email_engine.services.decision_email import (
     DecisionMismatch,
     bias_hold_reason,
     deliver_decision_email,
-    email_type_for,
     require_decision_on_record,
 )
-from apps.email_engine.services.html_renderer import render_html
+from apps.email_engine.services.email_payload import serialize_email
 from apps.email_engine.tasks import generate_email_task
 from apps.loans.permissions import check_loan_access
 
@@ -37,52 +36,6 @@ def _visible_emails(user, queryset):
     if _is_staff(user):
         return queryset
     return queryset.filter(application__applicant=user, sent_at__isnull=False)
-
-
-def _serialize_email(email, *, include_body, staff=True):
-    """Shared response shape for the email list and detail endpoints.
-
-    ``body``/``html_body`` are KB-scale per record, so the list endpoint omits
-    them; clients fetch them from the single-email endpoint (/emails/<loan_id>/).
-    Per-check guardrail details are internal compliance artefacts: customers get
-    an empty ``guardrail_checks`` list (same key, so the response shape holds).
-    """
-    applicant = email.application.applicant
-    data = {
-        "id": str(email.id),
-        "application_id": str(email.application_id),
-        "applicant_id": applicant.id,
-        "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
-        "decision": email.decision,
-        "subject": email.subject,
-    }
-    if include_body:
-        data["body"] = email.body
-        data["html_body"] = render_html(email.body, email_type=email_type_for(email.decision))
-    data.update(
-        {
-            "model_used": email.model_used,
-            "generation_time_ms": email.generation_time_ms,
-            "attempt_number": email.attempt_number,
-            "passed_guardrails": email.passed_guardrails,
-            "guardrail_checks": [
-                {
-                    "check_name": log.check_name,
-                    "passed": log.passed,
-                    "details": log.details,
-                    "category": log.category,
-                    # quality_score is a batch-computed value (not stored per-log).
-                    # Exposed as null here; callers should use the email-level score.
-                    "quality_score": None,
-                }
-                for log in email.guardrail_checks.all()
-            ]
-            if staff
-            else [],
-            "created_at": email.created_at.isoformat(),
-        }
-    )
-    return data
 
 
 class EmailListView(APIView):
@@ -113,7 +66,7 @@ class EmailListView(APIView):
         emails = queryset[offset : offset + page_size]
 
         staff = _is_staff(user)
-        results = [_serialize_email(email, include_body=False, staff=staff) for email in emails]
+        results = [serialize_email(email, include_body=False, staff=staff) for email in emails]
 
         base_url = request.build_absolute_uri(request.path)
         next_url = f"{base_url}?page={page + 1}&page_size={page_size}" if offset + page_size < total else None
@@ -243,4 +196,4 @@ class EmailDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        return Response(_serialize_email(email, include_body=True, staff=_is_staff(request.user)))
+        return Response(serialize_email(email, include_body=True, staff=_is_staff(request.user)))

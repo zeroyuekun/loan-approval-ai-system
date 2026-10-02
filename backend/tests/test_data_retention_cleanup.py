@@ -173,3 +173,117 @@ def test_weekly_retention_task_runs_the_deidentification():
     called = [c.args[0] for c in cmd.call_args_list]
     assert "enforce_retention" in called
     assert "data_retention_cleanup" in called
+
+
+# --- 2026-10-02 review: gaps left after I8 ---------------------------------
+
+
+@pytest.mark.django_db
+def test_free_text_tied_to_the_customer_is_scrubbed():
+    """Complaints, review requests, offers, pipeline steps, bias analysis and
+    guardrail details all carried the customer's own words or name."""
+    from apps.agents.models import AgentRun, BiasReport, NextBestOffer
+    from apps.email_engine.models import GuardrailLog
+    from apps.loans.models import Complaint, DecisionReview
+
+    user = _customer("free_text", years_ago=9)
+    app = _application(user, status="denied", years_ago=8)
+    email = GeneratedEmail.objects.get(application=app)
+    complaint = Complaint.objects.create(
+        complainant=user,
+        loan_application=app,
+        category="decision",
+        subject="Jane disputes the decision",
+        description="My daughter's school is in Parramatta",
+        resolution="Called Jane on 0400111222",
+    )
+    review = DecisionReview.objects.create(
+        application=app, requested_by=user, reason="Jane's income was wrong", resolution_note="Spoke to Jane"
+    )
+    run = AgentRun.objects.create(
+        application=app,
+        status="completed",
+        steps=[{"step_name": "email_generation", "status": "completed", "result_summary": {"subject": "Hi Jane"}}],
+    )
+    offer = NextBestOffer.objects.create(
+        agent_run=run,
+        application=app,
+        analysis="Jane Citizen is a teacher",
+        personalized_message="Dear Jane",
+        marketing_message="Jane, here are your options",
+    )
+    bias = BiasReport.objects.create(agent_run=run, email=email, bias_score=10, analysis="Mentions Jane", flagged=False)
+    guardrail = GuardrailLog.objects.create(email=email, check_name="tone", passed=True, details="Dear Jane Citizen")
+
+    call_command("data_retention_cleanup", stdout=StringIO())
+
+    complaint.refresh_from_db()
+    review.refresh_from_db()
+    run.refresh_from_db()
+    offer.refresh_from_db()
+    bias.refresh_from_db()
+    guardrail.refresh_from_db()
+    texts = [
+        complaint.subject,
+        complaint.description,
+        complaint.resolution,
+        review.reason,
+        review.resolution_note,
+        str(run.steps),
+        offer.analysis,
+        offer.personalized_message,
+        offer.marketing_message,
+        bias.analysis,
+        guardrail.details,
+    ]
+    assert not [t for t in texts if "Jane" in t or "Parramatta" in t or "0400111222" in t]
+    # Operational facts stay for analytics.
+    assert run.steps[0]["step_name"] == "email_generation"
+    assert complaint.category == "decision"
+
+
+@pytest.mark.django_db
+def test_a_customer_cannot_opt_out_by_using_the_deidentified_email_domain():
+    user = _customer("opt_out", years_ago=9)
+    _application(user, status="denied", years_ago=8)
+    CustomUser.objects.filter(pk=user.pk).update(email="me@deidentified.local")
+
+    call_command("data_retention_cleanup", stdout=StringIO())
+
+    user.refresh_from_db()
+    assert not user.is_active
+    assert AuditLog.objects.filter(action="data_retention_cleanup", resource_id=str(user.pk)).exists()
+
+
+@pytest.mark.django_db
+def test_signing_in_keeps_an_active_customer_out_of_deidentification():
+    """Nothing set last_login, so a weekly user with an old closed loan was scrubbed."""
+    from rest_framework.test import APIClient
+
+    user = _customer("weekly_user", years_ago=9)
+    _application(user, status="denied", years_ago=8)
+
+    resp = APIClient().post("/api/v1/auth/login/", {"username": "weekly_user", "password": "x"}, format="json")
+    assert resp.status_code == 200, resp.data
+
+    call_command("data_retention_cleanup", stdout=StringIO())
+
+    user.refresh_from_db()
+    assert user.is_active
+    assert user.first_name == "Jane"
+
+
+@pytest.mark.django_db
+def test_a_token_refresh_records_activity():
+    from rest_framework.test import APIClient
+    from rest_framework_simplejwt.tokens import RefreshToken
+
+    user = _customer("refresh_user", years_ago=9)
+    stale = timezone.now() - timedelta(days=8 * YEARS)
+    CustomUser.objects.filter(pk=user.pk).update(last_login=stale)
+
+    resp = APIClient().post("/api/v1/auth/refresh/", {"refresh": str(RefreshToken.for_user(user))}, format="json")
+    assert resp.status_code == 200, resp.data
+
+    user.refresh_from_db()
+    assert user.last_login > timezone.now() - timedelta(minutes=5)

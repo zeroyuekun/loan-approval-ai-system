@@ -7,6 +7,7 @@ soft_time_limit + idempotent send behaviour (Task 3).
 import pytest
 
 from apps.email_engine.models import GeneratedEmail
+from tests.conftest import passing_email_result, use_locmem_cache
 
 
 @pytest.fixture
@@ -128,6 +129,37 @@ def test_task_converts_rate_limited_to_retry(monkeypatch, sample_application, de
 
 
 @pytest.mark.django_db
+def test_the_dedup_lock_outlives_the_longest_retry_countdown(monkeypatch, sample_application, denied_decision):
+    """A provider's long Retry-After must not let the lock expire before the
+    retry re-enters it, or a second run can start and send in between."""
+    from unittest.mock import MagicMock
+
+    from celery.exceptions import Retry
+    from django.core.cache import cache
+
+    from apps.email_engine import tasks as email_tasks
+    from apps.email_engine.services.exceptions import RateLimited
+
+    def _raise_rate_limited(self, application, decision, *a, **kw):
+        raise RateLimited(retry_after=10_000)
+
+    monkeypatch.setattr("apps.email_engine.services.email_generator.EmailGenerator.generate", _raise_rate_limited)
+    retry_mock = MagicMock(side_effect=Retry)
+    monkeypatch.setattr(email_tasks.generate_email_task, "retry", retry_mock)
+
+    with use_locmem_cache:
+        with pytest.raises(Retry):
+            email_tasks.generate_email_task(str(sample_application.id), "denied")
+        lock_held = cache.has_key(email_tasks._email_lock_key(str(sample_application.id), "denied"))
+
+    task = email_tasks.generate_email_task
+    # The Retry-After retry and the autoretry backoff (Celery caps it at 600 s by default).
+    countdowns = [retry_mock.call_args.kwargs["countdown"], getattr(task, "retry_backoff_max", 600)]
+    assert email_tasks._EMAIL_LOCK_TTL >= task.time_limit + max(countdowns)
+    assert lock_held, "the lock was released before the retry"
+
+
+@pytest.mark.django_db
 def test_send_is_idempotent_on_redelivery(monkeypatch, sample_application, denied_decision):
     """Already-sent email (sent_at set) must NOT be re-sent on redelivery.
 
@@ -166,25 +198,9 @@ def test_send_occurs_once_when_not_yet_sent(monkeypatch, sample_application, den
     """First delivery: sent_at is None → send IS called once and sent_at persists."""
     from apps.email_engine import tasks as email_tasks
 
-    # Generator returns a passing result without touching the network.
-    def _fake_generate(self, application, decision, *a, **kw):
-        return {
-            "subject": "Your application",
-            "body": "Body text",
-            "prompt_used": "p",
-            "guardrail_results": [],
-            "passed_guardrails": True,
-            "quality_score": 100,
-            "generation_time_ms": 10,
-            "attempt_number": 1,
-            "template_fallback": False,
-            "input_tokens": 0,
-            "output_tokens": 0,
-        }
-
     monkeypatch.setattr(
         "apps.email_engine.services.email_generator.EmailGenerator.generate",
-        _fake_generate,
+        lambda self, *a, **kw: passing_email_result("denied"),
     )
 
     from unittest.mock import MagicMock
@@ -330,3 +346,60 @@ def test_redelivery_sends_generated_but_unsent_email(monkeypatch, sample_applica
     assert result["email_sent"] is True
     email = GeneratedEmail.objects.get(application=sample_application, decision="denied")
     assert email.sent_at is not None  # marker persisted
+
+
+# ---------------------------------------------------------------------------
+# No staff email while the pipeline is deciding; one run per decision at a time
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_task_refuses_while_the_pipeline_is_processing(monkeypatch, sample_application, denied_decision):
+    """The running pipeline has written its LoanDecision but not finished its
+    email step: a staff Generate now would send a second, unscreened email."""
+    from unittest.mock import MagicMock
+
+    from apps.email_engine import tasks as email_tasks
+    from apps.email_engine.services.decision_email import HeldForBiasReview
+
+    sample_application.status = "processing"
+    sample_application.save(update_fields=["status"])
+    send_mock = MagicMock(return_value={"sent": True})
+    monkeypatch.setattr("apps.email_engine.services.sender.send_decision_email", send_mock)
+    monkeypatch.setattr(
+        "apps.email_engine.services.email_generator.EmailGenerator.generate",
+        lambda self, *a, **kw: passing_email_result("denied"),
+    )
+
+    with use_locmem_cache, pytest.raises(HeldForBiasReview):
+        email_tasks.generate_email_task(str(sample_application.id), "denied")
+    assert send_mock.call_count == 0
+    assert not GeneratedEmail.objects.filter(application=sample_application).exists()
+
+
+@pytest.mark.django_db
+def test_a_concurrent_run_for_the_same_decision_sends_once(monkeypatch, sample_application, denied_decision):
+    """A second run starts while the first is generating (no email row exists
+    yet for either to find): only one email is generated and sent."""
+    from unittest.mock import MagicMock
+
+    from apps.email_engine import tasks as email_tasks
+
+    send_mock = MagicMock(return_value={"sent": True})
+    monkeypatch.setattr("apps.email_engine.services.sender.send_decision_email", send_mock)
+    inner = {}
+
+    def _generate(self, application, decision, *a, **kw):
+        if not inner:
+            inner["started"] = True  # only the outer run starts a second one
+            inner["result"] = email_tasks.generate_email_task.apply(args=(str(application.pk), decision)).get()
+        return passing_email_result("denied")
+
+    monkeypatch.setattr("apps.email_engine.services.email_generator.EmailGenerator.generate", _generate)
+
+    with use_locmem_cache:
+        email_tasks.generate_email_task.apply(args=(str(sample_application.id), "denied")).get()
+
+    assert send_mock.call_count == 1, "two concurrent runs each sent a decision email"
+    assert inner["result"] == {"skipped": True, "reason": "dedup_lock_held"}
+    assert GeneratedEmail.objects.filter(application=sample_application).count() == 1

@@ -4,7 +4,10 @@ export const CURATED_METADATA_KEYS: { key: string; label: string }[] = [
   { key: 'test_size', label: 'Test Size' },
   { key: 'cv_auc_mean', label: 'CV AUC (mean)' },
   { key: 'cv_auc_std', label: 'CV AUC (std)' },
-  { key: 'overfitting_gap', label: 'Overfitting Gap' },
+  { key: 'train_auc', label: 'Train AUC' },
+  { key: 'val_auc', label: 'Validation AUC' },
+  { key: 'overfitting_gap_val', label: 'Overfitting Gap (train − validation)' },
+  { key: 'overfitting_gap', label: 'Overfitting Gap (train − test)' },
   { key: 'training_time_seconds', label: 'Training Time (s)' },
   { key: 'calibration_method', label: 'Calibration Method' },
 ]

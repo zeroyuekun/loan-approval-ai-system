@@ -12,6 +12,8 @@ from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 
+from apps.common.http import client_ip
+
 from .models import AuditLog, Complaint, DecisionReview, LoanApplication, LoanDecision, PipelineDispatchOutbox
 from .services.audit_diff import field_change_details, snapshot
 from .services.decision_review import apply_review_outcome
@@ -27,7 +29,18 @@ def _audit_admin_change(request, action, instance, before, **kwargs):
         resource_type=type(instance).__name__,
         resource_id=str(instance.pk),
         details=details,
-        ip_address=request.META.get("REMOTE_ADDR"),
+        ip_address=client_ip(request),
+    )
+
+
+def _audit_admin_delete(request, instance):
+    AuditLog.objects.create(
+        user=request.user,
+        action="loan_deleted",
+        resource_type=type(instance).__name__,
+        resource_id=str(instance.pk),
+        details={"source": "django_admin", "status": instance.status},
+        ip_address=client_ip(request),
     )
 
 
@@ -97,6 +110,20 @@ class LoanApplicationAdmin(admin.ModelAdmin):
                 request,
                 "Application queued, but applicant has no email on file — no decision email will be sent.",
             )
+
+    def delete_model(self, request, obj):
+        # delete() soft-deletes; record it in the hash chain like every other
+        # admin write, not only in Django's LogEntry.
+        with transaction.atomic():
+            super().delete_model(request, obj)
+            _audit_admin_delete(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        with transaction.atomic():
+            deleted = list(queryset)
+            super().delete_queryset(request, queryset)
+            for obj in deleted:
+                _audit_admin_delete(request, obj)
 
 
 @admin.register(LoanDecision)
@@ -173,6 +200,9 @@ class DecisionReviewAdmin(admin.ModelAdmin):
         "resolution_note",
     )
     actions = ["mark_upheld", "mark_overturned"]
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # a contestability record; resolved through the actions below, never deleted
 
     @admin.action(description="Uphold selected decisions (no change to loan)")
     def mark_upheld(self, request, queryset):

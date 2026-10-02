@@ -22,6 +22,10 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(
         "ml_prediction": 30_000,
         "email_generation": 60_000,
         "bias_check": 60_000,
+        "bias_regeneration": 60_000,
+        # Rewrite + bias check + senior review: one generation, one detector
+        # call and one review call, each budgeted like its own step.
+        "bias_agent2_regeneration": 180_000,
         "ai_email_review": 60_000,
         "email_delivery": 30_000,
         "next_best_offers": 60_000,
@@ -32,6 +36,7 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(
         "marketing_email_delivery": 30_000,
         "human_escalation": 5_000,
         "human_escalation_severe_bias": 5_000,
+        "human_escalation_moderate_bias": 5_000,
         "human_escalation_low_confidence": 5_000,
         "human_review_approved": 5_000,
         "human_review_denied": 5_000,
@@ -66,6 +71,14 @@ def pipeline_deadline(seconds):
         yield
     finally:
         _PIPELINE_DEADLINE.reset(token)
+
+
+def seconds_until_deadline():
+    """Seconds left before the pipeline's soft deadline, or None outside a deadline scope."""
+    deadline = _PIPELINE_DEADLINE.get()
+    if deadline is None:
+        return None
+    return deadline - time.monotonic()
 
 
 def raise_if_past_deadline():
@@ -122,6 +135,35 @@ class StepTracker:
         step["error"] = error
         step["failure_category"] = failure_category or self.categorize_error(error)
         return step
+
+    def record_delivery(self, step, outcome):
+        """Close an ``email_delivery`` step from a ``deliver_decision_email`` outcome."""
+        if outcome["sent"] or outcome["already_sent"]:
+            return self.complete_step(step, result_summary={"sent": True, "recipient": outcome["recipient"]})
+        if outcome["recipient"] is None:
+            return self.complete_step(step, result_summary={"sent": False, "reason": "No recipient email"})
+        return self.fail_step(step, outcome["error"] or "Send failed")
+
+    @staticmethod
+    def post_decision_failure_step(step_name, error):
+        """A failed-step record for best-effort work after the decision is applied.
+
+        Built directly rather than through ``fail_step``, which re-raises a
+        soft time limit being handled: after the decision there is nothing
+        left for the limit to stop but finalizing the run.
+        """
+        now = datetime.now(UTC).isoformat()
+        return {
+            "step_name": step_name,
+            "status": "failed",
+            "started_at": now,
+            "completed_at": now,
+            "duration_ms": 0,
+            "timeout_ms": STEP_TIMEOUT_BUDGETS_MS.get(step_name, 120_000),
+            "result_summary": None,
+            "error": str(error) or type(error).__name__,
+            "failure_category": "transient",
+        }
 
     def categorize_error(self, error):
         error_lower = str(error).lower()

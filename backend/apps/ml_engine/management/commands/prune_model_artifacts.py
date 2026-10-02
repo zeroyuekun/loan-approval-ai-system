@@ -2,7 +2,7 @@
 
 Keeps: files referenced by any `is_active=True` ModelVersion, the N most
 recent inactive versions per segment (default N=1), `contract_test_model.joblib`,
-and any non-`.joblib` file (e.g. `golden_metrics.json`).
+and any non-`.joblib` file (e.g. `.gitkeep`).
 
 Deletes: every other `.joblib` file in `ML_MODELS_DIR` older than
 `--min-age-minutes` (default 60), including orphan files with no
