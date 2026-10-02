@@ -203,3 +203,23 @@ def test_overturn_stamps_human_involvement_overridden(django_user_model):
     # End-to-end: the persisted stamp flows through to the ADM disclosure mode.
     explanation = build_explanation_from_decision(app.decision)
     assert explanation["adm_disclosure"]["mode"] == "human"
+
+
+@pytest.mark.parametrize(
+    ("current", "kind", "expected", "changed"),
+    [
+        ("none", "assisted", "assisted", True),
+        ("none", "overridden", "overridden", True),
+        ("assisted", "overridden", "overridden", True),
+        ("assisted", "assisted", "assisted", False),
+        ("overridden", "assisted", "overridden", False),
+        ("overridden", "none", "overridden", False),
+        ("assisted", "none", "assisted", False),
+    ],
+)
+def test_mark_human_only_promotes(current, kind, expected, changed):
+    from apps.loans.models import LoanDecision
+
+    decision = LoanDecision(human_involvement=current)
+    assert decision.mark_human(kind) is changed
+    assert decision.human_involvement == expected

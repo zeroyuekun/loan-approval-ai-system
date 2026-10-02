@@ -109,3 +109,55 @@ class TestOrchestrationForceGuard:
         assert body.get("status") == "already_completed"
         assert body.get("existing_run_id") == str(completed_run.id)
         assert mock_delay.call_count == 0
+
+    @pytest.mark.parametrize(
+        ("app_status", "run_status"),
+        [
+            # A customer re-run would fail the escalated run and replace the
+            # decision the reviewer is about to act on.
+            ("review", "escalated"),
+            ("approved", "failed"),  # decided after a failed run
+        ],
+    )
+    @patch("apps.agents.views.orchestrate_pipeline_task.delay")
+    def test_customer_cannot_rerun_an_application_not_waiting_for_the_pipeline(
+        self, mock_delay, customer, loan_app, app_status, run_status
+    ):
+        from apps.agents.models import AgentRun
+
+        loan_app.status = app_status
+        loan_app.save(update_fields=["status"])
+        AgentRun.objects.create(application_id=loan_app.id, status=run_status)
+        mock_delay.return_value.id = "should-not-dispatch"
+        client = APIClient()
+        client.force_authenticate(user=customer)
+        resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
+        assert resp.status_code == status.HTTP_409_CONFLICT
+        assert mock_delay.call_count == 0
+
+    @patch("apps.agents.views.orchestrate_pipeline_task.delay")
+    def test_customer_can_start_the_pipeline_for_a_pending_application(self, mock_delay, customer, loan_app):
+        mock_delay.return_value.id = "task-1"
+        client = APIClient()
+        client.force_authenticate(user=customer)
+        resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert mock_delay.call_count == 1
+
+    @patch("apps.agents.views.orchestrate_pipeline_task.delay")
+    def test_non_force_ignores_a_completed_run_superseded_by_a_failed_one(self, mock_delay, customer, loan_app):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.agents.models import AgentRun
+
+        older = AgentRun.objects.create(application_id=loan_app.id, status=AgentRun.Status.COMPLETED)
+        AgentRun.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(hours=1))
+        AgentRun.objects.create(application_id=loan_app.id, status=AgentRun.Status.FAILED)
+        mock_delay.return_value.id = "task-2"
+        client = APIClient()
+        client.force_authenticate(user=customer)
+        resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert mock_delay.call_count == 1

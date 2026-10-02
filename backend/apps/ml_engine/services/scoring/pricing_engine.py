@@ -177,3 +177,18 @@ def get_tier(pd_score: float, segment: str) -> PricingTier:
         rate_max=None,
         rationale=(f"PD {pd_score:.4f} exceeds maximum priced tier cutoff ({top_cutoff}) — risk outside appetite"),
     )
+
+
+def quoted_tier(pd_score: float, segment: str) -> PricingTier:
+    """The tier a granted loan is priced in.
+
+    Its own tier, or the top priced tier when the PD is beyond every cutoff:
+    a decline the pricing gate made can still be approved by a person (a
+    decision-review overturn), and that loan is priced at the riskiest band
+    the bank publishes, not left unpriced.
+    """
+    tier = get_tier(pd_score, segment)
+    if tier.approved:
+        return tier
+    tiers = _HOME_TIERS if tier.segment == SEGMENT_HOME else _PERSONAL_TIERS
+    return get_tier(tiers[-1][1], segment)

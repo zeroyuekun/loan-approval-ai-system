@@ -78,7 +78,7 @@ def retry_failed_dispatches() -> dict:
     operator visibility but the automated loop stops retrying.
     """
     from apps.agents.tasks import orchestrate_pipeline_task
-    from apps.loans.models import LoanApplication, PipelineDispatchOutbox
+    from apps.loans.models import PipelineDispatchOutbox
 
     pending = PipelineDispatchOutbox.objects.filter(
         attempts__lt=PipelineDispatchOutbox.MAX_DISPATCH_ATTEMPTS
@@ -107,15 +107,9 @@ def retry_failed_dispatches() -> dict:
             continue
 
         # Only delete the durable row once the app DEMONSTRABLY left QUEUE_FAILED.
-        # .delay() not raising doesn't prove the broker enqueued the task, so we
-        # condition the delete on the guarded transition actually matching a row.
-        rows = LoanApplication.objects.filter(
-            pk=application_id,
-            status=LoanApplication.Status.QUEUE_FAILED,
-        ).update(status=LoanApplication.Status.PENDING)
-
-        if rows == 1:
-            entry.delete()
+        # .delay() not raising doesn't prove the broker enqueued the task, so the
+        # release (which deletes the row) is guarded on the status it leaves.
+        if entry.application.release_queue_failed(source="outbox_drain"):
             logger.info("Outbox recovered dispatch for %s", application_id)
             recovered += 1
         else:

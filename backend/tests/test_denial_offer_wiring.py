@@ -112,6 +112,9 @@ def test_rate_limit_fallback_template_carries_the_offer(processing_denied):
 def test_staff_triggered_denial_email_task_passes_the_offer_to_the_generator(processing_denied):
     from apps.email_engine.tasks import generate_email_task
 
+    # Staff Generate runs on a decided application (a PROCESSING one is held).
+    processing_denied.status = "denied"
+    processing_denied.save(update_fields=["status"])
     template = EmailGenerator().generate_template(processing_denied, "denied")
     with (
         patch.object(EmailGenerator, "generate", return_value=template) as generate,

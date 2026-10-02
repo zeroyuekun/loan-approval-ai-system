@@ -215,3 +215,61 @@ class TestAssembleDecision:
             "refer_reasons",
             "pricing_payload",
         }
+
+
+class TestDeclineOverrides:
+    """A denial made by a rule over a model approval carries the rule's code,
+    so the waterfall and the denial email do not present it as the model's."""
+
+    def test_pricing_decline_of_a_model_approval_is_marked(self):
+        # Real pricing table: home PD 0.15 is above the 0.10 cutoff -> Decline.
+        result = assemble_decision(
+            probability_positive=0.85, model_version=_mk_version(0.5), drift_warnings=[], segment="home"
+        )
+
+        assert result["prediction_label"] == "denied"
+        assert result["pricing_payload"].get("declined_model_approval") is True
+
+    def test_pricing_decline_reports_its_reason_code(self):
+        from apps.ml_engine.services.scoring.decision_assembly import decline_overrides
+
+        result = assemble_decision(
+            probability_positive=0.85, model_version=_mk_version(0.5), drift_warnings=[], segment="home"
+        )
+        overrides = decline_overrides(
+            {"prediction": result["prediction_label"], "pricing_tier": result["pricing_payload"]}
+        )
+
+        assert [o["code"] for o in overrides] == ["PRICING_TIER_DECLINE"]
+        assert overrides[0]["detail"]
+
+    def test_a_model_denial_has_no_override(self):
+        from apps.ml_engine.services.scoring.decision_assembly import decline_overrides
+
+        result = assemble_decision(
+            probability_positive=0.3, model_version=_mk_version(0.5), drift_warnings=[], segment="home"
+        )
+
+        assert result["pricing_payload"]["declined_model_approval"] is False
+        assert decline_overrides({"prediction": "denied", "pricing_tier": result["pricing_payload"]}) == []
+
+    def test_enforce_policy_hard_fails_report_policy_codes(self):
+        from apps.ml_engine.services.scoring.decision_assembly import decline_overrides
+
+        policy = {
+            "mode": "enforce",
+            "changed_model_decision": True,
+            "hard_fails": ["P03"],
+            "rationale_by_code": {"P03": "Undischarged bankrupt"},
+        }
+
+        assert decline_overrides({"prediction": "denied", "policy_decision": policy}) == [
+            {"code": "POLICY_DECLINE_P03", "detail": "Undischarged bankrupt"}
+        ]
+
+    def test_shadow_policy_never_reports_a_decline(self):
+        from apps.ml_engine.services.scoring.decision_assembly import decline_overrides
+
+        policy = {"mode": "shadow", "changed_model_decision": False, "hard_fails": ["P03"]}
+
+        assert decline_overrides({"prediction": "denied", "policy_decision": policy}) == []

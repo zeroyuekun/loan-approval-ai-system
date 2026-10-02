@@ -5,6 +5,7 @@ import time
 import anthropic
 import httpx
 
+from apps.ml_engine.services.scoring.decision_assembly import POLICY_DECLINE_PREFIX, PRICING_TIER_DECLINE
 from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
@@ -233,13 +234,47 @@ class EmailGenerator:
         "bnpl_monthly_commitment": "Your buy-now-pay-later commitments reduce the amount we can lend",
     }
 
-    def _format_denial_reasons(self, feature_importances, shap_values=None):
+    # Lending rules that can decline an application the model approved. The
+    # decision waterfall records them by these codes (decision_assembly), and
+    # they, not the model's feature attributions, are why the loan was declined.
+    DECLINE_RULE_REASON_MAP = {
+        PRICING_TIER_DECLINE: "The assessed risk for this loan is above the level we can offer a rate for",
+        f"{POLICY_DECLINE_PREFIX}P01": "Your residency status doesn't meet the eligibility requirements for this loan",
+        f"{POLICY_DECLINE_PREFIX}P02": "The loan term doesn't meet our age eligibility requirements",
+        f"{POLICY_DECLINE_PREFIX}P03": "There's a current or recent bankruptcy on your credit file",
+        f"{POLICY_DECLINE_PREFIX}P04": "There's an outstanding tax debt default recorded against you",
+        f"{POLICY_DECLINE_PREFIX}P05": "Your credit score is below the minimum we lend at",
+        f"{POLICY_DECLINE_PREFIX}P06": "The loan amount is too high relative to the property value",
+        f"{POLICY_DECLINE_PREFIX}P07": "Your total debt is too high relative to your income",
+    }
+
+    def _decline_rule_reasons(self, decision_waterfall):
+        """Plain-language reasons for the lending rules that declined the application, or []."""
+        reasons = []
+        for entry in decision_waterfall or []:
+            code = entry.get("reason_code") if isinstance(entry, dict) else None
+            if code == PRICING_TIER_DECLINE or (code or "").startswith(POLICY_DECLINE_PREFIX):
+                reason = self.DECLINE_RULE_REASON_MAP.get(code, "Your application didn't meet our lending policy")
+                if reason not in reasons:
+                    reasons.append(reason)
+        return reasons
+
+    def _format_denial_reasons(self, feature_importances, shap_values=None, decision_waterfall=None):
         """Convert per-applicant SHAP values to plain-language denial reasons.
 
-        Prefers SHAP values (per-applicant, explains why THIS person was denied)
-        over global feature importances (model-wide weights, same for everyone).
-        Falls back to global importances when SHAP values are unavailable.
+        A lending rule that declined a model approval (pricing tier, credit
+        policy) is the reason when the decision waterfall records one: the
+        attributions explain the model's score, which was an approval.
+
+        Otherwise prefers SHAP values (per-applicant, explains why THIS person
+        was denied) over global feature importances (model-wide weights, same
+        for everyone). Falls back to global importances when SHAP values are
+        unavailable.
         """
+        rule_reasons = self._decline_rule_reasons(decision_waterfall)
+        if rule_reasons:
+            return "; ".join(rule_reasons)
+
         if not feature_importances and not shap_values:
             return "Credit assessment criteria not met"
 
@@ -421,6 +456,7 @@ class EmailGenerator:
             reasons = self._format_denial_reasons(
                 decision_obj.feature_importances if decision_obj else None,
                 shap_values=decision_obj.shap_values if decision_obj else None,
+                decision_waterfall=decision_obj.decision_waterfall if decision_obj else None,
             )
             nbo_offer = (profile_context or {}).get("nbo_offer")
             alternative_offer = self._render_nbo_block(nbo_offer)
@@ -718,11 +754,15 @@ class EmailGenerator:
             # Gather rich denial context
             feature_importances = None
             shap_values = None
+            decision_waterfall = None
             if hasattr(application, "decision") and application.decision:
                 feature_importances = application.decision.feature_importances
                 shap_values = application.decision.shap_values
+                decision_waterfall = application.decision.decision_waterfall
 
-            denial_reasons = self._format_denial_reasons(feature_importances, shap_values=shap_values)
+            denial_reasons = self._format_denial_reasons(
+                feature_importances, shap_values=shap_values, decision_waterfall=decision_waterfall
+            )
 
             credit_score = getattr(application, "credit_score", None)
             debt_to_income = getattr(application, "debt_to_income", None)

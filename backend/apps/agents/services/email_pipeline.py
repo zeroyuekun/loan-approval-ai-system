@@ -1,10 +1,10 @@
 import logging
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.db import transaction
 
 from apps.agents.exceptions import LLMServiceError
-from apps.agents.metrics import bias_check_unavailable_total
 from apps.email_engine.services.decision_email import (
     deliver_decision_email,
     generate_decision_email,
@@ -12,7 +12,7 @@ from apps.email_engine.services.decision_email import (
 )
 from apps.loans.models import LoanApplication
 
-from .bias.thresholds import is_severe
+from .bias.thresholds import bias_failure_mode, is_severe
 from .bias_agent2 import run_agent2
 from .bias_detector import BiasDetector
 from .bias_records import bias_context, save_bias_report
@@ -101,6 +101,91 @@ def replace_flagged_email(
         )
     )
     return result, generated_email, new_bias
+
+
+@dataclass
+class BiasScreening:
+    """What ``screen_bias`` settled: the email that may be sent, or why none may."""
+
+    email_result: dict
+    generated_email: object
+    bias_result: dict | None
+    held_reason: str | None = None
+    # Set when the bias check itself could not run, whatever BIAS_FAILURE_MODE did about it.
+    check_error: Exception | None = None
+
+
+def screen_bias(
+    application,
+    agent_run,
+    decision,
+    email_result,
+    generated_email,
+    *,
+    detector_class,
+    tracker,
+    steps,
+    profile_context=None,
+    step_name="bias_check",
+):
+    """Bias-check a persisted decision email and settle which email, if any, may be sent.
+
+    The verdict shared by the paths that have no Agent 2 rewrite (the
+    standalone screening and the human-review resume): the report is saved
+    against the email; a severe score holds it; a flagged one is replaced by
+    the template, which is sent only if its own check is not flagged; anything
+    else holds. When the check cannot run, BIAS_FAILURE_MODE decides: ``block``
+    holds, ``warn``/``off`` let the email through. Each caller maps a hold to
+    its own state. ``detector_class`` is the caller's ``BiasDetector`` name, so
+    a test patching it in the caller's module reaches the check.
+    """
+    step = tracker.start_step(step_name)
+    try:
+        detector = detector_class()
+        bias_result = detector.analyze(email_result["body"], bias_context(application, decision))
+        save_bias_report(agent_run, generated_email, bias_result)
+    except Exception as exc:
+        steps.append(tracker.fail_step(step, str(exc), failure_category="transient"))
+        mode = bias_failure_mode()
+        logger.error("Application %s: bias check failed (%s): %s", application.pk, mode, exc)
+        held_reason = f"Bias check unavailable ({exc})" if mode == "block" else None
+        return BiasScreening(email_result, generated_email, None, held_reason=held_reason, check_error=exc)
+    steps.append(
+        tracker.complete_step(
+            step, result_summary={"bias_score": bias_result["score"], "flagged": bias_result["flagged"]}
+        )
+    )
+
+    score = bias_result["score"]
+    review_threshold = getattr(settings, "BIAS_THRESHOLD_REVIEW", 60)
+    if is_severe(score, review_threshold):
+        held_reason = f"Severe bias detected (score {score} >= {review_threshold})"
+        return BiasScreening(email_result, generated_email, bias_result, held_reason=held_reason)
+    if not bias_result["flagged"]:
+        return BiasScreening(email_result, generated_email, bias_result)
+
+    # The flagged text never ships, whatever BIAS_FAILURE_MODE says: the
+    # template replaces it and is sent only if its own check is clean.
+    try:
+        replacement = replace_flagged_email(
+            application,
+            agent_run,
+            decision,
+            email_result,
+            generated_email,
+            bias_result,
+            detector,
+            tracker,
+            steps,
+            profile_context=profile_context,
+        )
+    except Exception as exc:
+        logger.error("Application %s: bias re-check of the replacement failed: %s", application.pk, exc)
+        replacement = None
+    if replacement is None or replacement[2].get("flagged"):
+        held_reason = f"Bias flagged (score {score}) and no clean replacement email"
+        return BiasScreening(email_result, generated_email, bias_result, held_reason=held_reason)
+    return BiasScreening(*replacement)
 
 
 class EmailPipelineService:
@@ -358,17 +443,7 @@ class EmailPipelineService:
             # sent_at, so the standalone task's redelivery path cannot re-send.
             step = self.tracker.start_step("email_delivery")
             try:
-                outcome = deliver_decision_email(generated_email)
-                if outcome["sent"] or outcome["already_sent"]:
-                    step = self.tracker.complete_step(
-                        step, result_summary={"sent": True, "recipient": outcome["recipient"]}
-                    )
-                elif outcome["recipient"] is None:
-                    step = self.tracker.complete_step(
-                        step, result_summary={"sent": False, "reason": "No recipient email"}
-                    )
-                else:
-                    step = self.tracker.fail_step(step, outcome["error"] or "Send failed")
+                step = self.tracker.record_delivery(step, deliver_decision_email(generated_email))
             except (ConnectionError, TimeoutError, OSError) as e:
                 logger.error("Application %s: email delivery failed: %s", application_id, e)
                 step = self.tracker.fail_step(step, str(e), failure_category="transient")
@@ -427,14 +502,7 @@ class EmailPipelineService:
         None to proceed fail-open (warn/off modes). Never auto-ships a decision
         with bias detection effectively off.
         """
-        mode = getattr(settings, "BIAS_FAILURE_MODE", "block").lower()
-        if mode not in ("block", "warn", "off"):
-            logger.warning("Unknown BIAS_FAILURE_MODE=%r — defaulting to 'block'", mode)
-            mode = "block"
-
-        bias_check_unavailable_total.labels(mode=mode).inc()
-
-        if mode != "block":
+        if bias_failure_mode() != "block":
             # warn/off: alert recorded above; proceed with legacy fail-open.
             return None
 

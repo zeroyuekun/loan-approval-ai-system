@@ -136,6 +136,35 @@ class StepTracker:
         step["failure_category"] = failure_category or self.categorize_error(error)
         return step
 
+    def record_delivery(self, step, outcome):
+        """Close an ``email_delivery`` step from a ``deliver_decision_email`` outcome."""
+        if outcome["sent"] or outcome["already_sent"]:
+            return self.complete_step(step, result_summary={"sent": True, "recipient": outcome["recipient"]})
+        if outcome["recipient"] is None:
+            return self.complete_step(step, result_summary={"sent": False, "reason": "No recipient email"})
+        return self.fail_step(step, outcome["error"] or "Send failed")
+
+    @staticmethod
+    def post_decision_failure_step(step_name, error):
+        """A failed-step record for best-effort work after the decision is applied.
+
+        Built directly rather than through ``fail_step``, which re-raises a
+        soft time limit being handled: after the decision there is nothing
+        left for the limit to stop but finalizing the run.
+        """
+        now = datetime.now(UTC).isoformat()
+        return {
+            "step_name": step_name,
+            "status": "failed",
+            "started_at": now,
+            "completed_at": now,
+            "duration_ms": 0,
+            "timeout_ms": STEP_TIMEOUT_BUDGETS_MS.get(step_name, 120_000),
+            "result_summary": None,
+            "error": str(error) or type(error).__name__,
+            "failure_category": "transient",
+        }
+
     def categorize_error(self, error):
         error_lower = str(error).lower()
         if any(term in error_lower for term in ["timeout", "rate limit", "429", "timed out"]):
