@@ -53,6 +53,22 @@ def simulate_latent_signals(df, n, rng):
     return doc_quality, savings_pattern, employer_stability, relationship_bonus
 
 
+def apply_tenure_shading(base_shade, employment_type, employment_length):
+    """STEP 1 tenure overrides on top of the base ``INCOME_SHADING`` factor
+    (Big 4 2025 practice): self-employed 2yr+ 0.82, <1yr 0.65; casual 2yr+
+    1.00, <1yr 0.60. Works element-wise on arrays/Series or on scalars, so
+    the underwriting engine and the recommendation engine shade income with
+    the same rules. No rng draws."""
+    employment_type = np.asarray(employment_type)
+    employment_length = np.asarray(employment_length)
+    self_employed = employment_type == "self_employed"
+    casual = employment_type == "payg_casual"
+    shade = np.where(self_employed & (employment_length >= 2), 0.82, base_shade)
+    shade = np.where(self_employed & (employment_length < 1), 0.65, shade)
+    shade = np.where(casual & (employment_length >= 2), 1.00, shade)
+    return np.where(casual & (employment_length < 1), 0.60, shade)
+
+
 def compute_effective_expenses(df, get_hem):
     """STEP 6: declared expenses floored at the HEM benchmark. No rng draws
     (verbatim extraction). ``get_hem`` is the engine's HEM lookup."""

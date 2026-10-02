@@ -172,20 +172,13 @@ class UnderwritingEngine:
         #   - 1-2yr: 75%, 2yr+: 82%
         # - Casual tenure-based: <1yr deny, 1-2yr 80%, 2yr+ 100%
         # =========================================================
-        income_shade = df["employment_type"].map(self.INCOME_SHADING).values
-        # Self-employed with 2+ years: higher acceptance
-        se_experienced = (df["employment_type"] == "self_employed") & (df["employment_length"] >= 2)
-        income_shade = np.where(se_experienced, 0.82, income_shade)
-        # Self-employed with 1-2 years: base rate (0.75 from INCOME_SHADING)
-        # Self-employed with <1 year: lower acceptance
-        se_new = (df["employment_type"] == "self_employed") & (df["employment_length"] < 1)
-        income_shade = np.where(se_new, 0.65, income_shade)
-        # Casual with 2+ years same employer: full income accepted
-        casual_experienced = (df["employment_type"] == "payg_casual") & (df["employment_length"] >= 2)
-        income_shade = np.where(casual_experienced, 1.00, income_shade)
-        # Casual with <1 year: significantly lower (hard deny below)
-        casual_new = (df["employment_type"] == "payg_casual") & (df["employment_length"] < 1)
-        income_shade = np.where(casual_new, 0.60, income_shade)
+        # Tenure overrides are shared with the recommendation engine
+        # (casual <1yr is shaded to 0.60 here and hard-denied below).
+        income_shade = _helpers.apply_tenure_shading(
+            df["employment_type"].map(self.INCOME_SHADING).values,
+            df["employment_type"],
+            df["employment_length"],
+        )
         shaded_monthly_income = gross_monthly_income * income_shade
 
         # =========================================================
