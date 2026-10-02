@@ -569,7 +569,7 @@ blocking defaults, or before overriding one back to advisory.
 | `ML_PROMOTION_GATE_MODE` | `warn` | `block` | The activation service refuses activation if `model_selector.promote_if_eligible` reports any of the five promotion gates failed (KS regression, PSI stability, ECE calibration, AUC regression, overfitting). The overfitting gate fails when train AUC minus validation AUC exceeds `ML_OVERFIT_MAX_GAP` (default `0.05`). |
 | `ML_VALIDATION_SIGNOFF_GATE_MODE` | `warn` | `block` | The activation service refuses activation without an approved, signed-off `ModelValidationReport`. A freshly trained candidate stays inactive until sign-off and a manual activation. `?force=true` on the activate endpoint is the audited override. |
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` | `enforce` | Hard-fail P-codes in `services/credit_policy.py` decline the application whatever the model says; refer P-codes are recorded on the decision (the human review queue is only for bias flags). If the overlay cannot be evaluated in enforce mode, the prediction step fails and the application returns to pending. |
-| `DECISION_OVERTURN_GATE_MODE` | `off` | `second_approver` | Maker/checker control on officer overturns of denials at/above `DECISION_OVERTURN_THRESHOLD` (default `$100,000`). `second_approver` blocks high-value overturns at the API pending an out-of-band dual-approval process; `2fa` (weaker) requires the acting officer to hold a verified TOTP device. Below-threshold overturns are never gated. |
+| `DECISION_OVERTURN_GATE_MODE` | `off` | `second_approver` | Maker/checker control on officer overturns of denials at/above `DECISION_OVERTURN_THRESHOLD` (default `$100,000`). `second_approver` blocks high-value overturns at the API pending an out-of-band dual-approval process. The legacy value `2fa` maps to `second_approver`, since two-factor authentication was removed. Below-threshold overturns are never gated. |
 | `BIAS_FAILURE_MODE` | `block` | `block` | If bias detection is unavailable, the decision email is withheld and the application rolled back to pending. |
 
 The first two gate `train_model_task`, which runs rarely (on the retraining
@@ -689,7 +689,7 @@ the advisory value and restart the affected services (see step 3 above):
 | `ML_PROMOTION_GATE_MODE` | `warn` |
 | `ML_VALIDATION_SIGNOFF_GATE_MODE` | `warn` |
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` |
-| `DECISION_OVERTURN_GATE_MODE` | `2fa` or `off` |
+| `DECISION_OVERTURN_GATE_MODE` | `off` |
 
 Currently active models with failed gates remain active across the flip:
 the gates run at activation, not on models already serving. There is no
