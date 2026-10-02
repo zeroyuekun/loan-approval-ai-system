@@ -188,7 +188,7 @@ export async function withNotFoundFallback<T, F>(request: () => Promise<T>, fall
 
 // Auth
 export const authApi = {
-  login: (data: { username: string; password: string; otp_token?: string }) => api.post('/auth/login/', data),
+  login: (data: { username: string; password: string }) => api.post('/auth/login/', data),
   register: (data: RegisterPayload) => api.post('/auth/register/', data),
   getProfile: () => api.get('/auth/me/'),
   getCustomerProfile: () => api.get('/auth/me/profile/'),
@@ -198,11 +198,6 @@ export const authApi = {
   listCustomers: (params?: PaginationParams) => api.get('/auth/customers/', { params }),
   getCustomerActivity: (userId: number) => api.get(`/auth/customers/${userId}/activity/`),
   getCsrfToken: () => api.get('/auth/csrf/'),
-  // TOTP enrolment for staff (backend: accounts/views_2fa.py)
-  twoFactorStatus: () => api.get<{ enabled: boolean; required: boolean }>('/auth/2fa/status/'),
-  twoFactorSetup: () =>
-    api.post<{ provisioning_uri: string; qr_code_base64: string | null; detail: string }>('/auth/2fa/setup/'),
-  twoFactorVerify: (token: string) => api.post<{ detail: string; confirmed: boolean }>('/auth/2fa/verify/', { token }),
 }
 
 // Loans

@@ -65,38 +65,16 @@ describe('LoginPage', () => {
     renderPage()
     expect(screen.getByRole('link', { name: 'Create one' })).toHaveAttribute('href', '/register')
   })
-  it('prompts for a 2FA code when the account requires one and re-submits with it', async () => {
+  it('never asks for an authentication code, whatever login returns', async () => {
     const user = userEvent.setup()
-    mockLogin
-      .mockResolvedValueOnce({ status: 'otp_required' })
-      .mockResolvedValueOnce({ status: 'ok' })
+    // The shape the old two-step login returned; it must not open a code step.
+    mockLogin.mockResolvedValue({ status: 'otp_required' })
     renderPage()
     await user.type(screen.getByLabelText('Username'), 'officer1')
     await user.type(screen.getByLabelText('Password'), 'pw')
     await user.click(screen.getByRole('button', { name: 'Sign In' }))
-
-    const codeInput = await screen.findByLabelText('Authentication code')
-    // Not treated as a failed login
-    expect(screen.queryByText(/Invalid credentials/)).not.toBeInTheDocument()
-
-    await user.type(codeInput, '123456')
-    await user.click(screen.getByRole('button', { name: 'Verify' }))
-    await waitFor(() => { expect(mockLogin).toHaveBeenLastCalledWith('officer1', 'pw', '123456') })
-  })
-
-  it('shows the server error when the 2FA code is wrong and stays on the code step', async () => {
-    const user = userEvent.setup()
-    mockLogin
-      .mockResolvedValueOnce({ status: 'otp_required' })
-      .mockRejectedValueOnce({ response: { data: { detail: 'Invalid two-factor authentication code.' } } })
-    renderPage()
-    await user.type(screen.getByLabelText('Username'), 'officer1')
-    await user.type(screen.getByLabelText('Password'), 'pw')
-    await user.click(screen.getByRole('button', { name: 'Sign In' }))
-    await user.type(await screen.findByLabelText('Authentication code'), '000000')
-    await user.click(screen.getByRole('button', { name: 'Verify' }))
-
-    await waitFor(() => { expect(screen.getByText('Invalid two-factor authentication code.')).toBeInTheDocument() })
-    expect(screen.getByLabelText('Authentication code')).toBeInTheDocument()
+    await waitFor(() => { expect(mockLogin).toHaveBeenCalledWith('officer1', 'pw') })
+    expect(screen.queryByLabelText('Authentication code')).not.toBeInTheDocument()
+    expect(screen.getByText('Welcome back')).toBeInTheDocument()
   })
 })
