@@ -21,6 +21,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import transaction
 
+from apps.agents.metrics import bias_agent2_outcomes_total
 from apps.email_engine.services.decision_email import persist_decision_email, regenerate_decision_email
 
 from .api_budget import ApiBudgetGuard, ApiGateClosed
@@ -44,23 +45,25 @@ def run_agent2(
 ):
     """Return ``(email_result, generated_email, bias_result)`` to send, or None to hand over."""
     if not getattr(settings, "BIAS_AGENT2_ENABLED", True) or email_result.get("template_fallback"):
+        bias_agent2_outcomes_total.labels(outcome="skipped").inc()
         return None
 
     step = tracker.start_step(STEP_NAME)
 
-    def hand_over(reason, **extra):
+    def hand_over(outcome, reason, **extra):
+        bias_agent2_outcomes_total.labels(outcome=f"handed_over_{outcome}").inc()
         steps.append(tracker.complete_step(step, result_summary={"regenerated": False, "reason": reason, **extra}))
         logger.info("Application %s: Agent 2 handed over to the template path: %s", application.pk, reason)
         return None
 
     seconds_left = seconds_until_deadline()
     if seconds_left is not None and seconds_left < getattr(settings, "BIAS_AGENT2_MIN_SECONDS_LEFT", 240):
-        return hand_over("Not enough time left for a rewrite")
+        return hand_over("low_time", "Not enough time left for a rewrite")
     try:
         # Cheap pre-check before paying for a rewrite and a senior review.
         ApiBudgetGuard().check_budget()
     except ApiGateClosed:
-        return hand_over("API budget closed")
+        return hand_over("budget_closed", "API budget closed")
 
     try:
         result = regenerate_decision_email(
@@ -71,9 +74,9 @@ def run_agent2(
             bias_feedback=_feedback(bias_result),
         )
         if result.get("template_fallback"):
-            return hand_over("The LLM was unavailable, so no rewrite was written")
+            return hand_over("no_rewrite", "The LLM was unavailable, so no rewrite was written")
         if not result.get("passed_guardrails"):
-            return hand_over("The rewrite failed its guardrails")
+            return hand_over("guardrails", "The rewrite failed its guardrails")
 
         context = bias_context(application, decision)
         new_bias = BiasDetector().analyze(result["body"], context)
@@ -83,7 +86,7 @@ def run_agent2(
             generated_email = persist_decision_email(application, decision, result)
             report = save_bias_report(agent_run, generated_email, new_bias, ai_review_approved=False)
         if new_bias.get("flagged"):
-            return hand_over("The bias check flagged the rewrite", bias_score=new_bias.get("score"))
+            return hand_over("bias_flagged", "The bias check flagged the rewrite", bias_score=new_bias.get("score"))
 
         review = AIEmailReviewer().review(result["body"], new_bias, context)
         min_confidence = getattr(settings, "BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE", 0.70)
@@ -93,6 +96,7 @@ def run_agent2(
         report.save(update_fields=["ai_review_approved", "ai_review_reasoning"])
         if not approved:
             return hand_over(
+                "reviewer_rejected",
                 "The senior reviewer did not approve the rewrite",
                 bias_score=new_bias.get("score"),
                 reviewer_approved=bool(review.get("approved")),
@@ -103,7 +107,7 @@ def run_agent2(
         raise
     except Exception as exc:  # noqa: BLE001 - every other failure hands over to the template path
         logger.warning("Application %s: Agent 2 failed: %s", application.pk, exc, exc_info=True)
-        return hand_over(f"Agent 2 failed: {type(exc).__name__}")
+        return hand_over("error", f"Agent 2 failed: {type(exc).__name__}")
 
     steps.append(
         tracker.complete_step(
@@ -118,4 +122,5 @@ def run_agent2(
             },
         )
     )
+    bias_agent2_outcomes_total.labels(outcome="sent").inc()
     return result, generated_email, new_bias

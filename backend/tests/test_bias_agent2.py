@@ -503,3 +503,63 @@ def test_senior_review_prompt_does_not_promise_a_human_review(monkeypatch):
     assert "the email will not be sent as written" in prompt
     assert "human review" not in prompt.lower()
     assert "human escalation" not in prompt.lower()
+
+
+# ---------------------------------------------------------------------------
+# Observability: step budget and outcome counter
+# ---------------------------------------------------------------------------
+
+
+def _outcome_count(outcome):
+    from prometheus_client import REGISTRY
+
+    return REGISTRY.get_sample_value("bias_agent2_outcomes_total", {"outcome": outcome}) or 0.0
+
+
+def test_agent2_step_has_its_own_timeout_budget():
+    step = StepTracker().start_step("bias_agent2_regeneration")
+
+    assert step["timeout_ms"] == 180_000
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("outcome", "kwargs"),
+    [
+        ("skipped", {"enabled": False}),
+        ("handed_over_budget_closed", {"budget_side_effect": BudgetExhausted("cap")}),
+        ("handed_over_no_rewrite", {"regen_return": {**_llm_email(), "template_fallback": True}}),
+        ("handed_over_guardrails", {"regen_return": _rewrite(passed_guardrails=False)}),
+        ("handed_over_bias_flagged", {"regen_return": _rewrite(), "new_bias": _bias_result(score=45, flagged=True)}),
+        (
+            "handed_over_reviewer_rejected",
+            {
+                "regen_return": _rewrite(),
+                "new_bias": _bias_result(score=5, flagged=False),
+                "review": _review(approved=False),
+            },
+        ),
+        ("handed_over_error", {"regen_side_effect": RuntimeError("boom")}),
+        (
+            "sent",
+            {"regen_return": _rewrite(), "new_bias": _bias_result(score=5, flagged=False), "review": _review()},
+        ),
+    ],
+)
+def test_each_agent2_outcome_is_counted(processing_denied, agent_run, outcome, kwargs):
+    before = _outcome_count(outcome)
+
+    _run(processing_denied, agent_run, **kwargs)
+
+    assert _outcome_count(outcome) == before + 1
+
+
+@pytest.mark.django_db
+@override_settings(BIAS_AGENT2_MIN_SECONDS_LEFT=240)
+def test_low_time_hand_over_is_counted(processing_denied, agent_run):
+    before = _outcome_count("handed_over_low_time")
+
+    with pipeline_deadline(100):
+        _run(processing_denied, agent_run, regen_return=_rewrite())
+
+    assert _outcome_count("handed_over_low_time") == before + 1

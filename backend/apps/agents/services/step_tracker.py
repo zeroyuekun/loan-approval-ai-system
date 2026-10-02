@@ -23,6 +23,9 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(
         "email_generation": 60_000,
         "bias_check": 60_000,
         "bias_regeneration": 60_000,
+        # Rewrite + bias check + senior review: one generation, one detector
+        # call and one review call, each budgeted like its own step.
+        "bias_agent2_regeneration": 180_000,
         "ai_email_review": 60_000,
         "email_delivery": 30_000,
         "next_best_offers": 60_000,

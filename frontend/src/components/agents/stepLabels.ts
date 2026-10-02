@@ -7,6 +7,7 @@ export const STEP_LABELS: Record<string, string> = {
   email_delivery: 'Email Delivery',
   bias_check: 'Bias Check',
   bias_regeneration: 'Template Replacement (Bias Re-check)',
+  bias_agent2_regeneration: 'Agent 2 Rewrite (Bias Re-check + Senior Review)',
   ai_email_review: 'AI Email Review',
   human_escalation: 'Human Escalation',
   human_escalation_severe_bias: 'Human Escalation (Severe Bias)',

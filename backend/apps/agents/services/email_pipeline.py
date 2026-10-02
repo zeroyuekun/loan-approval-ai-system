@@ -252,7 +252,7 @@ class EmailPipelineService:
                 email_result, generated_email, bias_result = agent2
                 waterfall.append(
                     StepTracker.waterfall_entry(
-                        "bias_regeneration",
+                        "bias_agent2_regeneration",
                         "pass",
                         "EMAIL_REGENERATED_AGENT2",
                         f"Flagged email (score {bias_score}) rewritten by Agent 2; the rewrite passed the bias "

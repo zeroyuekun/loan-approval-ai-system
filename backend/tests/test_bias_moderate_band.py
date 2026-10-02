@@ -149,7 +149,9 @@ def test_moderate_email_is_rewritten_by_agent2_and_sent_when_clean_and_approved(
     assert "Agent 2 rewritten body" in send.call_args.args[2]
     assert "LLM-written body" not in send.call_args.args[2]
     assert bias.return_value.analyze.call_count == 1, "Agent 2 bypasses the template re-check entirely"
-    assert any(e["reason_code"] == "EMAIL_REGENERATED_AGENT2" for e in waterfall)
+    assert any(
+        e["reason_code"] == "EMAIL_REGENERATED_AGENT2" and e["step"] == "bias_agent2_regeneration" for e in waterfall
+    )
     assert any(
         s["step_name"] == "bias_agent2_regeneration" and s["result_summary"]["regenerated"] is True for s in steps
     )
