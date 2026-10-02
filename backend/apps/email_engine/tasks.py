@@ -12,7 +12,6 @@ from apps.email_engine.services.decision_email import (
     HeldForBiasReview,
     bias_hold_reason,
     deliver_decision_email,
-    deliver_screened_decision_email,
     generate_decision_email,
     require_decision_on_record,
 )
@@ -95,6 +94,9 @@ def generate_email_task(self, application_id, decision, regenerate=False):
 
 def _generate_and_send(task, application_id, decision, regenerate):
     """The body of ``generate_email_task``, run under its dedup lock."""
+    # Imported here: email_engine does not import the agents app at module level.
+    from apps.agents.services.decision_email_screening import screen_and_deliver_decision_email
+
     require_decision_on_record(application_id, decision)
 
     # Idempotency: if email already generated for this application+decision, return it.
@@ -124,7 +126,7 @@ def _generate_and_send(task, application_id, decision, regenerate):
                 # Never bias-checked (the bias check was down, or the worker died
                 # before it ran): screen it like a freshly generated email.
                 application = existing.application
-                outcome = deliver_screened_decision_email(
+                outcome = screen_and_deliver_decision_email(
                     application,
                     decision,
                     {
@@ -208,7 +210,7 @@ def _generate_and_send(task, application_id, decision, regenerate):
     # Bias-check it as the pipeline does, then send it (or the template that
     # replaced a flagged email) once, under a row lock, with sent_at stamped.
     # A held email stays unsent with its flagged bias report.
-    outcome = deliver_screened_decision_email(application, decision, result, email, profile_context=profile_context)
+    outcome = screen_and_deliver_decision_email(application, decision, result, email, profile_context=profile_context)
     email_sent = outcome["sent"]
     email = outcome["generated_email"]
 
