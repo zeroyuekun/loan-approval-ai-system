@@ -6,7 +6,7 @@ import type { CustomerLoanApplication } from '@/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
-import { formatMaybeMasked, formatDate, formatPurpose } from '@/lib/utils'
+import { formatDate, formatPurpose } from '@/lib/utils'
 import { Plus, ArrowRight, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { useCustomerProfile } from '@/hooks/useCustomerProfile'
@@ -122,7 +122,7 @@ export default function CustomerApplyPage() {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">{formatMaybeMasked(app.loan_amount)}</p>
+                      <p className="font-semibold">{app.loan_amount}</p>
                       <p className="text-sm text-muted-foreground">
                         {app.loan_term_months} months
                       </p>
