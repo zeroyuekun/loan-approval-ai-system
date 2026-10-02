@@ -95,6 +95,7 @@ export default function ApplicationsPage() {
             <SelectItem value="approved">Approved</SelectItem>
             <SelectItem value="denied">Denied</SelectItem>
             <SelectItem value="review">Review</SelectItem>
+            <SelectItem value="queue_failed">Queue Failed</SelectItem>
           </Select>
           <Select
             value={purposeFilter}

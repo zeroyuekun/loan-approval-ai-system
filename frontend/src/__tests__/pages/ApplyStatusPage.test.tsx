@@ -56,6 +56,43 @@ describe('Customer application status page', () => {
     expect(screen.getByText('$50,000 - $100,000')).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/NaN/)
   })
+
+  describe('when the pipeline dispatch failed (queue_failed)', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('explains the delay in plain words instead of "Status unknown."', async () => {
+      server.use(
+        http.get(`${API_URL}/loans/loan-1/`, () =>
+          HttpResponse.json({ ...maskedApplication, status: 'queue_failed' }),
+        ),
+      )
+      renderWithProviders(<CustomerApplicationStatusPage />)
+
+      await screen.findByText('Loan Amount')
+      expect(screen.queryByText('Status unknown.')).not.toBeInTheDocument()
+      expect(screen.getByText(/received.*delayed/i)).toBeInTheDocument()
+      expect(screen.queryByText(/queue_failed/i)).not.toBeInTheDocument()
+    })
+
+    it('keeps polling so the page updates once processing resumes', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      let requests = 0
+      server.use(
+        http.get(`${API_URL}/loans/loan-1/`, () => {
+          requests += 1
+          return HttpResponse.json({ ...maskedApplication, status: 'queue_failed' })
+        }),
+      )
+      renderWithProviders(<CustomerApplicationStatusPage />)
+
+      await screen.findByText('Loan Amount')
+      expect(requests).toBe(1)
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(requests).toBe(2)
+    })
+  })
 })
 
 describe('Customer applications list', () => {

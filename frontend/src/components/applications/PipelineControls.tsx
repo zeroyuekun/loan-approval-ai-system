@@ -66,7 +66,7 @@ export function PipelineControls({
             ) : (
               <>
                 <Bot className="mr-2 h-4 w-4" />
-                {applicationStatus === 'pending' ? 'Run AI Pipeline' : 'Re-run AI Pipeline'}
+                {applicationStatus === 'pending' || applicationStatus === 'queue_failed' ? 'Run AI Pipeline' : 'Re-run AI Pipeline'}
               </>
             )}
           </Button>

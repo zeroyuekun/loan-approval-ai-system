@@ -201,7 +201,7 @@ export interface LoanApplication {
   actual_outcome?: string | null;
   months_to_outcome?: number | null;
 
-  status: 'pending' | 'processing' | 'approved' | 'denied' | 'review';
+  status: 'pending' | 'processing' | 'approved' | 'denied' | 'review' | 'queue_failed';
   notes: string;
   conditions: string[];
   conditions_met: boolean;

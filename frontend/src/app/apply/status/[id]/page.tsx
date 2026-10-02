@@ -14,6 +14,7 @@ import { ApplicationStatusBadge } from '@/components/applications/ApplicationSta
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,
+  queue_failed: <Clock className="h-8 w-8 text-orange-500" />,
   processing: <Clock className="h-8 w-8 text-blue-500 animate-pulse" />,
   approved: <CheckCircle2 className="h-8 w-8 text-green-500" />,
   denied: <XCircle className="h-8 w-8 text-red-500" />,
@@ -22,6 +23,7 @@ const statusIcons: Record<string, React.ReactNode> = {
 
 const statusMessages: Record<string, string> = {
   pending: 'Your application has been received and is awaiting review.',
+  queue_failed: 'Your application has been received, but processing is delayed. We will keep trying, so there is nothing you need to do.',
   processing: 'Your application is currently being assessed by our AI system.',
   approved: 'Congratulations! Your loan application has been approved.',
   denied: 'Unfortunately, your loan application was not approved at this time.',
@@ -43,6 +45,7 @@ function getPipelineSteps(status: string): PipelineStep[] {
 
   switch (status) {
     case 'pending':
+    case 'queue_failed':
       steps[0].state = 'completed'
       steps[1].state = 'upcoming'
       break
@@ -185,12 +188,13 @@ function StatusPipeline({ status }: { status: string }) {
 export default function CustomerApplicationStatusPage() {
   const { id } = useParams<{ id: string }>()
   const { data: application, isLoading } = useApplication(id, {
-    // Poll every 5s only while still being processed. Letting TanStack Query
-    // own the interval avoids the stale closures and interval leaks a
-    // useEffect(setInterval) is prone to when the hook remounts quickly.
+    // Poll every 5s only while still being processed (queue_failed included:
+    // the backend retries the dispatch and moves it back to pending). Letting
+    // TanStack Query own the interval avoids the stale closures and interval
+    // leaks a useEffect(setInterval) is prone to when the hook remounts quickly.
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status === 'pending' || status === 'processing' ? 5000 : false
+      return status === 'pending' || status === 'processing' || status === 'queue_failed' ? 5000 : false
     },
   })
 
