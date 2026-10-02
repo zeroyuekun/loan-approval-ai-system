@@ -18,6 +18,7 @@ from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.governance.shadow_scoring import score_challengers_shadow
 from apps.ml_engine.services.model_selector import NoActiveModelError
 from apps.ml_engine.services.scoring import predictor as predictor_mod
+from apps.ml_engine.services.scoring.adhoc import ADHOC_SCORE_NOTE
 from apps.ml_engine.services.scoring.policy_overlay import apply_policy_overlay
 from apps.ml_engine.tests.predictor_stub import build_stub_predictor
 
@@ -152,6 +153,8 @@ class TestAdhocScoreView:
             "risk_grade",
             "top_factors",
             "model_version",
+            "note",
+            "defaulted_features",
         }
         assert data["decision"] == "approved"
         assert data["probability"] == 0.82
@@ -167,6 +170,17 @@ class TestAdhocScoreView:
             {"feature": "debt_to_income", "impact": -0.02},
         ]
         mock_predictor.predict.assert_called_once_with(ANY, persist=False)
+
+        assert data["note"] == ADHOC_SCORE_NOTE
+        assert isinstance(data["defaulted_features"], list)
+        assert len(data["defaulted_features"]) > 0
+        assert data["defaulted_features"] == sorted(data["defaulted_features"])
+        submitted_fields = set(VALID_ADHOC_PAYLOAD.keys())
+        assert not (set(data["defaulted_features"]) & submitted_fields)
+        # Spot-check a couple of the ~40 bureau/banking/macro features the
+        # ad-hoc form never collects, called out by the review.
+        for expected in ("num_hardship_flags", "rba_cash_rate", "postcode_default_rate"):
+            assert expected in data["defaulted_features"]
 
     def test_no_active_model_returns_503(self, django_user_model):
         officer = django_user_model.objects.create_user(username="adhoc_off_503", password="x", role="officer")
