@@ -375,13 +375,13 @@ class ModelCompareView(APIView):
     def get(self, request):
         from django.db.models import Avg, Count
 
-        from apps.ml_engine.services.model_selector import monitoring_model_version
+        from apps.ml_engine.services.model_selector import CHAMPION_ORDERING, pick_monitoring_model
 
         # Champion first, then the rest by traffic and age — a fixed order so
         # the agreement rate below always compares the champion with its peer.
-        champion = monitoring_model_version()
-        others = ModelVersion.objects.filter(is_active=True).order_by("-traffic_percentage", "-created_at")
-        active_models = [champion, *others.exclude(pk=champion.pk)] if champion else []
+        ranked = list(ModelVersion.objects.filter(is_active=True).order_by(*CHAMPION_ORDERING))
+        champion = pick_monitoring_model(ranked)
+        active_models = [champion, *(m for m in ranked if m is not champion)] if champion else []
         if len(active_models) < 2:
             return Response(
                 {"message": "Need at least 2 active models for comparison"},
