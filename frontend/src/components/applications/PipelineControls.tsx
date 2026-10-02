@@ -3,6 +3,8 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Bot, Loader2, Trash2 } from 'lucide-react'
+import { ForceRerunDialog } from '@/components/agents/ForceRerunDialog'
+import { isAwaitingPipeline } from '@/lib/utils'
 
 interface PipelineControlsProps {
   applicationStatus: string
@@ -16,6 +18,11 @@ interface PipelineControlsProps {
   isDeleting?: boolean
   showDeleteConfirm?: boolean
   onDeleteConfirmToggle?: (show: boolean) => void
+  forceRerunPrompt?: boolean
+  forceRerunPending?: boolean
+  forceRerunError?: string | null
+  onForceRerunConfirm?: (reason: string) => void
+  onForceRerunCancel?: () => void
 }
 
 export function PipelineControls({
@@ -30,6 +37,11 @@ export function PipelineControls({
   isDeleting,
   showDeleteConfirm,
   onDeleteConfirmToggle,
+  forceRerunPrompt = false,
+  forceRerunPending = false,
+  forceRerunError = null,
+  onForceRerunConfirm,
+  onForceRerunCancel,
 }: PipelineControlsProps) {
   return (
     <Card>
@@ -55,7 +67,7 @@ export function PipelineControls({
             ) : (
               <>
                 <Bot className="mr-2 h-4 w-4" />
-                {applicationStatus === 'pending' ? 'Run AI Pipeline' : 'Re-run AI Pipeline'}
+                {isAwaitingPipeline(applicationStatus) ? 'Run AI Pipeline' : 'Re-run AI Pipeline'}
               </>
             )}
           </Button>
@@ -100,6 +112,14 @@ export function PipelineControls({
         {pipelineSuccess && (
           <p className="text-sm text-green-600">{pipelineSuccess}</p>
         )}
+        <ForceRerunDialog
+          open={forceRerunPrompt && !!onForceRerunConfirm}
+          onCancel={() => onForceRerunCancel?.()}
+          onConfirm={(reason) => onForceRerunConfirm?.(reason)}
+          isPending={forceRerunPending}
+          error={forceRerunError}
+          description="This application already has a completed pipeline run. Re-running generates a new decision and a new customer email. A reason is required and the action is audited."
+        />
       </CardContent>
     </Card>
   )

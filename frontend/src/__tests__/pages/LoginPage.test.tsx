@@ -65,4 +65,16 @@ describe('LoginPage', () => {
     renderPage()
     expect(screen.getByRole('link', { name: 'Create one' })).toHaveAttribute('href', '/register')
   })
+  it('never asks for an authentication code, whatever login returns', async () => {
+    const user = userEvent.setup()
+    // The shape the old two-step login returned; it must not open a code step.
+    mockLogin.mockResolvedValue({ status: 'otp_required' })
+    renderPage()
+    await user.type(screen.getByLabelText('Username'), 'officer1')
+    await user.type(screen.getByLabelText('Password'), 'pw')
+    await user.click(screen.getByRole('button', { name: 'Sign In' }))
+    await waitFor(() => { expect(mockLogin).toHaveBeenCalledWith('officer1', 'pw') })
+    expect(screen.queryByLabelText('Authentication code')).not.toBeInTheDocument()
+    expect(screen.getByText('Welcome back')).toBeInTheDocument()
+  })
 })

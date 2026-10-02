@@ -54,22 +54,54 @@ describe('api interceptors', () => {
     expect(callCount).toBe(2)
   })
 
-  it('does not attempt refresh for auth-check paths (/auth/me/)', async () => {
-    let refreshCalled = false
-
+  it('refreshes once and replays /auth/me/ when the access cookie expired (session bootstrap)', async () => {
+    // A reload after the 60-min access cookie expired must use the 7-day
+    // refresh cookie instead of logging the user out.
+    let meCalls = 0
+    let refreshCalls = 0
     server.use(
       http.get(`${API_URL}/auth/me/`, () => {
-        return HttpResponse.json({ detail: 'Unauthorized' }, { status: 401 })
+        meCalls++
+        if (meCalls === 1) return HttpResponse.json({ detail: 'Unauthorized' }, { status: 401 })
+        return HttpResponse.json({ id: 1, username: 'alice', role: 'customer' })
       }),
       http.post(`${API_URL}/auth/refresh/`, () => {
-        refreshCalled = true
+        refreshCalls++
         return HttpResponse.json({ detail: 'Refreshed' })
       })
     )
 
     const api = await getApi()
-    await expect(api.get('/auth/me/')).rejects.toThrow()
-    expect(refreshCalled).toBe(false)
+    const response = await api.get('/auth/me/')
+
+    expect(response.data.username).toBe('alice')
+    expect(refreshCalls).toBe(1)
+    expect(meCalls).toBe(2)
+  })
+
+  it('rejects /auth/me/ without a hard redirect when the bootstrap refresh fails', async () => {
+    // No refresh cookie (never logged in): one refresh attempt, then reject so
+    // useAuth resolves to user=null and the layout redirects via the router.
+    // A window.location.assign here would reload /login in a loop.
+    const assignSpy = vi.fn()
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, assign: assignSpy },
+      writable: true,
+      configurable: true,
+    })
+    let refreshCalls = 0
+    server.use(
+      http.get(`${API_URL}/auth/me/`, () => HttpResponse.json({ detail: 'Unauthorized' }, { status: 401 })),
+      http.post(`${API_URL}/auth/refresh/`, () => {
+        refreshCalls++
+        return HttpResponse.json({ detail: 'No refresh token' }, { status: 401 })
+      })
+    )
+
+    const api = await getApi()
+    await expect(api.get('/auth/me/')).rejects.toMatchObject({ response: { status: 401 } })
+    expect(refreshCalls).toBe(1)
+    expect(assignSpy).not.toHaveBeenCalled()
   })
 
   it('propagates error when refresh itself fails', async () => {
@@ -89,6 +121,7 @@ describe('api interceptors', () => {
   it('clears sessionStorage user and calls window.location.assign(/login) when refresh fails', async () => {
     // Seed sessionStorage with a user so we can verify it is cleared
     sessionStorage.setItem('user', JSON.stringify({ role: 'admin', username: 'admin' }))
+    localStorage.setItem('loan_application_draft', JSON.stringify({ savedAt: Date.now(), data: {} }))
 
     // jsdom does not support real navigation; spy on window.location.assign.
     // Object.defineProperty is needed because jsdom's location is not fully writable.
@@ -113,6 +146,8 @@ describe('api interceptors', () => {
 
     // sessionStorage 'user' key must be removed
     expect(sessionStorage.getItem('user')).toBeNull()
+    // per-user drafts must not survive into the next session
+    expect(localStorage.getItem('loan_application_draft')).toBeNull()
     // window.location.assign('/login') must have been called
     expect(assignSpy).toHaveBeenCalledWith('/login')
   })

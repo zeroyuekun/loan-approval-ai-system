@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import DOMPurify from 'dompurify'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,11 +14,13 @@ import { CheckCircle, XCircle, Clock, Star, Reply, Forward, MoreVertical, Paperc
 // value we inject in the post-processing DOM walk (H23 tabnapping fix).
 // nosec: content is sanitized with DOMPurify before the innerHTML assignment
 function sanitizeEmailHtml(html: string): string {
+  // Without a DOM (server render) DOMPurify returns its input unchanged, so
+  // there is nothing safe to emit. HtmlEmailBody only renders after mount.
+  if (typeof document === 'undefined') return ''
   const clean = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ['div', 'p', 'strong', 'em', 'br', 'hr', 'table', 'tr', 'td', 'th', 'span', 'b', 'i', 'u', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3'],
     ALLOWED_ATTR: ['style', 'href', 'role', 'cellpadding', 'cellspacing', 'border', 'align', 'target', 'rel'],
   })
-  if (typeof document === 'undefined') return clean
   // Post-process: force rel="noopener noreferrer" on every _blank anchor to
   // prevent reverse tabnapping. This DOM walk is universally compatible
   // regardless of DOMPurify version.
@@ -31,8 +33,16 @@ function sanitizeEmailHtml(html: string): string {
   return div.innerHTML
 }
 
+const subscribeNoop = () => () => {}
+
+/** False during server rendering and hydration, true once mounted in the browser. */
+function useIsClient(): boolean {
+  return useSyncExternalStore(subscribeNoop, () => true, () => false)
+}
+
 export function HtmlEmailBody({ html }: { html: string }) {
-  const safeHtml = sanitizeEmailHtml(html)
+  const isClient = useIsClient()
+  const safeHtml = isClient ? sanitizeEmailHtml(html) : ''
 
   return (
     <div
@@ -43,13 +53,21 @@ export function HtmlEmailBody({ html }: { html: string }) {
   )
 }
 
-function formatTime() {
-  const now = new Date()
-  const hours = now.getHours()
-  const minutes = now.getMinutes().toString().padStart(2, '0')
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * When the email was generated, Gmail-style ("30 Mar 2026, 9:05 PM"), in the
+ * viewer's local time. Staff read these previews in an audit context, so this
+ * must be the record's timestamp, never the current time.
+ */
+export function formatEmailTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const hours = d.getHours()
+  const minutes = d.getMinutes().toString().padStart(2, '0')
   const ampm = hours >= 12 ? 'PM' : 'AM'
   const h = hours % 12 || 12
-  return `${h}:${minutes} ${ampm}`
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${h}:${minutes} ${ampm}`
 }
 
 interface EmailPreviewProps {
@@ -116,7 +134,7 @@ export function EmailPreview({ email }: EmailPreviewProps) {
                     <Clock className="h-3 w-3" />
                     {email.generation_time_ms}ms
                   </span>
-                  <span>{formatTime()}</span>
+                  <span>{formatEmailTime(email.created_at)}</span>
                   <Star className="h-4 w-4 text-gray-300 hover:text-yellow-400 cursor-pointer" />
                 </div>
               </div>

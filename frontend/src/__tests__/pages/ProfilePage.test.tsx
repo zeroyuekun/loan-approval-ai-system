@@ -33,8 +33,10 @@ vi.mock('sonner', () => ({
 
 import ProfilePage from '@/app/dashboard/profile/page'
 
+let queryClient: QueryClient
+
 function renderPage(user: User = { ...mockUser, role: 'customer' as const, first_name: 'Jane', last_name: 'Doe' }) {
-  const queryClient = new QueryClient({
+  queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
 
@@ -164,5 +166,30 @@ describe('ProfilePage', () => {
     await waitFor(() => {
       expect(screen.getByText(/Failed to save profile/)).toBeInTheDocument()
     })
+  })
+
+  it('keeps in-progress edits when the profile refetches with changed server data', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const phone = await screen.findByDisplayValue('0412345678')
+
+    await user.clear(phone)
+    await user.type(phone, '0499999999')
+
+    // Server data changes underneath (another tab, a staff edit) and the
+    // query refetches while the user is still editing.
+    server.use(
+      http.get(`${API_URL}/auth/me/profile/`, () =>
+        HttpResponse.json({ ...mockCustomerProfile, phone: '0400000000', suburb: 'Parramatta' }),
+      ),
+    )
+    await queryClient.refetchQueries()
+
+    // Untouched fields follow the server; the field being edited does not reset.
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Parramatta')).toBeInTheDocument()
+    })
+    expect(screen.getByDisplayValue('0499999999')).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('0400000000')).not.toBeInTheDocument()
   })
 })

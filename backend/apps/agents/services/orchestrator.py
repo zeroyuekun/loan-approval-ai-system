@@ -12,9 +12,11 @@ from apps.agents.models import AgentRun
 from apps.loans.models import AuditLog, FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
+from apps.ml_engine.services.scoring.decision_assembly import PRICING_TIER_DECLINE, decline_overrides
 from apps.ml_engine.services.scoring.predictor import ModelPredictor
 from apps.ml_engine.services.scoring.segmentation import derive_segment
 
+from .api_budget import api_call_context, bind_api_call_context
 from .context_builder import ApplicationContextBuilder
 from .email_pipeline import EmailPipelineService
 from .human_review_handler import HumanReviewHandler
@@ -70,7 +72,7 @@ class PipelineOrchestrator:
         return self._step_tracker.finalize_run(agent_run, steps, start_time, error)
 
     def _run_nbo_and_marketing_pipeline(self, application, agent_run, steps, denial_reasons, profile_context):
-        return self._marketing_pipeline.run(application, agent_run, steps, denial_reasons, profile_context)
+        return self._marketing_pipeline.run_best_effort(application, agent_run, steps, denial_reasons, profile_context)
 
     # ------------------------------------------------------------------
     # Counterfactual generation (denied applications only)
@@ -99,6 +101,24 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.warning("Counterfactual generation failed in orchestrator: %s", e)
             return []
+
+    @staticmethod
+    def _return_to_pending_after_ml_failure(application, reason, error):
+        """Send the application back to PENDING so the pipeline can be re-run.
+
+        A prediction failure is not a bias flag, so it does not belong in the
+        human review queue. The audited transition records why.
+        """
+        with transaction.atomic():
+            application.refresh_from_db()
+            application.transition_to(
+                LoanApplication.Status.PENDING,
+                details={
+                    "source": "orchestrator_ml_prediction_failure",
+                    "reason": reason,
+                    "error": str(error)[:500],
+                },
+            )
 
     # ------------------------------------------------------------------
     # Idempotent status restore
@@ -135,6 +155,12 @@ class PipelineOrchestrator:
     # ------------------------------------------------------------------
 
     def orchestrate(self, application_id):
+        # APP 8: attribute every LLM call made during this run (bias, NBO,
+        # marketing, email) to the application and, once created, the run.
+        with api_call_context(application_id=application_id):
+            return self._orchestrate(application_id)
+
+    def _orchestrate(self, application_id):
         start_time = time.time()
         logger.info("Starting pipeline for application %s", application_id)
 
@@ -158,7 +184,16 @@ class PipelineOrchestrator:
                     status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
                 ).update(status=AgentRun.Status.FAILED, error="Stale pipeline — automatically cleared")
                 application.transition_to("pending", details={"source": "stale_pipeline_reset"})
+            elif application.status == LoanApplication.Status.QUEUE_FAILED:
+                # Started by hand after the first dispatch failed: this run is the retry.
+                application.release_queue_failed(source="orchestrator_retry")
             application.transition_to("processing", details={"source": "orchestrator_pipeline"})
+            # A forced re-run or batch recheck replaces any run still waiting
+            # for review; left ESCALATED, it would stay in the queue and a
+            # reviewer could act on a decision this run is about to replace.
+            AgentRun.objects.filter(application=application, status=AgentRun.Status.ESCALATED).update(
+                status=AgentRun.Status.FAILED, error="Superseded by a newer pipeline run"
+            )
 
         # Refetch with profile (nullable) outside the lock — select_for_update
         # cannot be combined with outer joins on nullable relations in PostgreSQL.
@@ -170,6 +205,7 @@ class PipelineOrchestrator:
             status=AgentRun.Status.RUNNING,
             steps=[],
         )
+        bind_api_call_context(application_id=application.pk, agent_run_id=agent_run.pk)
 
         steps = []
         waterfall = []
@@ -269,7 +305,7 @@ class PipelineOrchestrator:
                 details={
                     "prediction": prediction_result["prediction"],
                     "probability": round(prediction_result["probability"], 4),
-                    "requires_human_review": prediction_result.get("requires_human_review", False),
+                    "refer_reasons": prediction_result.get("refer_reasons", []),
                 },
             )
 
@@ -305,19 +341,29 @@ class PipelineOrchestrator:
                 dti_check = ("pass", "DTI_WITHIN_LIMIT", f"Debt-to-income ratio {dti:.2f} within cap of {dti_cap}")
             waterfall.append(self._waterfall_entry("policy_rules", *dti_check))
 
-            # ML prediction waterfall entry
+            # ML prediction waterfall entry: the model's own decision. A pricing
+            # or credit-policy decline of a model approval is its own entry
+            # with the rule's code, which the denial email reads (saved now, so
+            # it is on the decision before the email step).
             prob = prediction_result["probability"]
-            ml_result = "pass" if prediction_result["prediction"] == "approved" else "fail"
+            overrides = decline_overrides(prediction_result)
+            model_label = "approved" if overrides else prediction_result["prediction"]
+            ml_result = "pass" if model_label == "approved" else "fail"
             ml_reason = "MODEL_APPROVED" if ml_result == "pass" else "MODEL_DENIED"
             waterfall.append(
                 self._waterfall_entry(
                     "ml_prediction",
                     ml_result,
                     ml_reason,
-                    f"Model prediction: {prediction_result['prediction']} "
+                    f"Model prediction: {model_label} "
                     f"(confidence={prob:.4f}, model={prediction_result['model_version']})",
                 )
             )
+            for override in overrides:
+                stage = "pricing" if override["code"] == PRICING_TIER_DECLINE else "policy_rules"
+                waterfall.append(self._waterfall_entry(stage, "fail", override["code"], override["detail"]))
+            if overrides:
+                self._save_waterfall(application, waterfall)
 
             step = self._complete_step(
                 step,
@@ -345,12 +391,7 @@ class PipelineOrchestrator:
             self._save_waterfall(application, waterfall)
             step = self._fail_step(step, str(e), failure_category="transient")
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
-            with transaction.atomic():
-                application.refresh_from_db()
-                application.transition_to(
-                    LoanApplication.Status.REVIEW,
-                    details={"source": "orchestrator_ml_prediction_failure", "reason": "transient"},
-                )
+            self._return_to_pending_after_ml_failure(application, "transient", e)
             return agent_run
         except Exception as e:
             logger.critical("Application %s: UNEXPECTED failure at ml_prediction: %s", application_id, e, exc_info=True)
@@ -365,12 +406,7 @@ class PipelineOrchestrator:
             self._save_waterfall(application, waterfall)
             step = self._fail_step(step, str(e), failure_category=None)
             self._finalize_run(agent_run, steps + [step], start_time, error=str(e))
-            with transaction.atomic():
-                application.refresh_from_db()
-                application.transition_to(
-                    LoanApplication.Status.REVIEW,
-                    details={"source": "orchestrator_ml_prediction_failure", "reason": "unexpected"},
-                )
+            self._return_to_pending_after_ml_failure(application, "unexpected", e)
             return agent_run
 
         steps.append(step)
@@ -409,41 +445,23 @@ class PipelineOrchestrator:
                 step = self._fail_step(step, str(e))
             steps.append(step)
 
-        # Borderline / severe-drift / policy-"refer" predictions must be
-        # decided by a human. Escalate BEFORE the email pipeline so no
-        # automated decision email is generated or sent for these cases.
-        if prediction_result.get("requires_human_review"):
-            waterfall.append(
-                self._waterfall_entry(
-                    "final_decision",
-                    "fail",
-                    "ESCALATED_HUMAN_REVIEW",
-                    "Prediction flagged for human review (borderline / drift / policy refer) — "
-                    "escalated before any automated decision was issued",
+        # Borderline / severe-drift / policy-"refer" / pricing-gap reasons do
+        # NOT go to the human review queue (that queue is only for bias flags).
+        # The model decision stands; each reason is recorded on the decision
+        # waterfall and the AuditLog so the decision stays explainable.
+        refer_reasons = prediction_result.get("refer_reasons") or []
+        if refer_reasons:
+            for reason in refer_reasons:
+                waterfall.append(
+                    self._waterfall_entry("referral", "flag", reason.get("code", "REFER"), reason.get("detail", ""))
                 )
-            )
             self._save_waterfall(application, waterfall)
-
-            step = self._start_step("human_review_required")
-            step = self._complete_step(
-                step,
-                result_summary={
-                    "review_category": "requires_human_review",
-                    "reason": "borderline / drift / policy refer",
-                },
+            AuditLog.objects.create(
+                action="decision_referral_recorded",
+                resource_type="LoanApplication",
+                resource_id=str(application.pk),
+                details={"decision": decision, "refer_reasons": refer_reasons},
             )
-            steps.append(step)
-
-            with transaction.atomic():
-                application.refresh_from_db()
-                application.transition_to(
-                    LoanApplication.Status.REVIEW,
-                    details={"source": "orchestrator_requires_human_review"},
-                )
-            agent_run.status = "escalated"
-            self._finalize_run(agent_run, steps, start_time)
-            logger.info("Application %s: escalated to human review (requires_human_review)", application_id)
-            return agent_run
 
         # Steps 2-4: Email generation, bias check, delivery (delegated)
         steps, email_result, generated_email, bias_result, escalated = self._email_pipeline.run(
@@ -474,7 +492,32 @@ class PipelineOrchestrator:
                 )
             return agent_run
 
-        # Step 5: NBO + Marketing pipeline (if denied)
+        # Final decision waterfall entry
+        final_reason = "APPROVED" if decision == "approved" else "DENIED"
+        waterfall.append(
+            self._waterfall_entry(
+                "final_decision",
+                "pass" if decision == "approved" else "fail",
+                final_reason,
+                f"Pipeline completed with decision: {decision}",
+            )
+        )
+
+        # No escalation — apply the ML decision directly. Before the follow-up
+        # below: the customer may already have the decision email, and a
+        # follow-up failure that left the application re-runnable would send
+        # them a second one on the re-run.
+        self._save_waterfall(application, waterfall)
+
+        with transaction.atomic():
+            application.refresh_from_db()
+            application.transition_to(
+                decision,
+                details={"source": "orchestrator_final_decision"},
+            )
+
+        # Step 5: NBO + Marketing pipeline (if denied), best-effort: the
+        # decision is applied and announced.
         if decision == "denied":
             denial_reasons = ""
             shap_vals = prediction_result.get("shap_values")
@@ -490,34 +533,8 @@ class PipelineOrchestrator:
                 )[:3]
                 denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
 
-            steps = self._run_nbo_and_marketing_pipeline(
-                application,
-                agent_run,
-                steps,
-                denial_reasons,
-                profile_context,
-            )
+            steps = self._run_nbo_and_marketing_pipeline(application, agent_run, steps, denial_reasons, profile_context)
 
-        # Final decision waterfall entry
-        final_reason = "APPROVED" if decision == "approved" else "DENIED"
-        waterfall.append(
-            self._waterfall_entry(
-                "final_decision",
-                "pass" if decision == "approved" else "fail",
-                final_reason,
-                f"Pipeline completed with decision: {decision}",
-            )
-        )
-
-        # No escalation — apply the ML decision directly.
-        self._save_waterfall(application, waterfall)
-
-        with transaction.atomic():
-            application.refresh_from_db()
-            application.transition_to(
-                decision,
-                details={"source": "orchestrator_final_decision"},
-            )
         agent_run.status = "completed"
         self._finalize_run(agent_run, steps, start_time)
         logger.info(
@@ -528,5 +545,8 @@ class PipelineOrchestrator:
 
         return agent_run
 
-    def resume_after_review(self, agent_run_id, reviewer="", note=""):
-        return self._human_review_handler.resume_after_review(agent_run_id, reviewer, note)
+    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve", reviewer_id=None):
+        with api_call_context(agent_run_id=agent_run_id):
+            return self._human_review_handler.resume_after_review(
+                agent_run_id, reviewer, note, action=action, reviewer_id=reviewer_id
+            )

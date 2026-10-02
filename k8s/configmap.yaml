@@ -8,8 +8,12 @@ metadata:
     app.kubernetes.io/part-of: aussieloanai
 data:
   DJANGO_SETTINGS_MODULE: config.settings.production
-  # CELERY_BROKER_URL and CELERY_RESULT_BACKEND moved to k8s/secrets.yaml
-  # Use authenticated Redis URLs: redis://:$(REDIS_PASSWORD)@redis:6379/0
+  # config/settings/production.py refuses to start without this. It must
+  # contain the Ingress host; the backend probes send the same Host header.
+  DJANGO_ALLOWED_HOSTS: app.aussieloanai.com.au
+  # Broker/cache URLs carry the Redis password, so they live in the Secret
+  # (see secrets.env.example).
   POSTGRES_DB: loan_approval_db
+  # With terraform, set this to the `rds_endpoint` output (host part only).
   POSTGRES_HOST: postgres
   POSTGRES_PORT: "5432"

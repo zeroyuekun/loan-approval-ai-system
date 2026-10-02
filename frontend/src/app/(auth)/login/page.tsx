@@ -7,6 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
+function errorDetail(err: unknown, fallback: string): string {
+  return (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback
+}
+
 export default function LoginPage() {
   const { login } = useAuth()
   const [username, setUsername] = useState('')
@@ -21,8 +25,8 @@ export default function LoginPage() {
 
     try {
       await login(username, password)
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid credentials. Please try again.')
+    } catch (err: unknown) {
+      setError(errorDetail(err, 'Invalid credentials. Please try again.'))
     } finally {
       setIsLoading(false)
     }

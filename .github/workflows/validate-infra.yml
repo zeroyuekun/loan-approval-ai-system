@@ -1,0 +1,94 @@
+name: Validate Infra
+
+# Reusable: runs only as part of ci.yml (see the note in test.yml).
+# Static validation of the deployment targets that CI never runs: k8s
+# manifests, Terraform and the monitoring configs. None of this is applied to
+# a real cluster or account; it keeps the files valid and keeps fixed defects
+# from coming back. Tool images are pinned to the versions the repo targets.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  # k8s: matches terraform/variables.tf kubernetes_version.
+  K8S_VERSION: "1.29.0"
+  KUBECONFORM_IMAGE: ghcr.io/yannh/kubeconform:v0.7.0
+  TERRAFORM_IMAGE: hashicorp/terraform:1.13.3
+  # Monitoring: the same images docker-compose.yml runs.
+  PROMETHEUS_IMAGE: prom/prometheus:v3.1.0
+  ALERTMANAGER_IMAGE: prom/alertmanager:v0.28.0
+
+jobs:
+  k8s:
+    name: k8s manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Render kustomization
+        run: kubectl kustomize k8s > rendered.yaml
+
+      - name: kubeconform (strict schema check)
+        run: docker run --rm -i "$KUBECONFORM_IMAGE" -strict -summary -kubernetes-version "$K8S_VERSION" - < rendered.yaml
+
+      - name: Policy checks (ingress, NetworkPolicy reachability, pod security, queues, migrations, references)
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 scripts/check_k8s_policy.py k8s < rendered.yaml
+
+      - name: No placeholder credentials in rendered manifests
+        run: bash scripts/check-k8s-placeholders.sh k8s
+
+  terraform:
+    name: Terraform fmt + validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: terraform fmt -check
+        run: docker run --rm -v "$PWD/terraform:/tf" -w /tf "$TERRAFORM_IMAGE" fmt -check -recursive -diff
+
+      - name: terraform validate
+        # -backend=false: validation needs the providers, not the S3 state.
+        run: |
+          docker run --rm -v "$PWD/terraform:/tf" -w /tf -e TF_IN_AUTOMATION=1 \
+            --entrypoint sh "$TERRAFORM_IMAGE" -c \
+            'terraform init -backend=false -input=false && terraform validate -no-color'
+
+  monitoring:
+    name: Monitoring configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: promtool check config
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            -v "$PWD/monitoring/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro" \
+            "$PROMETHEUS_IMAGE" check config --syntax-only /etc/prometheus/prometheus.yml
+
+      - name: promtool check + test alert rules
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring/prometheus:/rules:ro" -w /rules \
+            "$PROMETHEUS_IMAGE" check rules alert_rules.yml
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring/prometheus:/rules:ro" -w /rules \
+            "$PROMETHEUS_IMAGE" test rules alert_rules.test.yml
+
+      - name: amtool check-config
+        run: |
+          docker run --rm --entrypoint amtool -v "$PWD/monitoring/alertmanager:/am:ro" \
+            "$ALERTMANAGER_IMAGE" check-config /am/alertmanager.yml
+
+      - name: docker compose config (base + monitoring)
+        # Dummy values only satisfy the ${VAR:?} guards so the files parse.
+        env:
+          POSTGRES_PASSWORD: ci-dummy
+          REDIS_PASSWORD: ci-dummy
+          GRAFANA_ADMIN_PASSWORD: ci-dummy
+          HEALTH_CHECK_TOKEN: ci-dummy
+        run: |
+          docker network create loan-approval-ai-system_internal >/dev/null 2>&1 || true
+          docker compose -f docker-compose.yml -f docker-compose.monitoring.yml --profile monitoring config -q

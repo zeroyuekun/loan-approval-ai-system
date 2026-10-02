@@ -17,6 +17,8 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.policy import is_staff_role
+from apps.agents.services.api_budget import open_circuit_providers
 from apps.loans.models import LoanApplication
 from config.ops_auth import require_ops_auth
 
@@ -52,7 +54,7 @@ class TaskStatusView(APIView):
         from django_celery_results.models import TaskResult
 
         user = request.user
-        is_staff = user.role in ("admin", "officer")
+        is_staff = is_staff_role(user)
 
         try:
             result = TaskResult.objects.get(task_id=task_id)
@@ -188,7 +190,7 @@ def deep_health_check(request):
             "limit_usd": budget_limit,
             "calls_today": call_count,
             "call_limit": call_limit,
-            "circuit_breaker": "open" if r.exists("ai_budget:circuit_breaker") else "closed",
+            "circuit_breaker": "open" if open_circuit_providers(r) else "closed",
         }
     except Exception:
         checks["api_budget"] = "unavailable"

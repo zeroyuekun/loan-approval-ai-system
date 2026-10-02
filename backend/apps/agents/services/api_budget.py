@@ -3,7 +3,10 @@
 Prevents runaway costs by enforcing:
 - Daily dollar budget (hard cap — blocks calls when exceeded)
 - Daily call limit (default: 500 calls/day)
-- Circuit breaker: after N consecutive failures in M minutes, block calls temporarily
+- Circuit breaker PER PROVIDER: after N consecutive TRANSIENT failures (timeout,
+  connection, 5xx, 429) in M minutes, block that provider's calls temporarily.
+  A 4xx such as a free-tier 413 never trips it, and one provider's outage
+  never blocks another provider.
 
 Usage:
     budget = ApiBudgetGuard()
@@ -17,14 +20,54 @@ Or use the guarded_api_call() wrapper which handles all of the above:
     response = guarded_api_call(client, model='claude-sonnet-4-6', ...)
 """
 
+import contextvars
 import hashlib
 import logging
 import threading
+from contextlib import contextmanager
 
 import redis
 from django.conf import settings
 
 logger = logging.getLogger("agents.api_budget")
+
+# ---------------------------------------------------------------------------
+# APP 8 attribution context
+#
+# Which application / AgentRun an LLM call is made for. Entry points (the
+# orchestrator run, the human-review resume) open a scope and guarded_api_call
+# reads it, so deep callers such as the bias detector, which never see the
+# application, are still attributed. An explicit _loan_application_id /
+# _agent_run_id kwarg wins over the context.
+# ---------------------------------------------------------------------------
+
+_API_CALL_CONTEXT = contextvars.ContextVar("api_call_context", default=None)
+
+
+@contextmanager
+def api_call_context(**fields):
+    """Scope in which LLM calls are attributed to ``application_id`` / ``agent_run_id``."""
+    parent = _API_CALL_CONTEXT.get() or {}
+    token = _API_CALL_CONTEXT.set({**parent, **{k: v for k, v in fields.items() if v is not None}})
+    try:
+        yield
+    finally:
+        _API_CALL_CONTEXT.reset(token)
+
+
+def bind_api_call_context(**fields):
+    """Add fields (e.g. the AgentRun id once created) to the innermost open scope.
+
+    No-op outside an ``api_call_context`` scope, so nothing leaks past it.
+    """
+    ctx = _API_CALL_CONTEXT.get()
+    if ctx is not None:
+        ctx.update({k: v for k, v in fields.items() if v is not None})
+
+
+def current_api_call_context():
+    return dict(_API_CALL_CONTEXT.get() or {})
+
 
 # Anthropic pricing per million tokens. Verified April 2026 against
 # https://platform.claude.com/docs/en/docs/about-claude/models/overview
@@ -75,6 +118,43 @@ _PROVIDER_DESTINATION = {"anthropic": "US", "groq": "US", "ollama": "AU"}
 # MODEL_PRICING row. The budget guard still reserves the per-call floor and
 # counts the call against the daily call limit.
 _FREE_PROVIDERS = frozenset({"groq", "ollama"})
+
+_DEFAULT_PROVIDER = "anthropic"
+
+
+def _breaker_key(provider):
+    return f"ai_budget:circuit_breaker:{provider or _DEFAULT_PROVIDER}"
+
+
+def _failures_key(provider):
+    return f"ai_budget:consecutive_failures:{provider or _DEFAULT_PROVIDER}"
+
+
+def open_circuit_providers(r):
+    """Providers whose breaker is currently open (for health/stats reporting)."""
+    return [p for p in _PROVIDER_DESTINATION if r.exists(_breaker_key(p))]
+
+
+def is_transient_failure(exc):
+    """True for failures that say the provider is unhealthy right now.
+
+    Timeouts, connection errors, 5xx and 429 count towards the breaker. A 4xx
+    (400 bad request, 401/403 auth, 413 request too large) is a property of the
+    request or the configuration: retrying later will not fix it, so tripping
+    the breaker would only block healthy traffic.
+    """
+    import anthropic
+
+    from apps.email_engine.services.exceptions import EmailBackendError, RateLimited
+
+    if isinstance(exc, (RateLimited, TimeoutError, ConnectionError, anthropic.APIConnectionError)):
+        return True
+    if isinstance(exc, anthropic.APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    if isinstance(exc, EmailBackendError):
+        status = getattr(exc, "status_code", None)
+        return status is None or status == 429 or status >= 500  # None = transport failure
+    return False
 
 
 def estimate_cost_usd(input_tokens, output_tokens, model="", provider="anthropic"):
@@ -168,7 +248,7 @@ class ApiBudgetGuard:
 
         return f"ai_budget:{date.today().isoformat()}:{suffix}"
 
-    def check_budget(self):
+    def check_budget(self, provider=_DEFAULT_PROVIDER):
         """Raise BudgetExhausted if daily limit reached, CircuitOpen if breaker tripped.
 
         Advisory pre-flight only. It reads-then-decides, so under concurrency it can
@@ -182,8 +262,8 @@ class ApiBudgetGuard:
         try:
             r = self._get_redis()
 
-            # Check circuit breaker
-            cb_key = "ai_budget:circuit_breaker"
+            # Check this provider's circuit breaker
+            cb_key = _breaker_key(provider)
             if r.exists(cb_key):
                 ttl = r.ttl(cb_key)
                 raise CircuitOpen(f"Circuit breaker open — {ttl}s remaining. Too many consecutive API failures.")
@@ -237,7 +317,7 @@ class ApiBudgetGuard:
                 e,
             )
 
-    def reserve_budget(self, estimated_cost_cents=_RESERVE_FLOOR_CENTS, estimated_calls=1):
+    def reserve_budget(self, estimated_cost_cents=_RESERVE_FLOOR_CENTS, estimated_calls=1, provider=_DEFAULT_PROVIDER):
         """Atomically reserve budget BEFORE the API call (authoritative M5 gate).
 
         Performs check+increment of the cost and call counters in a single Redis
@@ -258,7 +338,7 @@ class ApiBudgetGuard:
         global _REDIS_FALLBACK_CALLS
         try:
             r = self._get_redis()
-            cb_key = "ai_budget:circuit_breaker"
+            cb_key = _breaker_key(provider)
             if r.exists(cb_key):
                 ttl = r.ttl(cb_key)
                 raise CircuitOpen(f"Circuit breaker open — {ttl}s remaining. Too many consecutive API failures.")
@@ -387,19 +467,22 @@ class ApiBudgetGuard:
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             logger.warning("Failed to record API call (Redis): %s", e)
 
-    def record_success(self):
-        """Reset consecutive failure counter on success."""
+    def record_success(self, provider=_DEFAULT_PROVIDER):
+        """Reset this provider's consecutive failure counter on success."""
         try:
             r = self._get_redis()
-            r.delete("ai_budget:consecutive_failures")
+            r.delete(_failures_key(provider))
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             logger.debug("Failed to reset failure counter (Redis): %s", e)
 
-    def record_failure(self):
-        """Increment consecutive failure counter. Trip circuit breaker after threshold."""
+    def record_failure(self, provider=_DEFAULT_PROVIDER):
+        """Count a TRANSIENT failure for ``provider``; trip its breaker at the threshold.
+
+        Callers decide transience (``is_transient_failure``); this only counts.
+        """
         try:
             r = self._get_redis()
-            key = "ai_budget:consecutive_failures"
+            key = _failures_key(provider)
             failures = r.incr(key)
             r.expire(key, 300)  # 5 minute window
 
@@ -407,9 +490,10 @@ class ApiBudgetGuard:
             cooldown_seconds = getattr(settings, "AI_CIRCUIT_BREAKER_COOLDOWN", 600)
 
             if failures >= failure_threshold:
-                r.setex("ai_budget:circuit_breaker", cooldown_seconds, 1)
+                r.setex(_breaker_key(provider), cooldown_seconds, 1)
                 logger.error(
-                    "Circuit breaker tripped: %d consecutive API failures. Blocking calls for %ds.",
+                    "Circuit breaker tripped for %s: %d consecutive transient failures. Blocking calls for %ds.",
+                    provider,
                     failures,
                     cooldown_seconds,
                 )
@@ -427,7 +511,7 @@ class ApiBudgetGuard:
                 "cost_usd": cost_cents / 100,
                 "budget_limit_usd": getattr(settings, "AI_DAILY_BUDGET_LIMIT_USD", 5.0),
                 "call_limit": getattr(settings, "AI_DAILY_CALL_LIMIT", 500),
-                "circuit_breaker_open": bool(r.exists("ai_budget:circuit_breaker")),
+                "circuit_breaker_open": bool(open_circuit_providers(r)),
             }
         except (redis.RedisError, ConnectionError, TimeoutError) as e:
             logger.debug("Failed to fetch daily stats (Redis): %s", e)
@@ -458,20 +542,39 @@ def _extract_prompt_text(kwargs):
     return "\n".join(parts)
 
 
-def _detect_pii_categories(prompt_text):
-    """Detect PII categories present in the prompt text."""
-    category_keywords = {
-        "name": ["name", "applicant", "customer"],
-        "income": ["income", "salary", "earnings"],
-        "employment": ["employment", "employer", "job", "occupation"],
-        "loan_amount": ["loan_amount", "loan amount", "borrowing"],
-        "credit_score": ["credit_score", "credit score"],
-        "address": ["address", "postcode", "suburb"],
-        "email": ["email"],
-        "phone": ["phone", "mobile"],
-    }
-    lower_text = prompt_text.lower()
-    return [cat for cat, keywords in category_keywords.items() if any(kw in lower_text for kw in keywords)]
+def _log_api_call(
+    kwargs,
+    *,
+    outcome,
+    service,
+    provider,
+    model,
+    loan_application_id,
+    agent_run_id,
+    pii_categories,
+    input_tokens=0,
+    output_tokens=0,
+):
+    """Write the APP 8 cross-border record. Never raises."""
+    try:
+        from apps.agents.models import APICallLog
+
+        prompt_text = _extract_prompt_text(kwargs)
+        APICallLog.objects.create(
+            loan_application_id=loan_application_id,
+            agent_run_id=agent_run_id,
+            service=service,
+            provider=provider,
+            model_used=model,
+            pii_categories=pii_categories,
+            prompt_hash=hashlib.sha256(prompt_text.encode()).hexdigest(),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            destination_country=_PROVIDER_DESTINATION.get(provider, "US"),
+            outcome=outcome,
+        )
+    except Exception as e:
+        logger.warning("Failed to create APICallLog: %s", e)
 
 
 def guarded_api_call(client, **kwargs):
@@ -487,8 +590,13 @@ def guarded_api_call(client, **kwargs):
         **kwargs: passed directly to client.messages.create()
             Extra keyword args (not passed to API):
             - _service: str — service name for API call logging (e.g. 'email_generation')
-            - _loan_application_id: UUID — FK to LoanApplication
-            - _agent_run_id: UUID — FK to AgentRun
+            - _loan_application_id: UUID — FK to LoanApplication (default: the
+              open api_call_context scope)
+            - _agent_run_id: UUID — FK to AgentRun (default: the open scope)
+            - _pii_categories: list[str] — categories of personal data the
+              caller actually interpolated into the prompt, declared from its
+              structured fields and never guessed from prompt wording. A call
+              that declares none is logged as "unclassified".
 
     Returns:
         The API response object.
@@ -502,9 +610,11 @@ def guarded_api_call(client, **kwargs):
         raise BudgetExhausted("No API client configured — using fallback")
 
     # Pop internal metadata before passing to API
+    ctx = current_api_call_context()
     service = kwargs.pop("_service", "unknown")
-    loan_application_id = kwargs.pop("_loan_application_id", None)
-    agent_run_id = kwargs.pop("_agent_run_id", None)
+    loan_application_id = kwargs.pop("_loan_application_id", None) or ctx.get("application_id")
+    agent_run_id = kwargs.pop("_agent_run_id", None) or ctx.get("agent_run_id")
+    pii_categories = list(kwargs.pop("_pii_categories", None) or ["unclassified"])
 
     model = kwargs.get("model", "")
     # See _SAMPLING_PARAMS_REMOVED_FAMILIES: adaptive-only models 400 on
@@ -523,17 +633,32 @@ def guarded_api_call(client, **kwargs):
     # call so concurrent workers cannot collectively overshoot the daily cap.
     reserved = budget.reserve_budget(
         estimated_cost_cents=_estimate_reserve_cents(model, kwargs.get("max_tokens"), provider=provider),
+        provider=provider,
     )
 
+    audit = {
+        "service": service,
+        "provider": provider,
+        "model": model,
+        "loan_application_id": loan_application_id,
+        "agent_run_id": agent_run_id,
+        "pii_categories": pii_categories,
+    }
     try:
         response = client.messages.create(**kwargs)
-    except Exception:
-        budget.record_failure()
+    except Exception as exc:
+        # Only a transient failure says the provider is unhealthy; a 4xx is a
+        # property of this request and must not block other callers.
+        if is_transient_failure(exc):
+            budget.record_failure(provider)
         # Release the reservation in full — the call never produced billable
         # tokens, so give back BOTH the reserved cost and the call slot.
         budget.record_call(
             input_tokens=0, output_tokens=0, model=model, reserved_cents=reserved, released=True, provider=provider
         )
+        # A timeout or 5xx can arrive after the prompt was transmitted (the SDK
+        # may even have sent it more than once): still a disclosure for APP 8.
+        _log_api_call(kwargs, outcome="error", **audit)
         raise
 
     # Track cost from actual usage, reconciling the reservation to the true cost.
@@ -547,26 +672,9 @@ def guarded_api_call(client, **kwargs):
         reserved_cents=reserved,
         provider=provider,
     )
-    budget.record_success()
+    budget.record_success(provider)
 
     # Log API call for PII cross-border audit (Privacy Act APP 8)
-    try:
-        from apps.agents.models import APICallLog
-
-        prompt_text = _extract_prompt_text(kwargs)
-        APICallLog.objects.create(
-            loan_application_id=loan_application_id,
-            agent_run_id=agent_run_id,
-            service=service,
-            provider=provider,
-            model_used=model,
-            pii_categories=_detect_pii_categories(prompt_text),
-            prompt_hash=hashlib.sha256(prompt_text.encode()).hexdigest(),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            destination_country=_PROVIDER_DESTINATION.get(provider, "US"),
-        )
-    except Exception as e:
-        logger.warning("Failed to create APICallLog: %s", e)
+    _log_api_call(kwargs, outcome="success", input_tokens=input_tokens, output_tokens=output_tokens, **audit)
 
     return response

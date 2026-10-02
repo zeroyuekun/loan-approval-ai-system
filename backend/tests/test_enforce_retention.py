@@ -46,7 +46,12 @@ def retention_mv(db):
     )
 
 
-def _mk_application(user, deleted_days_ago: int | None) -> LoanApplication:
+RETENTION_DAYS = 7 * 365
+
+
+def _mk_application(user, deleted_days_ago: int | None, created_days_ago: int = RETENTION_DAYS + 30) -> LoanApplication:
+    """``created_days_ago`` defaults past the 7-year application retention, so
+    a soft-deleted row is purge-eligible once its 90-day grace has passed."""
     app = LoanApplication.objects.create(
         applicant=user,
         annual_income=Decimal("75000.00"),
@@ -66,6 +71,9 @@ def _mk_application(user, deleted_days_ago: int | None) -> LoanApplication:
         has_hecs=False,
         has_bankruptcy=False,
         state="NSW",
+    )
+    LoanApplication.all_objects.all_with_deleted().filter(pk=app.pk).update(
+        created_at=timezone.now() - timedelta(days=created_days_ago)
     )
     if deleted_days_ago is not None:
         app.deleted_at = timezone.now() - timedelta(days=deleted_days_ago)
@@ -139,6 +147,19 @@ class TestEnforceRetention:
         assert LoanApplication.all_objects.all_with_deleted().filter(pk=fresh.pk).exists()
         # Active row untouched
         assert LoanApplication.objects.filter(pk=active.pk).exists()
+
+    def test_soft_deleted_application_inside_seven_year_retention_is_kept(self, retention_user):
+        """I4: a soft delete must not shorten the 7-year retention of the
+        application and its CASCADE children (decision, bias reports, emails)."""
+        from apps.loans.models import LoanDecision
+
+        recent = _mk_application(retention_user, deleted_days_ago=SOFT_DELETE_DAYS + 5, created_days_ago=365)
+        LoanDecision.objects.create(application=recent, decision="denied", confidence=0.2)
+
+        call_command("enforce_retention", stdout=StringIO())
+
+        assert LoanApplication.all_objects.all_with_deleted().filter(pk=recent.pk).exists()
+        assert LoanDecision.objects.filter(application_id=recent.pk).exists()
 
     def test_boundary_exactly_at_cutoff_is_not_purged(self, retention_user):
         """A row deleted exactly 90 days ago is on the boundary — cutoff

@@ -2,62 +2,142 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
-from celery.exceptions import SoftTimeLimitExceeded
-from django.db import transaction
+from celery.exceptions import Retry, SoftTimeLimitExceeded
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from apps.common.tasks import task_dedup_lock
 from apps.email_engine.models import GeneratedEmail, GuardrailAnalytics, GuardrailLog
-from apps.email_engine.services.email_generator import EmailGenerator
+from apps.email_engine.services.decision_email import (
+    HeldForBiasReview,
+    bias_hold_reason,
+    deliver_decision_email,
+    generate_decision_email,
+    require_decision_on_record,
+)
 from apps.email_engine.services.exceptions import RateLimited
-from apps.email_engine.services.persistence import EmailPersistenceService
 from apps.loans.models import AuditLog, LoanApplication
 
 logger = logging.getLogger("email_engine.tasks")
 
 
+def _email_context(application, decision):
+    """Same next-best offer the orchestrator gives a denial (no API call, best-effort)."""
+    if decision != "denied":
+        return None
+    # Imported here: email_engine does not import the agents app at module level.
+    from apps.agents.services.email_pipeline import build_denial_email_context
+
+    return build_denial_email_context(application, None)
+
+
+# Infrastructure errors Celery retries (ConnectionError and TimeoutError are
+# OSErrors). The dedup lock is kept across them and across the RateLimited
+# retry, as the orchestrate task keeps its lock (M22).
+_AUTORETRY = (OSError,)
+_EMAIL_TIME_LIMIT = 120
+# The longest wait before a retry: a provider's Retry-After is capped here, and
+# the autoretry backoff (1, 2, 4 s) stays far below it.
+_MAX_RETRY_COUNTDOWN = 300
+# A retry refreshes the lock when it starts, so the lock has to outlive one run
+# plus the longest countdown before the retry, with a minute for queueing.
+_EMAIL_LOCK_TTL = _EMAIL_TIME_LIMIT + _MAX_RETRY_COUNTDOWN + 60
+
+
+def _email_lock_key(application_id, decision):
+    return f"generate_email_lock:{application_id}:{decision}"
+
+
 @shared_task(
     bind=True,
     name="apps.email_engine.tasks.generate_email_task",
-    time_limit=120,
+    time_limit=_EMAIL_TIME_LIMIT,
     soft_time_limit=100,
-    autoretry_for=(ConnectionError, TimeoutError, OSError),
+    autoretry_for=_AUTORETRY,
     retry_backoff=True,
+    retry_backoff_max=_MAX_RETRY_COUNTDOWN,
     max_retries=3,
 )
-def generate_email_task(self, application_id, decision):
-    """Generate a decision email for a loan application."""
+def generate_email_task(self, application_id, decision, regenerate=False):
+    """Generate and send the decision email for a loan application.
+
+    Refuses (DecisionMismatch, not retried) when ``decision`` disagrees with
+    the application's LoanDecision, whoever the caller is.
+
+    ``regenerate=True`` always writes a fresh email instead of re-delivering
+    the latest stored one.
+
+    Refuses (HeldForBiasReview, not retried) while the application is under
+    human review, and never re-delivers a draft the bias check held back:
+    only the human-review paths, which re-run the bias check, release those.
+
+    Every email it sends is bias-checked first, as in the pipeline: a flagged
+    email is replaced by the template, and a severe finding (or a flagged
+    template) holds the email unsent (``held_reason`` in the result).
+
+    One run at a time per application and decision: the "is there an email
+    already" check has no row to lock before the first email exists, so two
+    concurrent runs (a staff Generate during a redelivery, a double click)
+    would each generate and send one. A run that finds the lock held by
+    another task skips.
+    """
+    lock = task_dedup_lock(
+        _email_lock_key(application_id, decision), self.request.id, _EMAIL_LOCK_TTL, keep_on=(*_AUTORETRY, Retry)
+    )
+    with lock as held:
+        if not held:
+            logger.info("Application %s (%s): email task already running, skipping", application_id, decision)
+            return {"skipped": True, "reason": "dedup_lock_held"}
+        return _generate_and_send(self, application_id, decision, regenerate)
+
+
+def _generate_and_send(task, application_id, decision, regenerate):
+    """The body of ``generate_email_task``, run under its dedup lock."""
+    # Imported here: email_engine does not import the agents app at module level.
+    from apps.agents.services.decision_email_screening import screen_and_deliver_decision_email
+
+    require_decision_on_record(application_id, decision)
+
     # Idempotency: if email already generated for this application+decision, return it.
     # Report the TRUE sent state from the sent_at marker so callers don't think an
     # already-delivered email still needs sending on a redelivery.
-    existing = (
-        GeneratedEmail.objects.filter(application_id=application_id, decision=decision).order_by("-created_at").first()
-    )
+    existing = None
+    if not regenerate:
+        existing = (
+            GeneratedEmail.objects.filter(application_id=application_id, decision=decision)
+            .select_related("application__applicant")
+            .order_by("-created_at")
+            .first()
+        )
+    hold = bias_hold_reason(application_id, existing)
+    if hold:
+        raise HeldForBiasReview(hold)
     if existing:
         if existing.passed_guardrails and existing.sent_at is None:
             # Generated but never delivered (transient SMTP failure, or a worker
             # killed after persist-before-send). Attempt delivery now using the
             # stored subject/body instead of returning 'done' — the row-locked
-            # send below is idempotent, so this cannot double-send even under a
-            # redelivery race.
-            application = LoanApplication.objects.select_related("applicant", "decision").get(pk=application_id)
-            delivered = False
-            if application.applicant.email:
-                with transaction.atomic():
-                    locked = GeneratedEmail.objects.select_for_update().get(pk=existing.pk)
-                    if locked.sent_at is None:
-                        from apps.email_engine.services.sender import send_decision_email
-
-                        send_result = send_decision_email(
-                            recipient_email=application.applicant.email,
-                            subject=locked.subject,
-                            body=locked.body,
-                            email_type="approval" if decision == "approved" else "denial",
-                        )
-                        if send_result.get("sent"):
-                            locked.sent_at = timezone.now()
-                            locked.save(update_fields=["sent_at"])
-                    delivered = locked.sent_at is not None
+            # send is idempotent, so this cannot double-send under a redelivery race.
+            if existing.bias_reports.exists():
+                outcome = deliver_decision_email(existing)
+                delivered = outcome["sent"] or outcome["already_sent"]
+            else:
+                # Never bias-checked (the bias check was down, or the worker died
+                # before it ran): screen it like a freshly generated email.
+                application = existing.application
+                outcome = screen_and_deliver_decision_email(
+                    application,
+                    decision,
+                    {
+                        "body": existing.body,
+                        "passed_guardrails": existing.passed_guardrails,
+                        "template_fallback": existing.template_fallback,
+                    },
+                    existing,
+                    profile_context=_email_context(application, decision),
+                )
+                delivered = outcome["sent"]
+                existing = outcome["generated_email"]
             logger.info(
                 "Redelivery for application %s (%s): generated-but-unsent email send attempted (delivered=%s)",
                 application_id,
@@ -94,16 +174,20 @@ def generate_email_task(self, application_id, decision):
         }
 
     application = LoanApplication.objects.select_related("applicant", "decision").get(pk=application_id)
+    profile_context = _email_context(application, decision)
 
-    generator = EmailGenerator()
     try:
-        result = generator.generate(application, decision)
-    except (ConnectionError, TimeoutError, OSError):
+        # on_rate_limit="raise": this task can reschedule itself, so a 429
+        # retries the LLM later instead of taking the template now.
+        result, email = generate_decision_email(
+            application, decision, profile_context=profile_context, on_rate_limit="raise"
+        )
+    except _AUTORETRY:
         raise  # let Celery autoretry handle infrastructure errors
     except RateLimited as exc:
         # The generator raises RateLimited on a 429 instead of sleeping; free the
         # worker by scheduling a Celery retry instead of holding it inside time_limit.
-        raise self.retry(countdown=exc.retry_after, exc=exc) from exc
+        raise task.retry(countdown=min(exc.retry_after, _MAX_RETRY_COUNTDOWN), exc=exc) from exc
     except SoftTimeLimitExceeded:
         AuditLog.objects.create(
             action="email_generation_timeout",
@@ -122,31 +206,12 @@ def generate_email_task(self, application_id, decision):
         )
         raise
 
-    # Save email record and guardrail logs
-    email = EmailPersistenceService.save_generated_email(application, decision, result)
-    EmailPersistenceService.save_guardrail_logs(email, result.get("guardrail_results", []))
-
-    # Send email to customer if guardrails passed. The send is idempotent: under
-    # a row lock we only send when sent_at is unset, then persist sent_at. This
-    # closes the acks_late window where a SIGKILLed-then-redelivered task could
-    # otherwise send a second decision email.
-    email_sent = False
-    if result["passed_guardrails"] and application.applicant.email:
-        with transaction.atomic():
-            locked = GeneratedEmail.objects.select_for_update().get(pk=email.pk)
-            if locked.sent_at is None:
-                from apps.email_engine.services.sender import send_decision_email
-
-                send_result = send_decision_email(
-                    recipient_email=application.applicant.email,
-                    subject=result["subject"],
-                    body=result["body"],
-                    email_type="approval" if decision == "approved" else "denial",
-                )
-                if send_result.get("sent"):
-                    locked.sent_at = timezone.now()
-                    locked.save(update_fields=["sent_at"])
-                    email_sent = True
+    # Bias-check it as the pipeline does, then send it (or the template that
+    # replaced a flagged email) once, under a row lock, with sent_at stamped.
+    # A held email stays unsent with its flagged bias report.
+    outcome = screen_and_deliver_decision_email(application, decision, result, email, profile_context=profile_context)
+    email_sent = outcome["sent"]
+    email = outcome["generated_email"]
 
     # Audit trail: log email generation/delivery
     AuditLog.objects.create(
@@ -155,19 +220,21 @@ def generate_email_task(self, application_id, decision):
         resource_id=str(email.id),
         details={
             "decision": decision,
-            "passed_guardrails": result["passed_guardrails"],
-            "attempt_number": result["attempt_number"],
+            "passed_guardrails": email.passed_guardrails,
+            "attempt_number": email.attempt_number,
             "email_sent": email_sent,
-            "template_fallback": result.get("template_fallback", False),
+            "template_fallback": email.template_fallback,
+            "held_reason": outcome["held_reason"],
         },
     )
 
     return {
         "email_id": str(email.id),
-        "subject": result["subject"],
-        "passed_guardrails": result["passed_guardrails"],
-        "attempt_number": result["attempt_number"],
+        "subject": email.subject,
+        "passed_guardrails": email.passed_guardrails,
+        "attempt_number": email.attempt_number,
         "email_sent": email_sent,
+        "held_reason": outcome["held_reason"],
     }
 
 

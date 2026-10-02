@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import timedelta
 
 from django.conf import settings
@@ -8,6 +9,7 @@ from django.db.models import Avg, Count, Q
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import permissions, viewsets
+from rest_framework import serializers as drf_serializers
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
@@ -17,12 +19,14 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import CustomerProfile
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
+from apps.accounts.policy import is_staff_role
 from apps.agents.models import AgentRun
 from apps.agents.services.api_budget import ApiBudgetGuard
-from apps.ml_engine.models import ModelVersion
+from apps.common.http import client_ip
+from apps.ml_engine.services.model_selector import monitoring_model_version
 
 from .filters import AuditLogFilter, LoanApplicationFilter
-from .models import AuditLog, Complaint, DecisionReview, LoanApplication
+from .models import AuditLog, Complaint, DecisionReview, LoanApplication, LoanDecision
 from .serializers import (
     AuditLogSerializer,
     ComplaintSerializer,
@@ -32,8 +36,8 @@ from .serializers import (
     LoanApplicationCustomerUpdateSerializer,
     LoanApplicationSerializer,
 )
-from .services.decision_review import apply_review_outcome, withdraw_review
-from .services.overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+from .services.audit_diff import field_change_details, snapshot
+from .services.decision_review import OverturnGateBlocked, apply_review_outcome, withdraw_review
 from .tasks import dispatch_pipeline_or_queue_failed
 
 logger = logging.getLogger(__name__)
@@ -43,7 +47,7 @@ class IsOwnerOrStaff(permissions.BasePermission):
     """Object-level permission: only the applicant, admins, or officers can modify."""
 
     def has_object_permission(self, request, view, obj):
-        if request.user.role in ("admin", "officer"):
+        if is_staff_role(request.user):
             return True
         return obj.applicant_id == request.user.id
 
@@ -72,7 +76,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = LoanApplication.objects.select_related("applicant", "decision").prefetch_related("fraud_checks")
-        if user.role in ("admin", "officer"):
+        if is_staff_role(user):
             return qs.all()
         return qs.filter(applicant=user)
 
@@ -111,7 +115,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 resource_type="LoanApplication",
                 resource_id=str(instance.id),
                 details={"loan_amount": str(instance.loan_amount), "purpose": instance.purpose},
-                ip_address=self.request.META.get("REMOTE_ADDR"),
+                ip_address=client_ip(self.request),
             )
 
             # Durable dispatch: on_commit so the row is visible to the worker,
@@ -119,25 +123,46 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             transaction.on_commit(lambda: dispatch_pipeline_or_queue_failed(instance, source="api"))
 
     def perform_update(self, serializer):
-        instance = serializer.save()
-        AuditLog.objects.create(
-            user=self.request.user,
-            action="loan_updated",
-            resource_type="LoanApplication",
-            resource_id=str(instance.id),
-            details={"status": instance.status},
-            ip_address=self.request.META.get("REMOTE_ADDR"),
-        )
+        """Every changed field is audited (before/after; free text by name).
+        Decision inputs of an assessed application are refused in the
+        serializer, so they never reach here."""
+        before = snapshot(serializer.instance)
+        with transaction.atomic():
+            instance = serializer.save()
+            details = field_change_details(before, instance, names_only=("notes", "conditions"))
+            details["status"] = instance.status
+            AuditLog.objects.create(
+                user=self.request.user,
+                action="loan_updated",
+                resource_type="LoanApplication",
+                resource_id=str(instance.id),
+                details=details,
+                ip_address=client_ip(self.request),
+            )
 
     def perform_destroy(self, instance):
+        """Soft delete: the application and its decision evidence (decision,
+        bias reports, emails, agent runs) stay for the retention period;
+        enforce_retention purges them later. The audit row snapshots what
+        the deleted record was."""
         resource_id = str(instance.id)
+        decision = LoanDecision.objects.filter(application_id=instance.pk).first()
+        with transaction.atomic():
+            self._audit_and_delete(instance, resource_id, decision)
+
+    def _audit_and_delete(self, instance, resource_id, decision):
         AuditLog.objects.create(
             user=self.request.user,
             action="loan_deleted",
             resource_type="LoanApplication",
             resource_id=resource_id,
-            details={},
-            ip_address=self.request.META.get("REMOTE_ADDR"),
+            details={
+                "soft_delete": True,
+                "status": instance.status,
+                "decision_id": str(decision.pk) if decision else None,
+                "decision": decision.decision if decision else None,
+            },
+            ip_address=client_ip(self.request),
         )
         super().perform_destroy(instance)
 
@@ -221,8 +246,9 @@ class DashboardStatsView(APIView):
             llm_spend_today_usd = 0.0
             llm_spend_cap_usd = 5.0
 
-        # Active model
-        active_model = ModelVersion.objects.filter(is_active=True).first()
+        # Active model — the unified champion the metrics pages describe, not
+        # the newest active row (which may be a segment model or challenger).
+        active_model = monitoring_model_version()
 
         # Daily application volume (last 30 days)
         thirty_days_ago = now - timedelta(days=30)
@@ -299,15 +325,21 @@ class ComplaintViewSet(viewsets.ModelViewSet):
 
     serializer_class = ComplaintSerializer
     permission_classes = [permissions.IsAuthenticated]
+    # No DELETE: a complaint is an IDR record (ASIC RG 271) that must be kept.
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    # Fields whose before/after values go into the audit row. Free text
+    # (subject, description, resolution) is recorded by name only.
+    _AUDITED_VALUES = ("status", "category", "loan_application_id", "resolved_at")
 
     def get_queryset(self):
         user = self.request.user
-        if user.role in ("admin", "officer"):
+        if is_staff_role(user):
             return Complaint.objects.all().select_related("complainant", "loan_application")
         return Complaint.objects.filter(complainant=user).select_related("loan_application")
 
     def get_permissions(self):
-        if self.action in ("update", "partial_update", "destroy"):
+        if self.action in ("update", "partial_update"):
             return [permissions.IsAuthenticated(), IsAdminOrOfficer()]
         return [permissions.IsAuthenticated()]
 
@@ -315,6 +347,21 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return [ComplaintFilingThrottle()]
         return super().get_throttles()
+
+    def perform_update(self, serializer):
+        """Staff edits are audited with every changed field."""
+        before = snapshot(serializer.instance)
+        with transaction.atomic():
+            updated = serializer.save()
+            details = field_change_details(before, updated, values_for=self._AUDITED_VALUES)
+            AuditLog.objects.create(
+                user=self.request.user,
+                action="complaint_updated",
+                resource_type="Complaint",
+                resource_id=str(updated.pk),
+                details=details,
+                ip_address=client_ip(self.request),
+            )
 
 
 class DecisionReviewFilingThrottle(UserRateThrottle):
@@ -331,11 +378,18 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = DecisionReview.objects.select_related("application", "requested_by")
-        if user.role not in ("admin", "officer"):
+        # Reviews of a soft-deleted application go with it.
+        qs = DecisionReview.objects.select_related("application", "requested_by").filter(
+            application__deleted_at__isnull=True
+        )
+        if not is_staff_role(user):
             qs = qs.filter(requested_by=user)
         application_id = self.request.query_params.get("application")
         if application_id:
+            try:
+                application_id = uuid.UUID(application_id)
+            except ValueError as exc:
+                raise drf_serializers.ValidationError({"application": "must be a UUID"}) from exc
             qs = qs.filter(application_id=application_id)
         return qs
 
@@ -354,27 +408,22 @@ class DecisionReviewViewSet(viewsets.ModelViewSet):
     def resolve(self, request, pk=None):
         review = self.get_object()
         outcome = request.data.get("outcome")
-        note = request.data.get("note", "")
+        note = request.data.get("note")
+        if note is None:
+            note = ""
+        if not isinstance(note, str):
+            return Response({"detail": "note must be a string"}, status=400)
         if len(note) > 4000:
             return Response({"detail": "note must be 4000 characters or fewer"}, status=400)
         if outcome not in ("upheld", "overturned"):
             return Response({"detail": "outcome must be 'upheld' or 'overturned'"}, status=400)
 
-        # Optional maker/checker gate on high-value overturns. Default mode is
-        # "off" — no behaviour change until an operator opts in.
-        if outcome == "overturned":
-            mode = normalize_overturn_mode(getattr(settings, "DECISION_OVERTURN_GATE_MODE", "off"))
-            gate = evaluate_overturn_gate(
-                amount=float(review.application.loan_amount or 0),
-                threshold=getattr(settings, "DECISION_OVERTURN_THRESHOLD", 100000.0),
-                mode=mode,
-                officer_has_2fa=request.user.has_confirmed_totp(),
-            )
-            if not gate["allowed"]:
-                return Response({"detail": gate["reason"]}, status=403)
-
+        # The overturn maker/checker gate is enforced inside
+        # apply_review_outcome, so the Django admin cannot skip it.
         try:
             updated = apply_review_outcome(review, officer=request.user, outcome=outcome, note=note)
+        except OverturnGateBlocked as exc:
+            return Response({"detail": str(exc)}, status=403)
         except (ValueError, LoanApplication.InvalidStateTransition) as exc:
             return Response({"detail": str(exc)}, status=409)
         return Response(DecisionReviewSerializer(updated, context={"request": request}).data)

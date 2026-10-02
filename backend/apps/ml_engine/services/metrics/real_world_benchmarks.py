@@ -503,7 +503,7 @@ class RealWorldBenchmarks:
           3 = Persons, 7 = Private+Public, TOT = All Industries,
           10 = Original, region code, S = Half-yearly
         """
-        from .external.macro_data import _ABS_STATE_CODES
+        from ..external.macro_data import _ABS_STATE_CODES
 
         state_code = _ABS_STATE_CODES.get(state, "AUS")
         sdmx_key = f"1.1.3.7.TOT.10.{state_code}.S"

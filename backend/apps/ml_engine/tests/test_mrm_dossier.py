@@ -22,6 +22,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -282,7 +284,7 @@ def test_purpose_section_default_mode_emits_shadow_wording():
     assert "must be treated as advisory" not in md
 
 
-def test_purpose_section_enforce_mode_emits_mandatory_referral():
+def test_purpose_section_enforce_mode_describes_blocks_and_recorded_refers():
     from django.test import override_settings
 
     from apps.ml_engine.services.governance.mrm_dossier import generate_dossier_markdown
@@ -296,7 +298,10 @@ def test_purpose_section_enforce_mode_emits_mandatory_referral():
 
     assert "`enforce` mode" in md
     assert "blocked by the overlay" in md
-    assert "routed to manual underwriter review" in md
+    # Refers no longer route to review (that queue is bias-only): the dossier
+    # must describe what enforce mode actually does with them.
+    assert "recorded on the decision as refer reasons" in md
+    assert "routed to manual underwriter review" not in md
 
 
 def test_purpose_section_off_mode_emits_no_overlay_message():
@@ -593,3 +598,13 @@ def test_write_dossier_creates_file_at_expected_path():
         content = p.read_text(encoding="utf-8")
         assert "## 1. Header" in content
         assert "## 11. Change log" in content
+
+
+def test_write_dossier_refuses_a_sibling_directory_that_shares_the_prefix(tmp_path, settings):
+    """A str.startswith guard let ``<ML_MODELS_DIR>_evil`` through."""
+    from apps.ml_engine.services.governance.mrm_dossier import write_dossier
+
+    settings.ML_MODELS_DIR = tmp_path / "ml_models"
+    settings.ML_MODELS_DIR.mkdir()
+    with pytest.raises(ValueError, match="path traversal blocked"):
+        write_dossier(_make_compliant_mv(), str(tmp_path / "ml_models_evil"))

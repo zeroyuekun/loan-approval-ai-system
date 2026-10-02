@@ -51,7 +51,7 @@ Subject: Next steps for your AussieLoanAI loan application
 
 Dear {applicant_first_name},
 
-We appreciate your interest in banking with AussieLoanAI and we've put together some options that might work better for you:
+Following your recent loan application with us, we've looked at your profile and there are a few options worth considering:
 
 [FOR EACH OFFER in the OFFER DATA above, output one block in this exact format. Output up to 3 offers.]
 
@@ -65,8 +65,8 @@ Option [N]: [Offer Name]
 
 [END FOR EACH]
 
-If any of these options interest you, I'd be happy to talk them through with you. You can contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-Thanks for coming to us, {applicant_first_name}. We'd love to help you find the right option when you're ready.
+If any of these options interest you, I'd be happy to talk them through with you. Call me on 1300 000 000 (Mon\u2013Fri, 8:30am\u20135:30pm AEST) or reply to this email.
+Thanks for coming to us, {applicant_first_name}. When you're ready, we'd like to help you find the right option.
 
 Kind regards,
 Sarah Mitchell
@@ -201,6 +201,19 @@ class MarketingAgent:
         try:
             response = guarded_api_call(
                 self.client,
+                _service="marketing_email",
+                _loan_application_id=application.pk,
+                # MARKETING_EMAIL_PROMPT interpolates name, loan amount, credit
+                # score, income, employment, decline factors and banking profile.
+                _pii_categories=[
+                    "name",
+                    "loan_amount",
+                    "credit_score",
+                    "income",
+                    "employment",
+                    "credit_assessment",
+                    "financial_profile",
+                ],
                 model="claude-sonnet-4-6",
                 max_tokens=1500,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
@@ -344,10 +357,10 @@ class MarketingAgent:
                 f"profile and there are a few options worth considering.\n\n"
                 f"{offers_text}\n\n"
                 f"If any of these options interest you, I'd be happy to talk them through "
-                f"with you. You can contact me directly at 1300 000 000 "
-                f"(Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.\n"
-                f"Thanks for coming to us, {first_name}. We'd love to help you find the "
-                f"right option when you're ready.\n\n"
+                f"with you. Call me on 1300 000 000 "
+                f"(Mon\u2013Fri, 8:30am\u20135:30pm AEST) or reply to this email.\n"
+                f"Thanks for coming to us, {first_name}. When you're ready, we'd like to "
+                f"help you find the right option.\n\n"
                 f"Kind regards,\n"
                 f"Sarah Mitchell\n"
                 f"Senior Lending Officer\n"

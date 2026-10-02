@@ -22,4 +22,11 @@ class EmailBackendError(Exception):
     compliant email. A 429 is handled separately as ``RateLimited`` (Celery
     retry); programming errors (AttributeError, KeyError, ...) are NOT wrapped in
     this, so they still surface as real bugs.
+
+    ``status_code`` is the provider's HTTP status, or None for a transport
+    failure; the circuit breaker uses it to tell a transient 5xx from a 4xx.
     """
+
+    def __init__(self, message="", status_code=None):
+        self.status_code = status_code
+        super().__init__(message)

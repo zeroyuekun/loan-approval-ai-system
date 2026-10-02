@@ -26,14 +26,13 @@ class CookieJWTAuthentication(JWTAuthentication):
     def authenticate(self, request):
         cookie_name = getattr(settings, "JWT_ACCESS_COOKIE_NAME", "access_token")
         raw_token = request.COOKIES.get(cookie_name)
+        if raw_token is None:
+            return super().authenticate(request)
 
-        if raw_token is not None:
-            validated_token = self.get_validated_token(raw_token)
-            user = self.get_user(validated_token)
-            self._enforce_csrf(request)
-            return user, validated_token
-
-        return super().authenticate(request)
+        validated_token = self.get_validated_token(raw_token)
+        user = self.get_user(validated_token)
+        self._enforce_csrf(request)
+        return user, validated_token
 
     def _enforce_csrf(self, request):
         check = _CSRFCheck(lambda r: None)

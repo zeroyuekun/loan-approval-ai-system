@@ -13,6 +13,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.loans.models import AuditLog
 
 
 @override_settings(
@@ -42,7 +43,10 @@ class DeletedUserTokenRefreshTests(TestCase):
 
     def test_refresh_with_deleted_user_returns_401_not_500(self):
         self._login()
-        # Delete the user AFTER the token was issued — simulates the race
+        # Delete the user AFTER the token was issued — simulates the race.
+        # AuditLog.user is PROTECT (an audited user cannot be deleted), so
+        # drop the login's audit rows first to reach the missing-user path.
+        AuditLog.objects.filter(user=self.user).delete()
         self.user.delete()
 
         resp = self.client.post("/api/v1/auth/refresh/")

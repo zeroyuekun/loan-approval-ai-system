@@ -3,7 +3,9 @@ apiVersion: 1
 groups:
   - orgId: 1
     name: Loan Approval Alerts
-    folder: General
+    # Not "General": Grafana 11 reserves that name, and provisioning into it
+    # fails with "A folder with that name already exists", which stops Grafana.
+    folder: Loan Approval
     interval: 1m
     rules:
       - uid: high-error-rate
@@ -150,6 +152,11 @@ groups:
         labels:
           severity: warning
 
+      # The ml-* rules below read ml_* metrics, which are incremented inside
+      # Celery worker processes. Workers expose no /metrics endpoint yet, so
+      # these rules only see predictions made in web requests (see the header
+      # of monitoring/prometheus/alert_rules.yml). Worker-side failures and
+      # latency are covered by the celery-exporter rules in Prometheus.
       - uid: ml-prediction-latency-high
         title: ML Prediction Latency p95 > 3s
         condition: C
@@ -286,7 +293,10 @@ groups:
                     type: and
                   query:
                     params: [A]
-        noDataState: Alerting
+        # OK, not Alerting: ml_predictions_total has no series until a web
+        # request makes a prediction (workers are not scraped), so "no data"
+        # would page permanently now that alerts reach Alertmanager.
+        noDataState: OK
         execErrState: Error
         for: 10m
         annotations:

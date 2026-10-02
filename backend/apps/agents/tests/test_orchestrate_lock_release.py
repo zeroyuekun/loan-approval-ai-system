@@ -4,9 +4,10 @@ Before the fix: when autoretry_for exhausted all retries, Celery called
 on_failure but the base Task.on_failure did nothing about the dedup lock,
 leaving it held for the full TTL (~600 s).
 
-After the fix: _OrchestrateTask.on_failure releases the lock when
-self.request.retries >= self.max_retries (terminal failure), while keeping
-the lock alive DURING retries (M22 safety).
+After the fix: _OrchestrateTask.on_failure releases the lock on any terminal
+failure. Celery calls on_failure only for terminal failures (a scheduled
+autoretry goes through on_retry), so the lock stays alive DURING retries
+(M22 safety) without a retries check (I9 removed one that skipped cleanup).
 
 Strategy: we test the lock-management logic in isolation by calling
 _OrchestrateTask.on_failure as an unbound method with a duck-typed self
@@ -79,8 +80,12 @@ class TestOrchestrateTaskOnFailure:
         mock_cleanup.assert_called_once_with(app_id)
 
     @CACHE_OVERRIDE
-    def test_lock_kept_during_retry(self):
-        """Mid-retry failure (retries < max_retries) must NOT release the lock."""
+    def test_terminal_failure_before_max_retries_cleans_up(self):
+        """I9: Celery calls on_failure only for a TERMINAL failure. A scheduled
+        autoretry goes through on_retry, so the lock stays held during retries
+        without any check here. A non-retryable error (or a time limit) on
+        retry 1 is terminal too; previously the retries >= max_retries guard
+        skipped cleanup and left the application in PROCESSING."""
         from django.core.cache import cache
 
         app_id = "RetryApp-001"
@@ -91,9 +96,8 @@ class TestOrchestrateTaskOnFailure:
 
         mock_cleanup = _invoke_on_failure(retries=1, max_retries=3, args=[app_id], kwargs={})
 
-        # Lock must still be held so the next retry is protected (M22)
-        assert cache.get(lock_key) is not None, "Dedup lock must be kept alive during retries (M22)"
-        mock_cleanup.assert_not_called()
+        assert cache.get(lock_key) is None
+        mock_cleanup.assert_called_once_with(app_id)
 
     @CACHE_OVERRIDE
     def test_lock_released_when_application_id_from_kwargs(self):
@@ -128,17 +132,20 @@ class TestOrchestrateTaskOnFailure:
         assert cache.get(lock_key) is None
 
     @CACHE_OVERRIDE
-    def test_lock_kept_at_zero_retries(self):
-        """First failure attempt (retries=0, max_retries=3) must not release the lock."""
+    def test_lock_released_on_first_attempt_terminal_failure(self):
+        """I9: on_failure at retries=0 means the first attempt failed with a
+        non-retryable error (a scheduled autoretry calls on_retry instead,
+        celery.app.trace.handle_retry). That is terminal: clean up and release."""
         from django.core.cache import cache
 
         app_id = "ZeroRetryApp-001"
         lock_key = f"orchestrate_lock:{app_id}"
         cache.add(lock_key, "task-z", 600)
 
-        _invoke_on_failure(retries=0, max_retries=3, args=[app_id], kwargs={})
+        mock_cleanup = _invoke_on_failure(retries=0, max_retries=3, args=[app_id], kwargs={})
 
-        assert cache.get(lock_key) is not None
+        assert cache.get(lock_key) is None
+        mock_cleanup.assert_called_once_with(app_id)
 
 
 class TestOrchestrateRetryReentrancy:

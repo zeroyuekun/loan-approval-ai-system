@@ -12,6 +12,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from apps.agents.models import AgentRun
 from apps.loans.models import AuditLog, LoanApplication
 
 BATCH_URL = "/api/v1/agents/orchestrate-all/"
@@ -107,7 +108,8 @@ class TestBatchOrchestrateCap:
         from apps.agents.views import BATCH_ORCHESTRATE_MAX
 
         for _ in range(BATCH_ORCHESTRATE_MAX + 50):
-            _make_application(customer_user, status_value=LoanApplication.Status.REVIEW)
+            app = _make_application(customer_user, status_value=LoanApplication.Status.REVIEW)
+            AgentRun.objects.create(application=app, status=AgentRun.Status.ESCALATED)
 
         response, mock_delay, cap = self._post(admin_user, query="recheck=true")
 
@@ -116,6 +118,23 @@ class TestBatchOrchestrateCap:
         assert body["queued"] == cap
         assert body["skipped"] == 50
         assert mock_delay.call_count == cap
+
+    def test_recheck_leaves_a_claimed_review_alone(self, admin_user, customer_user):
+        """A reviewer has claimed the run (RUNNING) and its resume is in flight:
+        the recheck must not move the application to pending or re-run it."""
+        claimed = _make_application(customer_user, status_value=LoanApplication.Status.REVIEW)
+        AgentRun.objects.create(application=claimed, status=AgentRun.Status.RUNNING)
+        queued = _make_application(customer_user, status_value=LoanApplication.Status.REVIEW)
+        AgentRun.objects.create(application=queued, status=AgentRun.Status.ESCALATED)
+
+        response, mock_delay, _ = self._post(admin_user, query="recheck=true")
+
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        dispatched = {str(call.args[0]) for call in mock_delay.call_args_list}
+        assert str(claimed.pk) not in dispatched
+        claimed.refresh_from_db()
+        assert claimed.status == LoanApplication.Status.REVIEW
+        assert dispatched == {str(queued.pk)}
 
     def test_oldest_first_ordering_on_default_path(self, admin_user, customer_user):
         from datetime import timedelta

@@ -10,7 +10,7 @@ Covers the two pure functions carved out of `ModelPredictor`:
 - `run_stress_scenarios(features, threshold, model, transform_fn, feature_cols)`
   — runs four APS-110-flavoured adverse scenarios (income −15%, property
   value −20%, credit score −50, combined) and reports probability + decision
-  per scenario. Distinct from `stress_testing.py` which is portfolio-level.
+  per scenario.
 
 Both functions are pure — no Django ORM, no module state — so tests can use
 plain in-memory mocks.

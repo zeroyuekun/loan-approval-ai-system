@@ -4,7 +4,9 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.models import CustomerProfile
+from apps.accounts.policy import is_staff_role
 from apps.accounts.serializers import UserSerializer
+from apps.common.http import client_ip
 from utils.pii_masking import PIIMaskingMixin, mask_credit_score, mask_currency
 
 from .models import AuditLog, Complaint, DecisionReview, FraudCheck, LoanApplication, LoanDecision
@@ -147,6 +149,21 @@ class LoanApplicationSerializer(serializers.ModelSerializer):
             "consumer_requirements",
             "financial_situation_notes",
         )
+
+    def validate(self, attrs):
+        instance = self.instance
+        if instance is not None and instance.decision_inputs_frozen():
+            frozen = {
+                name: (
+                    f"Cannot change a decision input once the application has been assessed "
+                    f"(status '{instance.status}')."
+                )
+                for name, value in attrs.items()
+                if name in LoanApplication.DECISION_INPUT_FIELDS and value != getattr(instance, name)
+            }
+            if frozen:
+                raise serializers.ValidationError(frozen)
+        return attrs
 
     def get_latest_fraud_check(self, obj):
         # Use .all() to hit the prefetch cache — .first() bypasses it and causes N+1
@@ -305,12 +322,24 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    # IDR workflow state: set by staff (or by the server on create), never by
+    # the complainant, so a complaint cannot be filed already closed.
+    STAFF_MANAGED_FIELDS = ("status", "resolution", "resolved_at")
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request is None or not is_staff_role(request.user):
+            for name in self.STAFF_MANAGED_FIELDS:
+                fields[name].read_only = True
+        return fields
+
     def validate_loan_application(self, value):
         if value is None:
             return value
         request = self.context["request"]
         user = request.user
-        if getattr(user, "role", None) in ("admin", "officer"):
+        if is_staff_role(user):
             return value
         if value.applicant_id != user.id:
             raise serializers.ValidationError("You can only file complaints on your own applications.")
@@ -346,7 +375,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
                 "loan_application_id": str(loan_app.id) if loan_app else None,
                 "on_behalf_of_id": on_behalf_of_id,
             },
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return instance
@@ -402,6 +431,6 @@ class DecisionReviewSerializer(serializers.ModelSerializer):
             resource_type="DecisionReview",
             resource_id=str(instance.id),
             details={"application_id": str(instance.application_id)},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
         return instance

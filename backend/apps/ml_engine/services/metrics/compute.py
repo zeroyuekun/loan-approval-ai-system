@@ -246,8 +246,10 @@ class MetricsService:
                 "bins": [],
             }
 
-        expected_counts = np.histogram(expected, bins=bin_edges)[0]
-        actual_counts = np.histogram(actual, bins=bin_edges)[0]
+        # Open-ended outer bins, as in the canonical drift_monitor primitive:
+        # values outside the reference range are counted, not dropped.
+        expected_counts = drift_monitor.open_edge_counts(expected, bin_edges)
+        actual_counts = drift_monitor.open_edge_counts(actual, bin_edges)
 
         # Convert to proportions using the SAME scheme as the canonical
         # drift_monitor.compute_psi: epsilon REPLACES zeros only, with NO

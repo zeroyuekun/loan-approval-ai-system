@@ -1,3 +1,21 @@
+# Prometheus alert rules.
+#
+# Where the metrics come from (job names match monitoring/prometheus.yml):
+#   django-backend    - gunicorn web process: django_*, process_*, and any app
+#                       metric incremented inside a web request.
+#   celery-exporter   - celery_task_* / celery_queue_length / celery_worker_up,
+#                       built from worker task events (workers run with -E).
+#   postgres-exporter - pg_*.
+#
+# Celery worker processes expose no /metrics endpoint, so app metrics that are
+# only incremented inside a worker (ml_predictions_total,
+# ml_prediction_latency_seconds, pipeline_e2e_seconds, and email_generation_total
+# for pipeline emails) are not scraped. Worker-side alerts below therefore use
+# the exporter's task metrics. The rules in the "web_process_metrics" group
+# only see work done inside web requests until workers get a metrics endpoint.
+#
+# CI runs `promtool check rules` on this file (.github/workflows/validate-infra.yml).
+
 groups:
   - name: loan_approval_alerts
     rules:
@@ -7,51 +25,91 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Celery queue {{ $labels.queue }} has {{ $value }} pending tasks — check worker capacity"
+          summary: "Celery queue {{ $labels.queue_name }} has {{ $value }} pending tasks — check worker capacity"
 
-      - alert: APIBudgetHigh
-        expr: ai_budget_daily_calls > 400
+      - alert: CeleryWorkerDown
+        expr: celery_worker_up == 0
         for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Claude API daily call count is {{ $value }} (80% of 500 budget) — throttle or review usage"
-
-      - alert: CircuitBreakerTripped
-        expr: ai_circuit_breaker_status == 1
-        for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "AI circuit breaker is OPEN — Claude API calls are being blocked"
+          summary: "Celery worker {{ $labels.hostname }} has stopped sending heartbeats"
+
+      - alert: CeleryTaskFailureRate
+        # Share of executions that raised, per task name, for the tasks that
+        # carry a loan decision. The `or ... * 0` keeps the ratio defined when
+        # a task has failures but no successes in the window.
+        expr: |
+          sum by (name) (rate(celery_task_failed_total{name=~"apps\\.(agents\\.tasks\\.(orchestrate|resume)_pipeline_task|email_engine\\.tasks\\.generate_email_task|ml_engine\\.tasks\\.run_prediction_task)"}[15m]))
+          /
+          (
+            (
+              sum by (name) (rate(celery_task_succeeded_total{name=~"apps\\.(agents\\.tasks\\.(orchestrate|resume)_pipeline_task|email_engine\\.tasks\\.generate_email_task|ml_engine\\.tasks\\.run_prediction_task)"}[15m]))
+              or
+              sum by (name) (rate(celery_task_failed_total{name=~"apps\\.(agents\\.tasks\\.(orchestrate|resume)_pipeline_task|email_engine\\.tasks\\.generate_email_task|ml_engine\\.tasks\\.run_prediction_task)"}[15m])) * 0
+            )
+            +
+            sum by (name) (rate(celery_task_failed_total{name=~"apps\\.(agents\\.tasks\\.(orchestrate|resume)_pipeline_task|email_engine\\.tasks\\.generate_email_task|ml_engine\\.tasks\\.run_prediction_task)"}[15m]))
+          )
+          > 0.05
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.name }} failure rate {{ $value | humanizePercentage }} > 5%"
+          description: "Decision tasks are raising. Check worker logs, model availability, the Claude API and recent deploys."
+
+      - alert: PipelineE2ESLOBurn
+        # SLO: p95 pipeline_e2e < 30s (docs/slo.md). Page when p95 > 60s
+        # sustained, double the SLO. Measured as the orchestrator task runtime
+        # from celery-exporter, because pipeline_e2e_seconds lives in the worker
+        # and is not scraped. Runtime excludes queue wait, which
+        # CeleryQueueBacklog covers. Needs CE_BUCKETS to include 60.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(celery_task_runtime_bucket{name="apps.agents.tasks.orchestrate_pipeline_task"}[5m]))
+          ) > 60
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pipeline p95 runtime {{ $value }}s exceeds 2x the SLO (30s)"
+          description: "Decision pipeline p95 > 60s for 30 minutes — investigate orchestrator, Celery queue depth, Claude API latency."
 
       - alert: DBConnectionPoolHigh
-        expr: pg_stat_activity_count / pg_settings_max_connections > 0.8
+        # pg_stat_activity_count is split by datname/state; aggregate both
+        # sides so the division has matching (empty) label sets.
+        expr: sum(pg_stat_activity_count) / max(pg_settings_max_connections) > 0.8
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "PostgreSQL connection usage is at {{ $value | humanizePercentage }} of max — risk of pool exhaustion"
 
+  - name: web_process_metrics
+    rules:
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="django-backend"} > 500 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Django web process using >500MB memory"
+          description: "Check for memory leaks in model cache or guardrail processing."
+
       - alert: HighPredictionLatency
-        expr: histogram_quantile(0.95, sum(rate(ml_prediction_latency_seconds_bucket[5m])) by (le)) > 5
+        expr: histogram_quantile(0.95, sum(rate(ml_prediction_latency_seconds_bucket{job="django-backend"}[5m])) by (le)) > 5
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "ML prediction p95 latency is {{ $value }}s (threshold 5s) — check model complexity or resource contention"
 
-      - alert: HighMemoryUsage
-        expr: process_resident_memory_bytes{job="django"} > 500 * 1024 * 1024
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Django process using >500MB memory"
-          description: "Check for memory leaks in model cache or guardrail processing."
-
       - alert: PredictionErrorRate
-        expr: rate(ml_predictions_total{decision="error"}[5m]) / rate(ml_predictions_total[5m]) > 0.05
+        expr: |
+          sum(rate(ml_predictions_total{job="django-backend", decision="error"}[5m]))
+          /
+          sum(rate(ml_predictions_total{job="django-backend"}[5m])) > 0.05
         for: 2m
         labels:
           severity: critical
@@ -59,42 +117,13 @@ groups:
           summary: "ML prediction error rate >5%"
           description: "More than 5% of predictions are failing. Check model availability."
 
-      - alert: GuardrailViolationRate
-        expr: rate(guardrail_checks_total{result="fail"}[1h]) / rate(guardrail_checks_total[1h]) > 0.30
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Email guardrail failure rate >30%"
-          description: "High guardrail failure rate may indicate prompt drift or template issues."
-
-      - alert: WorkerMemoryLeak
-        expr: rate(process_resident_memory_bytes{job=~"celery.*"}[1h]) > 10 * 1024 * 1024
-        for: 30m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Celery worker memory growing >10MB/hour"
-          description: "Possible memory leak in worker process. Consider restarting."
-
-      - alert: PipelineE2ESLOBurn
-        # SLO: p95 pipeline_e2e < 30s. Page when p95 > 60s sustained
-        # — that's double the SLO and the burn-rate threshold in docs/slo.md.
-        expr: histogram_quantile(0.95, sum(rate(pipeline_e2e_seconds_bucket[5m])) by (le)) > 60
-        for: 30m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Pipeline p95 latency {{ $value }}s exceeds SLO (30s)"
-          description: "Decision pipeline p95 > 60s for 30 minutes — investigate orchestrator, Celery queue depth, Claude API latency."
-
       - alert: EmailGenerationErrorBudgetBurn
         # SLO: >=98% success rate. Alert when success rate dips below 95%
         # for 15m — burning the monthly 2% error budget in <1 day.
         expr: |
-          sum(rate(email_generation_total{status!="success"}[15m]))
+          sum(rate(email_generation_total{job="django-backend", status!="success"}[15m]))
           /
-          sum(rate(email_generation_total[15m])) > 0.05
+          sum(rate(email_generation_total{job="django-backend"}[15m])) > 0.05
         for: 15m
         labels:
           severity: warning

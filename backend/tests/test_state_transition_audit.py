@@ -52,8 +52,9 @@ def pending_application(db, audit_user):
 
 @pytest.mark.django_db
 def test_orchestrator_ml_failure_writes_transition_auditlog(pending_application):
-    """Forcing ML prediction to fail routes the app to REVIEW — that
-    processing→review transition must produce an AuditLog row."""
+    """Forcing ML prediction to fail returns the app to PENDING (the review
+    queue is only for bias flags) — that processing→pending transition must
+    produce an AuditLog row."""
     baseline_transitions = AuditLog.objects.filter(
         resource_type="LoanApplication",
         resource_id=str(pending_application.id),
@@ -68,21 +69,21 @@ def test_orchestrator_ml_failure_writes_transition_auditlog(pending_application)
         PipelineOrchestrator().orchestrate(pending_application.id)
 
     pending_application.refresh_from_db()
-    assert pending_application.status == LoanApplication.Status.REVIEW
+    assert pending_application.status == LoanApplication.Status.PENDING
 
     new_transitions = AuditLog.objects.filter(
         resource_type="LoanApplication",
         resource_id=str(pending_application.id),
         action="status_transition",
     ).order_by("timestamp")
-    # Expected: pending→processing (line 141) + processing→review (ML fail handler) = 2
+    # Expected: pending→processing (orchestrator entry) + processing→pending (ML fail handler) = 2
     new_count = new_transitions.count() - baseline_transitions
     assert new_count == 2, (
-        f"Expected 2 new status_transition AuditLog rows (pending→processing, processing→review); got {new_count}"
+        f"Expected 2 new status_transition AuditLog rows (pending→processing, processing→pending); got {new_count}"
     )
     last = new_transitions.last()
     assert last.details.get("from_status") == "processing"
-    assert last.details.get("to_status") == "review"
+    assert last.details.get("to_status") == "pending"
     assert last.details.get("source") == "orchestrator_ml_prediction_failure"
 
 

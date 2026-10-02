@@ -5,6 +5,7 @@ import time
 import anthropic
 import httpx
 
+from apps.ml_engine.services.scoring.decision_assembly import POLICY_DECLINE_PREFIX, PRICING_TIER_DECLINE
 from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
@@ -233,13 +234,47 @@ class EmailGenerator:
         "bnpl_monthly_commitment": "Your buy-now-pay-later commitments reduce the amount we can lend",
     }
 
-    def _format_denial_reasons(self, feature_importances, shap_values=None):
+    # Lending rules that can decline an application the model approved. The
+    # decision waterfall records them by these codes (decision_assembly), and
+    # they, not the model's feature attributions, are why the loan was declined.
+    DECLINE_RULE_REASON_MAP = {
+        PRICING_TIER_DECLINE: "The assessed risk for this loan is above the level we can offer a rate for",
+        f"{POLICY_DECLINE_PREFIX}P01": "Your residency status doesn't meet the eligibility requirements for this loan",
+        f"{POLICY_DECLINE_PREFIX}P02": "The loan term doesn't meet our age eligibility requirements",
+        f"{POLICY_DECLINE_PREFIX}P03": "There's a current or recent bankruptcy on your credit file",
+        f"{POLICY_DECLINE_PREFIX}P04": "There's an outstanding tax debt default recorded against you",
+        f"{POLICY_DECLINE_PREFIX}P05": "Your credit score is below the minimum we lend at",
+        f"{POLICY_DECLINE_PREFIX}P06": "The loan amount is too high relative to the property value",
+        f"{POLICY_DECLINE_PREFIX}P07": "Your total debt is too high relative to your income",
+    }
+
+    def _decline_rule_reasons(self, decision_waterfall):
+        """Plain-language reasons for the lending rules that declined the application, or []."""
+        reasons = []
+        for entry in decision_waterfall or []:
+            code = entry.get("reason_code") if isinstance(entry, dict) else None
+            if code == PRICING_TIER_DECLINE or (code or "").startswith(POLICY_DECLINE_PREFIX):
+                reason = self.DECLINE_RULE_REASON_MAP.get(code, "Your application didn't meet our lending policy")
+                if reason not in reasons:
+                    reasons.append(reason)
+        return reasons
+
+    def _format_denial_reasons(self, feature_importances, shap_values=None, decision_waterfall=None):
         """Convert per-applicant SHAP values to plain-language denial reasons.
 
-        Prefers SHAP values (per-applicant, explains why THIS person was denied)
-        over global feature importances (model-wide weights, same for everyone).
-        Falls back to global importances when SHAP values are unavailable.
+        A lending rule that declined a model approval (pricing tier, credit
+        policy) is the reason when the decision waterfall records one: the
+        attributions explain the model's score, which was an approval.
+
+        Otherwise prefers SHAP values (per-applicant, explains why THIS person
+        was denied) over global feature importances (model-wide weights, same
+        for everyone). Falls back to global importances when SHAP values are
+        unavailable.
         """
+        rule_reasons = self._decline_rule_reasons(decision_waterfall)
+        if rule_reasons:
+            return "; ".join(rule_reasons)
+
         if not feature_importances and not shap_values:
             return "Credit assessment criteria not met"
 
@@ -266,29 +301,63 @@ class EmailGenerator:
     def _render_nbo_block(self, nbo_offer):
         """Render a neutral, factual alternative-offer teaser for denial emails.
 
-        No apology/emotion language (locked project rule). Returns "" when no
-        usable offer is supplied so the prompt is unchanged.
+        Delegates to ``template_fallback.render_nbo_block`` (shared by this
+        LLM prompt path and the deterministic template path).
+        """
+        from .template_fallback import render_nbo_block
+
+        return render_nbo_block(nbo_offer)
+
+    @staticmethod
+    def _add_nbo_context(context, nbo_offer):
+        """Add the next-best-offer figures to the guardrail context, if present.
+
+        Shared by the LLM path (``generate``) and the template path
+        (``generate_template`` / ``_generate_fallback``) so both whitelist the
+        teaser's dollar figure and rate against the hallucinated-numbers
+        guardrail (engine.py) the same way.
         """
         if not nbo_offer:
-            return ""
-        name = nbo_offer.get("name") or nbo_offer.get("type")
-        amount = nbo_offer.get("amount")
-        if not name or amount is None:
-            return ""
-        rate = nbo_offer.get("estimated_rate")
-        monthly = nbo_offer.get("monthly_repayment")
-        headline = f"${float(amount):,.0f}"
-        if rate:
-            headline += f" at {float(rate):.2f}% p.a."
-        if monthly:
-            headline += f", around ${float(monthly):,.0f}/month"
-        return (
-            "A specific option you may qualify for now:\n"
-            f"  •  {name}: {headline}\n"
-            "You can discuss this option using the contact details below."
-        )
+            return
+        nbo_amounts = nbo_offer_amounts([nbo_offer])
+        if nbo_amounts:
+            context["nbo_amounts"] = nbo_amounts
+        # The offer itself carries estimated_rate, so the teaser's
+        # "at X% p.a." is validated against the real rate (S1-F1).
+        context["nbo_offers"] = [nbo_offer]
 
-    def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
+    @staticmethod
+    def _applicant_name(application):
+        applicant_name = _sanitize_prompt_input(
+            f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
+            max_length=200,
+        )
+        if not applicant_name:
+            applicant_name = _sanitize_prompt_input(application.applicant.username, max_length=200)
+        return applicant_name
+
+    def _base_context(self, application, decision):
+        """Guardrail context shared by the LLM and template paths."""
+        return {
+            "applicant_name": self._applicant_name(application),
+            "loan_amount": float(application.loan_amount),
+            "purpose": application.get_purpose_display(),
+            "decision": decision,
+        }
+
+    def generate_template(self, application, decision, profile_context=None):
+        """Issue the deterministic, guardrail-checked template email directly.
+
+        Used by callers that must degrade without an LLM round trip (for
+        example on a provider 429 outside the Celery email task). ``profile_context``
+        carries ``nbo_offer`` for denials, exactly like the LLM path in ``generate()``.
+        """
+        context = self._base_context(application, decision)
+        if decision != "approved":
+            self._add_nbo_context(context, (profile_context or {}).get("nbo_offer"))
+        return self._generate_fallback(application, decision, context, time.time())
+
+    def generate(self, application, decision, attempt=1, confidence=None, profile_context=None, bias_feedback=None):
         """Generate an approval/denial email for the given loan application."""
         # Reset retry state only on the first attempt (not recursive retries)
         if attempt == 1:
@@ -296,19 +365,8 @@ class EmailGenerator:
 
         start_time = time.time()
 
-        applicant_name = _sanitize_prompt_input(
-            f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
-            max_length=200,
-        )
-        if not applicant_name:
-            applicant_name = _sanitize_prompt_input(application.applicant.username, max_length=200)
-
-        context = {
-            "applicant_name": applicant_name,
-            "loan_amount": float(application.loan_amount),
-            "purpose": application.get_purpose_display(),
-            "decision": decision,
-        }
+        context = self._base_context(application, decision)
+        applicant_name = context["applicant_name"]
 
         # Build banking context string from profile data
         # Sanitize all string values to prevent prompt injection
@@ -340,6 +398,13 @@ class EmailGenerator:
             if profile_context.get("has_mortgage"):
                 lines.append("- Existing mortgage holder")
             banking_context = "\n".join(lines) if lines else banking_context
+
+        # APP 8: the personal-data categories this prompt actually carries.
+        pii_categories = ["name", "loan_amount", "credit_assessment"]
+        if decision == "approved":
+            pii_categories.append("employment")
+        if profile_context and banking_context != "No banking relationship data available":
+            pii_categories.append("financial_profile")
 
         # Resolve confidence: prefer explicit param, then decision model, then 0.0
         if confidence is None:
@@ -391,6 +456,7 @@ class EmailGenerator:
             reasons = self._format_denial_reasons(
                 decision_obj.feature_importances if decision_obj else None,
                 shap_values=decision_obj.shap_values if decision_obj else None,
+                decision_waterfall=decision_obj.decision_waterfall if decision_obj else None,
             )
             nbo_offer = (profile_context or {}).get("nbo_offer")
             alternative_offer = self._render_nbo_block(nbo_offer)
@@ -404,10 +470,16 @@ class EmailGenerator:
             )
             # Whitelist the teaser figures so the hallucinated-numbers guardrail
             # (engine.py:61) recognises them on the decision email.
-            if nbo_offer:
-                nbo_amounts = nbo_offer_amounts([nbo_offer])
-                if nbo_amounts:
-                    context["nbo_amounts"] = nbo_amounts
+            self._add_nbo_context(context, nbo_offer)
+
+        if bias_feedback:
+            prompt += (
+                "\n\n=== COMPLIANCE REVIEW FEEDBACK ===\n"
+                "A compliance reviewer flagged an earlier draft of this email for possible bias:\n"
+                f"{_sanitize_prompt_input(bias_feedback, max_length=2000)}\n\n"
+                "Write the email again so none of these issues appear. Describe the application and "
+                "its circumstances, never the person. Keep every required section.\n"
+            )
 
         # Add retry feedback if not first attempt.
         # The feedback is structured to tell Claude exactly what failed,
@@ -453,7 +525,7 @@ class EmailGenerator:
 
         budget = ApiBudgetGuard()
         try:
-            budget.check_budget()
+            budget.check_budget(provider=self.provider)
         except ApiGateClosed:
             # CircuitOpen: the shared breaker may have been tripped by ANOTHER
             # AI service's failures — the customer still gets a template email.
@@ -475,6 +547,9 @@ class EmailGenerator:
             # self.retry(countdown=...) and free the worker (M6/L25).
             response = guarded_api_call(
                 self.client,
+                _service="email_generation",
+                _loan_application_id=application.pk,
+                _pii_categories=pii_categories,
                 model=_model,
                 max_tokens=token_limit,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_DECISION_EMAIL", 0.0),
@@ -544,10 +619,30 @@ class EmailGenerator:
                 )
             self._last_feedback = "\n".join(feedback_parts)
             return self.generate(
-                application, decision, attempt=attempt + 1, confidence=confidence, profile_context=profile_context
+                application,
+                decision,
+                attempt=attempt + 1,
+                confidence=confidence,
+                profile_context=profile_context,
+                bias_feedback=bias_feedback,
             )
 
         _record_email_metric(decision=decision, source="claude_api", passed_guardrails=all_passed)
+
+        if not all_passed:
+            # Every LLM attempt failed the guardrails. The decision still has to
+            # reach the customer, so issue the compliant deterministic template
+            # (itself guardrail-checked) rather than withholding the notice.
+            # Only if the template ALSO fails is the email withheld.
+            logging.getLogger("email_engine.generator").warning(
+                "email LLM output failed guardrails on all %d attempts (%s) — issuing template",
+                attempt,
+                ", ".join(r["check_name"] for r in guardrail_results if not r["passed"]),
+            )
+            fallback = self._generate_fallback(application, decision, context, start_time)
+            fallback["attempt_number"] = attempt
+            fallback["prompt_used"] = "[TEMPLATE FALLBACK — LLM output failed guardrails on every attempt]"
+            return fallback
 
         return {
             "subject": subject,
@@ -561,6 +656,7 @@ class EmailGenerator:
             "template_fallback": False,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "model_used": f"{self.provider}:{_model}",
         }
 
     def _parse_tool_response(self, response):
@@ -633,13 +729,7 @@ class EmailGenerator:
         from .pricing import calculate_loan_pricing
         from .template_fallback import generate_approval_template, generate_denial_template
 
-        applicant_name = (
-            _sanitize_prompt_input(
-                f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
-                max_length=200,
-            )
-            or application.applicant.username
-        )
+        applicant_name = self._applicant_name(application)
 
         pricing = None
         if decision == "approved":
@@ -664,14 +754,19 @@ class EmailGenerator:
             # Gather rich denial context
             feature_importances = None
             shap_values = None
+            decision_waterfall = None
             if hasattr(application, "decision") and application.decision:
                 feature_importances = application.decision.feature_importances
                 shap_values = application.decision.shap_values
+                decision_waterfall = application.decision.decision_waterfall
 
-            denial_reasons = self._format_denial_reasons(feature_importances, shap_values=shap_values)
+            denial_reasons = self._format_denial_reasons(
+                feature_importances, shap_values=shap_values, decision_waterfall=decision_waterfall
+            )
 
             credit_score = getattr(application, "credit_score", None)
             debt_to_income = getattr(application, "debt_to_income", None)
+            nbo_offer = (context.get("nbo_offers") or [None])[0]
 
             result = generate_denial_template(
                 applicant_name,
@@ -682,6 +777,7 @@ class EmailGenerator:
                 credit_score=int(credit_score) if credit_score else None,
                 debt_to_income=float(debt_to_income) if debt_to_income else None,
                 employment_type=application.get_employment_type_display(),
+                nbo_offer=nbo_offer,
             )
 
         generation_time = int((time.time() - start_time) * 1000)
@@ -716,4 +812,5 @@ class EmailGenerator:
             "template_fallback": True,
             "input_tokens": 0,
             "output_tokens": 0,
+            "model_used": "template",
         }

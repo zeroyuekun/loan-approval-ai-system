@@ -34,8 +34,8 @@ def _capture_generate_kwargs():
 
 class TestEmailPipelineNboInjection:
     @patch("apps.email_engine.services.sender.send_decision_email")
-    @patch("apps.agents.services.email_pipeline.EmailGenerator")
-    @patch("apps.agents.services.email_pipeline.EmailPersistenceService")
+    @patch("apps.email_engine.services.decision_email.EmailGenerator")
+    @patch("apps.email_engine.services.decision_email.EmailPersistenceService")
     @patch("apps.agents.services.email_pipeline.RecommendationEngine")
     def test_denial_injects_best_offer_into_profile_context(
         self, mock_engine_cls, mock_persist, mock_gen_cls, mock_send
@@ -80,20 +80,22 @@ class TestEmailPipelineNboInjection:
 
         assert captured["profile_context"]["nbo_offer"]["name"] == "Secured Personal Loan"
 
-    @patch("apps.email_engine.services.sender.send_decision_email")
-    @patch("apps.agents.services.email_pipeline.EmailGenerator")
-    @patch("apps.agents.services.email_pipeline.EmailPersistenceService")
+    @patch("apps.agents.services.email_pipeline.deliver_decision_email")
+    @patch("apps.email_engine.services.decision_email.EmailGenerator")
+    @patch("apps.email_engine.services.decision_email.EmailPersistenceService")
     @patch("apps.agents.services.email_pipeline.RecommendationEngine")
-    def test_successful_send_stamps_sent_at(self, mock_engine_cls, mock_persist, mock_gen_cls, mock_send):
-        """A successful orchestrator delivery must stamp GeneratedEmail.sent_at so
-        the standalone task's redelivery path never treats it as unsent and
-        re-sends it (double-send guard)."""
+    def test_successful_send_stamps_sent_at(self, mock_engine_cls, mock_persist, mock_gen_cls, mock_deliver):
+        """The orchestrator must deliver through deliver_decision_email, which
+        sends under a row lock and stamps GeneratedEmail.sent_at so the
+        standalone task's redelivery path never re-sends it (double-send guard).
+        The stamping itself is exercised against the DB in
+        tests/test_decision_email_issuance.py."""
         _, fake_generate = _capture_generate_kwargs()
         mock_gen_cls.return_value.generate.side_effect = fake_generate
         gen_email = MagicMock()
         gen_email.sent_at = None
         mock_persist.save_generated_email.return_value = gen_email
-        mock_send.return_value = {"sent": True}
+        mock_deliver.return_value = {"sent": True, "already_sent": False, "recipient": "c@x.com", "error": None}
         mock_engine_cls.return_value.recommend.return_value = {"offers": []}
 
         application = MagicMock()
@@ -118,5 +120,4 @@ class TestEmailPipelineNboInjection:
             with patch("apps.agents.models.BiasReport.objects.create"):
                 svc.run(application, MagicMock(), {}, {"probability": 0.9}, "approved", [], [])
 
-        mock_send.assert_called_once()
-        gen_email.save.assert_any_call(update_fields=["sent_at"])
+        mock_deliver.assert_called_once_with(gen_email)

@@ -1,13 +1,19 @@
-from django.db import transaction
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
+from apps.accounts.permissions import IsAdminOrOfficer
+from apps.accounts.policy import is_staff_role
 from apps.email_engine.models import GeneratedEmail
-from apps.email_engine.services.html_renderer import render_html
+from apps.email_engine.services.decision_email import (
+    DecisionMismatch,
+    bias_hold_reason,
+    deliver_decision_email,
+    require_decision_on_record,
+)
+from apps.email_engine.services.email_payload import serialize_email
 from apps.email_engine.tasks import generate_email_task
 from apps.loans.permissions import check_loan_access
 
@@ -16,50 +22,20 @@ class EmailGenerationThrottle(UserRateThrottle):
     rate = "10/hour"
 
 
-def _email_type(decision):
-    return "approval" if decision == "approved" else "denial"
+def _is_staff(user):
+    return is_staff_role(user)
 
 
-def _serialize_email(email, *, include_body):
-    """Shared response shape for the email list and detail endpoints.
+def _visible_emails(user, queryset):
+    """Customers see only emails that were actually issued to them.
 
-    ``body``/``html_body`` are KB-scale per record, so the list endpoint omits
-    them; clients fetch them from the single-email endpoint (/emails/<loan_id>/).
+    A row with ``sent_at`` unset is a draft: withheld by the guardrails, held by
+    the bias check, or not yet delivered. Its body may carry exactly the content
+    the withhold exists to stop (a hallucinated rate, prohibited wording).
     """
-    applicant = email.application.applicant
-    data = {
-        "id": str(email.id),
-        "application_id": str(email.application_id),
-        "applicant_id": applicant.id,
-        "applicant_name": f"{applicant.first_name} {applicant.last_name}".strip() or applicant.username,
-        "decision": email.decision,
-        "subject": email.subject,
-    }
-    if include_body:
-        data["body"] = email.body
-        data["html_body"] = render_html(email.body, email_type=_email_type(email.decision))
-    data.update(
-        {
-            "model_used": email.model_used,
-            "generation_time_ms": email.generation_time_ms,
-            "attempt_number": email.attempt_number,
-            "passed_guardrails": email.passed_guardrails,
-            "guardrail_checks": [
-                {
-                    "check_name": log.check_name,
-                    "passed": log.passed,
-                    "details": log.details,
-                    "category": log.category,
-                    # quality_score is a batch-computed value (not stored per-log).
-                    # Exposed as null here; callers should use the email-level score.
-                    "quality_score": None,
-                }
-                for log in email.guardrail_checks.all()
-            ],
-            "created_at": email.created_at.isoformat(),
-        }
-    )
-    return data
+    if _is_staff(user):
+        return queryset
+    return queryset.filter(application__applicant=user, sent_at__isnull=False)
 
 
 class EmailListView(APIView):
@@ -71,11 +47,11 @@ class EmailListView(APIView):
         queryset = (
             GeneratedEmail.objects.select_related("application", "application__applicant")
             .prefetch_related("guardrail_checks")
+            .filter(application__deleted_at__isnull=True)  # hidden with a soft-deleted application
             .order_by("-created_at")
         )
 
-        if user.role not in ("admin", "officer"):
-            queryset = queryset.filter(application__applicant=user)
+        queryset = _visible_emails(user, queryset)
 
         try:
             page = int(request.query_params.get("page", 1))
@@ -89,7 +65,8 @@ class EmailListView(APIView):
         offset = (page - 1) * page_size
         emails = queryset[offset : offset + page_size]
 
-        results = [_serialize_email(email, include_body=False) for email in emails]
+        staff = _is_staff(user)
+        results = [serialize_email(email, include_body=False, staff=staff) for email in emails]
 
         base_url = request.build_absolute_uri(request.path)
         next_url = f"{base_url}?page={page + 1}&page_size={page_size}" if offset + page_size < total else None
@@ -106,19 +83,41 @@ class EmailListView(APIView):
 
 
 class GenerateEmailView(APIView):
-    permission_classes = [IsAuthenticated]
+    # Staff only: a decision email is a credit representation from the lender,
+    # so the applicant must never be able to trigger one.
+    permission_classes = [IsAdminOrOfficer]
     throttle_classes = [EmailGenerationThrottle]
 
     def post(self, request, loan_id):
-        """Trigger email generation for a loan application."""
+        """Trigger generation of the decision email for the decision on record.
+
+        ``decision`` in the body is optional; when present it must match the
+        application's LoanDecision (409 otherwise), so a stale screen cannot
+        issue the wrong letter.
+        """
         check_loan_access(request, loan_id)
 
-        decision = request.data.get("decision", "approved")
-        if decision not in ("approved", "denied"):
+        requested = request.data.get("decision") if isinstance(request.data, dict) else None
+        if requested is not None and requested not in ("approved", "denied"):
             return Response(
                 {"error": "decision must be 'approved' or 'denied'"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            decision = require_decision_on_record(loan_id, requested)
+        except DecisionMismatch as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        # Refuse rather than regenerate: a regenerated email here would skip
+        # the bias check, so it would release a decision the reviewer has not
+        # cleared. The latest draft for this decision is what the task would
+        # otherwise re-deliver.
+        latest = (
+            GeneratedEmail.objects.filter(application_id=loan_id, decision=decision).order_by("-created_at").first()
+        )
+        hold = bias_hold_reason(loan_id, latest)
+        if hold:
+            return Response({"error": hold}, status=status.HTTP_409_CONFLICT)
 
         task = generate_email_task.delay(str(loan_id), decision)
         return Response(
@@ -128,7 +127,7 @@ class GenerateEmailView(APIView):
 
 
 class SendLatestEmailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrOfficer]
     throttle_classes = [EmailGenerationThrottle]
 
     def post(self, request, loan_id):
@@ -154,39 +153,24 @@ class SendLatestEmailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from apps.email_engine.services.sender import send_decision_email
+        try:
+            require_decision_on_record(loan_id, email.decision)
+        except DecisionMismatch as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
 
-        recipient = email.application.applicant.email
-        if not recipient:
-            return Response(
-                {"error": "No recipient email address on file"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        hold = bias_hold_reason(loan_id, email)
+        if hold:
+            return Response({"error": hold}, status=status.HTTP_409_CONFLICT)
 
-        with transaction.atomic():
-            locked = GeneratedEmail.objects.select_for_update().get(pk=email.pk)
-            if locked.sent_at is not None:
-                return Response({"detail": "Email already sent."}, status=status.HTTP_200_OK)
-
-            result = send_decision_email(
-                recipient,
-                locked.subject,
-                locked.body,
-                email_type=_email_type(locked.decision),
-            )
-            if result["sent"]:
-                locked.sent_at = timezone.now()
-                locked.save(update_fields=["sent_at"])
-                return Response(
-                    {
-                        "sent": True,
-                        "recipient": recipient,
-                        "email_id": str(locked.id),
-                    }
-                )
-
+        outcome = deliver_decision_email(email)
+        if outcome["already_sent"]:
+            return Response({"detail": "Email already sent."}, status=status.HTTP_200_OK)
+        if outcome["sent"]:
+            return Response({"sent": True, "recipient": outcome["recipient"], "email_id": str(email.id)})
+        if outcome["recipient"] is None:
+            return Response({"error": outcome["error"]}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
-            {"sent": False, "error": result.get("error", "Send failed")},
+            {"sent": False, "error": outcome["error"] or "Send failed"},
             status=status.HTTP_502_BAD_GATEWAY,
         )
 
@@ -199,7 +183,7 @@ class EmailDetailView(APIView):
         check_loan_access(request, loan_id)
 
         email = (
-            GeneratedEmail.objects.filter(application_id=loan_id)
+            _visible_emails(request.user, GeneratedEmail.objects.filter(application_id=loan_id))
             .select_related("application__applicant")
             .prefetch_related("guardrail_checks")
             .order_by("-created_at")
@@ -212,4 +196,4 @@ class EmailDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        return Response(_serialize_email(email, include_body=True))
+        return Response(serialize_email(email, include_body=True, staff=_is_staff(request.user)))

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import sentry_sdk
 
+from config.sentry import scrub_event
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application version (synced with CHANGELOG.md)
@@ -70,8 +72,6 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_filters",
     "django_celery_results",
-    "django_otp",
-    "django_otp.plugins.otp_totp",
     # Local apps
     "apps.accounts",
     "apps.loans",
@@ -92,7 +92,6 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
@@ -142,12 +141,22 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    # 12, matching what registration asks of customers; staff passwords set
+    # through the admin or createsuperuser go through this list alone.
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 12}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
 AUTH_USER_MODEL = "accounts.CustomUser"
+
+# Sign-in lockout. Failed sign-ins only add up while they keep coming: a failure
+# more than LOGIN_FAILURE_WINDOW after the previous one starts the count again,
+# so one wrong password now and then cannot keep an account locked.
+LOGIN_FAILURE_WINDOW = timedelta(minutes=15)
+# (failures in a row, minutes locked), highest first. The longest lock is no
+# longer than the window, so once it ends the next failure starts a new count.
+LOGIN_LOCKOUT_TIERS = ((10, 15), (8, 5), (5, 1))
 
 LANGUAGE_CODE = "en-au"
 TIME_ZONE = "UTC"
@@ -177,9 +186,18 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "20/min",
         "user": "60/min",
-        "totp_verify": "5/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # APIClient posts JSON unless a test asks for another format, as the
+    # frontend does (login and registration accept nothing else).
+    "TEST_REQUEST_DEFAULT_FORMAT": "json",
+    # Reverse-proxy hops in front of Django that append to X-Forwarded-For.
+    # Throttles key on the client IP DRF derives from this: with None (the DRF
+    # default) the whole client-supplied header is the key, so a spoofed
+    # header got a fresh login/register/refresh bucket on every request.
+    # 0 = ignore X-Forwarded-For and use REMOTE_ADDR (compose publishes the
+    # backend directly). production.py defaults to 1 for the k8s ingress.
+    "NUM_PROXIES": _env_int("TRUSTED_PROXY_COUNT", 0),
 }
 
 # Simple JWT
@@ -286,42 +304,52 @@ ML_AUTO_SEED_ROWS = _env_int("ML_AUTO_SEED_ROWS", 20000)
 
 # Hard credit policy overlay. Modes: "off" (not applied), "shadow"
 # (evaluated + logged, model verdict stands), "enforce" (hard-fails override
-# the model, refers route to human review). Default is "shadow" so the rule
-# set can be calibrated against production traffic before being promoted
-# to enforce. Unknown values collapse to "shadow" at read time so a
-# misconfigured deployment never silently downgrades responsible-lending
-# safeguards.
+# the model, refers are recorded on the decision; the human review queue is
+# only for bias flags). Default here is "shadow" so the rule set can be
+# calibrated in development; production.py defaults to "enforce". Unknown
+# values collapse to "shadow" at read time, which is weaker than "enforce",
+# so production.py rejects an unknown value at start-up.
 CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shadow")
 
 # Pre-activation fairness gate mode for `train_model_task`. Three values:
 # "warn" (default — log + flag failures, leave model active; current
 # behaviour byte-identical), "block" (refuse activation if fairness gate
 # fails or no fairness data was recorded — old segment models keep serving),
-# "off" (skip the check entirely; emergency escape hatch). Default is "warn";
-# flip to "block" only after validating the training pipeline
-# produces compliant fairness metrics for the segments in scope. See
-# docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
+# "off" (skip the check entirely; emergency escape hatch). Default here is
+# "warn" so local training never gets stuck; production.py defaults to
+# "block". See docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
 ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
 
 # Pre-activation champion-challenger promotion gate mode for `train_model_task`.
 # Mirrors ML_FAIRNESS_GATE_MODE: "warn" (default — gates run, decision recorded
 # on training_metadata, model activates regardless), "block" (refuse activation
-# if model_selector.promote_if_eligible reports any of the 4 gates failed —
-# KS regression, PSI stability, ECE calibration, AUC regression), "off" (skip
-# the check entirely). Default "warn"; flip to "block" only after
-# validating the trainer produces compliant promotion metrics for the segments
-# in scope. See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
+# if model_selector.promote_if_eligible reports any of the 5 gates failed —
+# KS regression, PSI stability, ECE calibration, AUC regression, overfitting
+# (train-vs-validation AUC gap above ML_OVERFIT_MAX_GAP)), "off" (skip the
+# check entirely). Default here "warn"; production.py defaults to "block".
+# See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
 ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
 
 # Pre-activation validation sign-off gate mode. Mirrors the
 # fairness/promotion gate pattern: "warn" (default — gate runs, decision is
 # recorded, activation proceeds even with no approved ModelValidationReport),
-# "block" (training-path candidates are demoted to is_active=False without
-# an approved sign-off; manual ModelActivateView returns 409 unless ?force=true
-# is provided), "off" (skip the check entirely). Defaults to "warn"; flip to
-# "block" once operators have established a sign-off cadence.
+# "block" (without an approved sign-off a training-path candidate stays
+# inactive while the champion keeps serving; manual ModelActivateView returns
+# 409 unless ?force=true is provided), "off" (skip the check entirely).
+# Default here "warn"; production.py defaults to "block".
 # See docs/superpowers/specs/2026-05-07-codex-adversarial-response-v1-10-7-design.md.
 ML_VALIDATION_SIGNOFF_GATE_MODE = os.environ.get("ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
+
+# Promotion gate 5 ceiling for the train-vs-validation AUC gap
+# (training_metadata["overfitting_gap_val"]). A challenger whose gap exceeds
+# this is judged overfit to the training split before the test set is ever
+# read. Mirrors model_selector.MAX_OVERFIT_GAP; env-overridable per deployment.
+ML_OVERFIT_MAX_GAP = _env_float("ML_OVERFIT_MAX_GAP", 0.05)
+
+# Load a model artefact that has no stored SHA-256 (integrity check skipped
+# with a warning). Off here and forced off in production.py; development.py
+# turns it on so engineers can iterate on hand-made bundles.
+ML_ALLOW_UNHASHED_MODELS = False
 
 # MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
@@ -332,11 +360,11 @@ MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").
 # without removing the API surface (returns 503).
 DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lower() in ("true", "1", "yes")
 
-# Maker/checker gate on high-value officer overturns. Default "off"
-# (no behaviour change). "2fa" requires the acting officer to hold a verified
-# TOTP device before overturning a denial >= DECISION_OVERTURN_THRESHOLD;
-# "second_approver" blocks such overturns at the API pending dual approval.
-# Unknown values collapse to "off" (see overturn_policy.normalize_overturn_mode).
+# Maker/checker gate on high-value officer overturns. Default here "off";
+# production.py defaults to "second_approver", which blocks overturning a
+# denial >= DECISION_OVERTURN_THRESHOLD at the API pending dual approval. The
+# legacy value "2fa" maps to "second_approver". Unknown values collapse to
+# "off" (see overturn_policy.normalize_overturn_mode).
 DECISION_OVERTURN_GATE_MODE = os.environ.get("DECISION_OVERTURN_GATE_MODE", "off")
 DECISION_OVERTURN_THRESHOLD = _env_float("DECISION_OVERTURN_THRESHOLD", 100000)
 
@@ -351,23 +379,6 @@ ML_STANDALONE_PREDICT_ENABLED = os.environ.get("ML_STANDALONE_PREDICT_ENABLED", 
     "1",
     "yes",
 )
-
-# Two-factor authentication
-# (spec: docs/superpowers/specs/2026-05-25-security-gap-closure-design.md).
-#
-# ENFORCE_2FA_FOR_STAFF — when "true", IsAdmin / IsAdminOrOfficer /
-# IsLoanOfficer permissions require the user to have a confirmed TOTP
-# device. Off by default so existing tests (and any pre-rollout
-# environments) keep working. Flip to "true" in production AFTER all
-# admin/officer accounts are enrolled in TOTP via /api/v1/auth/2fa/setup/.
-#
-# ALLOW_2FA_BYPASS — break-glass switch that skips the OTP check at
-# login for users who already have a TOTP device. Every bypass is
-# logged in AuditLog as `login_2fa_bypassed`. Set to "true" only during
-# documented incident response and remove from the env immediately
-# after — see docs/SECRETS_ROTATION.md (planned).
-ENFORCE_2FA_FOR_STAFF = os.environ.get("ENFORCE_2FA_FOR_STAFF", "false").lower() == "true"
-ALLOW_2FA_BYPASS = os.environ.get("ALLOW_2FA_BYPASS", "false").lower() == "true"
 
 # Security headers (applied in all environments)
 X_FRAME_OPTIONS = "DENY"
@@ -485,6 +496,16 @@ MARKETING_BIAS_THRESHOLD_REVIEW = 70  # 51-70: high bias, senior AI review
 #   "off": explicit escape hatch — legacy fail-open with no special handling.
 BIAS_FAILURE_MODE = os.environ.get("BIAS_FAILURE_MODE", "block").lower()
 
+# Agent 2: rewrites a moderate-band flagged email once under a stricter
+# check (bias detector clean + senior reviewer approved with confidence)
+# before handing over to the deterministic template path.
+BIAS_AGENT2_ENABLED = os.environ.get("BIAS_AGENT2_ENABLED", "true").lower() == "true"
+BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE = 0.70
+# Agent 2 is skipped (the template path takes over) when less than this many
+# seconds remain before the pipeline task's soft time limit: a rewrite plus a
+# bias check plus a senior review can take minutes on a slow local LLM.
+BIAS_AGENT2_MIN_SECONDS_LEFT = 240
+
 # API Documentation (drf-spectacular)
 SPECTACULAR_SETTINGS = {
     "TITLE": "AussieLoanAI API",
@@ -517,6 +538,12 @@ if _sentry_dsn:
         traces_sample_rate=0.1,
         profiles_sample_rate=0.1,
         send_default_pii=False,
+        # Request bodies and frame locals hold passwords and applicant PII,
+        # and send_default_pii=False does not stop the SDK sending them.
+        max_request_body_size="never",
+        include_local_variables=False,
+        before_send=scrub_event,
+        before_send_transaction=scrub_event,
         environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
     )
 

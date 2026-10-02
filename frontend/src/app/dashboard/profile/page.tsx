@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { authApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -17,6 +17,8 @@ import { Save, Shield, Building2, CreditCard, Briefcase, Landmark, Home } from '
 import { toast } from 'sonner'
 import { tierColors, AU_STATES } from '@/lib/customerLabels'
 import { CUSTOMER_PROFILE_KEY, useCustomerProfile } from '@/hooks/useCustomerProfile'
+import { useSeededForm } from '@/hooks/useSeededForm'
+import { buildProfilePatch } from '@/lib/profilePatch'
 
 export default function ProfilePage() {
   const { user } = useAuth()
@@ -25,60 +27,61 @@ export default function ProfilePage() {
 
   const { data: profile, isLoading } = useCustomerProfile()
 
-  const [form, setForm] = useState<Partial<CustomerProfile>>({})
-
-  useEffect(() => {
-    if (profile) {
-      setForm({
-        date_of_birth: profile.date_of_birth || '',
-        phone: profile.phone || '',
-        address_line_1: profile.address_line_1 || '',
-        address_line_2: profile.address_line_2 || '',
-        suburb: profile.suburb || '',
-        state: profile.state || '',
-        postcode: profile.postcode || '',
-        marital_status: profile.marital_status || '',
-        residency_status: profile.residency_status || '',
-        primary_id_type: profile.primary_id_type || '',
-        primary_id_number: profile.primary_id_number || '',
-        secondary_id_type: profile.secondary_id_type || '',
-        secondary_id_number: profile.secondary_id_number || '',
-        tax_file_number_provided: profile.tax_file_number_provided || false,
-        is_politically_exposed: profile.is_politically_exposed || false,
-        // Employment
-        employer_name: profile.employer_name || '',
-        occupation: profile.occupation || '',
-        industry: profile.industry || '',
-        employment_status: profile.employment_status || '',
-        years_in_current_role: profile.years_in_current_role || 0,
-        previous_employer: profile.previous_employer || '',
-        // Income
-        gross_annual_income: profile.gross_annual_income || 0,
-        other_income: profile.other_income || 0,
-        other_income_source: profile.other_income_source || '',
-        partner_annual_income: profile.partner_annual_income || 0,
-        // Assets
-        estimated_property_value: profile.estimated_property_value || 0,
-        vehicle_value: profile.vehicle_value || 0,
-        savings_other_institutions: profile.savings_other_institutions || 0,
-        investment_value: profile.investment_value || 0,
-        superannuation_balance: profile.superannuation_balance || 0,
-        // Liabilities
-        other_loan_repayments_monthly: profile.other_loan_repayments_monthly || 0,
-        other_credit_card_limits: profile.other_credit_card_limits || 0,
-        rent_or_board_monthly: profile.rent_or_board_monthly || 0,
-        // Living Situation
-        housing_situation: profile.housing_situation || '',
-        time_at_current_address_years: profile.time_at_current_address_years || 0,
-        number_of_dependants: profile.number_of_dependants || 0,
-        previous_suburb: profile.previous_suburb || '',
-        previous_state: profile.previous_state || '',
-        previous_postcode: profile.previous_postcode || '',
-        // Contact
-        preferred_contact_method: profile.preferred_contact_method || '',
-      })
-    }
-  }, [profile])
+  // Seeded from the server profile; the user's edits are layered on top so a
+  // refetch never overwrites a field that is being edited.
+  const seed = useMemo<Partial<CustomerProfile> | undefined>(
+    () =>
+      profile
+        ? {
+            date_of_birth: profile.date_of_birth ?? undefined,
+            phone: profile.phone || '',
+            address_line_1: profile.address_line_1 || '',
+            address_line_2: profile.address_line_2 || '',
+            suburb: profile.suburb || '',
+            state: profile.state || '',
+            postcode: profile.postcode || '',
+            marital_status: profile.marital_status || '',
+            residency_status: profile.residency_status || '',
+            primary_id_type: profile.primary_id_type || '',
+            secondary_id_type: profile.secondary_id_type || '',
+            tax_file_number_provided: profile.tax_file_number_provided || false,
+            is_politically_exposed: profile.is_politically_exposed || false,
+            // Employment
+            employer_name: profile.employer_name || '',
+            occupation: profile.occupation || '',
+            industry: profile.industry || '',
+            employment_status: profile.employment_status || '',
+            years_in_current_role: profile.years_in_current_role || 0,
+            previous_employer: profile.previous_employer || '',
+            // Income
+            gross_annual_income: profile.gross_annual_income || 0,
+            other_income: profile.other_income || 0,
+            other_income_source: profile.other_income_source || '',
+            partner_annual_income: profile.partner_annual_income || 0,
+            // Assets
+            estimated_property_value: profile.estimated_property_value || 0,
+            vehicle_value: profile.vehicle_value || 0,
+            savings_other_institutions: profile.savings_other_institutions || 0,
+            investment_value: profile.investment_value || 0,
+            superannuation_balance: profile.superannuation_balance || 0,
+            // Liabilities
+            other_loan_repayments_monthly: profile.other_loan_repayments_monthly || 0,
+            other_credit_card_limits: profile.other_credit_card_limits || 0,
+            rent_or_board_monthly: profile.rent_or_board_monthly || 0,
+            // Living Situation
+            housing_situation: profile.housing_situation || '',
+            time_at_current_address_years: profile.time_at_current_address_years || 0,
+            number_of_dependants: profile.number_of_dependants || 0,
+            previous_suburb: profile.previous_suburb || '',
+            previous_state: profile.previous_state || '',
+            previous_postcode: profile.previous_postcode || '',
+            // Contact
+            preferred_contact_method: profile.preferred_contact_method || '',
+          }
+        : undefined,
+    [profile],
+  )
+  const { form, updateField, resetEdits } = useSeededForm(seed)
 
   const updateProfile = useMutation({
     mutationFn: async (data: Partial<CustomerProfile>) => {
@@ -86,7 +89,8 @@ export default function ProfilePage() {
       return result
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: CUSTOMER_PROFILE_KEY })
+      // Saved: drop local edits once the refetched server values are in
+      void queryClient.invalidateQueries({ queryKey: CUSTOMER_PROFILE_KEY }).then(resetEdits)
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
       toast.success('Profile saved successfully')
@@ -96,11 +100,11 @@ export default function ProfilePage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
     const checked = (e.target as HTMLInputElement).checked
-    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
+    updateField(name, type === 'checkbox' ? checked : value)
   }
 
   const handleSave = () => {
-    updateProfile.mutate(form)
+    updateProfile.mutate(buildProfilePatch(seed, form))
   }
 
   if (isLoading) {
@@ -455,7 +459,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <Label htmlFor="primary_id_number">Document Number</Label>
-              <Input id="primary_id_number" name="primary_id_number" value={(form.primary_id_number as string) || ''} onChange={handleChange} placeholder="e.g. 12345678" />
+              <Input id="primary_id_number" name="primary_id_number" value={(form.primary_id_number as string) || ''} onChange={handleChange} placeholder={profile?.primary_id_number_masked || 'e.g. 12345678'} />
             </div>
           </div>
 
@@ -475,7 +479,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <Label htmlFor="secondary_id_number">Document Number</Label>
-              <Input id="secondary_id_number" name="secondary_id_number" value={(form.secondary_id_number as string) || ''} onChange={handleChange} placeholder="e.g. 2345 67890 1" />
+              <Input id="secondary_id_number" name="secondary_id_number" value={(form.secondary_id_number as string) || ''} onChange={handleChange} placeholder={profile?.secondary_id_number_masked || 'e.g. 2345 67890 1'} />
             </div>
           </div>
 

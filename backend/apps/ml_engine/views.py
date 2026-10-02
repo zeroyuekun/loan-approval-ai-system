@@ -1,7 +1,8 @@
+import logging
+
 import redis
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -9,17 +10,22 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
+from apps.common.http import client_ip
 from apps.loans.models import AuditLog
 from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
-from apps.ml_engine.services.validation_gate_mode import (
-    ValidationSignoffBlocked,
-    evaluate_validation_signoff_gate,
-)
+from apps.ml_engine.services.model_selector import NoActiveModelError
+from apps.ml_engine.services.scoring.adhoc import AdhocApplicantSerializer, input_error_detail, score_applicant
+from apps.ml_engine.services.scoring.policy_overlay import PolicyOverlayUnavailable
 from apps.ml_engine.tasks import TRAIN_LOCK_KEY, run_prediction_task, train_model_task
+
+logger = logging.getLogger(__name__)
 
 
 class PredictionThrottle(UserRateThrottle):
+    # Own scope so this cap doesn't share the global UserRateThrottle's
+    # "throttle_user_<id>" cache key (see accounts.views.RefreshRateThrottle).
+    scope = "ml_predict"
     rate = "10/hour"
 
 
@@ -45,7 +51,7 @@ class PredictView(APIView):
             resource_type="LoanApplication",
             resource_id=str(loan_id),
             details={"task_id": task.id},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return Response(
@@ -58,8 +64,10 @@ class ModelMetricsView(APIView):
     permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
-        """Return metrics for the active model."""
-        model_version = ModelVersion.objects.filter(is_active=True).first()
+        """Return metrics for the active model (the unified champion)."""
+        from apps.ml_engine.services.model_selector import monitoring_model_version
+
+        model_version = monitoring_model_version()
         if not model_version:
             return Response(
                 {"error": "No active model found"},
@@ -137,7 +145,7 @@ class TrainModelView(APIView):
             resource_type="ModelVersion",
             resource_id="pending",
             details={"algorithm": algorithm, "task_id": task.id},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
         return Response(
@@ -164,22 +172,24 @@ class ModelDriftView(APIView):
     def get(self, request):
         """Compute PSI for recent applications vs training distribution."""
         from apps.ml_engine.services.governance.drift_monitor import compute_on_demand_feature_psi
-        from apps.ml_engine.services.model_selector import select_model_version
-        from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
-
-        # Resolve the active ModelVersion directly — avoids constructing a full
-        # ModelPredictor (which joblib.load-s the model bundle) only to throw
-        # the model object away before compute_on_demand_feature_psi builds its
-        # own ModelPredictor internally.  One joblib.load per drift check.
-        try:
-            model_version = select_model_version(segment=SEGMENT_UNIFIED)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        from apps.ml_engine.services.model_selector import monitoring_model_version
 
         try:
             days = int(request.query_params.get("days", 30))
         except (ValueError, TypeError):
             return Response({"error": "days must be an integer"}, status=400)
+        if not 1 <= days <= 365:
+            return Response({"error": "days must be between 1 and 365"}, status=400)
+
+        # Resolve the active ModelVersion directly — avoids constructing a full
+        # ModelPredictor (which joblib.load-s the model bundle) only to throw
+        # the model object away before compute_on_demand_feature_psi builds its
+        # own ModelPredictor internally.  One joblib.load per drift check.
+        # Same model as the metrics page (monitoring_model_version), not the
+        # weighted A/B draw, so the report never flips to a challenger.
+        model_version = monitoring_model_version()
+        if model_version is None:
+            return Response({"error": "No active model found"}, status=status.HTTP_404_NOT_FOUND)
 
         result = compute_on_demand_feature_psi(model_version, days=days)
 
@@ -257,109 +267,98 @@ class ModelVersionListView(APIView):
         return Response({"models": data})
 
 
+def _refused_response(exc):
+    """HTTP 409 for an activation the service refused (no row changed)."""
+    from apps.ml_engine.services.activation import ActivationBlocked, ArtefactUnusable
+
+    if isinstance(exc, ActivationBlocked):
+        return Response(
+            {
+                "error": "activation_blocked",
+                "blocked_gates": exc.blocked_gates,
+                "gates": exc.gates,
+                "hint": (
+                    "Fix what the gate reports (e.g. create and sign off a ModelValidationReport), "
+                    "or pass ?force=true on /activate/ (audited override)."
+                ),
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+    code = "artefact_unusable" if isinstance(exc, ArtefactUnusable) else "segment_would_be_empty"
+    return Response({"error": code, "detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+
 class ModelActivateView(APIView):
-    """Activate a model as champion with 100% traffic."""
+    """Activate a model as its segment's champion with 100% traffic.
+
+    Goes through the activation service: artefact check, governance gates
+    (``?force=true`` is the audited override), segment lock, audit.
+    """
 
     permission_classes = [IsAdmin]
 
     def post(self, request, pk):
+        from apps.ml_engine.services.activation import ActivationRefused, activate_model_version
+
         try:
             version = ModelVersion.objects.get(pk=pk)
         except ModelVersion.DoesNotExist:
             return Response({"error": "Model not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Validation sign-off gate. In `block` mode we refuse activation when no approved ModelValidationReport exists
-        # for this candidate, unless the caller passes ?force=true (audited
-        # break-glass). `warn` mode (default) records the decision but lets
-        # activation proceed.
         force = request.query_params.get("force", "").lower() == "true"
-        validation_mode = getattr(django_settings, "ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
         try:
-            validation_decision = evaluate_validation_signoff_gate(version, validation_mode, bypass=force)
-        except ValidationSignoffBlocked as exc:
-            return Response(
-                {
-                    "error": "validation_signoff_required",
-                    "details": exc.payload,
-                    "hint": (
-                        "Create + sign off a ModelValidationReport for this "
-                        "candidate, or pass ?force=true (audited override)."
-                    ),
-                },
-                status=status.HTTP_409_CONFLICT,
+            gates = activate_model_version(
+                version,
+                actor=request.user,
+                source="api",
+                force=force,
+                ip_address=client_ip(request),
             )
-
-        target_segment = version.segment
-        previous_active_segments = sorted(
-            ModelVersion.objects.filter(is_active=True).values_list("segment", flat=True).distinct()
-        )
-
-        with transaction.atomic():
-            # Scope deactivation to THIS model's segment, matching the trainer
-            # (tasks.py) and ModelVersion.clean(). A blanket deactivation would
-            # silently retire other segments' active champions (e.g. activating a
-            # personal-loan model would knock out the home-loan champion).
-            ModelVersion.objects.filter(is_active=True, segment=version.segment).update(
-                is_active=False,
-                traffic_percentage=0,
-            )
-            version.is_active = True
-            version.traffic_percentage = 100
-            version.save()
-
-            audit_payload = validation_decision["decision"].to_dict()
-            AuditLog.objects.create(
-                user=request.user,
-                action="model_activate_force" if force else "model_activate",
-                resource_type="ModelVersion",
-                resource_id=str(version.id),
-                details={
-                    "version": version.version,
-                    "segment": target_segment,
-                    "previous_active_segments": previous_active_segments,
-                    "validation_gate_mode": validation_decision.get("mode"),
-                    "validation_gate_decision": audit_payload,
-                    "force_bypass": force,
-                },
-                ip_address=request.META.get("REMOTE_ADDR"),
-            )
+        except ActivationRefused as exc:
+            return _refused_response(exc)
 
         return Response(
             {
                 "message": f"Model {version.version} activated as champion (100% traffic)",
                 "model_id": str(version.id),
-                "segment": target_segment,
-                "validation_gate": validation_decision.get("mode"),
+                "segment": version.segment,
+                "validation_gate": gates["validation"]["mode"],
                 "force": force,
             }
         )
 
 
 class ModelTrafficView(APIView):
-    """Adjust traffic percentage for a model version."""
+    """Adjust traffic percentage for a model version (through the activation service)."""
 
     permission_classes = [IsAdmin]
 
     def patch(self, request, pk):
+        from apps.ml_engine.services.activation import ActivationRefused, set_traffic
+
         try:
             version = ModelVersion.objects.get(pk=pk)
         except ModelVersion.DoesNotExist:
             return Response({"error": "Model not found"}, status=status.HTTP_404_NOT_FOUND)
 
         traffic = request.data.get("traffic_percentage")
-        if traffic is None or not isinstance(traffic, (int, float)) or not (0 <= traffic <= 100):
+        # bool is an int subclass (True would become 1%), and 50.9 must not
+        # silently truncate to 50: only a whole number 0-100 is accepted.
+        is_whole = isinstance(traffic, int) or (isinstance(traffic, float) and traffic.is_integer())
+        if isinstance(traffic, bool) or not is_whole or not (0 <= traffic <= 100):
             return Response(
                 {"error": "traffic_percentage must be an integer 0-100"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        version.traffic_percentage = int(traffic)
-        version.is_active = version.traffic_percentage > 0
         try:
-            version.save()
+            set_traffic(version, int(traffic), actor=request.user, ip_address=client_ip(request))
+        except ActivationRefused as exc:
+            return _refused_response(exc)
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        version.refresh_from_db()
         return Response(
             {
                 "model_id": str(version.id),
@@ -377,8 +376,14 @@ class ModelCompareView(APIView):
     def get(self, request):
         from django.db.models import Avg, Count
 
-        active_models = ModelVersion.objects.filter(is_active=True)
-        if active_models.count() < 2:
+        from apps.ml_engine.services.model_selector import CHAMPION_ORDERING, pick_monitoring_model
+
+        # Champion first, then the rest by traffic and age — a fixed order so
+        # the agreement rate below always compares the champion with its peer.
+        ranked = list(ModelVersion.objects.filter(is_active=True).order_by(*CHAMPION_ORDERING))
+        champion = pick_monitoring_model(ranked)
+        active_models = [champion, *(m for m in ranked if m is not champion)] if champion else []
+        if len(active_models) < 2:
             return Response(
                 {"message": "Need at least 2 active models for comparison"},
                 status=status.HTTP_200_OK,
@@ -440,7 +445,9 @@ class DriftReportListView(APIView):
     permission_classes = [IsAdminOrOfficer]
 
     def get(self, request):
-        active_model = ModelVersion.objects.filter(is_active=True).first()
+        from apps.ml_engine.services.model_selector import monitoring_model_version
+
+        active_model = monitoring_model_version()
         if not active_model:
             return Response(
                 {"error": "No active model found"},
@@ -476,3 +483,53 @@ class DriftReportListView(APIView):
             )
 
         return Response(data)
+
+
+class AdhocScoreThrottle(UserRateThrottle):
+    # Own scope: without it the cap shares "throttle_user_<id>" with the
+    # global UserRateThrottle and both limits count each other's requests.
+    scope = "adhoc_score"
+    rate = "30/hour"
+
+
+class AdhocScoreView(APIView):
+    """Score one applicant's facts against the active model.
+
+    Builds nothing durable: no `LoanApplication` row, no referral-audit
+    save, no shadow-scoring `PredictionLog` row (see `ModelPredictor.predict
+    (..., persist=False)`). Staff-only — this is an underwriting tool, not
+    a customer-facing pre-qualification endpoint.
+    """
+
+    permission_classes = [IsAdminOrOfficer]
+    throttle_classes = [AdhocScoreThrottle]
+
+    def post(self, request):
+        serializer = AdhocApplicantSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = score_applicant(serializer.validated_data)
+        except NoActiveModelError:  # a ValueError subclass, so it must come first
+            return Response({"detail": "No active model"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except PolicyOverlayUnavailable as exc:
+            # Class name only: the exception text can carry applicant figures.
+            logger.warning("adhoc_score_unavailable: %s", type(exc).__name__)
+            return Response(
+                {"detail": "Credit policy rules are unavailable right now. Try again shortly."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except ValueError as exc:
+            logger.warning("adhoc_score_rejected: %s", type(exc).__name__)
+            return Response({"detail": input_error_detail(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="adhoc_score",
+            resource_type="ModelVersion",
+            resource_id=result["model_version"],
+            details={"fields": sorted(serializer.validated_data.keys())},
+            ip_address=client_ip(request),
+        )
+
+        return Response(result, status=status.HTTP_200_OK)

@@ -179,8 +179,12 @@ class TestFullPipeline(TestCase):
         mock_delay.assert_called_once_with(str(app_id))
 
     @patch("apps.email_engine.tasks.generate_email_task.delay")
-    def test_trigger_email_generation(self, mock_delay):
-        """Triggering email generation queues a Celery task and returns 202."""
+    def test_customer_cannot_trigger_email_generation(self, mock_delay):
+        """A customer must not be able to make the lender email them an approval
+        letter for their own (pending) application: decision emails are staff-only.
+
+        This test previously asserted 202 here, which codified the C1 defect.
+        """
         mock_delay.return_value = MagicMock(id="test-email-task-456")
         self._register_and_login()
         self._complete_profile()
@@ -192,10 +196,23 @@ class TestFullPipeline(TestCase):
             {"decision": "approved"},
             format="json",
         )
-        assert resp.status_code == status.HTTP_202_ACCEPTED, f"Email trigger: {resp.status_code} {resp.data}"
-        assert resp.data["task_id"] == "test-email-task-456"
-        assert resp.data["status"] == "email_generation_queued"
-        mock_delay.assert_called_once_with(str(app_id), "approved")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN, f"Email trigger: {resp.status_code} {resp.data}"
+        mock_delay.assert_not_called()
+
+    def _login_officer(self, username):
+        CustomUser.objects.create_user(
+            username=username,
+            password="TestPass123!",
+            email=f"{username}@e2e.com",
+            role="officer",
+        )
+        self.client.post("/api/v1/auth/login/", {"username": username, "password": "TestPass123!"})
+
+    @staticmethod
+    def _record_decision(app_id, decision):
+        from apps.loans.models import LoanDecision
+
+        LoanDecision.objects.create(application_id=app_id, decision=decision, confidence=0.9)
 
     def test_email_list_empty_initially(self):
         """Email list returns empty for new customer."""
@@ -247,7 +264,7 @@ class TestFullPipeline(TestCase):
             assert resp.status_code == status.HTTP_202_ACCEPTED
             assert resp.data["task_id"] == "pred-task-789"
 
-        # Step 6: Trigger email generation (mocked Celery)
+        # Step 6: The customer cannot trigger a decision email (staff-only, C1)
         with patch("apps.email_engine.tasks.generate_email_task.delay") as mock_email:
             mock_email.return_value = MagicMock(id="email-task-101")
             resp = self.client.post(
@@ -255,8 +272,8 @@ class TestFullPipeline(TestCase):
                 {"decision": "denied"},
                 format="json",
             )
-            assert resp.status_code == status.HTTP_202_ACCEPTED
-            assert resp.data["task_id"] == "email-task-101"
+            assert resp.status_code == status.HTTP_403_FORBIDDEN
+            mock_email.assert_not_called()
 
         # Step 7: Verify emails list endpoint works
         resp = self.client.get("/api/v1/emails/")
@@ -321,6 +338,7 @@ class TestFullPipeline(TestCase):
                 "password": "TestPass123!",
             },
         )
+        self._record_decision(app_id, "approved")
 
         resp = self.client.post(
             f"/api/v1/emails/generate/{app_id}/",
@@ -328,6 +346,7 @@ class TestFullPipeline(TestCase):
             format="json",
         )
         assert resp.status_code == status.HTTP_202_ACCEPTED
+        mock_delay.assert_called_once_with(str(app_id), "approved")
 
     def test_email_invalid_decision_rejected(self):
         """Email generation rejects invalid decision values."""
@@ -335,6 +354,8 @@ class TestFullPipeline(TestCase):
         self._complete_profile()
         app = self._create_application()
         app_id = app["id"]
+        self._login_officer("officer_invalid_decision")
+        self._record_decision(app_id, "approved")
 
         resp = self.client.post(
             f"/api/v1/emails/generate/{app_id}/",
@@ -394,6 +415,8 @@ class TestFullPipeline(TestCase):
         self._complete_profile()
         app = self._create_application()
         app_id = app["id"]
+        self._login_officer("officer_email_idem")
+        self._record_decision(app_id, "approved")
 
         resp1 = self.client.post(
             f"/api/v1/emails/generate/{app_id}/",

@@ -3,6 +3,9 @@
 import logging
 import random
 from dataclasses import dataclass, field
+from operator import attrgetter
+
+from django.conf import settings
 
 from apps.ml_engine.models import ModelVersion
 from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
@@ -18,6 +21,14 @@ KS_REGRESSION_TOLERANCE = 0.015  # Candidate KS must not drop more than 1.5pp
 MAX_PSI_THRESHOLD = 0.25  # Significant-shift PSI boundary
 MAX_ECE_THRESHOLD = 0.03  # Expected calibration error ceiling
 AUC_REGRESSION_TOLERANCE = 0.02  # Candidate AUC must not drop more than 2pp
+MAX_OVERFIT_GAP = 0.05  # Train-vs-validation AUC gap ceiling (gate 5)
+
+# Champion ranking within a pool: most traffic first, newest on a tie.
+CHAMPION_ORDERING = ("-traffic_percentage", "-created_at")
+
+
+class NoActiveModelError(ValueError):
+    """No active model version serves the requested segment (or unified)."""
 
 
 def select_model_version(segment: str = SEGMENT_UNIFIED):
@@ -26,12 +37,12 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
     Scoped to `segment` so per-segment A/B tests (e.g. two personal-loan
     challengers) don't interfere with mortgage models. When `segment` is
     non-unified and no active model exists in that segment, the call falls
-    back to the unified segment — mirroring
-    `segmentation.select_active_model_for_segment`.
+    back to the unified segment.
 
     Single active model: returns it immediately (fast path).
     Multiple active models (same segment): weighted random selection.
-    No active models in segment and no unified fallback: raises ValueError.
+    No active models in segment and no unified fallback: raises
+    NoActiveModelError (a ValueError).
     """
     active_models = list(
         ModelVersion.objects.filter(is_active=True, traffic_percentage__gt=0, segment=segment).order_by("-created_at")
@@ -49,7 +60,7 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
         )
 
     if not active_models:
-        raise ValueError(
+        raise NoActiveModelError(
             f"No active model version found for segment '{segment}' (and no "
             "unified fallback available). Train a model first."
         )
@@ -68,6 +79,47 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
         len(active_models),
     )
     return selected
+
+
+def champion_model_version(segment: str = SEGMENT_UNIFIED):
+    """The segment's champion: the serving model with the most traffic, then the newest.
+
+    Deterministic counterpart of `select_model_version` (same serving pool,
+    same unified fallback) for callers that must not be routed at random:
+    ad-hoc what-if scoring needs identical submissions to hit the same model
+    during an A/B test. Raises NoActiveModelError when neither pool serves.
+    """
+    for pool_segment in dict.fromkeys((segment, SEGMENT_UNIFIED)):
+        champion = (
+            ModelVersion.objects.filter(is_active=True, traffic_percentage__gt=0, segment=pool_segment)
+            .order_by(*CHAMPION_ORDERING)
+            .first()
+        )
+        if champion is not None:
+            return champion
+    raise NoActiveModelError(
+        f"No active model version found for segment '{segment}' (and no "
+        "unified fallback available). Train a model first."
+    )
+
+
+def pick_monitoring_model(active_models):
+    """The monitoring model among ``active_models`` (listed in CHAMPION_ORDERING).
+
+    The unified segment's main champion; if no unified model is active, the
+    newest active model. None for an empty list.
+    """
+    unified = next((m for m in active_models if m.segment == SEGMENT_UNIFIED), None)
+    return unified or max(active_models, key=attrgetter("created_at"), default=None)
+
+
+def monitoring_model_version():
+    """The model the metrics and drift dashboards describe (see pick_monitoring_model).
+
+    Taking the first row of every active model would switch the dashboards to
+    whichever segment model or challenger was trained last.
+    """
+    return pick_monitoring_model(list(ModelVersion.objects.filter(is_active=True).order_by(*CHAMPION_ORDERING)))
 
 
 @dataclass
@@ -105,17 +157,17 @@ def _max_psi(mv: ModelVersion) -> float:
     """Return the largest per-feature PSI recorded at training time.
 
     Reads from `training_metadata.psi_by_feature`. If it is missing (older
-    model with no recorded stability data) this returns +inf so the gate
-    refuses to promote.
+    model with no recorded stability data) or malformed (non-numeric values)
+    this returns +inf so the gate refuses to promote: no evidence is not a pass.
     """
     meta = getattr(mv, "training_metadata", None) or {}
     by_feature = meta.get("psi_by_feature") or {}
     if not by_feature:
         return float("inf")
     try:
-        return float(max(by_feature.values()))
+        return float(max(float(v) for v in by_feature.values()))
     except (ValueError, TypeError):
-        return 0.0
+        return float("inf")
 
 
 def promote_if_eligible(
@@ -125,17 +177,20 @@ def promote_if_eligible(
     max_psi: float = MAX_PSI_THRESHOLD,
     max_ece: float = MAX_ECE_THRESHOLD,
     auc_tolerance: float = AUC_REGRESSION_TOLERANCE,
+    max_overfit_gap: float | None = None,
 ) -> PromotionDecision:
-    """Evaluate the 4-gate champion-challenger promotion rules for `candidate_version`.
+    """Evaluate the 5-gate champion-challenger promotion rules for `candidate_version`.
 
     Gates (D5 spec §D5):
       1. KS regression gate    — candidate.ks ≥ champion.ks − ks_tolerance
       2. PSI stability gate    — max(candidate.psi_by_feature) ≤ max_psi
       3. Calibration gate      — candidate.ece ≤ max_ece
       4. AUC regression gate   — candidate.auc_test ≥ champion.auc_test − auc_tolerance
+      5. Overfitting gate      — train-vs-validation AUC gap ≤ max_overfit_gap
 
     If `candidate_version` is the only model in its segment (no incumbent),
-    gates 1 and 4 short-circuit to pass and only PSI + ECE are evaluated.
+    gates 1 and 4 short-circuit to pass and only PSI + ECE + overfitting are
+    evaluated — gate 5 does not depend on a champion, so it runs either way.
 
     Returns a `PromotionDecision`. Does NOT mutate `candidate_version.is_active`;
     the caller is responsible for persisting promotion. This keeps the gate
@@ -175,13 +230,24 @@ def promote_if_eligible(
     if cand_ece > max_ece:
         reasons.append(f"Calibration gate failed: ECE {cand_ece:.4f} exceeds {max_ece:.2f} ceiling")
 
+    # --- Gate 5: Overfitting (train vs validation AUC) ---------------------
+    limit = max_overfit_gap if max_overfit_gap is not None else getattr(settings, "ML_OVERFIT_MAX_GAP", MAX_OVERFIT_GAP)
+    gap = (getattr(candidate_version, "training_metadata", None) or {}).get("overfitting_gap_val")
+    if gap is None:
+        gates["overfitting"] = {"value": None, "threshold": limit, "passed": True, "not_assessable": True}
+    else:
+        gap = float(gap)
+        gates["overfitting"] = {"value": gap, "threshold": limit, "passed": gap <= limit}
+        if gap > limit:
+            reasons.append(f"Overfitting gate failed: train-vs-validation AUC gap {gap:.4f} exceeds {limit:.2f}")
+
     # --- Gates 1 and 4 need an incumbent champion to compare against ---
     if champion is None:
         gates["ks"] = {"value": _metric(candidate_version, "ks_statistic"), "no_champion": True, "passed": True}
         gates["auc"] = {"value": _metric(candidate_version, "auc_roc"), "no_champion": True, "passed": True}
         promoted = not reasons
         if promoted:
-            reasons.append("No incumbent champion — candidate auto-promotes after PSI+ECE gates")
+            reasons.append("No incumbent champion — candidate auto-promotes after PSI+ECE+overfitting gates")
         return PromotionDecision(
             promoted=promoted,
             candidate_id=str(candidate_version.id),
@@ -224,7 +290,7 @@ def promote_if_eligible(
     if promoted:
         reasons.append(
             f"All gates passed: KS {cand_ks:.4f} ≥ {ks_min:.4f}, PSI ≤ {max_psi:.2f}, "
-            f"ECE ≤ {max_ece:.2f}, AUC {cand_auc:.4f} ≥ {auc_min:.4f}"
+            f"ECE ≤ {max_ece:.2f}, AUC {cand_auc:.4f} ≥ {auc_min:.4f}, overfitting gap ≤ {limit:.2f}"
         )
     else:
         logger.warning(

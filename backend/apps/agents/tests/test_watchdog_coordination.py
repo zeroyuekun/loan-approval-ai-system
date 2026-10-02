@@ -54,7 +54,7 @@ def _make_application(django_user_model, *, status="processing", suffix=""):
 
 
 @pytest.mark.django_db
-def test_cleanup_noops_when_completed_run_exists(django_user_model):
+def test_cleanup_noops_when_latest_run_completed(django_user_model):
     from apps.agents.models import AgentRun
     from apps.agents.tasks import _cleanup_stuck_application
 
@@ -71,6 +71,31 @@ def test_cleanup_noops_when_completed_run_exists(django_user_model):
 
 
 @pytest.mark.django_db
+def test_cleanup_resets_a_rerun_that_died_after_an_older_completed_run(django_user_model):
+    """A forced re-run that dies must not be shielded by the run it replaced."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from apps.agents.models import AgentRun
+    from apps.agents.tasks import _cleanup_stuck_application
+
+    app = _make_application(django_user_model, suffix="_rerun")
+    older = AgentRun.objects.create(application=app, status=AgentRun.Status.COMPLETED, steps=[])
+    AgentRun.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(hours=1))
+    rerun = AgentRun.objects.create(application=app, status=AgentRun.Status.RUNNING, steps=[])
+
+    _cleanup_stuck_application(str(app.id))
+
+    app.refresh_from_db()
+    older.refresh_from_db()
+    rerun.refresh_from_db()
+    assert app.status == "pending"
+    assert rerun.status == AgentRun.Status.FAILED
+    assert older.status == AgentRun.Status.COMPLETED
+
+
+@pytest.mark.django_db
 def test_cleanup_resets_when_only_failed_running_runs(django_user_model):
     from apps.agents.models import AgentRun
     from apps.agents.tasks import _cleanup_stuck_application
@@ -82,8 +107,19 @@ def test_cleanup_resets_when_only_failed_running_runs(django_user_model):
 
     app.refresh_from_db()
     running.refresh_from_db()
-    assert app.status == "review"
+    # Owner rule: the human review queue is only for bias flags. A stuck run
+    # goes back to PENDING (re-runnable), never to REVIEW.
+    assert app.status == "pending"
     assert running.status == AgentRun.Status.FAILED
+
+    from apps.loans.models import AuditLog
+
+    reset = AuditLog.objects.filter(
+        action="status_transition", resource_id=str(app.id), details__to_status="pending"
+    ).get()
+    assert reset.details["from_status"] == "processing"
+    assert reset.details["source"] == "stuck_cleanup"
+    assert reset.details["reason"]
 
 
 @CACHE_OVERRIDE

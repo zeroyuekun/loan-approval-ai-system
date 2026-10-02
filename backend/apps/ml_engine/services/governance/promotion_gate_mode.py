@@ -9,7 +9,8 @@ the check entirely).
 
 The dispatcher itself is pure-functional and unit-testable without Django ORM
 boot — it takes the mode as an argument and returns a structured decision.
-Only `tasks.py` reads the `ML_PROMOTION_GATE_MODE` setting and delegates here.
+Only the activation service (`services/activation.py`) reads the
+`ML_PROMOTION_GATE_MODE` setting and delegates here.
 
 Sibling to `fairness_gate_mode.py`. The two dispatchers are intentionally
 parallel so operators learn one mode pattern that applies to both gates.
@@ -79,7 +80,7 @@ def evaluate_promotion_gates_for_activation(
 
     Raises:
         PromotionGateBlocked: in `block` mode when `decision.promoted` is False.
-            The caller (tasks.py) is responsible for ensuring this raise happens
+            The caller (the activation service) is responsible for ensuring this raise happens
             BEFORE any model-activation transaction so old segment models keep
             serving.
     """

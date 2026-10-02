@@ -3,10 +3,13 @@ import re
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from utils.sanitization import sanitize_prompt_input
 
+from .fields import UndecryptableValue
 from .models import CustomerProfile, CustomUser
 
 
@@ -48,6 +51,22 @@ class EncryptedDecimalField(serializers.DecimalField):
         return super().to_representation(value)
 
 
+class PreserveUnreadableFieldsMixin:
+    """Keep a stored value this deployment cannot decrypt when a save sends it back blank.
+
+    An undecryptable field reads as "" (never as ciphertext), and the profile
+    forms send every field back, so without this the first ordinary save would
+    replace the token with "" and restoring the right key could not recover
+    it. A real new value still replaces it.
+    """
+
+    def update(self, instance, validated_data):
+        for name in list(validated_data):
+            if validated_data[name] in ("", None) and isinstance(getattr(instance, name, None), UndecryptableValue):
+                del validated_data[name]
+        return super().update(instance, validated_data)
+
+
 class NameValidationMixin:
     """Shared first/last-name validation. Names flow into LLM prompts (marketing
     follow-ups), so they are attacker-controlled prompt input — reject injection-y
@@ -87,6 +106,19 @@ class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"password": "Password must contain at least one lowercase letter."})
         if not re.search(r"[0-9]", pw):
             raise serializers.ValidationError({"password": "Password must contain at least one digit."})
+        # The configured AUTH_PASSWORD_VALIDATORS (common passwords, similarity
+        # to the username/email/name, all-numeric). A throwaway user carries
+        # the attributes the similarity check compares against.
+        candidate = CustomUser(
+            username=data.get("username", ""),
+            email=data.get("email", ""),
+            first_name=data.get("first_name", ""),
+            last_name=data.get("last_name", ""),
+        )
+        try:
+            validate_password(pw, user=candidate)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"password": list(exc.messages)}) from exc
         return data
 
     def validate_email(self, value):
@@ -226,7 +258,7 @@ _BANKING_FIELDS = (
 _TIMESTAMP_FIELDS = ("created_at", "updated_at")
 
 
-class CustomerProfileSerializer(serializers.ModelSerializer):
+class CustomerProfileSerializer(PreserveUnreadableFieldsMixin, serializers.ModelSerializer):
     account_tenure_years = serializers.IntegerField(read_only=True)
     loyalty_tier = serializers.CharField(read_only=True)
     num_products = serializers.IntegerField(read_only=True)
@@ -332,7 +364,7 @@ class StaffCustomerDetailSerializer(serializers.ModelSerializer):
         return _mask_id_number(obj.secondary_id_number)
 
 
-class AdminCustomerProfileUpdateSerializer(serializers.ModelSerializer):
+class AdminCustomerProfileUpdateSerializer(PreserveUnreadableFieldsMixin, serializers.ModelSerializer):
     """Serializer for admin to update any customer's profile fields."""
 
     user = UserSerializer(read_only=True)

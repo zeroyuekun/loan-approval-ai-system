@@ -22,9 +22,12 @@ class AuditLog(models.Model):
     # default=timezone.now (not auto_now_add) so save() can read the value
     # before INSERT to bind it into hash_self.
     timestamp = models.DateTimeField(default=timezone.now, db_index=True, editable=False)
+    # PROTECT, not SET_NULL: user_id is part of hash_self, and SET_NULL's bulk
+    # UPDATE would rewrite it without rehashing and break the chain. Deactivate
+    # an audited user instead of deleting them.
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="audit_logs",
@@ -86,6 +89,45 @@ class AuditLog(models.Model):
 
 
 class LoanApplication(SoftDeleteModel):
+    # delete() soft-deletes: the decision, bias reports and emails CASCADE
+    # from this row and carry a 7-year retention (enforce_retention purges).
+    # CustomerProfile does not opt in: it is one-to-one with the user, so a
+    # soft-deleted row would block the get_or_create that recreates it.
+    SOFT_DELETE_ON_DELETE = True
+
+    # The applicant's facts the decision is assessed on. Frozen once the
+    # pipeline has taken the application (any status but these), in the API
+    # serializer and the Django admin alike: changing them would leave the
+    # stored decision and its ADM explanation out of step with their inputs.
+    # notes / conditions / conditions_met are post-decision workflow fields.
+    DECISION_INPUT_FIELDS = (
+        "annual_income",
+        "credit_score",
+        "loan_amount",
+        "loan_term_months",
+        "debt_to_income",
+        "employment_length",
+        "property_value",
+        "deposit_amount",
+        "monthly_expenses",
+        "existing_credit_card_limit",
+        "number_of_dependants",
+        "employment_type",
+        "applicant_type",
+        "purpose",
+        "home_ownership",
+        "has_cosigner",
+        "has_hecs",
+        "has_bankruptcy",
+        "state",
+    )
+    # Waiting for the pipeline: the decision inputs are still editable and a
+    # customer may start the pipeline themselves.
+    AWAITING_PIPELINE_STATUSES = ("pending", "queue_failed")
+
+    def decision_inputs_frozen(self) -> bool:
+        return self.status not in self.AWAITING_PIPELINE_STATUSES
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         PROCESSING = "processing", "Processing"
@@ -421,6 +463,24 @@ class LoanApplication(SoftDeleteModel):
             },
         )
 
+    def release_queue_failed(self, *, source, user=None) -> bool:
+        """Move this application from QUEUE_FAILED back to PENDING and drop its outbox row.
+
+        Guarded: only an application still in QUEUE_FAILED moves, because the
+        outbox drain and a run started by hand can both release it; returns
+        whether this call did. The move is an audited ``transition_to`` and
+        the outbox row goes in the same transaction: left behind, the drain
+        would dispatch the application again.
+        """
+        with transaction.atomic():
+            locked = type(self).objects.select_for_update().filter(pk=self.pk, status=self.Status.QUEUE_FAILED).first()
+            if locked is None:
+                return False
+            locked.transition_to(self.Status.PENDING, user=user, details={"source": source})
+            PipelineDispatchOutbox.objects.filter(application_id=self.pk).delete()
+        self.status, self.updated_at = locked.status, locked.updated_at
+        return True
+
     def __str__(self):
         return f"Loan {self.id} - {self.applicant.username} - ${self.loan_amount}"
 
@@ -481,8 +541,24 @@ class LoanDecision(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    _HUMAN_INVOLVEMENT_RANK = {
+        HumanInvolvement.NONE: 0,
+        HumanInvolvement.ASSISTED: 1,
+        HumanInvolvement.OVERRIDDEN: 2,
+    }
+
     def __str__(self):
         return f"Decision for {self.application_id}: {self.decision} ({self.confidence:.1%})"
+
+    def mark_human(self, kind) -> bool:
+        """Record a human touch on this decision. Only promotes (NONE <
+        ASSISTED < OVERRIDDEN), never downgrades. Does not save: returns True
+        when the field changed so the caller can add it to update_fields."""
+        rank = self._HUMAN_INVOLVEMENT_RANK
+        if rank[kind] <= rank.get(self.human_involvement, 0):
+            return False
+        self.human_involvement = kind
+        return True
 
 
 class FraudCheck(models.Model):

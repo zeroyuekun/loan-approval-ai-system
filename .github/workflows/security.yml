@@ -1,14 +1,10 @@
 name: Security
 
+# Reusable: runs only as part of ci.yml, whose `ci-gate` job is the single
+# required status check. Do not add push/pull_request triggers here, or the
+# jobs run twice and outside the gate.
 on:
-  push:
-    branches: [master, main]
-  pull_request:
-    branches: [master, main]
-
-concurrency:
-  group: security-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 # Force Node.js 24 runtime for all JS actions (gitleaks@v2 has no native Node 24 version)
 env:

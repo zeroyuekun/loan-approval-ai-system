@@ -170,6 +170,10 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             fallback,
             "LLM bias interpretation",
             "falling back to deterministic",
+            # The decision email under review carries the applicant's name,
+            # the loan amount and the decision rationale / pricing.
+            _service="bias_detection",
+            _pii_categories=["name", "loan_amount", "credit_assessment"],
             model="claude-sonnet-4-6",
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),

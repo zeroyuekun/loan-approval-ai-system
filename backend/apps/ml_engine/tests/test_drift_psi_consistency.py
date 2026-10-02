@@ -127,3 +127,41 @@ class TestPsiConsistency:
         assert result["psi"] == pytest.approx(0.0, abs=0.01), (
             f"Old eps inflation would push PSI above 0 even for identical data; got {result['psi']}"
         )
+
+
+class TestOutOfRangeValues:
+    """I4: values outside the training range are drift, not something to drop.
+
+    np.histogram ignores values outside [edges[0], edges[-1]] and the on-demand
+    path normalised by the in-range count only, so the worst drift read as
+    "stable"; with every value out of range it divided 0/0 and returned NaN,
+    which DRF's strict JSON renderer turns into a 500.
+    """
+
+    EDGES = list(np.linspace(0, 100, 11))
+    COUNTS = [100] * 10
+
+    def _reference_sample(self):
+        return np.repeat([(self.EDGES[i] + self.EDGES[i + 1]) / 2 for i in range(10)], 100)
+
+    def test_half_the_sample_beyond_the_training_max_is_significant(self):
+        in_range = np.repeat([(self.EDGES[i] + self.EDGES[i + 1]) / 2 for i in range(10)], 5)
+        actual = np.concatenate([in_range, np.full(50, 1000.0)])
+        result = _psi_from_histogram(self.COUNTS, self.EDGES, actual)
+        assert result["status"] == "significant_shift"
+        # Same answer as the weekly path, which also counts out-of-range values.
+        assert result["psi"] == pytest.approx(compute_psi(self._reference_sample(), actual), rel=0.05)
+
+    def test_every_value_out_of_range_is_finite_and_significant(self):
+        result = _psi_from_histogram(self.COUNTS, self.EDGES, np.full(40, -500.0))
+        assert np.isfinite(result["psi"])
+        assert result["status"] == "significant_shift"
+
+    def test_empty_actual_sample_is_not_nan(self):
+        result = _psi_from_histogram(self.COUNTS, self.EDGES, np.array([]))
+        assert np.isfinite(result["psi"])
+        assert result["psi"] == 0.0
+
+    def test_weekly_psi_counts_values_below_the_training_min(self):
+        actual = np.concatenate([self._reference_sample()[::2], np.full(500, -50.0)])
+        assert compute_psi(self._reference_sample(), actual) >= 0.25

@@ -117,4 +117,10 @@ app.conf.beat_schedule = {
         "task": "apps.loans.tasks.retry_failed_dispatches",
         "schedule": 60.0,
     },
+    # A hard-killed orchestrate task runs no cleanup; reset what it left in PROCESSING
+    # back to PENDING (re-runnable). Never to REVIEW: that queue is for bias flags only.
+    "recover-stuck-processing": {
+        "task": "apps.agents.tasks.recover_stuck_processing_applications",
+        "schedule": 300.0,
+    },
 }

@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # Retention periods (days)
 RETENTION_POLICY = {
     "soft_deleted_records": 90,  # Privacy Act APP 11.2 — purge soft-deleted PII
+    "loan_applications": 7 * 365,  # AML/CTF Act s 107 — floor for purging a soft-deleted application
     "prediction_logs": 5 * 365,  # APRA CPG 235 — model audit trail
     "drift_reports": 3 * 365,  # Internal governance policy
     # Loan applications, audit logs, KYC, emails, bias reports: 7 years
@@ -68,9 +69,13 @@ class Command(BaseCommand):
         # ── 1. Purge soft-deleted records past retention ──
         cutoff_soft = now - timedelta(days=RETENTION_POLICY["soft_deleted_records"])
 
-        for model_cls in [CustomerProfile, LoanApplication]:
+        # A soft-deleted application is purged only once its 7-year retention
+        # has also run: the purge CASCADEs to the decision, bias reports and
+        # emails, which carry their own 7-year retention.
+        cutoff_app = now - timedelta(days=RETENTION_POLICY["loan_applications"])
+        for model_cls, extra in ((CustomerProfile, {}), (LoanApplication, {"created_at__lt": cutoff_app})):
             name = model_cls.__name__
-            expired = model_cls.all_objects.dead().filter(deleted_at__lt=cutoff_soft)
+            expired = model_cls.all_objects.dead().filter(deleted_at__lt=cutoff_soft, **extra)
             count = expired.count()
 
             if count > 0:
@@ -90,7 +95,7 @@ class Command(BaseCommand):
                             "policy": f"{RETENTION_POLICY['soft_deleted_records']} days",
                         },
                     )
-                    expired.delete()
+                    expired.hard_delete()
                     self.stdout.write(self.style.SUCCESS(f"    Purged {count} {name} records"))
                 total_purged += count
             else:

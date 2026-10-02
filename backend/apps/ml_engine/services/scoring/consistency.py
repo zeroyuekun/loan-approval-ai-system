@@ -21,6 +21,18 @@ def _safe_float(val, default=0.0):
         return default
 
 
+class ConsistencyError(ValueError):
+    """An application failed one or more error-severity consistency checks.
+
+    `errors` keeps the structured findings (fields, severity, message) so a
+    caller can build its own response without parsing the message text.
+    """
+
+    def __init__(self, errors: list[dict]):
+        self.errors = list(errors)
+        super().__init__("Data consistency check failed: " + "; ".join(e["message"] for e in self.errors))
+
+
 class DataConsistencyChecker:
     """Cross-validates relationships between loan application features."""
 
