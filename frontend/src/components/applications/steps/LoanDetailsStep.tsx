@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectItem } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { FormData } from '@/hooks/useApplicationForm'
+import { LOAN_TERM_OPTIONS, PURPOSE_OPTIONS } from '@/lib/loanFieldOptions'
 
 interface LoanDetailsStepProps {
   register: UseFormRegister<FormData>
@@ -30,14 +31,9 @@ export function LoanDetailsStep({ register, errors, watch }: LoanDetailsStepProp
           <div>
             <Label htmlFor="loan_term_months">Loan Term (months)</Label>
             <Select id="loan_term_months" {...register('loan_term_months')}>
-              <SelectItem value="12">12 months (1 year)</SelectItem>
-              <SelectItem value="24">24 months (2 years)</SelectItem>
-              <SelectItem value="36">36 months (3 years)</SelectItem>
-              <SelectItem value="60">60 months (5 years)</SelectItem>
-              <SelectItem value="84">84 months (7 years)</SelectItem>
-              <SelectItem value="240">240 months (20 years)</SelectItem>
-              <SelectItem value="300">300 months (25 years)</SelectItem>
-              <SelectItem value="360">360 months (30 years)</SelectItem>
+              {LOAN_TERM_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
             </Select>
             {errors.loan_term_months && <p className="text-sm text-destructive mt-1">{errors.loan_term_months.message}</p>}
           </div>
@@ -45,11 +41,9 @@ export function LoanDetailsStep({ register, errors, watch }: LoanDetailsStepProp
         <div>
           <Label htmlFor="purpose">Loan Purpose</Label>
           <Select id="purpose" {...register('purpose')}>
-            <SelectItem value="home">Home Purchase / Refinance</SelectItem>
-            <SelectItem value="auto">Vehicle Loan</SelectItem>
-            <SelectItem value="education">Education (non-HECS)</SelectItem>
-            <SelectItem value="personal">Personal Loan</SelectItem>
-            <SelectItem value="business">Business Loan</SelectItem>
+            {PURPOSE_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
           </Select>
           {errors.purpose && <p className="text-sm text-destructive mt-1">{errors.purpose.message}</p>}
         </div>

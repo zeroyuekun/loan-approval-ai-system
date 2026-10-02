@@ -18,6 +18,7 @@ import { FairnessTab } from '@/components/metrics/tabs/FairnessTab'
 import { CalibrationThresholdsTab } from '@/components/metrics/tabs/CalibrationThresholdsTab'
 import { DriftTab } from '@/components/metrics/tabs/DriftTab'
 import { DiagnosticsTab } from '@/components/metrics/tabs/DiagnosticsTab'
+import { TryItTab } from '@/components/metrics/tabs/TryItTab'
 
 export default function ModelMetricsPage() {
   const { data: metrics, isLoading, isError } = useModelMetrics()
@@ -27,6 +28,7 @@ export default function ModelMetricsPage() {
   const [selectedAlgorithm, setSelectedAlgorithm] = useState('xgb')
   const isTraining = trainModel.isPending || trainingStatus === 'training'
   const isAdmin = user?.role === 'admin'
+  const canScore = user?.role === 'admin' || user?.role === 'officer'
   const activeTrainingLabel = ALGORITHM_LABELS[trainingAlgorithm || selectedAlgorithm] || selectedAlgorithm
 
   const handleTrain = () => {
@@ -123,6 +125,7 @@ export default function ModelMetricsPage() {
           <TabsTrigger value="calibration">Calibration &amp; Thresholds</TabsTrigger>
           {hasDrift && <TabsTrigger value="drift">Drift</TabsTrigger>}
           <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
+          {canScore && <TabsTrigger value="try-it">Try it</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="performance"><PerformanceTab metrics={metrics} /></TabsContent>
@@ -130,6 +133,7 @@ export default function ModelMetricsPage() {
         <TabsContent value="calibration"><CalibrationThresholdsTab metrics={metrics} /></TabsContent>
         {hasDrift && <TabsContent value="drift"><DriftTab reports={driftReports} /></TabsContent>}
         <TabsContent value="diagnostics"><DiagnosticsTab metrics={metrics} /></TabsContent>
+        {canScore && <TabsContent value="try-it"><TryItTab /></TabsContent>}
       </Tabs>
     </div>
   )
