@@ -2,7 +2,8 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
-from celery.exceptions import SoftTimeLimitExceeded
+from celery.exceptions import Retry, SoftTimeLimitExceeded
+from django.core.cache import cache
 from django.db.models import Count, Q
 from django.utils import timezone
 
@@ -31,6 +32,17 @@ def _email_context(application, decision):
     return build_denial_email_context(application, None)
 
 
+# Held for one run of the task (hard limit 120 s) and across its autoretries.
+_EMAIL_LOCK_TTL = 180
+# Exceptions after which Celery runs the task again: the lock stays held for
+# the retry, as the orchestrate task keeps its lock (M22).
+_RETRIED = (ConnectionError, TimeoutError, OSError, Retry)
+
+
+def _email_lock_key(application_id, decision):
+    return f"generate_email_lock:{application_id}:{decision}"
+
+
 @shared_task(
     bind=True,
     name="apps.email_engine.tasks.generate_email_task",
@@ -56,7 +68,33 @@ def generate_email_task(self, application_id, decision, regenerate=False):
     Every email it sends is bias-checked first, as in the pipeline: a flagged
     email is replaced by the template, and a severe finding (or a flagged
     template) holds the email unsent (``held_reason`` in the result).
+
+    One run at a time per application and decision: the "is there an email
+    already" check has no row to lock before the first email exists, so two
+    concurrent runs (a staff Generate during a redelivery, a double click)
+    would each generate and send one. A run that finds the lock held by
+    another task skips.
     """
+    lock_key = _email_lock_key(application_id, decision)
+    if not cache.add(lock_key, self.request.id, _EMAIL_LOCK_TTL):
+        if cache.get(lock_key) != self.request.id:
+            logger.info("Application %s (%s): email task already running, skipping", application_id, decision)
+            return {"skipped": True, "reason": "dedup_lock_held"}
+        cache.set(lock_key, self.request.id, _EMAIL_LOCK_TTL)  # our own retry re-entering
+
+    keep_lock = False
+    try:
+        return _generate_and_send(self, application_id, decision, regenerate)
+    except _RETRIED:
+        keep_lock = True
+        raise
+    finally:
+        if not keep_lock:
+            cache.delete(lock_key)
+
+
+def _generate_and_send(task, application_id, decision, regenerate):
+    """The body of ``generate_email_task``, run under its dedup lock."""
     require_decision_on_record(application_id, decision)
 
     # Idempotency: if email already generated for this application+decision, return it.
@@ -148,7 +186,7 @@ def generate_email_task(self, application_id, decision, regenerate=False):
     except RateLimited as exc:
         # The generator raises RateLimited on a 429 instead of sleeping; free the
         # worker by scheduling a Celery retry instead of holding it inside time_limit.
-        raise self.retry(countdown=exc.retry_after, exc=exc) from exc
+        raise task.retry(countdown=exc.retry_after, exc=exc) from exc
     except SoftTimeLimitExceeded:
         AuditLog.objects.create(
             action="email_generation_timeout",

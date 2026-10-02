@@ -330,3 +330,81 @@ def test_redelivery_sends_generated_but_unsent_email(monkeypatch, sample_applica
     assert result["email_sent"] is True
     email = GeneratedEmail.objects.get(application=sample_application, decision="denied")
     assert email.sent_at is not None  # marker persisted
+
+
+# ---------------------------------------------------------------------------
+# No staff email while the pipeline is deciding; one run per decision at a time
+# ---------------------------------------------------------------------------
+
+_LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
+
+def _passing_denial(*args, **kwargs):
+    return {
+        "subject": "Your application",
+        "body": "Body text",
+        "prompt_used": "p",
+        "guardrail_results": [],
+        "passed_guardrails": True,
+        "quality_score": 100,
+        "generation_time_ms": 10,
+        "attempt_number": 1,
+        "template_fallback": False,
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }
+
+
+@pytest.mark.django_db
+def test_task_refuses_while_the_pipeline_is_processing(monkeypatch, sample_application, denied_decision):
+    """The running pipeline has written its LoanDecision but not finished its
+    email step: a staff Generate now would send a second, unscreened email."""
+    from unittest.mock import MagicMock
+
+    from django.test import override_settings
+
+    from apps.email_engine import tasks as email_tasks
+    from apps.email_engine.services.decision_email import HeldForBiasReview
+
+    sample_application.status = "processing"
+    sample_application.save(update_fields=["status"])
+    send_mock = MagicMock(return_value={"sent": True})
+    monkeypatch.setattr("apps.email_engine.services.sender.send_decision_email", send_mock)
+    monkeypatch.setattr(
+        "apps.email_engine.services.email_generator.EmailGenerator.generate",
+        lambda self, *a, **kw: _passing_denial(),
+    )
+
+    with override_settings(CACHES=_LOCMEM), pytest.raises(HeldForBiasReview):
+        email_tasks.generate_email_task(str(sample_application.id), "denied")
+    assert send_mock.call_count == 0
+    assert not GeneratedEmail.objects.filter(application=sample_application).exists()
+
+
+@pytest.mark.django_db
+def test_a_concurrent_run_for_the_same_decision_sends_once(monkeypatch, sample_application, denied_decision):
+    """A second run starts while the first is generating (no email row exists
+    yet for either to find): only one email is generated and sent."""
+    from unittest.mock import MagicMock
+
+    from django.test import override_settings
+
+    from apps.email_engine import tasks as email_tasks
+
+    send_mock = MagicMock(return_value={"sent": True})
+    monkeypatch.setattr("apps.email_engine.services.sender.send_decision_email", send_mock)
+    inner = {}
+
+    def _generate(self, application, decision, *a, **kw):
+        if not inner:
+            inner["result"] = email_tasks.generate_email_task.apply(args=(str(application.pk), decision)).get()
+        return _passing_denial()
+
+    monkeypatch.setattr("apps.email_engine.services.email_generator.EmailGenerator.generate", _generate)
+
+    with override_settings(CACHES=_LOCMEM):
+        email_tasks.generate_email_task.apply(args=(str(sample_application.id), "denied")).get()
+
+    assert send_mock.call_count == 1, "two concurrent runs each sent a decision email"
+    assert inner["result"] == {"skipped": True, "reason": "dedup_lock_held"}
+    assert GeneratedEmail.objects.filter(application=sample_application).count() == 1

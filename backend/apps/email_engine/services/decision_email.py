@@ -58,6 +58,7 @@ class HeldForBiasReview(ValueError):
 def bias_hold_reason(application_id, email=None):
     """Why no staff send/generate may run for this application, or None.
 
+    * The application is PROCESSING: the running pipeline issues the email.
     * The application is under human review (status REVIEW or an escalated
       AgentRun): the reviewer's outcome decides the email.
     * ``email`` is an unsent draft with a flagged bias report: the pipeline
@@ -74,8 +75,13 @@ def bias_hold_reason(application_id, email=None):
     from apps.agents.models import AgentRun
     from apps.loans.models import LoanApplication
 
+    status = LoanApplication.objects.filter(pk=application_id).values_list("status", flat=True).first()
+    if status == LoanApplication.Status.PROCESSING:
+        # A run is deciding it right now: its LoanDecision may already be the
+        # new one while its email step (and bias check) has not finished.
+        return "Application is being processed; the pipeline issues the decision email"
     under_review = (
-        LoanApplication.objects.filter(pk=application_id, status=LoanApplication.Status.REVIEW).exists()
+        status == LoanApplication.Status.REVIEW
         or AgentRun.objects.filter(application_id=application_id, status=AgentRun.Status.ESCALATED).exists()
     )
     if under_review:
