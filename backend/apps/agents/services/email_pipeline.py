@@ -5,7 +5,6 @@ from django.db import transaction
 
 from apps.agents.exceptions import LLMServiceError
 from apps.agents.metrics import bias_check_unavailable_total
-from apps.agents.models import BiasReport
 from apps.email_engine.services.decision_email import (
     deliver_decision_email,
     generate_decision_email,
@@ -15,6 +14,7 @@ from apps.loans.models import LoanApplication
 
 from .bias.thresholds import is_severe
 from .bias_detector import BiasDetector
+from .bias_records import bias_context, save_bias_report  # noqa: F401 - re-exported
 from .recommendation_engine import RecommendationEngine
 from .step_tracker import StepTracker
 
@@ -36,30 +36,6 @@ def build_denial_email_context(application, profile_context):
     except Exception as exc:  # noqa: BLE001 — teaser is best-effort
         logger.warning("Application %s: NBO teaser unavailable: %s", application.pk, exc)
     return profile_context
-
-
-def bias_context(application, decision):
-    """The application facts the bias detector reads alongside the email text."""
-    return {
-        "loan_amount": float(application.loan_amount),
-        "purpose": application.get_purpose_display(),
-        "decision": decision,
-    }
-
-
-def save_bias_report(agent_run, generated_email, bias_result):
-    return BiasReport.objects.create(
-        agent_run=agent_run,
-        email=generated_email,
-        bias_score=bias_result["score"],
-        deterministic_score=bias_result.get("deterministic_score"),
-        llm_raw_score=bias_result.get("llm_raw_score"),
-        score_source=bias_result.get("score_source", "composite"),
-        categories=bias_result.get("categories", []),
-        analysis=bias_result.get("analysis", ""),
-        flagged=bias_result["flagged"],
-        requires_human_review=bias_result.get("requires_human_review", bias_result["flagged"]),
-    )
 
 
 def replace_flagged_email(
