@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.ml_engine.models import ModelValidationReport, ModelVersion
+from apps.ml_engine.services.model_selector import monitoring_model_version
 
 
 class ModelCardGenerator:
@@ -17,7 +18,7 @@ class ModelCardGenerator:
 
     def __init__(self, model_version: ModelVersion | None = None):
         if model_version is None:
-            model_version = ModelVersion.objects.filter(is_active=True).first()
+            model_version = monitoring_model_version()
         if model_version is None:
             raise ValueError("No active model found")
         self.model_version = model_version

@@ -17,9 +17,9 @@ The bias detection pipeline uses four AI agents, each with its own role and pers
 
 **Why two tiers?** The junior analyst (Sonnet) is fast and catches obvious violations. The senior reviewer (Opus) is slower and more expensive, but it catches subtle framing, coded language, and context-dependent bias that a less experienced model misses. For decision emails the senior reviewer only reads a rewrite of a moderate-band email (score 31-59), never every email.
 
-In the code, "Agent 2" (`bias_agent2.py`) is the moderate-band rewrite step: the email generator writes a new draft, and the senior reviewer is the second of its two checks.
+In the code, "Agent 2" (`backend/apps/agents/services/bias_agent2.py`) is the moderate-band rewrite step: the email generator writes a new draft, and the senior reviewer is the second of its two checks.
 
-Note: the decision-email thresholds are `BIAS_THRESHOLD_PASS` = 30 and `BIAS_THRESHOLD_REVIEW` = 60 (`config/settings/base.py`). Marketing thresholds are tighter because ASIC scrutinises outbound marketing to declined customers more heavily.
+Note: the decision-email thresholds are `BIAS_THRESHOLD_PASS` = 30 and `BIAS_THRESHOLD_REVIEW` = 60 (`backend/config/settings/base.py`). Marketing thresholds are tighter because ASIC scrutinises outbound marketing to declined customers more heavily.
 
 ## Required inputs
 
@@ -65,7 +65,7 @@ An email lands in the moderate band when the email pipeline (`EmailPipelineServi
 
 1. **Try a rewrite (`run_agent2`, gated by `BIAS_AGENT2_ENABLED`, on by default).** The email generator is asked for a new draft of the same decision, with Agent 1's findings passed back as feedback (flagged categories plus the analysis text). The rewrite must then pass two independent checks before it may be sent:
    - A fresh `BiasDetector` run against the rewrite must come back clean (not flagged).
-   - `AIEmailReviewer` must approve it with confidence at or above `BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE` (0.70). This is a fixed setting in `config/settings/base.py`, not an environment variable.
+   - `AIEmailReviewer` must approve it with confidence at or above `BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE` (0.70). This is a fixed setting in `backend/config/settings/base.py`, not an environment variable.
 
    If both checks pass, the rewrite is sent and the original flagged draft stays unsent; the waterfall records `EMAIL_REGENERATED_AGENT2` under the `bias_agent2_regeneration` step. Otherwise the step hands over to the template path: the rewrite failed either check, the generator degraded to the template (LLM unavailable or guardrails exhausted), the rewrite failed its guardrails, or Agent 2 raised an error. Agent 2 can only replace the flagged email with something that passed more checks, never with something weaker.
 
