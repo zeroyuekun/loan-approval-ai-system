@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
 import { LoanApplication } from '@/types'
-import { formatMaybeMasked, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface ApplicationTableProps {
@@ -63,7 +63,7 @@ export function ApplicationTable({
               <TableCell className="font-medium">
                 {app.applicant.first_name} {app.applicant.last_name}
               </TableCell>
-              <TableCell>{formatMaybeMasked(app.loan_amount)}</TableCell>
+              <TableCell>{formatCurrency(app.loan_amount)}</TableCell>
               <TableCell>{app.credit_score}</TableCell>
               <TableCell>
                 <ApplicationStatusBadge status={app.status} decision={app.decision} />

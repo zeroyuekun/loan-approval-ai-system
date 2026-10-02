@@ -159,10 +159,9 @@ export interface StaffCustomerDetail {
 export interface LoanApplication {
   id: string;
   applicant: User;
-  // Customer-facing responses mask these as bracket/band strings
-  annual_income: number | string;
-  credit_score: number | string;
-  loan_amount: number | string;
+  annual_income: number;
+  credit_score: number;
+  loan_amount: number;
   loan_term_months: number;
   debt_to_income: number;
   employment_length: number;
@@ -171,7 +170,7 @@ export interface LoanApplication {
   has_cosigner: boolean;
   property_value: number | null;
   deposit_amount: number | null;
-  monthly_expenses: number | string | null;
+  monthly_expenses: number | null;
   existing_credit_card_limit: number;
   number_of_dependants: number;
   employment_type: 'payg_permanent' | 'payg_casual' | 'self_employed' | 'contract';
@@ -208,6 +207,46 @@ export interface LoanApplication {
   created_at: string;
   updated_at: string;
   decision?: LoanDecision;
+}
+
+/**
+ * A loan application as a customer receives it (backend
+ * CustomerLoanApplicationSerializer): money and credit score are masked to
+ * bracket/band strings, and staff-only fields are left out.
+ */
+export interface CustomerLoanApplication
+  extends Pick<
+    LoanApplication,
+    | 'id'
+    | 'loan_term_months'
+    | 'debt_to_income'
+    | 'employment_length'
+    | 'property_value'
+    | 'deposit_amount'
+    | 'number_of_dependants'
+    | 'employment_type'
+    | 'purpose'
+    | 'home_ownership'
+    | 'has_cosigner'
+    | 'has_hecs'
+    | 'status'
+    | 'notes'
+    | 'conditions'
+    | 'conditions_met'
+    | 'created_at'
+    | 'updated_at'
+  > {
+  annual_income: string;
+  credit_score: string;
+  loan_amount: string;
+  monthly_expenses: string | null;
+  consumer_objectives: string;
+  consumer_requirements: string;
+  financial_situation_notes: string;
+  decision?: Pick<
+    LoanDecision,
+    'id' | 'decision' | 'created_at' | 'denial_reasons' | 'reapplication_guidance' | 'counterfactuals' | 'adm_disclosure'
+  > | null;
 }
 
 export interface AdmDisclosure {

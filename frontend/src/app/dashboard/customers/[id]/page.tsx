@@ -19,7 +19,7 @@ import { AgentStepCard } from '@/components/agents/AgentStepCard'
 import { NextBestOfferCard } from '@/components/agents/NextBestOfferCard'
 import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
-import { formatCurrency, formatMaybeMasked, formatDate, formatPurpose, getStatusColor } from '@/lib/utils'
+import { formatCurrency, formatDate, formatPurpose, getStatusColor } from '@/lib/utils'
 import {
   tierColors,
   residencyLabels,
@@ -773,7 +773,7 @@ export default function CustomerProfilePage() {
                     onClick={() => router.push(`/dashboard/applications/${loan.id}`)}
                   >
                     <TableCell className="font-mono text-xs">{loan.id.slice(0, 8)}</TableCell>
-                    <TableCell className="font-semibold">{formatMaybeMasked(loan.loan_amount)}</TableCell>
+                    <TableCell className="font-semibold">{formatCurrency(loan.loan_amount)}</TableCell>
                     <TableCell>{formatPurpose(loan.purpose)}</TableCell>
                     <TableCell>{loan.credit_score}</TableCell>
                     <TableCell>

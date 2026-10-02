@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/lib/auth'
 import { useApplications } from '@/hooks/useApplications'
+import type { CustomerLoanApplication } from '@/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
@@ -47,7 +48,7 @@ function ProfileBanner({ missing }: { missing: string[] }) {
 
 export default function CustomerApplyPage() {
   const { user } = useAuth()
-  const { data, isLoading } = useApplications()
+  const { data, isLoading } = useApplications<CustomerLoanApplication>()
 
   const { data: profile, isLoading: profileLoading } = useCustomerProfile()
 

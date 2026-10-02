@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { LoanApplication } from '@/types'
-import { formatCurrency, formatMaybeMasked, formatPercent } from '@/lib/utils'
+import { formatCurrency, formatPercent } from '@/lib/utils'
 
 interface FinancialDetailsProps {
   application: LoanApplication
@@ -17,11 +17,11 @@ export function FinancialDetails({ application }: FinancialDetailsProps) {
       <CardContent className="space-y-3">
         <div className="flex justify-between">
           <span className="text-muted-foreground">Loan Amount</span>
-          <span className="font-semibold">{formatMaybeMasked(application.loan_amount)}</span>
+          <span className="font-semibold">{formatCurrency(application.loan_amount)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Annual Income</span>
-          <span>{formatMaybeMasked(application.annual_income)}</span>
+          <span>{formatCurrency(application.annual_income)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Credit Score</span>
@@ -45,7 +45,7 @@ export function FinancialDetails({ application }: FinancialDetailsProps) {
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Monthly Expenses</span>
-          <span>{application.monthly_expenses != null ? formatMaybeMasked(application.monthly_expenses) : '—'}</span>
+          <span>{application.monthly_expenses != null ? formatCurrency(application.monthly_expenses) : '—'}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Credit Card Limit</span>
@@ -63,7 +63,7 @@ export function FinancialDetails({ application }: FinancialDetailsProps) {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">LVR</span>
-              <span>{application.property_value > 0 ? formatPercent(Number(application.loan_amount) / application.property_value) : '—'}</span>
+              <span>{application.property_value > 0 ? formatPercent(application.loan_amount / application.property_value) : '—'}</span>
             </div>
           </>
         )}

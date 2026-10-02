@@ -3,6 +3,7 @@
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useApplication } from '@/hooks/useApplications'
+import type { CustomerLoanApplication } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -187,7 +188,7 @@ function StatusPipeline({ status }: { status: string }) {
 
 export default function CustomerApplicationStatusPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: application, isLoading } = useApplication(id, {
+  const { data: application, isLoading } = useApplication<CustomerLoanApplication>(id, {
     // Poll while the application is being processed; queue_failed only changes
     // on a backend retry, so it polls at the retry pace. Letting TanStack Query
     // own the interval avoids the stale closures and interval leaks a

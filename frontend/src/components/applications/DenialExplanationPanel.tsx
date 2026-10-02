@@ -4,24 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { XCircle, RefreshCw, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
-import type { AdmDisclosure } from '@/types'
+import type { AdmDisclosure, CustomerLoanApplication } from '@/types'
 import { DecisionReviewStatus } from './DecisionReviewStatus'
 
 interface DenialExplanationPanelProps {
   denialReasons: Array<{ code: string; reason: string; feature: string }>
   counterfactuals: Array<{ changes: Record<string, number>; statement: string }>
-  // Customers receive a masked band string (e.g. "Average (500-699)"), staff the number
-  creditScore: number | string | null
+  // The customer-facing masked band, e.g. "Average (500-699)"
+  creditScore: CustomerLoanApplication['credit_score'] | null
   applicationId?: string
   admDisclosure?: AdmDisclosure | null
-}
-
-function getEquifaxBand(score: number): string {
-  if (score <= 459) return 'Below Average'
-  if (score <= 660) return 'Average'
-  if (score <= 734) return 'Good'
-  if (score <= 852) return 'Very Good'
-  return 'Excellent'
 }
 
 export function DenialExplanationPanel({
@@ -59,13 +51,6 @@ export function DenialExplanationPanel({
             <div className="rounded-lg border p-3 text-sm">
               <span className="text-muted-foreground">Credit score: </span>
               <span className="font-semibold">{creditScore}</span>
-              {typeof creditScore === 'number' && (
-                <>
-                  <span className="text-muted-foreground"> — </span>
-                  <span className="font-medium">{getEquifaxBand(creditScore)}</span>
-                  <span className="text-muted-foreground"> (Equifax AU band)</span>
-                </>
-              )}
             </div>
           )}
 
