@@ -121,10 +121,12 @@ class LoanApplication(SoftDeleteModel):
         "has_bankruptcy",
         "state",
     )
-    INPUTS_EDITABLE_STATUSES = ("pending", "queue_failed")
+    # Waiting for the pipeline: the decision inputs are still editable and a
+    # customer may start the pipeline themselves.
+    AWAITING_PIPELINE_STATUSES = ("pending", "queue_failed")
 
     def decision_inputs_frozen(self) -> bool:
-        return self.status not in self.INPUTS_EDITABLE_STATUSES
+        return self.status not in self.AWAITING_PIPELINE_STATUSES
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

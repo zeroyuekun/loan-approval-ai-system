@@ -104,9 +104,6 @@ class AgentRunListView(APIView):
         )
 
 
-_CUSTOMER_DISPATCHABLE = (LoanApplication.Status.PENDING, LoanApplication.Status.QUEUE_FAILED)
-
-
 class OrchestrateView(APIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [OrchestrationThrottle]
@@ -154,7 +151,7 @@ class OrchestrateView(APIView):
             # is waiting for it. Anything else (under review, being processed,
             # decided after a failed run) would replace a decision or fail an
             # escalated review run: that is a staff action.
-            if not is_staff_role(request.user) and application.status not in _CUSTOMER_DISPATCHABLE:
+            if not is_staff_role(request.user) and application.status not in LoanApplication.AWAITING_PIPELINE_STATUSES:
                 return Response(
                     {"detail": f"The application cannot be processed in its current status ({application.status})"},
                     status=status.HTTP_409_CONFLICT,
