@@ -7,6 +7,8 @@ per-employment-type thresholds that actually served. Scoring now applies one
 threshold to every applicant and ignores group thresholds, so without this
 the live model would approve at the test-split 0.5. The previous value is kept
 in training_metadata.superseded_optimal_threshold; the reverse restores it.
+The stored metrics are not recomputed: training_metadata.metrics_threshold
+records the threshold they describe (see ModelVersion.stale_metrics_threshold).
 """
 
 from django.db import migrations
@@ -26,6 +28,10 @@ def persist_validation_threshold(apps, schema_editor):
         if chosen is None or mv.optimal_threshold == chosen:
             continue
         meta["superseded_optimal_threshold"] = mv.optimal_threshold
+        # The stored metrics (confusion matrix, precision/recall, fairness
+        # ratios) were computed at the old threshold and are not recomputed
+        # here; record that so gates and dashboards can tell.
+        meta["metrics_threshold"] = mv.optimal_threshold
         meta["decision_threshold"] = {
             "value": chosen,
             "applies_to": "all_applicants",
@@ -41,6 +47,7 @@ def restore_superseded_threshold(apps, schema_editor):
         meta = dict(mv.training_metadata)
         previous = meta.pop("superseded_optimal_threshold")
         meta.pop("decision_threshold", None)
+        meta.pop("metrics_threshold", None)
         ModelVersion.objects.filter(pk=mv.pk).update(optimal_threshold=previous, training_metadata=meta)
 
 

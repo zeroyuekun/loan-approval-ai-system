@@ -64,3 +64,19 @@ def test_coherent_rows_and_rows_without_a_recorded_threshold_are_untouched(setti
     bare.refresh_from_db()
     assert (coherent.optimal_threshold, coherent.training_metadata) == (0.6, {"optimal_threshold": 0.6})
     assert (bare.optimal_threshold, bare.training_metadata) == (0.55, {})
+
+
+def test_the_migration_records_the_threshold_the_stored_metrics_were_computed_at(settings, tmp_path):
+    """The confusion matrix, precision/recall and fairness ratios on a legacy row
+    were computed at the old threshold; only the serving threshold moved."""
+    mv = _mv(settings, tmp_path, "legacy_metrics", 0.5, {"optimal_threshold": 0.87})
+
+    migration.persist_validation_threshold(global_apps, None)
+    mv.refresh_from_db()
+    assert mv.training_metadata["metrics_threshold"] == 0.5
+    assert mv.stale_metrics_threshold() == 0.5
+
+    migration.restore_superseded_threshold(global_apps, None)
+    mv.refresh_from_db()
+    assert "metrics_threshold" not in mv.training_metadata
+    assert mv.stale_metrics_threshold() is None
