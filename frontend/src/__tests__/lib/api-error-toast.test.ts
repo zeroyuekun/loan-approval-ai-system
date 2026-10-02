@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw'
 import { toast } from 'sonner'
 import { server } from '@/test/mocks/server'
-import api, { agentsApi, mlApi, withNotFoundFallback } from '@/lib/api'
+import api, { agentsApi, loansApi, mlApi, withNotFoundFallback } from '@/lib/api'
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -56,5 +56,14 @@ describe('api error toasts', () => {
 
     await expect(api.post('/loans/decision-reviews/', {})).rejects.toThrow()
     expect(toast.error).toHaveBeenCalledWith('Application not found.')
+  })
+
+  it('still toasts an unexpected GET 404', async () => {
+    server.use(
+      http.get(`${API_URL}/loans/missing/`, () => HttpResponse.json({ detail: 'Not found.' }, { status: 404 })),
+    )
+
+    await expect(loansApi.get('missing')).rejects.toMatchObject({ response: { status: 404 } })
+    expect(toast.error).toHaveBeenCalledWith('Not found.')
   })
 })
