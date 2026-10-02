@@ -12,14 +12,21 @@
 
 const ID_NUMBER_FIELDS = new Set(['primary_id_number', 'secondary_id_number'])
 
-// Fields the server stores as a date or number: a cleared input means "no
-// value" and is sent as null, because '' is not a valid date or number.
+// A cleared date or number input means "no value". These fields are nullable
+// on the server, so the cleared value goes out as null ('' is not a valid date
+// or number).
 const BLANK_AS_NULL_FIELDS = new Set([
   'date_of_birth',
   'years_in_current_role',
   'gross_annual_income',
   'other_income',
   'partner_annual_income',
+  'time_at_current_address_years',
+])
+
+// These are NOT NULL on the server with a default of 0, so null is rejected:
+// a cleared input goes out as 0.
+const BLANK_AS_ZERO_FIELDS = new Set([
   'estimated_property_value',
   'vehicle_value',
   'savings_other_institutions',
@@ -28,7 +35,6 @@ const BLANK_AS_NULL_FIELDS = new Set([
   'other_loan_repayments_monthly',
   'other_credit_card_limits',
   'rent_or_board_monthly',
-  'time_at_current_address_years',
   'number_of_dependants',
   'savings_balance',
   'checking_balance',
@@ -37,6 +43,13 @@ const BLANK_AS_NULL_FIELDS = new Set([
   'on_time_payment_pct',
   'previous_loans_repaid',
 ])
+
+function normaliseBlank(key: string, value: unknown): unknown {
+  if (value !== '') return value
+  if (BLANK_AS_NULL_FIELDS.has(key)) return null
+  if (BLANK_AS_ZERO_FIELDS.has(key)) return 0
+  return value
+}
 
 export function buildProfilePatch<T extends object>(
   initial: Partial<T> | undefined,
@@ -50,7 +63,7 @@ export function buildProfilePatch<T extends object>(
       continue
     }
     if (Object.is(value, before[key])) continue
-    const normalised = value === '' && BLANK_AS_NULL_FIELDS.has(key) ? null : value
+    const normalised = normaliseBlank(key, value)
     // A blank input over a null server value is not a change.
     if (normalised === null && (before[key] === null || before[key] === undefined)) continue
     patch[key] = normalised
