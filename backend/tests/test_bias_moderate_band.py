@@ -22,6 +22,7 @@ from apps.loans.models import LoanDecision
 
 SENDER = "apps.email_engine.services.sender.send_decision_email"
 HUMAN_REVIEW = "apps.agents.services.human_review_handler"
+AGENT2 = "apps.agents.services.bias_agent2"
 LOCMEM = override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
 
 
@@ -84,6 +85,133 @@ def _run_pipeline(application, *, generate_result, bias_results, send):
     return run, steps, email_result, generated_email, escalated, bias
 
 
+def _run_pipeline_agent2(
+    application,
+    *,
+    generate_side_effect,
+    pipeline_bias_results,
+    agent2_bias_result=None,
+    agent2_review=None,
+    send,
+):
+    """Like ``_run_pipeline`` but with Agent 2 enabled (the default). Its two
+    collaborators — ``BiasDetector`` and ``AIEmailReviewer`` inside
+    ``bias_agent2`` — are mocked independently of the pipeline's own
+    ``BiasDetector``, which only ever sees the original email and (if Agent 2
+    hands over) the template replacement."""
+    from apps.agents.services.email_pipeline import EmailPipelineService
+    from apps.agents.services.step_tracker import StepTracker
+
+    run = AgentRun.objects.create(application=application, status="running", steps=[])
+    steps, waterfall = [], []
+    with (
+        patch.object(EmailGenerator, "generate", side_effect=generate_side_effect),
+        patch("apps.agents.services.email_pipeline.BiasDetector") as bias,
+        patch(f"{AGENT2}.BiasDetector") as agent2_bias,
+        patch(f"{AGENT2}.AIEmailReviewer") as agent2_reviewer,
+        patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
+        patch(SENDER, send),
+    ):
+        bias.return_value.analyze.side_effect = list(pipeline_bias_results)
+        if agent2_bias_result is not None:
+            agent2_bias.return_value.analyze.return_value = agent2_bias_result
+        if agent2_review is not None:
+            agent2_reviewer.return_value.review.return_value = agent2_review
+        nbo.return_value.recommend.return_value = {"offers": []}
+        _, email_result, generated_email, bias_result, escalated = EmailPipelineService(StepTracker()).run(
+            application, run, {}, {"probability": 0.2}, "denied", steps, waterfall
+        )
+    return run, steps, waterfall, email_result, generated_email, escalated, bias, agent2_bias, agent2_reviewer
+
+
+@pytest.mark.django_db
+def test_moderate_email_is_rewritten_by_agent2_and_sent_when_clean_and_approved(processing_denied):
+    """Agent 2's rewrite is clean and the senior reviewer approves it with
+    confidence: the rewrite is sent, never the template, never the flagged
+    original."""
+    send = MagicMock(return_value={"sent": True})
+    rewrite = {**_llm_email(), "body": "Dear Customer, Agent 2 rewritten body."}
+
+    run, steps, waterfall, email_result, generated_email, escalated, bias, agent2_bias, agent2_reviewer = (
+        _run_pipeline_agent2(
+            processing_denied,
+            generate_side_effect=[_llm_email(), rewrite],
+            pipeline_bias_results=[MODERATE, CLEAN],
+            agent2_bias_result=CLEAN,
+            agent2_review={"approved": True, "confidence": 0.9, "reasoning": "ok"},
+            send=send,
+        )
+    )
+
+    assert not escalated
+    assert send.call_count == 1
+    assert "Agent 2 rewritten body" in send.call_args.args[2]
+    assert "LLM-written body" not in send.call_args.args[2]
+    assert bias.return_value.analyze.call_count == 1, "Agent 2 bypasses the template re-check entirely"
+    assert any(e["reason_code"] == "EMAIL_REGENERATED_AGENT2" for e in waterfall)
+    assert any(
+        s["step_name"] == "bias_agent2_regeneration" and s["result_summary"]["regenerated"] is True for s in steps
+    )
+    generated_email.refresh_from_db()
+    assert generated_email.sent_at is not None
+    flagged_draft = GeneratedEmail.objects.get(application=processing_denied, body="Dear Customer, LLM-written body.")
+    assert flagged_draft.sent_at is None
+
+
+@pytest.mark.django_db
+def test_moderate_email_falls_back_to_template_when_agent2_reviewer_rejects(processing_denied):
+    """The senior reviewer rejects Agent 2's rewrite: hand over to the
+    deterministic template, which checks clean and is sent."""
+    send = MagicMock(return_value={"sent": True})
+    rewrite = {**_llm_email(), "body": "Dear Customer, Agent 2 rewritten body."}
+
+    run, steps, waterfall, email_result, generated_email, escalated, bias, agent2_bias, agent2_reviewer = (
+        _run_pipeline_agent2(
+            processing_denied,
+            generate_side_effect=[_llm_email(), rewrite],
+            pipeline_bias_results=[MODERATE, CLEAN],
+            agent2_bias_result=CLEAN,
+            agent2_review={"approved": False, "confidence": 0.95, "reasoning": "tone concerns remain"},
+            send=send,
+        )
+    )
+
+    agent2_reviewer.return_value.review.assert_called_once()
+    assert not escalated
+    assert send.call_count == 1
+    assert "LLM-written body" not in send.call_args.args[2]
+    assert "Agent 2 rewritten body" not in send.call_args.args[2]
+    assert email_result["template_fallback"] is True
+    assert not any(e["reason_code"] == "EMAIL_REGENERATED_AGENT2" for e in waterfall)
+    assert any(e["reason_code"] == "EMAIL_REPLACED" for e in waterfall)
+
+
+@pytest.mark.django_db
+def test_moderate_email_escalates_when_agent2_rejects_and_template_also_flagged(processing_denied):
+    """The senior reviewer rejects Agent 2's rewrite and the template
+    replacement is still flagged: escalate to human review, send nothing."""
+    send = MagicMock(return_value={"sent": True})
+    rewrite = {**_llm_email(), "body": "Dear Customer, Agent 2 rewritten body."}
+
+    run, steps, waterfall, email_result, generated_email, escalated, bias, agent2_bias, agent2_reviewer = (
+        _run_pipeline_agent2(
+            processing_denied,
+            generate_side_effect=[_llm_email(), rewrite],
+            pipeline_bias_results=[MODERATE, MODERATE],
+            agent2_bias_result=CLEAN,
+            agent2_review={"approved": False, "confidence": 0.95, "reasoning": "tone concerns remain"},
+            send=send,
+        )
+    )
+
+    agent2_reviewer.return_value.review.assert_called_once()
+    assert escalated
+    send.assert_not_called()
+    processing_denied.refresh_from_db()
+    assert processing_denied.status == "review"
+    assert run.status == "escalated"
+
+
 @pytest.mark.django_db
 def test_bias_report_stores_every_score_source_the_detector_emits(processing_denied):
     """BiasDetector emits 'deterministic_weighted' (22 chars) when the LLM confirms
@@ -95,6 +223,7 @@ def test_bias_report_stores_every_score_source_the_detector_emits(processing_den
     assert BiasReport.objects.filter(agent_run=run).count() == 4
 
 
+@override_settings(BIAS_AGENT2_ENABLED=False)
 @pytest.mark.django_db
 def test_moderate_llm_email_is_replaced_by_template_and_sent_when_replacement_is_clean(processing_denied):
     send = MagicMock(return_value={"sent": True})
@@ -118,6 +247,7 @@ def test_moderate_llm_email_is_replaced_by_template_and_sent_when_replacement_is
     assert any(s["step_name"] == "bias_regeneration" for s in steps)
 
 
+@override_settings(BIAS_AGENT2_ENABLED=False)
 @pytest.mark.django_db
 def test_moderate_email_whose_replacement_is_still_flagged_is_held_for_review(processing_denied):
     send = MagicMock(return_value={"sent": True})
@@ -134,6 +264,7 @@ def test_moderate_email_whose_replacement_is_still_flagged_is_held_for_review(pr
     assert not GeneratedEmail.objects.filter(application=processing_denied, sent_at__isnull=False).exists()
 
 
+@override_settings(BIAS_AGENT2_ENABLED=False)
 @pytest.mark.django_db
 def test_moderate_template_email_is_held_without_regenerating(processing_denied):
     """Regenerating a flagged template yields the same text, so it goes straight to review."""

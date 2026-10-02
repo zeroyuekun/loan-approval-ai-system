@@ -13,6 +13,7 @@ from apps.email_engine.services.decision_email import (
 from apps.loans.models import LoanApplication
 
 from .bias.thresholds import is_severe
+from .bias_agent2 import run_agent2
 from .bias_detector import BiasDetector
 from .bias_records import bias_context, save_bias_report  # noqa: F401 - re-exported
 from .recommendation_engine import RecommendationEngine
@@ -236,45 +237,68 @@ class EmailPipelineService:
         # Moderate band: flagged, below the severe threshold. Replace the email
         # with the template and send only if the replacement checks clean.
         if bias_result.get("flagged"):
-            try:
-                replacement = replace_flagged_email(
-                    application,
-                    agent_run,
-                    decision,
-                    email_result,
-                    generated_email,
-                    bias_result,
-                    bias_detector,
-                    self.tracker,
-                    steps,
-                )
-            except Exception as e:
-                # The flagged original must not ship, so a failed re-check holds
-                # the run for review in every BIAS_FAILURE_MODE.
-                logger.error("Application %s: bias re-check of the replacement failed: %s", application_id, e)
-                replacement = None
-            if replacement is None or replacement[2].get("flagged"):
-                self._escalate_for_bias(
-                    application,
-                    agent_run,
-                    steps,
-                    waterfall,
-                    code="ESCALATED_MODERATE_BIAS",
-                    step_name="human_escalation_moderate_bias",
-                    reason=f"Bias flagged (score {bias_score}) and no clean replacement email",
-                    bias_score=bias_score,
-                )
-                return steps, email_result, generated_email, bias_result, True
-            email_result, generated_email, bias_result = replacement
-            waterfall.append(
-                StepTracker.waterfall_entry(
-                    "bias_regeneration",
-                    "pass",
-                    "EMAIL_REPLACED",
-                    f"Flagged email (score {bias_score}) replaced by the template, which checked clean "
-                    f"(score {bias_result.get('score', 0)})",
-                )
+            agent2 = run_agent2(
+                application,
+                agent_run,
+                decision,
+                email_result,
+                bias_result,
+                confidence=prediction_result["probability"],
+                profile_context=profile_context,
+                tracker=self.tracker,
+                steps=steps,
             )
+            if agent2 is not None:
+                email_result, generated_email, bias_result = agent2
+                waterfall.append(
+                    StepTracker.waterfall_entry(
+                        "bias_regeneration",
+                        "pass",
+                        "EMAIL_REGENERATED_AGENT2",
+                        f"Flagged email (score {bias_score}) rewritten by Agent 2; the rewrite passed the bias "
+                        f"check (score {bias_result.get('score', 0)}) and the senior review",
+                    )
+                )
+            else:
+                try:
+                    replacement = replace_flagged_email(
+                        application,
+                        agent_run,
+                        decision,
+                        email_result,
+                        generated_email,
+                        bias_result,
+                        bias_detector,
+                        self.tracker,
+                        steps,
+                    )
+                except Exception as e:
+                    # The flagged original must not ship, so a failed re-check holds
+                    # the run for review in every BIAS_FAILURE_MODE.
+                    logger.error("Application %s: bias re-check of the replacement failed: %s", application_id, e)
+                    replacement = None
+                if replacement is None or replacement[2].get("flagged"):
+                    self._escalate_for_bias(
+                        application,
+                        agent_run,
+                        steps,
+                        waterfall,
+                        code="ESCALATED_MODERATE_BIAS",
+                        step_name="human_escalation_moderate_bias",
+                        reason=f"Bias flagged (score {bias_score}) and no clean replacement email",
+                        bias_score=bias_score,
+                    )
+                    return steps, email_result, generated_email, bias_result, True
+                email_result, generated_email, bias_result = replacement
+                waterfall.append(
+                    StepTracker.waterfall_entry(
+                        "bias_regeneration",
+                        "pass",
+                        "EMAIL_REPLACED",
+                        f"Flagged email (score {bias_score}) replaced by the template, which checked clean "
+                        f"(score {bias_result.get('score', 0)})",
+                    )
+                )
 
         # Guardrail failure — log it and skip email delivery, but do NOT
         # escalate to human review.  Only bias flags trigger escalation.

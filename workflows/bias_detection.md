@@ -33,6 +33,7 @@ Note: the 60/80 bias thresholds came from testing against real bank denial lette
 | Decision email senior reviewer | `backend/apps/agents/services/bias_detector.py:AIEmailReviewer` | Agent 2: senior review of flagged decision emails (Opus) |
 | Marketing email bias detector | `backend/apps/agents/services/bias_detector.py:MarketingBiasDetector` | Agent 3: first-pass bias scoring on marketing emails |
 | Marketing email senior reviewer | `backend/apps/agents/services/bias_detector.py:MarketingEmailReviewer` | Agent 4: senior review of flagged marketing emails (Opus) |
+| Moderate-band rewrite | `backend/apps/agents/services/bias_agent2.py:run_agent2` | Email pipeline step: rewrites a moderate-band flagged decision email with the bias findings as feedback, then re-checks the rewrite before it may replace the template fallback |
 
 ## Decision email pipeline
 
@@ -60,6 +61,22 @@ Note: the 60/80 bias thresholds came from testing against real bank denial lette
    - Make a final approve/reject decision
 
 4. **If Agent 2 rejects,** escalate to a human reviewer through `HumanReviewView`.
+
+### Moderate-band route: rewrite before template, template before escalation
+
+An email lands in the moderate band when the email pipeline (`EmailPipelineService.run`) finds it flagged but below `BIAS_THRESHOLD_REVIEW` (the score that escalates straight to a human). A flagged email is never sent as written, so the pipeline tries two replacements in order before it will hold the application for human review:
+
+1. **Try a rewrite (`run_agent2`, gated by `BIAS_AGENT2_ENABLED`, on by default).** The email generator is asked for a new draft of the same decision, with Agent 1's findings passed back as feedback (flagged categories plus the analysis text). The rewrite must then pass two independent checks before it is allowed to ship:
+   - A fresh `BiasDetector` run against the rewrite must come back clean (not flagged).
+   - `AIEmailReviewer` (the same senior-reviewer model used in step 3 above) must approve it with confidence at or above `BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE` (default 0.70).
+
+   If both checks pass, the rewrite is what gets sent — the original flagged draft is discarded unsent, and the waterfall records `EMAIL_REGENERATED_AGENT2`. If the rewrite fails either check, the generator degrades to the template, or the rewrite itself fails to generate, the rewrite step hands over to the template path instead (it can only replace the flagged email with something that passed more checks, never with something weaker). Agent 2 is skipped entirely when the original email was already the deterministic template, since regenerating it would produce the same text.
+
+2. **Fall back to the template.** When the rewrite was skipped, disabled, or handed over, the pipeline falls back to the existing deterministic-template replacement: generate the template, bias-check it, and send it only if that check comes back clean (waterfall: `EMAIL_REPLACED`).
+
+3. **Escalate.** If the template replacement is also still flagged, the application is held and routed to the human-review queue (waterfall: `ESCALATED_MODERATE_BIAS`), exactly as before this rewrite step existed.
+
+The human-review resume path (re-running a previously escalated application after a reviewer clears it) does not go through the rewrite step — it only ever replaces a flagged email with the template, since a human has already reviewed the run.
 
 ### Fail-closed behaviour
 - If Agent 1 can't parse Claude's response → default to score 100 (blocked)
