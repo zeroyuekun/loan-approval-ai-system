@@ -2,6 +2,7 @@ import axios from 'axios'
 import { toast } from 'sonner'
 import { resetClientState } from '@/lib/clientState'
 import { resolveApiUrl } from '@/lib/csp'
+import { AdhocScoreFields, AdhocScoreResult } from '@/types'
 
 // API parameter and payload types
 interface PaginationParams {
@@ -218,6 +219,7 @@ export const loansApi = {
 export const mlApi = {
   predict: (loanId: string) => api.post(`/ml/predict/${loanId}/`),
   getMetrics: () => api.get('/ml/models/active/metrics/'),
+  scoreApplicant: (fields: AdhocScoreFields) => api.post<AdhocScoreResult>('/ml/models/active/score/', fields),
   trainModel: (algorithm: string) => api.post('/ml/models/train/', { algorithm }),
   getModelCard: () => api.get('/ml/models/active/model-card/'),
   getDriftReports: (limit?: number) => api.get('/ml/models/active/drift-reports/', { params: { limit: limit || 12 } }),

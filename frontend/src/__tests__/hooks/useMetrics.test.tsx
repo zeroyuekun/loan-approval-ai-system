@@ -281,6 +281,63 @@ describe('useTrainModel', () => {
     })
   })
 
+  it('transitions to blocked and names the gates when the new model was not activated', async () => {
+    server.use(
+      http.post(`${API_URL}/ml/models/train/`, () => {
+        return HttpResponse.json({ task_id: 'task-blocked', status: 'queued' })
+      }),
+      http.get(`${API_URL}/tasks/:taskId/status/`, () => {
+        return HttpResponse.json({
+          task_id: 'task-blocked',
+          status: 'SUCCESS',
+          result: { model_version_id: 'mv-2', activated: false, activation_blocked: ['promotion', 'validation'] },
+        })
+      }),
+    )
+
+    const { result } = renderHook(() => useTrainModel(), {
+      wrapper: createWrapper(),
+    })
+
+    await act(async () => {
+      result.current.mutate('rf')
+    })
+
+    await waitFor(() => {
+      expect(result.current.trainingStatus).toBe('blocked')
+    })
+    expect(result.current.blockedGates).toEqual(['promotion', 'validation'])
+    expect(localStorage.getItem(TRAINING_STORAGE_KEY)).toBeNull()
+  })
+
+  it('stays success when the task reports the new model activated', async () => {
+    server.use(
+      http.post(`${API_URL}/ml/models/train/`, () => {
+        return HttpResponse.json({ task_id: 'task-activated', status: 'queued' })
+      }),
+      http.get(`${API_URL}/tasks/:taskId/status/`, () => {
+        return HttpResponse.json({
+          task_id: 'task-activated',
+          status: 'SUCCESS',
+          result: JSON.stringify({ model_version_id: 'mv-3', activated: true, activation_blocked: [] }),
+        })
+      }),
+    )
+
+    const { result } = renderHook(() => useTrainModel(), {
+      wrapper: createWrapper(),
+    })
+
+    await act(async () => {
+      result.current.mutate('xgb')
+    })
+
+    await waitFor(() => {
+      expect(result.current.trainingStatus).toBe('success')
+    })
+    expect(result.current.blockedGates).toEqual([])
+  })
+
   it('exposes 409 conflict as in-progress error message', async () => {
     server.use(
       http.post(`${API_URL}/ml/models/train/`, () => {

@@ -10,11 +10,21 @@ export function PerformanceTab({ metrics }: { metrics: ModelMetrics }) {
   const hasRoc = metrics.roc_curve_data?.fpr && metrics.roc_curve_data?.tpr
   const features = metrics.feature_importances
   const hasFeatures = features && (Array.isArray(features) ? features.length > 0 : Object.keys(features).length > 0)
+  // The stored matrix may have been computed at an older threshold than the
+  // one the model serves at (ModelVersion.stale_metrics_threshold).
+  const metricsThreshold = metrics.training_metadata?.metrics_threshold
+  const matrixThreshold = typeof metricsThreshold === 'number' ? metricsThreshold : metrics.optimal_threshold
 
   return (
     <div className="space-y-6">
       <div className="grid gap-6 md:grid-cols-2">
-        {hasConfusion && <ConfusionMatrix matrix={metrics.confusion_matrix} threshold={metrics.optimal_threshold} />}
+        {hasConfusion && (
+          <ConfusionMatrix
+            matrix={metrics.confusion_matrix}
+            threshold={matrixThreshold}
+            servingThreshold={metrics.optimal_threshold}
+          />
+        )}
         {hasRoc && <ROCCurve fpr={metrics.roc_curve_data.fpr!} tpr={metrics.roc_curve_data.tpr!} auc={metrics.auc_roc ?? 0} />}
       </div>
       {hasFeatures && <FeatureImportance features={features} />}

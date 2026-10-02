@@ -1,3 +1,5 @@
+import logging
+
 import redis
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError
@@ -11,10 +13,18 @@ from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 from apps.loans.models import AuditLog
 from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
+from apps.ml_engine.services.model_selector import NoActiveModelError
+from apps.ml_engine.services.scoring.adhoc import AdhocApplicantSerializer, input_error_detail, score_applicant
+from apps.ml_engine.services.scoring.policy_overlay import PolicyOverlayUnavailable
 from apps.ml_engine.tasks import TRAIN_LOCK_KEY, run_prediction_task, train_model_task
+
+logger = logging.getLogger(__name__)
 
 
 class PredictionThrottle(UserRateThrottle):
+    # Own scope so this cap doesn't share the global UserRateThrottle's
+    # "throttle_user_<id>" cache key (see accounts.views.RefreshRateThrottle).
+    scope = "ml_predict"
     rate = "10/hour"
 
 
@@ -466,3 +476,53 @@ class DriftReportListView(APIView):
             )
 
         return Response(data)
+
+
+class AdhocScoreThrottle(UserRateThrottle):
+    # Own scope: without it the cap shares "throttle_user_<id>" with the
+    # global UserRateThrottle and both limits count each other's requests.
+    scope = "adhoc_score"
+    rate = "30/hour"
+
+
+class AdhocScoreView(APIView):
+    """Score one applicant's facts against the active model.
+
+    Builds nothing durable: no `LoanApplication` row, no referral-audit
+    save, no shadow-scoring `PredictionLog` row (see `ModelPredictor.predict
+    (..., persist=False)`). Staff-only — this is an underwriting tool, not
+    a customer-facing pre-qualification endpoint.
+    """
+
+    permission_classes = [IsAdminOrOfficer]
+    throttle_classes = [AdhocScoreThrottle]
+
+    def post(self, request):
+        serializer = AdhocApplicantSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = score_applicant(serializer.validated_data)
+        except NoActiveModelError:  # a ValueError subclass, so it must come first
+            return Response({"detail": "No active model"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except PolicyOverlayUnavailable as exc:
+            # Class name only: the exception text can carry applicant figures.
+            logger.warning("adhoc_score_unavailable: %s", type(exc).__name__)
+            return Response(
+                {"detail": "Credit policy rules are unavailable right now. Try again shortly."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except ValueError as exc:
+            logger.warning("adhoc_score_rejected: %s", type(exc).__name__)
+            return Response({"detail": input_error_detail(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="adhoc_score",
+            resource_type="ModelVersion",
+            resource_id=result["model_version"],
+            details={"fields": sorted(serializer.validated_data.keys())},
+            ip_address=request.META.get("REMOTE_ADDR"),
+        )
+
+        return Response(result, status=status.HTTP_200_OK)

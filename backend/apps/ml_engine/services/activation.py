@@ -116,6 +116,18 @@ def _evaluate_gates(mv: ModelVersion, *, force: bool) -> tuple[dict, list[str]]:
             "blocked": str(exc),
         }
 
+    # Fairness evidence computed at another threshold describes a cutoff the
+    # model no longer serves at (legacy rows after migration 0010).
+    stale = mv.stale_metrics_threshold()
+    if stale is not None and gates["fairness"]["mode"] != "off":
+        gates["fairness"]["stale_metrics"] = {"computed_at": stale, "serving_at": mv.optimal_threshold}
+        if gates["fairness"]["mode"] == "block" and "fairness" not in blocked:
+            blocked.append("fairness")
+            gates["fairness"]["blocked"] = (
+                f"Fairness metrics were computed at threshold {stale} but the model serves at "
+                f"{mv.optimal_threshold}; retrain (or re-evaluate) before activating."
+            )
+
     try:
         decision = evaluate_promotion_gates_for_activation(promote_if_eligible(mv), promotion_mode)
         payload = decision["decision"]

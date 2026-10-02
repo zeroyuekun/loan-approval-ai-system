@@ -38,7 +38,7 @@ export function useModelMetrics() {
   })
 }
 
-type TrainingStatus = 'idle' | 'training' | 'success' | 'failure' | 'skipped'
+export type TrainingStatus = 'idle' | 'training' | 'success' | 'failure' | 'skipped' | 'blocked'
 
 function parseTaskResult(result: unknown): Record<string, any> | null {
   if (result == null) return null
@@ -59,6 +59,9 @@ export function useTrainModel() {
   const [taskId, setTaskId] = useState<string | null>(null)
   const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>('idle')
   const [trainingAlgorithm, setTrainingAlgorithm] = useState<string>('')
+  // Gates that kept a freshly trained model inactive (task result
+  // `activation_blocked`); empty unless trainingStatus is 'blocked'.
+  const [blockedGates, setBlockedGates] = useState<string[]>([])
   const pollCountRef = useRef(0)
 
   // On mount, check if there's a training task in progress
@@ -78,6 +81,7 @@ export function useTrainModel() {
     },
     onSuccess: (data) => {
       pollCountRef.current = 0  // reset backoff for new job so first poll is 2s, not up to 30s
+      setBlockedGates([])
       setTaskId(data.task_id)
       setTrainingAlgorithm(data.algorithm)
       setTrainingStatus('training')
@@ -121,13 +125,20 @@ export function useTrainModel() {
         pollCountRef.current += 1
         return interval
       }
+      const taskResult = parseTaskResult(query.state.data?.result)
       if (status === 'FAILURE') {
         setTrainingStatus('failure')
-      } else if (parseTaskResult(query.state.data?.result)?.status === 'skipped') {
+      } else if (taskResult?.status === 'skipped') {
         // A Celery SUCCESS can still be a no-op run (the task short-circuited
         // because another training was already holding the lock). Inspect the
         // payload so we don't mislead the operator.
         setTrainingStatus('skipped')
+      } else if (taskResult?.activated === false) {
+        // Trained, but a pre-activation gate in block mode kept the new model
+        // inactive; the current champion keeps serving.
+        const gates = taskResult.activation_blocked
+        setBlockedGates(Array.isArray(gates) ? gates.map(String) : [])
+        setTrainingStatus('blocked')
       } else {
         setTrainingStatus('success')
         queryClient.invalidateQueries({ queryKey: ['modelMetrics'] })
@@ -139,5 +150,5 @@ export function useTrainModel() {
     },
   })
 
-  return { ...mutation, trainingStatus, trainingAlgorithm, errorMessage }
+  return { ...mutation, trainingStatus, trainingAlgorithm, blockedGates, errorMessage }
 }

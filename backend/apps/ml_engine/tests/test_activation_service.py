@@ -191,6 +191,57 @@ def test_approved_candidate_passes_block_mode(models_dir):
     assert candidate.is_active
 
 
+def _stale(mv, computed_at=0.5, serving_at=0.87):
+    mv.optimal_threshold = serving_at
+    mv.training_metadata = {**mv.training_metadata, "metrics_threshold": computed_at}
+    mv.save(update_fields=["optimal_threshold", "training_metadata"])
+    return mv
+
+
+@override_settings(ML_FAIRNESS_GATE_MODE="block")
+def test_block_mode_refuses_fairness_evidence_computed_at_another_threshold(models_dir):
+    """Migration 0010 moved legacy models' threshold, not the metrics computed at the old one."""
+    candidate = _stale(make_mv(models_dir, "stale", fairness_metrics=PASSING_FAIRNESS))
+    _approve(candidate)
+
+    with pytest.raises(ActivationBlocked) as exc:
+        activate_model_version(candidate, actor=None, source="api")
+
+    assert "fairness" in exc.value.blocked_gates
+    candidate.refresh_from_db()
+    assert not candidate.is_active
+
+
+@override_settings(ML_FAIRNESS_GATE_MODE="warn")
+def test_warn_mode_records_stale_fairness_evidence(models_dir):
+    candidate = _stale(make_mv(models_dir, "stale_warn", fairness_metrics=PASSING_FAIRNESS))
+    _approve(candidate)
+
+    gates = activate_model_version(candidate, actor=None, source="api")
+
+    assert gates["fairness"]["stale_metrics"] == {"computed_at": 0.5, "serving_at": 0.87}
+    candidate.refresh_from_db()
+    assert candidate.is_active
+
+
+def test_metrics_computed_at_the_serving_threshold_are_not_stale(models_dir):
+    same = _stale(make_mv(models_dir, "same"), computed_at=0.87, serving_at=0.87)
+    unrecorded = make_mv(models_dir, "unrecorded")
+    assert same.stale_metrics_threshold() is None
+    assert unrecorded.stale_metrics_threshold() is None
+
+
+def test_weekly_fairness_check_reports_models_serving_on_stale_metrics(models_dir):
+    from apps.ml_engine.tasks import check_fairness_violations
+
+    _stale(make_mv(models_dir, "live_stale", active=True, traffic=100, fairness_metrics=PASSING_FAIRNESS))
+
+    result = check_fairness_violations.apply().get()
+
+    assert [m["version"] for m in result["stale_metrics"]] == ["live_stale"]
+    assert AuditLog.objects.filter(action="fairness_metrics_stale").exists()
+
+
 # --- traffic endpoint (I7) ----------------------------------------------------
 
 
@@ -304,8 +355,12 @@ def test_block_mode_training_keeps_the_champion_serving(models_dir, fake_trainin
 
     champion = make_mv(models_dir, "champ", active=True, traffic=100)
 
-    _do_train(MagicMock(), "xgb", fake_training, MagicMock())
+    result = _do_train(MagicMock(), "xgb", fake_training, MagicMock())
 
+    # The task result names the blocking gates so the Train Model UI can say
+    # why the new model is not serving, instead of reporting plain success.
+    assert result["activated"] is False
+    assert result["activation_blocked"] == ["validation"]
     champion.refresh_from_db()
     assert champion.is_active and champion.traffic_percentage == 100
     candidate = ModelVersion.objects.exclude(pk=champion.pk).get()
@@ -319,8 +374,10 @@ def test_warn_mode_training_activates_and_records_the_gates(models_dir, fake_tra
 
     champion = make_mv(models_dir, "champ", active=True, traffic=100)
 
-    _do_train(MagicMock(), "xgb", fake_training, MagicMock())
+    result = _do_train(MagicMock(), "xgb", fake_training, MagicMock())
 
+    assert result["activated"] is True
+    assert result["activation_blocked"] == []
     champion.refresh_from_db()
     candidate = ModelVersion.objects.exclude(pk=champion.pk).get()
     assert (candidate.is_active, candidate.traffic_percentage) == (True, 100)

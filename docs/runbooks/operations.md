@@ -566,7 +566,7 @@ blocking defaults, or before overriding one back to advisory.
 | Variable | Development default | Production default | Effect when enforcing |
 |---|---|---|---|
 | `ML_FAIRNESS_GATE_MODE` | `warn` | `block` | The activation service (training, `train_model`, activate and traffic endpoints) refuses activation if the EEOC 80% rule fails for any protected attribute, or if no fairness data was recorded. The current champion keeps serving; no zero-model gap. |
-| `ML_PROMOTION_GATE_MODE` | `warn` | `block` | The activation service refuses activation if `model_selector.promote_if_eligible` reports any of the four champion-challenger gates failed (KS regression, PSI stability, ECE calibration, AUC regression). |
+| `ML_PROMOTION_GATE_MODE` | `warn` | `block` | The activation service refuses activation if `model_selector.promote_if_eligible` reports any of the five promotion gates failed (KS regression, PSI stability, ECE calibration, AUC regression, overfitting). The overfitting gate fails when train AUC minus validation AUC exceeds `ML_OVERFIT_MAX_GAP` (default `0.05`). |
 | `ML_VALIDATION_SIGNOFF_GATE_MODE` | `warn` | `block` | The activation service refuses activation without an approved, signed-off `ModelValidationReport`. A freshly trained candidate stays inactive until sign-off and a manual activation. `?force=true` on the activate endpoint is the audited override. |
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` | `enforce` | Hard-fail P-codes in `services/credit_policy.py` decline the application whatever the model says; refer P-codes are recorded on the decision (the human review queue is only for bias flags). If the overlay cannot be evaluated in enforce mode, the prediction step fails and the application returns to pending. |
 | `DECISION_OVERTURN_GATE_MODE` | `off` | `second_approver` | Maker/checker control on officer overturns of denials at/above `DECISION_OVERTURN_THRESHOLD` (default `$100,000`). `second_approver` blocks high-value overturns at the API pending an out-of-band dual-approval process; `2fa` (weaker) requires the acting officer to hold a verified TOTP device. Below-threshold overturns are never gated. |
@@ -603,8 +603,22 @@ so a mistake there reaches more decisions and the rollout needs more care.
 - [ ] `metrics["calibration_data"]["ece"]` is populated (introduced
       pre-v1.9.0; legacy models without it will fail Gate 3).
 - [ ] At least one champion exists per segment you train, or you accept
-      that the first model in a segment is auto-promoted once PSI and ECE
-      pass (the gate short-circuits Gates 1 and 4 in that case).
+      that the first model in a segment is auto-promoted once PSI, ECE and
+      the overfitting gate pass (the gate short-circuits Gates 1 and 4 in
+      that case).
+- [ ] Recent training runs record `training_metadata.overfitting_gap_val`
+      (train AUC minus validation AUC). Gate 5 fails a candidate whose gap
+      is above `ML_OVERFIT_MAX_GAP` (default `0.05`; an empty or malformed
+      value falls back to the default). A model without the field is
+      treated as not assessable and passes Gate 5.
+- [ ] You accept that Random Forest retrains are expected to be blocked.
+      Their train-vs-validation AUC gap runs at about 0.12 to 0.15 at every
+      depth in the training grid, so in `block` mode an RF candidate stays
+      inactive and the current champion keeps serving. The Train Model page
+      reports this as "trained but not activated" and names the gate.
+      XGBoost is the algorithm expected to pass. Raising
+      `ML_OVERFIT_MAX_GAP` to let RF through is a reviewed exception, not
+      a fix.
 - [ ] Documented rollback acknowledged: set `ML_PROMOTION_GATE_MODE=warn`
       and restart the `worker_ml` Celery worker.
 

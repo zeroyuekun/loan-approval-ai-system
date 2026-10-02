@@ -10,9 +10,13 @@ interface ConfusionMatrixProps {
   /** The operating threshold these counts were computed at. Surfaced so the
    *  matrix is never mistaken for a 0.5-cutoff classifier the system never runs. */
   threshold?: number | null
+  /** The threshold the model serves at now. When it differs from `threshold`
+   *  (legacy models after the single-threshold migration) the counts describe
+   *  a cutoff that is no longer used, and the card says so. */
+  servingThreshold?: number | null
 }
 
-export function ConfusionMatrix({ matrix: raw, threshold }: ConfusionMatrixProps) {
+export function ConfusionMatrix({ matrix: raw, threshold, servingThreshold }: ConfusionMatrixProps) {
   const matrix = {
     tp: raw.tp ?? raw.true_positives ?? 0,
     fp: raw.fp ?? raw.false_positives ?? 0,
@@ -81,6 +85,12 @@ export function ConfusionMatrix({ matrix: raw, threshold }: ConfusionMatrixProps
               <> · at operating threshold {threshold.toFixed(2)}</>
             )}
           </p>
+          {typeof threshold === 'number' && typeof servingThreshold === 'number' &&
+            Math.abs(threshold - servingThreshold) > 1e-9 && (
+              <p className="text-center text-xs text-amber-700 mt-1">
+                The model now serves at {servingThreshold.toFixed(2)}; retrain to refresh these figures.
+              </p>
+            )}
         </div>
       </CardContent>
     </Card>

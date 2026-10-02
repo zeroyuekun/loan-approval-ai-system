@@ -288,6 +288,53 @@ export interface ModelMetrics {
   created_at: string;
 }
 
+/** Decision-input facts the "Try it" ad-hoc scoring form collects (backend: LoanApplication.DECISION_INPUT_FIELDS). */
+// Number fields are optional: the form leaves an empty input out of the
+// payload instead of sending 0, and the backend reports a missing required one.
+export interface AdhocScoreFields {
+  annual_income?: number;
+  credit_score?: number;
+  loan_amount?: number;
+  loan_term_months: number;
+  debt_to_income?: number;
+  employment_length?: number;
+  purpose: string;
+  home_ownership: string;
+  employment_type: string;
+  applicant_type: string;
+  state: string;
+  number_of_dependants?: number;
+  property_value?: number | null;
+  deposit_amount?: number | null;
+  monthly_expenses?: number | null;
+  existing_credit_card_limit?: number;
+  has_cosigner?: boolean;
+  has_hecs?: boolean;
+  has_bankruptcy?: boolean;
+}
+
+export interface AdhocScoreTopFactor {
+  feature: string;
+  impact: number;
+}
+
+export interface AdhocScoreResult {
+  probability: number;
+  decision: 'approved' | 'denied';
+  threshold: number;
+  risk_grade: string;
+  top_factors: AdhocScoreTopFactor[];
+  model_version: string;
+  note: string;
+  defaulted_features: string[];
+  /** Credit-policy overlay mode; only "enforce" applies the P-codes below. */
+  policy_mode?: string | null;
+  policy_hard_fails?: string[];
+  policy_refers?: string[];
+  /** Codes of the refer reasons recorded on the decision, e.g. "POLICY_REFER_P11". */
+  refer_reasons?: string[];
+}
+
 export interface GeneratedEmail {
   id: string;
   application_id: string;
