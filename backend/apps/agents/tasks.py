@@ -232,11 +232,12 @@ def orchestrate_pipeline_task(self, application_id, force=False):
     retry_backoff=True,
     max_retries=3,
 )
-def resume_pipeline_task(self, agent_run_id, reviewer="", note="", action="approve"):
+def resume_pipeline_task(self, agent_run_id, reviewer="", note="", action="approve", reviewer_id=None):
     """Resume an escalated pipeline after a human-review approve or deny.
 
     ``action="deny"``: the view has already recorded the denial on the
     LoanDecision; the resume issues the bias-checked denial email.
+    ``reviewer_id`` is recorded as the user on the decision's status transition.
     """
     from apps.agents.services.orchestrator import PipelineOrchestrator
     from apps.agents.services.step_tracker import pipeline_deadline
@@ -244,7 +245,9 @@ def resume_pipeline_task(self, agent_run_id, reviewer="", note="", action="appro
     try:
         orchestrator = PipelineOrchestrator()
         with pipeline_deadline(self.soft_time_limit or _DEDUP_LOCK_TTL):
-            agent_run = orchestrator.resume_after_review(agent_run_id, reviewer=reviewer, note=note, action=action)
+            agent_run = orchestrator.resume_after_review(
+                agent_run_id, reviewer=reviewer, note=note, action=action, reviewer_id=reviewer_id
+            )
     except _AUTORETRY:
         raise  # autoretried; the resume accepts the claimed run again
     except Exception as exc:

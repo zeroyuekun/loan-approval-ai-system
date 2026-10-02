@@ -1,6 +1,7 @@
 import logging
 import time
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
@@ -43,12 +44,14 @@ class HumanReviewHandler:
         self.tracker = step_tracker
         self.context_builder = context_builder
 
-    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve"):
+    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve", reviewer_id=None):
         """Issue the decision on record after a reviewer approved or denied.
 
         Both outcomes take the same path: generate the decision email, run the
         bias pre-screen/check, deliver once, then apply the decision. For a
         deny the view has already written the denial onto the LoanDecision.
+        The decision's status transition records ``reviewer_id`` as its user,
+        so the four-eyes check on a later decision review finds the decider.
         """
         start_time = time.time()
         logger.info("Resuming agent run %s after human review", agent_run_id)
@@ -255,6 +258,7 @@ class HumanReviewHandler:
             application.refresh_from_db()
             application.transition_to(
                 decision,
+                user=get_user_model().objects.filter(pk=reviewer_id).first() if reviewer_id else None,
                 details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
             )
             # Record that a human was involved, so the ADM disclosure can

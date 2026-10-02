@@ -545,6 +545,8 @@ class PipelineOrchestrator:
 
         return agent_run
 
-    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve"):
+    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve", reviewer_id=None):
         with api_call_context(agent_run_id=agent_run_id):
-            return self._human_review_handler.resume_after_review(agent_run_id, reviewer, note, action=action)
+            return self._human_review_handler.resume_after_review(
+                agent_run_id, reviewer, note, action=action, reviewer_id=reviewer_id
+            )

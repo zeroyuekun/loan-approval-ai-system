@@ -210,6 +210,12 @@ def test_human_review_deny_sends_bias_checked_denial_email(escalated_agent_run, 
     assert decision.human_involvement == LoanDecision.HumanInvolvement.OVERRIDDEN
     escalated_agent_run.refresh_from_db()
     assert escalated_agent_run.status == "completed"
+    # The denial's status transition names the reviewer, so the four-eyes
+    # check on a later decision review finds the decider there.
+    from apps.loans.models import AuditLog
+
+    transition = AuditLog.objects.get(action="status_transition", resource_id=str(app.pk), details__to_status="denied")
+    assert transition.user_id == officer_user.pk
 
 
 @LOCMEM

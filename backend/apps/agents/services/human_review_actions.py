@@ -1,7 +1,8 @@
 """Officer actions on an escalated pipeline run: approve, deny or regenerate.
 
 Concurrency and consistency guarantees:
-- select_for_update() to prevent race conditions between concurrent reviewers
+- select_for_update() on the run, then the application, to prevent races
+  between concurrent reviewers; every check and write uses the locked rows
 - Audit log inside transaction to prevent ghost entries on DB failure
 - LoanDecision updated on human deny to maintain consistency
 - Task dispatched via on_commit() to ensure DB state is committed first
@@ -13,73 +14,71 @@ from __future__ import annotations
 import logging
 
 from django.db import transaction
-from rest_framework import status
 
 from apps.agents.models import AgentRun
 from apps.agents.tasks import orchestrate_pipeline_task, resume_pipeline_task
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
+from apps.loans.services.reviewer_independence import assert_independent_reviewer
 
 logger = logging.getLogger(__name__)
 
 HUMAN_REVIEW_ACTIONS = ("approve", "deny", "regenerate")
 
+_STATUS_BY_ACTION = {
+    "approve": "review_approved_pipeline_resuming",
+    "deny": "review_denied_pipeline_resuming",
+    "regenerate": "regeneration_queued",
+}
+
 
 class HumanReviewRejected(Exception):
-    """The action cannot be applied; carries the HTTP status the view returns."""
+    """The action cannot be applied."""
 
-    def __init__(self, message: str, status_code: int):
-        super().__init__(message)
-        self.status_code = status_code
+
+class ReviewRunNotFound(HumanReviewRejected):
+    """There is no agent run with that id."""
+
+
+class ReviewConflict(HumanReviewRejected):
+    """The run or its application is no longer waiting for this review."""
 
 
 def apply_human_review_action(run_id, *, action: str, user, note: str, ip_address) -> dict:
     """Apply ``action`` to the escalated run ``run_id`` on behalf of ``user``.
 
-    Returns the response payload; raises HumanReviewRejected when the run is
-    missing, not escalated, owned by the reviewer, or its application has
-    moved on.
+    Returns the response payload. Raises ReviewRunNotFound, ReviewConflict
+    (the run is not escalated or its application has moved on) or
+    ReviewerNotIndependent, a PermissionDenied (the reviewer applied for the
+    loan).
     """
-    reviewer_note = note
+    dispatched = {}
 
-    # Acquire row lock to prevent two reviewers acting on the same run
+    def _dispatch_after_commit(task, *args, **kwargs):
+        transaction.on_commit(lambda: dispatched.update(task=task.delay(*args, **kwargs)))
+
     with transaction.atomic():
         try:
             agent_run = AgentRun.objects.select_for_update().get(pk=run_id)
         except AgentRun.DoesNotExist as exc:
-            raise HumanReviewRejected("Agent run not found", status.HTTP_404_NOT_FOUND) from exc
+            raise ReviewRunNotFound("Agent run not found") from exc
 
         if agent_run.status != AgentRun.Status.ESCALATED:
-            raise HumanReviewRejected(
-                f"Agent run is not escalated (current status: {agent_run.status})",
-                status.HTTP_409_CONFLICT,
-            )
+            raise ReviewConflict(f"Agent run is not escalated (current status: {agent_run.status})")
 
-        # Staff can also be borrowers; nobody reviews their own application.
-        if agent_run.application.applicant_id == user.pk:
-            raise HumanReviewRejected("You cannot review a run for your own application.", status.HTTP_403_FORBIDDEN)
+        application = LoanApplication.objects.select_for_update().get(pk=agent_run.application_id)
+        assert_independent_reviewer(user, application)
 
         # A run left escalated by an older pipeline must not act on an
         # application a later run has already decided.
-        application_status = (
-            LoanApplication.objects.select_for_update()
-            .values_list("status", flat=True)
-            .get(pk=agent_run.application_id)
-        )
-        if application_status != LoanApplication.Status.REVIEW:
-            raise HumanReviewRejected(
-                f"Application is no longer in review (current status: {application_status})",
-                status.HTTP_409_CONFLICT,
-            )
+        if application.status != LoanApplication.Status.REVIEW:
+            raise ReviewConflict(f"Application is no longer in review (current status: {application.status})")
 
         review_step = {
             "step_name": "human_review_decision",
             "status": "completed",
-            "result_summary": {
-                "action": action,
-                "reviewer": user.username,
-                "note": reviewer_note,
-            },
+            "result_summary": {"action": action, "reviewer": user.username, "note": note},
         }
+        audit_details = {"note": note, "application_id": str(application.id)}
 
         if action == "approve":
             # Claim the run under the lock: it leaves the queue, and a second
@@ -87,31 +86,11 @@ def apply_human_review_action(run_id, *, action: str, user, note: str, ip_addres
             agent_run.steps = agent_run.steps + [review_step]
             agent_run.status = AgentRun.Status.RUNNING
             agent_run.save(update_fields=["steps", "status", "updated_at"])
-
-            # Audit log inside the transaction
-            AuditLog.objects.create(
-                user=user,
-                action="human_review_approve",
-                resource_type="AgentRun",
-                resource_id=str(run_id),
-                details={"note": reviewer_note},
-                ip_address=ip_address,
+            _dispatch_after_commit(
+                resume_pipeline_task, str(run_id), reviewer=user.username, note=note, action=action, reviewer_id=user.pk
             )
 
-            # Dispatch task after commit so it sees the updated state
-            task_holder = {}
-
-            def _dispatch_resume():
-                task_holder["task"] = resume_pipeline_task.delay(
-                    str(run_id),
-                    reviewer=user.username,
-                    note=reviewer_note,
-                )
-
-            transaction.on_commit(_dispatch_resume)
-
         elif action == "deny":
-            application = agent_run.application
             decision = LoanDecision.objects.select_for_update().filter(application=application).first()
             if decision is None:
                 # Nothing on record to announce: deny directly (no notice
@@ -129,15 +108,8 @@ def apply_human_review_action(run_id, *, action: str, user, note: str, ip_addres
                 agent_run.status = AgentRun.Status.COMPLETED
                 agent_run.total_time_ms = agent_run.total_time_ms or 0
                 agent_run.save(update_fields=["steps", "status", "total_time_ms", "updated_at"])
-                AuditLog.objects.create(
-                    user=user,
-                    action="human_review_deny",
-                    resource_type="AgentRun",
-                    resource_id=str(run_id),
-                    details={"note": reviewer_note, "application_id": str(application.id)},
-                    ip_address=ip_address,
-                )
-                return {"status": "application_denied_by_reviewer", "action": "deny"}
+                _audit(user, action, run_id, audit_details, ip_address)
+                return {"status": "application_denied_by_reviewer", "action": action}
 
             # Record the reviewer's denial on the decision, then resume the
             # run exactly as an approval does: the resume generates the
@@ -146,7 +118,7 @@ def apply_human_review_action(run_id, *, action: str, user, note: str, ip_addres
             # flagged denial email is withheld and the run re-escalates.
             original_decision = decision.decision
             decision.decision = "denied"
-            decision.reasoning = f"Human review override by {user.username}: {reviewer_note}"
+            decision.reasoning = f"Human review override by {user.username}: {note}"
             update_fields = ["decision", "reasoning"]
             if original_decision != "denied" and decision.mark_human(LoanDecision.HumanInvolvement.OVERRIDDEN):
                 update_fields.append("human_involvement")
@@ -155,31 +127,10 @@ def apply_human_review_action(run_id, *, action: str, user, note: str, ip_addres
             agent_run.steps = agent_run.steps + [review_step]
             agent_run.status = AgentRun.Status.RUNNING  # claimed, as for approve
             agent_run.save(update_fields=["steps", "status", "updated_at"])
-
-            AuditLog.objects.create(
-                user=user,
-                action="human_review_deny",
-                resource_type="AgentRun",
-                resource_id=str(run_id),
-                details={
-                    "note": reviewer_note,
-                    "application_id": str(application.id),
-                    "original_decision": original_decision,
-                },
-                ip_address=ip_address,
+            audit_details["original_decision"] = original_decision
+            _dispatch_after_commit(
+                resume_pipeline_task, str(run_id), reviewer=user.username, note=note, action=action, reviewer_id=user.pk
             )
-
-            task_holder = {}
-
-            def _dispatch_deny():
-                task_holder["task"] = resume_pipeline_task.delay(
-                    str(run_id),
-                    reviewer=user.username,
-                    note=reviewer_note,
-                    action="deny",
-                )
-
-            transaction.on_commit(_dispatch_deny)
 
         else:  # regenerate
             # Close the old run as superseded, NOT completed: a COMPLETED run
@@ -193,37 +144,26 @@ def apply_human_review_action(run_id, *, action: str, user, note: str, ip_addres
             agent_run.save(update_fields=["steps", "status", "error", "total_time_ms", "updated_at"])
 
             # Reset application to pending so the new pipeline can process it
-            application = agent_run.application
             application.transition_to("pending", user=user, details={"reason": "human_review_regenerate"})
+            # force=True: an earlier COMPLETED run for this application must
+            # not short-circuit the reviewer's regenerate request.
+            _dispatch_after_commit(orchestrate_pipeline_task, str(application.id), force=True)
 
-            AuditLog.objects.create(
-                user=user,
-                action="human_review_regenerate",
-                resource_type="AgentRun",
-                resource_id=str(run_id),
-                details={"note": reviewer_note, "application_id": str(agent_run.application_id)},
-                ip_address=ip_address,
-            )
+        _audit(user, action, run_id, audit_details, ip_address)
 
-            # Dispatch new pipeline AFTER commit
-            task_holder = {}
-
-            def _dispatch_regenerate():
-                # force=True: an earlier COMPLETED run for this application
-                # must not short-circuit the reviewer's regenerate request.
-                task_holder["task"] = orchestrate_pipeline_task.delay(str(agent_run.application_id), force=True)
-
-            transaction.on_commit(_dispatch_regenerate)
-
-    # For approve/regenerate, return task info after transaction commits
-    task = task_holder.get("task")
-    status_by_action = {
-        "approve": "review_approved_pipeline_resuming",
-        "deny": "review_denied_pipeline_resuming",
-        "regenerate": "regeneration_queued",
-    }
     return {
-        "task_id": getattr(task, "id", None),
-        "status": status_by_action[action],
+        "task_id": getattr(dispatched.get("task"), "id", None),
+        "status": _STATUS_BY_ACTION[action],
         "action": action,
     }
+
+
+def _audit(user, action, run_id, details, ip_address):
+    AuditLog.objects.create(
+        user=user,
+        action=f"human_review_{action}",
+        resource_type="AgentRun",
+        resource_id=str(run_id),
+        details=details,
+        ip_address=ip_address,
+    )

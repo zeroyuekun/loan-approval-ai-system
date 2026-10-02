@@ -1,5 +1,6 @@
 import logging
 
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import OuterRef, Subquery
 from rest_framework import status
@@ -14,7 +15,8 @@ from apps.agents.models import AgentRun
 from apps.agents.serializers import agent_run_serializer_class
 from apps.agents.services.human_review_actions import (
     HUMAN_REVIEW_ACTIONS,
-    HumanReviewRejected,
+    ReviewConflict,
+    ReviewRunNotFound,
     apply_human_review_action,
 )
 from apps.agents.tasks import orchestrate_pipeline_task
@@ -311,6 +313,10 @@ class HumanReviewView(APIView):
                 note=request.data.get("note", ""),
                 ip_address=client_ip(request),
             )
-        except HumanReviewRejected as exc:
-            return Response({"error": str(exc)}, status=exc.status_code)
+        except ReviewRunNotFound as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        except ReviewConflict as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except PermissionDenied as exc:  # the reviewer is a party to the application
+            return Response({"error": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         return Response(payload)

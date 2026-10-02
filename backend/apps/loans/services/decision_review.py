@@ -16,6 +16,7 @@ from django.utils import timezone
 from apps.loans.models import AuditLog, DecisionReview, LoanApplication, LoanDecision
 
 from .overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+from .reviewer_independence import assert_independent_reviewer
 
 logger = logging.getLogger(__name__)
 
@@ -73,42 +74,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
         if locked.status in _TERMINAL:
             raise ValueError(f"DecisionReview already resolved ({locked.status})")
 
-        # Conflict of interest: staff can also be borrowers, and the person who
-        # applied for the loan or filed the review is not an independent
-        # reviewer of it, whatever their role.
-        if officer.pk in (locked.application.applicant_id, locked.requested_by_id):
-            raise PermissionDenied("You cannot resolve a review of your own application or a review you filed.")
-
-        # Four-eyes / maker-checker: the officer who made the original loan
-        # decision (i.e. who last manually transitioned this application to
-        # 'denied') must not be the same person who resolves the review.
-        # Automated ML decisions have user=None and are therefore exempt.
-        original_decider_id = (
-            AuditLog.objects.filter(
-                resource_type="LoanApplication",
-                resource_id=str(locked.application_id),
-                action="status_transition",
-                details__to_status="denied",
-                user__isnull=False,
-            )
-            .order_by("-timestamp")
-            .values_list("user_id", flat=True)
-            .first()
-        )
-        # A human-review deny is audited against the AgentRun; the pipeline
-        # then moves the application to denied with no user on the
-        # transition, so the reviewer has to be found on that row instead.
-        human_review_denier_ids = set(
-            AuditLog.objects.filter(
-                action="human_review_deny",
-                details__application_id=str(locked.application_id),
-                user__isnull=False,
-            ).values_list("user_id", flat=True)
-        )
-        if officer.pk == original_decider_id or officer.pk in human_review_denier_ids:
-            raise PermissionDenied(
-                "An officer cannot resolve their own decision — four-eyes policy requires a second approver."
-            )
+        assert_independent_reviewer(officer, locked.application, review=locked)
 
         locked.assigned_officer = officer
         locked.resolution_note = note
