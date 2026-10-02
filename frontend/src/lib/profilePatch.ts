@@ -44,8 +44,10 @@ const BLANK_AS_ZERO_FIELDS = new Set([
   'previous_loans_repaid',
 ])
 
+// A cleared input arrives as '' from a text input or as null from a number
+// input that already converts blanks; both mean "no value".
 function normaliseBlank(key: string, value: unknown): unknown {
-  if (value !== '') return value
+  if (value !== '' && value !== null) return value
   if (BLANK_AS_NULL_FIELDS.has(key)) return null
   if (BLANK_AS_ZERO_FIELDS.has(key)) return 0
   return value

@@ -92,4 +92,17 @@ describe('Customer detail page admin edit', () => {
     await waitFor(() => expect(captured.body).not.toBeNull())
     expect(captured.body).toEqual({ years_in_current_role: null })
   })
+
+  it('sends 0 for a cleared field the server stores as NOT NULL', async () => {
+    // estimated_property_value is DecimalField(default=0): null would be a 400.
+    const captured = setup({ ...staffDetail, estimated_property_value: 650000 })
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: /edit profile/i }))
+    await user.clear(screen.getByDisplayValue('650000'))
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => expect(captured.body).not.toBeNull())
+    expect(captured.body).toEqual({ estimated_property_value: 0 })
+  })
 })
