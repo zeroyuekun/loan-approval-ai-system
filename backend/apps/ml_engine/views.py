@@ -1,7 +1,6 @@
 import redis
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -12,10 +11,6 @@ from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 from apps.loans.models import AuditLog
 from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
-from apps.ml_engine.services.validation_gate_mode import (
-    ValidationSignoffBlocked,
-    evaluate_validation_signoff_gate,
-)
 from apps.ml_engine.tasks import TRAIN_LOCK_KEY, run_prediction_task, train_model_task
 
 
@@ -259,109 +254,98 @@ class ModelVersionListView(APIView):
         return Response({"models": data})
 
 
+def _refused_response(exc):
+    """HTTP 409 for an activation the service refused (no row changed)."""
+    from apps.ml_engine.services.activation import ActivationBlocked, ArtefactUnusable
+
+    if isinstance(exc, ActivationBlocked):
+        return Response(
+            {
+                "error": "activation_blocked",
+                "blocked_gates": exc.blocked_gates,
+                "gates": exc.gates,
+                "hint": (
+                    "Fix what the gate reports (e.g. create and sign off a ModelValidationReport), "
+                    "or pass ?force=true on /activate/ (audited override)."
+                ),
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+    code = "artefact_unusable" if isinstance(exc, ArtefactUnusable) else "segment_would_be_empty"
+    return Response({"error": code, "detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+
 class ModelActivateView(APIView):
-    """Activate a model as champion with 100% traffic."""
+    """Activate a model as its segment's champion with 100% traffic.
+
+    Goes through the activation service: artefact check, governance gates
+    (``?force=true`` is the audited override), segment lock, audit.
+    """
 
     permission_classes = [IsAdmin]
 
     def post(self, request, pk):
+        from apps.ml_engine.services.activation import ActivationRefused, activate_model_version
+
         try:
             version = ModelVersion.objects.get(pk=pk)
         except ModelVersion.DoesNotExist:
             return Response({"error": "Model not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Validation sign-off gate. In `block` mode we refuse activation when no approved ModelValidationReport exists
-        # for this candidate, unless the caller passes ?force=true (audited
-        # break-glass). `warn` mode (default) records the decision but lets
-        # activation proceed.
         force = request.query_params.get("force", "").lower() == "true"
-        validation_mode = getattr(django_settings, "ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
         try:
-            validation_decision = evaluate_validation_signoff_gate(version, validation_mode, bypass=force)
-        except ValidationSignoffBlocked as exc:
-            return Response(
-                {
-                    "error": "validation_signoff_required",
-                    "details": exc.payload,
-                    "hint": (
-                        "Create + sign off a ModelValidationReport for this "
-                        "candidate, or pass ?force=true (audited override)."
-                    ),
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        target_segment = version.segment
-        previous_active_segments = sorted(
-            ModelVersion.objects.filter(is_active=True).values_list("segment", flat=True).distinct()
-        )
-
-        with transaction.atomic():
-            # Scope deactivation to THIS model's segment, matching the trainer
-            # (tasks.py) and ModelVersion.clean(). A blanket deactivation would
-            # silently retire other segments' active champions (e.g. activating a
-            # personal-loan model would knock out the home-loan champion).
-            ModelVersion.objects.filter(is_active=True, segment=version.segment).update(
-                is_active=False,
-                traffic_percentage=0,
-            )
-            version.is_active = True
-            version.traffic_percentage = 100
-            version.save()
-
-            audit_payload = validation_decision["decision"].to_dict()
-            AuditLog.objects.create(
-                user=request.user,
-                action="model_activate_force" if force else "model_activate",
-                resource_type="ModelVersion",
-                resource_id=str(version.id),
-                details={
-                    "version": version.version,
-                    "segment": target_segment,
-                    "previous_active_segments": previous_active_segments,
-                    "validation_gate_mode": validation_decision.get("mode"),
-                    "validation_gate_decision": audit_payload,
-                    "force_bypass": force,
-                },
+            gates = activate_model_version(
+                version,
+                actor=request.user,
+                source="api",
+                force=force,
                 ip_address=request.META.get("REMOTE_ADDR"),
             )
+        except ActivationRefused as exc:
+            return _refused_response(exc)
 
         return Response(
             {
                 "message": f"Model {version.version} activated as champion (100% traffic)",
                 "model_id": str(version.id),
-                "segment": target_segment,
-                "validation_gate": validation_decision.get("mode"),
+                "segment": version.segment,
+                "validation_gate": gates["validation"]["mode"],
                 "force": force,
             }
         )
 
 
 class ModelTrafficView(APIView):
-    """Adjust traffic percentage for a model version."""
+    """Adjust traffic percentage for a model version (through the activation service)."""
 
     permission_classes = [IsAdmin]
 
     def patch(self, request, pk):
+        from apps.ml_engine.services.activation import ActivationRefused, set_traffic
+
         try:
             version = ModelVersion.objects.get(pk=pk)
         except ModelVersion.DoesNotExist:
             return Response({"error": "Model not found"}, status=status.HTTP_404_NOT_FOUND)
 
         traffic = request.data.get("traffic_percentage")
-        if traffic is None or not isinstance(traffic, (int, float)) or not (0 <= traffic <= 100):
+        # bool is an int subclass (True would become 1%), and 50.9 must not
+        # silently truncate to 50: only a whole number 0-100 is accepted.
+        is_whole = isinstance(traffic, int) or (isinstance(traffic, float) and traffic.is_integer())
+        if isinstance(traffic, bool) or not is_whole or not (0 <= traffic <= 100):
             return Response(
                 {"error": "traffic_percentage must be an integer 0-100"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        version.traffic_percentage = int(traffic)
-        version.is_active = version.traffic_percentage > 0
         try:
-            version.save()
+            set_traffic(version, int(traffic), actor=request.user, ip_address=request.META.get("REMOTE_ADDR"))
+        except ActivationRefused as exc:
+            return _refused_response(exc)
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        version.refresh_from_db()
         return Response(
             {
                 "model_id": str(version.id),

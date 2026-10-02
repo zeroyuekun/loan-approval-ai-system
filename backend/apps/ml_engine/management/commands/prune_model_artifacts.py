@@ -4,8 +4,13 @@ Keeps: files referenced by any `is_active=True` ModelVersion, the N most
 recent inactive versions per segment (default N=1), `contract_test_model.joblib`,
 and any non-`.joblib` file (e.g. `golden_metrics.json`).
 
-Deletes: every other `.joblib` file in `ML_MODELS_DIR`, including orphan
-files with no ModelVersion row.
+Deletes: every other `.joblib` file in `ML_MODELS_DIR` older than
+`--min-age-minutes` (default 60), including orphan files with no
+ModelVersion row. Younger files are skipped: a training run writes its
+`.joblib` before it registers the row, so a fresh file is not an orphan yet.
+
+Rows whose file was pruned stay in the DB but cannot be activated: the
+activation service checks the artefact exists and matches its hash first.
 
 Complements `cleanup_old_models` (which prunes DB rows first and cascades to
 files); this command prunes files first and leaves the DB alone, so it can
@@ -16,10 +21,12 @@ Usage:
     python manage.py prune_model_artifacts             # prune
     python manage.py prune_model_artifacts --dry-run   # preview
     python manage.py prune_model_artifacts --keep 2    # retain last 2 inactive per segment
+    python manage.py prune_model_artifacts --min-age-minutes 0   # include files written just now
 """
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
@@ -47,6 +54,12 @@ class Command(BaseCommand):
             default=1,
             help="Number of most-recent inactive ModelVersions per segment to retain (default: 1).",
         )
+        parser.add_argument(
+            "--min-age-minutes",
+            type=int,
+            default=60,
+            help="Never delete a file modified less than this many minutes ago (default: 60).",
+        )
 
     def handle(self, *args, **opts):
         models_dir = Path(settings.ML_MODELS_DIR)
@@ -55,6 +68,7 @@ class Command(BaseCommand):
 
         dry_run: bool = opts["dry_run"]
         keep_n: int = max(0, int(opts["keep"]))
+        newest_deletable = time.time() - max(0, int(opts["min_age_minutes"])) * 60
 
         keep_basenames = self._compute_whitelist(keep_n)
         self.stdout.write(f"Whitelist ({len(keep_basenames)} file(s)):")
@@ -66,7 +80,11 @@ class Command(BaseCommand):
         for joblib in sorted(models_dir.glob("*.joblib")):
             if joblib.name in keep_basenames:
                 continue
-            size = joblib.stat().st_size
+            stat = joblib.stat()
+            if stat.st_mtime > newest_deletable:
+                self.stdout.write(f"  SKIP  {joblib.name} (modified within --min-age-minutes)")
+                continue
+            size = stat.st_size
             reclaimed += size
             deleted += 1
             verb = "would delete" if dry_run else "deleting"

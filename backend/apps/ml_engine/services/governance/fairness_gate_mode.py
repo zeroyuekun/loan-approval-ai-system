@@ -5,7 +5,7 @@ three-mode policy: warn (current behaviour — log + flag, leave active),
 block (refuse activation; old segment models keep serving), off (skip the
 check entirely). The dispatcher itself is pure-functional and unit-testable
 without Django ORM / settings boot — it takes the mode as an argument and
-returns a structured decision; only `tasks.py` reads the
+returns a structured decision; only the activation service (`services/activation.py`) reads the
 `ML_FAIRNESS_GATE_MODE` setting and delegates here.
 
 See `docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md`.
@@ -71,7 +71,7 @@ def evaluate_fairness_gate_for_activation(fairness_data: dict, mode: str) -> dic
 
     Raises:
         FairnessGateBlocked: in `block` mode when fairness evidence is missing
-            or the gate failed. The caller (tasks.py) is responsible for
+            or the gate failed. The caller (the activation service) is responsible for
             ensuring this raise happens BEFORE any model-activation transaction
             so old segment models keep serving.
     """

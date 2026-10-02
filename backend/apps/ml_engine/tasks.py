@@ -67,13 +67,9 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
     segment (home_owner_occupier / home_investor / personal). When omitted
     the trainer produces a unified model that scores all applications.
     """
-    import redis as _redis
-
-    # Prevent concurrent training — acquire a Redis lock for 30 minutes
-    redis_url = settings.CELERY_BROKER_URL
-    redis_client = _redis.from_url(redis_url)
-    lock = redis_client.lock(TRAIN_LOCK_KEY, timeout=1800, blocking=False)
-    if not lock.acquire(blocking=False):
+    # Prevent concurrent training — the same Redis lock TrainModelView checks.
+    lock = acquire_train_lock()
+    if lock is None:
         logger.warning("Training already in progress — skipping duplicate task %s", self.request.id)
         return {"status": "skipped", "reason": "training_already_in_progress"}
 
@@ -85,14 +81,27 @@ def train_model_task(self, algorithm="xgb", data_path=None, segment=None):
             algorithm,
             self.request.id,
         )
-        # Guard the release: after a long train the 30-min lock may already have
-        # expired, and releasing an expired/unowned redis lock raises — which
-        # would mask the real training error this except block is re-raising.
-        try:
-            lock.release()
-        except Exception:
-            logger.warning("train_model lock release failed (likely expired); ignoring")
+        release_train_lock(lock)
         raise
+
+
+def acquire_train_lock():
+    """Take the 30-minute training lock; return it, or None if a run holds it."""
+    import redis as _redis
+
+    redis_client = _redis.from_url(settings.CELERY_BROKER_URL)
+    lock = redis_client.lock(TRAIN_LOCK_KEY, timeout=1800, blocking=False)
+    return lock if lock.acquire(blocking=False) else None
+
+
+def release_train_lock(lock):
+    # Guard the release: after a long train the 30-min lock may already have
+    # expired, and releasing an expired/unowned redis lock raises — which
+    # would mask the real training error a caller may be re-raising.
+    try:
+        lock.release()
+    except Exception:
+        logger.warning("train_model lock release failed (likely expired); ignoring")
 
 
 def _ensure_training_data(data_path, num_records=None):
@@ -136,23 +145,21 @@ def _ensure_training_data(data_path, num_records=None):
 
 
 def _do_train(task, algorithm, data_path, lock, *, segment=None):
-    """Inner training logic — called with lock held."""
-    from types import SimpleNamespace
+    """Train, register and (gates permitting) activate a model. Lock held by the caller.
 
-    from apps.ml_engine.services.governance.fairness_gate_mode import (
-        evaluate_fairness_gate_for_activation,
-    )
-    from apps.ml_engine.services.governance.promotion_gate_mode import (
-        evaluate_promotion_gates_for_activation,
-    )
-    from apps.ml_engine.services.model_selector import promote_if_eligible
-    from apps.ml_engine.services.scoring.predictor import clear_model_cache
+    The new ModelVersion is created inactive and handed to the activation
+    service, which checks the artefact, runs the fairness / promotion /
+    validation gates in their configured modes, and only then retires the
+    segment's champion — all under the segment lock. In ``block`` mode a
+    failing gate leaves the candidate inactive (traffic 0) for sign-off and
+    manual activation, and the champion keeps serving. Shared by the Celery
+    task and the ``train_model`` command.
+    """
+    from django.db import transaction
+
+    from apps.ml_engine.services.activation import ActivationBlocked, activate_model_version
     from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
     from apps.ml_engine.services.training.trainer import ModelTrainer
-    from apps.ml_engine.services.validation_gate_mode import (
-        ValidationSignoffBlocked,
-        evaluate_validation_signoff_gate,
-    )
 
     if data_path is None:
         data_path = str(settings.BASE_DIR / ".tmp" / "synthetic_loans.csv")
@@ -172,51 +179,16 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
 
     file_hash = file_sha256(model_path)  # integrity check at load time
 
-    # Pre-activation fairness gate. In `block` mode this raises
-    # FairnessGateBlocked BEFORE the atomic activation block — old segment
-    # models stay `is_active=True` because we never enter the transaction
-    # below. The outer `train_model_task` wrapper releases the training
-    # lock on the raise path. See
-    # docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
-    fairness_data = metrics.get("fairness", {})
-    gate_mode = getattr(settings, "ML_FAIRNESS_GATE_MODE", "warn")
-    gate_decision = evaluate_fairness_gate_for_activation(fairness_data, gate_mode)
-
-    # Pre-activation champion-challenger promotion gates. Build a transient
-    # candidate stub from the in-memory metrics — promote_if_eligible reads
-    # via getattr + training_metadata, no DB write needed. The pk=None makes
-    # the .exclude(pk=...) clause inside promote_if_eligible a no-op which is
-    # correct here (we want the existing active model excluded only if it
-    # shares pk with us). In `block` mode this raises PromotionGateBlocked
-    # BEFORE the atomic activation block. See
-    # docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
-    candidate_stub = SimpleNamespace(
-        id="(pre-activation)",
-        pk=None,
-        segment=segment,
-        auc_roc=metrics["auc_roc"],
-        ks_statistic=metrics["ks_statistic"],
-        ece=metrics.get("calibration_data", {}).get("ece"),
-        training_metadata=metrics.get("training_metadata", {}),
-    )
-    promotion_decision = promote_if_eligible(candidate_stub)
-    promotion_mode = getattr(settings, "ML_PROMOTION_GATE_MODE", "warn")
-    promotion_gate_decision = evaluate_promotion_gates_for_activation(promotion_decision, promotion_mode)
-
-    # Deactivate old models and activate new one atomically — if create()
-    # fails, the old active model remains active (no zero-model gap).
-    from django.db import transaction
-
+    # One transaction: the row, the activation and the gate record commit
+    # together, so the MRM dossier (enqueued on commit) sees the gate verdicts.
     with transaction.atomic():
-        # Scope deactivation to the same segment so training a new
-        # personal-loan model doesn't knock out the active home-loan model.
-        ModelVersion.objects.filter(is_active=True, segment=segment).update(is_active=False, traffic_percentage=0)
         mv = ModelVersion.objects.create(
             algorithm=algorithm,
             version=version_str,
             file_path=model_path,
             file_hash=file_hash,
-            is_active=True,
+            is_active=False,
+            traffic_percentage=0,
             segment=segment,
             **model_version_metric_fields(metrics),
             retraining_policy={
@@ -230,100 +202,63 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
             next_review_date=(timezone.now() + timedelta(days=90)).date(),
         )
 
-    # Validation sign-off gate. The candidate now
-    # has a real PK so the gate can query ModelValidationReport. In `block`
-    # mode the gate raises — at training time there is by construction no
-    # approved sign-off (the row was just created), so block mode demotes
-    # the candidate to is_active=False rather than re-raising past the
-    # already-completed activation transaction. Operators then create +
-    # sign off a report and manually activate via ModelActivateView.
-    validation_mode = getattr(settings, "ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
-    validation_blocked_demoted = False
-    try:
-        validation_gate_decision = evaluate_validation_signoff_gate(mv, validation_mode)
-    except ValidationSignoffBlocked as exc:
-        logger.warning(
-            "Model %s training-path activation blocked by validation gate: %s. "
-            "Candidate retained as is_active=False; manual activation required after sign-off.",
-            mv.id,
-            exc,
-        )
-        ModelVersion.objects.filter(pk=mv.pk).update(is_active=False, traffic_percentage=0)
+        try:
+            gates = activate_model_version(mv, actor=None, source="training")
+            blocked_gates = []
+        except ActivationBlocked as exc:
+            gates, blocked_gates = exc.gates, exc.blocked_gates
+            logger.warning(
+                "Model %s not activated: blocked by %s. Candidate kept inactive; "
+                "the current champion keeps serving. Sign off and activate it manually.",
+                mv.id,
+                ", ".join(blocked_gates),
+            )
+
         mv.refresh_from_db()
-        validation_gate_decision = {
-            "action": "blocked_demoted",
-            "decision": exc.payload,
-            "mode": "block",
-            "bypass": False,
-        }
-        validation_blocked_demoted = True
+        mv.training_metadata = {**(mv.training_metadata or {}), **_gate_metadata(mv, gates, blocked_gates)}
+        mv.save(update_fields=["training_metadata"])
 
-    # Record the gate decisions (mode + result) on the activated mv so the
-    # MRM dossier §1 banner has the audit trail for both gates. In `warn`
-    # mode a failed gate is logged + flagged; activation already happened.
-    gate_meta = {
-        **(mv.training_metadata or {}),
-        "fairness_gate_mode": gate_decision["mode"],
-        "promotion_gate_mode": promotion_gate_decision["mode"],
-        "validation_gate_mode": validation_gate_decision["mode"],
+    release_train_lock(lock)
+    return {"model_version_id": str(mv.id), "metrics": metrics, "activated": not blocked_gates}
+
+
+def _gate_metadata(mv, gates: dict, blocked_gates: list[str]) -> dict:
+    """The gate verdicts in the training_metadata keys the MRM dossier reads."""
+    meta = {
+        "fairness_gate_mode": gates["fairness"]["mode"],
+        "promotion_gate_mode": gates["promotion"]["mode"],
+        "validation_gate_mode": gates["validation"]["mode"],
     }
-    validation_decision_payload = validation_gate_decision.get("decision")
-    if validation_decision_payload is not None:
-        # The blocked-demoted path above stores the exception's dict payload;
-        # every other path stores a ValidationDecision.
-        gate_meta["validation_gate"] = (
-            validation_decision_payload.to_dict()
-            if hasattr(validation_decision_payload, "to_dict")
-            else validation_decision_payload
-        )
-    if validation_blocked_demoted:
-        gate_meta["validation_gate_blocked_demoted"] = True
-    gate_result = gate_decision["gate_result"]
-    if gate_result is not None:
-        gate_meta["fairness_gate"] = gate_result
-        if not gate_result["passed"]:
+    if blocked_gates:
+        meta["activation_blocked"] = blocked_gates
+    if gates["validation"]["result"] is not None:
+        meta["validation_gate"] = gates["validation"]["result"]
+
+    fairness = gates["fairness"]["result"]
+    if fairness is not None:
+        meta["fairness_gate"] = fairness
+        if not fairness["passed"]:
             logger.warning(
-                "Model %s FAILED fairness gate (mode=%s, failing: %s, min DIR: %s). "
-                "Model remains active but flagged for human review.",
+                "Model %s FAILED fairness gate (mode=%s, failing: %s, min DIR: %s).",
                 mv.id,
-                gate_decision["mode"],
-                gate_result["failing_attributes"],
-                gate_result["minimum_dir"],
+                gates["fairness"]["mode"],
+                fairness["failing_attributes"],
+                fairness["minimum_dir"],
             )
-            gate_meta["requires_fairness_review"] = True
+            meta["requires_fairness_review"] = True
 
-    # Promotion gate decision — record only when the dispatcher inspected it
-    # (None when mode == "off"). In `warn` mode log a clear line if rejected
-    # so audit trails capture the regression-vs-champion verdict even though
-    # activation proceeded.
-    promo_decision_payload = promotion_gate_decision["decision"]
-    if promo_decision_payload is not None:
-        gate_meta["promotion_gate"] = promo_decision_payload.to_dict()
-        if not promo_decision_payload.promoted:
+    promotion = gates["promotion"]["result"]
+    if promotion is not None:
+        meta["promotion_gate"] = promotion
+        if not promotion["promoted"]:
             logger.warning(
-                "Model %s REJECTED by promotion gates (mode=%s, reasons: %s). "
-                "Model remains active but flagged for human review.",
+                "Model %s REJECTED by promotion gates (mode=%s, reasons: %s).",
                 mv.id,
-                promotion_gate_decision["mode"],
-                "; ".join(promo_decision_payload.reasons),
+                gates["promotion"]["mode"],
+                "; ".join(promotion["reasons"]),
             )
-            gate_meta["requires_promotion_review"] = True
-    mv.training_metadata = gate_meta
-    mv.save(update_fields=["training_metadata"])
-
-    # Invalidate cached models so workers pick up the new version
-    clear_model_cache()
-
-    # Release the training lock
-    try:
-        lock.release()
-    except Exception as exc:
-        logger.debug(
-            "training_lock_release_noop",
-            extra={"model_version_id": str(mv.id), "error": str(exc)},
-        )
-
-    return {"model_version_id": str(mv.id), "metrics": metrics}
+            meta["requires_promotion_review"] = True
+    return meta
 
 
 @shared_task(
@@ -565,11 +500,11 @@ def compute_weekly_drift_report(self):
 def generate_mrm_dossier_task(self, model_version_id: str):
     """Generate an MRM dossier for a ModelVersion on the `ml` queue.
 
-    Invoked from the post_save signal on ModelVersion. Non-blocking:
+    Queued once per new ModelVersion, after the creating transaction commits
+    (post_save signal + on_commit). Later save() calls do not re-queue it;
+    regenerate with `manage.py generate_mrm_dossier`. Non-blocking:
     failures log a warning but do not surface back to the caller that
-    created the model. Idempotent — overwriting an existing dossier is
-    the correct behaviour when the metrics payload changes (e.g. a
-    post-training fairness update calls save() again).
+    created the model. Idempotent — overwriting an existing dossier is safe.
     """
     try:
         mv = ModelVersion.objects.get(pk=model_version_id)

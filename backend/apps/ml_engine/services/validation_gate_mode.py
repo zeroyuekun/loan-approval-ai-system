@@ -14,11 +14,12 @@ Behaviour by mode:
     phase where validation reports haven't been seeded yet — operators get
     visibility without breaking the existing demo flow.
   - ``block``: the dispatcher raises ``ValidationSignoffBlocked`` when no
-    approved/signed-off report exists for the candidate. Callers (tasks.py
-    and ``ModelActivateView``) interpret this depending on their context —
-    tasks.py demotes the freshly-created candidate to ``is_active=False``
-    rather than raising past the activation transaction; the view returns
-    HTTP 409 unless the request carries an audited ``force=true`` flag.
+    approved/signed-off report exists for the candidate. The activation
+    service (``services/activation.py``) is the only caller: it refuses the
+    activation before touching any row, so the training path keeps the
+    candidate inactive while the champion keeps serving, and the activate
+    view returns HTTP 409 unless the request carries an audited
+    ``force=true`` flag.
   - ``off``: the gate is skipped entirely. Use only when validation reports
     are out of band (e.g. a private offline workflow).
 
@@ -132,8 +133,8 @@ def evaluate_validation_signoff_gate(
 
     Args:
         candidate: The ``ModelVersion`` about to be promoted. Must already
-            have a saved primary key (training-path callers persist the row
-            before invoking this dispatcher).
+            have a saved primary key (the training path saves it inactive
+            before calling the activation service).
         mode: One of "warn" | "block" | "off". Unknown values are coerced
             to "warn" via :func:`normalize_mode`.
         bypass: Audited break-glass override (e.g. ``?force=true`` on the
