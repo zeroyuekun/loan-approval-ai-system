@@ -322,8 +322,7 @@ class HumanReviewHandler:
             # Record that a human was involved, so the ADM disclosure can
             # truthfully report "assisted" after status moves off 'review'.
             loan_decision = application.decision
-            if loan_decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
-                loan_decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+            if loan_decision.mark_human(LoanDecision.HumanInvolvement.ASSISTED):
                 loan_decision.save(update_fields=["human_involvement"])
 
         if decision == "denied":

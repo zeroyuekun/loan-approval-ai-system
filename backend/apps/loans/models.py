@@ -518,8 +518,24 @@ class LoanDecision(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    _HUMAN_INVOLVEMENT_RANK = {
+        HumanInvolvement.NONE: 0,
+        HumanInvolvement.ASSISTED: 1,
+        HumanInvolvement.OVERRIDDEN: 2,
+    }
+
     def __str__(self):
         return f"Decision for {self.application_id}: {self.decision} ({self.confidence:.1%})"
+
+    def mark_human(self, kind) -> bool:
+        """Record a human touch on this decision. Only promotes (NONE <
+        ASSISTED < OVERRIDDEN), never downgrades. Does not save: returns True
+        when the field changed so the caller can add it to update_fields."""
+        rank = self._HUMAN_INVOLVEMENT_RANK
+        if rank[kind] <= rank.get(self.human_involvement, 0):
+            return False
+        self.human_involvement = kind
+        return True
 
 
 class FraudCheck(models.Model):

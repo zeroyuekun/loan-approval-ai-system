@@ -174,7 +174,7 @@ def _deny(run, officer_user, *, bias_result, send):
         patch(f"{HUMAN_REVIEW}.BiasDetector") as bias,
         patch(f"{HUMAN_REVIEW}.MarketingPipelineService") as mkt,
         patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
-        patch("apps.agents.views.resume_pipeline_task.delay", side_effect=_run_task),
+        patch("apps.agents.services.human_review_actions.resume_pipeline_task.delay", side_effect=_run_task),
         patch("apps.agents.views.OrchestrationThrottle.allow_request", return_value=True),
         patch(SENDER, send),
     ):

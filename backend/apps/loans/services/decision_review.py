@@ -126,8 +126,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
                 decision = LoanDecision.objects.select_for_update().get(application_id=locked.application_id)
             except LoanDecision.DoesNotExist:
                 decision = None
-            if decision is not None and decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
-                decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+            if decision is not None and decision.mark_human(LoanDecision.HumanInvolvement.ASSISTED):
                 decision.save(update_fields=["human_involvement"])
         else:
             try:
@@ -165,7 +164,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
                 raise ValueError("No decision record exists for this application") from exc
             decision.decision = "approved"
             decision.reasoning = f"Officer override via decision review {locked.id}: {note}".strip()
-            decision.human_involvement = LoanDecision.HumanInvolvement.OVERRIDDEN
+            decision.mark_human(LoanDecision.HumanInvolvement.OVERRIDDEN)
             decision.save(update_fields=["decision", "reasoning", "human_involvement"])
             try:
                 # denied -> processing -> approved (validated transitions, each audited)
