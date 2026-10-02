@@ -77,6 +77,11 @@ export function ApplicationDetail({ application, email, agentRun: agentRunProp, 
         pipelineError={pipeline.pipelineError}
         pipelineSuccess={pipeline.pipelineSuccess}
         handleOrchestrate={pipeline.handleOrchestrate}
+        forceRerunPrompt={pipeline.forceRerunPrompt}
+        forceRerunPending={pipeline.forceRerunPending}
+        forceRerunError={pipeline.forceRerunError}
+        onForceRerunConfirm={pipeline.confirmForceRerun}
+        onForceRerunCancel={pipeline.cancelForceRerun}
         onDelete={onDelete}
         isDeleting={isDeleting}
         showDeleteConfirm={showDeleteConfirm}

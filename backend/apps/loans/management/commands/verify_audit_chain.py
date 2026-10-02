@@ -1,4 +1,4 @@
-"""Verify the AuditLog hash chain — PR-2 of the security gap-closure cycle.
+"""Verify the AuditLog hash chain.
 
 Walks every ``AuditLog`` row in chronological (timestamp, id) order and
 checks two invariants per row:
@@ -11,9 +11,8 @@ checks two invariants per row:
 Any mismatch surfaces the offending row id and exits non-zero via
 ``CommandError``. Empty DB → trivially OK.
 
-Intended to run as a Celery beat job (daily) and as a one-shot check
-during incident response. The dashboard operator-status-strip
-(PR #192 of the dashboard refit) will surface the most recent result.
+Run on demand (e.g. during incident response or an audit). It is not
+currently scheduled in Celery beat or surfaced on the dashboard status strip.
 """
 
 from django.core.management.base import BaseCommand, CommandError

@@ -24,7 +24,7 @@ migrate:                 ## Run Django migrations
 	docker compose exec backend python manage.py migrate
 
 seed:                    ## Generate synthetic data and train model
-	docker compose exec backend python manage.py generate_data --count 10000
+	docker compose exec backend python manage.py generate_data --num-records 10000
 	docker compose exec backend python manage.py train_model --algorithm xgb
 
 shell:                   ## Open Django shell
@@ -45,8 +45,8 @@ test-ml:                 ## Run ML tests only
 
 # Linting
 lint:                    ## Lint backend and frontend
-	cd backend && ruff check . || true
-	cd frontend && npm run lint || true
+	cd backend && ruff check . && ruff format --check .
+	cd frontend && npm run lint
 
 format:                  ## Auto-format backend code
 	cd backend && ruff format .
@@ -57,18 +57,18 @@ deadcode:                ## Report unused code (ruff F401/F811/F841 + vulture)
 		--ignore-names "_*,test_*,setUp,tearDown,Meta,sender,view,frame,expression,connection,signum,instance,kwargs" \
 		--exclude "*/migrations/*,*/tests/*"
 
-typecheck:               ## Type-check backend (mypy) + frontend (tsc --noEmit)
+typecheck:               ## Type-check backend (mypy) + frontend (tsc --noEmit); paths mirror lint.yml's mypy job
 	docker compose exec backend mypy --config-file mypy.ini \
-		apps/ml_engine/services/feature_prep.py \
-		apps/ml_engine/services/prediction_cache.py \
-		apps/ml_engine/services/policy_overlay.py \
-		apps/ml_engine/services/policy_recompute.py \
-		apps/ml_engine/services/prediction_diagnostics.py \
-		apps/ml_engine/services/prediction_explanations.py \
-		apps/ml_engine/services/prediction_features.py \
-		apps/ml_engine/services/shadow_scoring.py \
-		apps/ml_engine/services/shap_attribution.py \
-		apps/ml_engine/services/decision_assembly.py
+		apps/ml_engine/services/training/feature_prep.py \
+		apps/ml_engine/services/scoring/prediction_cache.py \
+		apps/ml_engine/services/scoring/policy_overlay.py \
+		apps/ml_engine/services/scoring/policy_recompute.py \
+		apps/ml_engine/services/scoring/prediction_diagnostics.py \
+		apps/ml_engine/services/scoring/prediction_explanations.py \
+		apps/ml_engine/services/scoring/prediction_features.py \
+		apps/ml_engine/services/governance/shadow_scoring.py \
+		apps/ml_engine/services/scoring/shap_attribution.py \
+		apps/ml_engine/services/scoring/decision_assembly.py
 	cd frontend && npm run typecheck
 
 security:                ## Security scans (bandit + pip-audit + npm audit)

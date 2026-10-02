@@ -95,8 +95,6 @@ def _monthly_repayment(principal, annual_rate, term_months):
     if annual_rate <= 0 or term_months <= 0:
         return 0.0
     monthly_rate = annual_rate / 100 / 12
-    if monthly_rate == 0:
-        return principal / term_months
     payment = principal * monthly_rate * (1 + monthly_rate) ** term_months / ((1 + monthly_rate) ** term_months - 1)
     return round(payment, 2)
 
@@ -174,22 +172,35 @@ def _sign_by_date(days_from_now=14):
     return date.today() + timedelta(days=days_from_now)
 
 
-def _format_date(d):
-    """Format date as 'DD Month YYYY' (Australian style)."""
-    return d.strftime("%-d %B %Y") if hasattr(d, "strftime") else str(d)
-
-
 def _format_date_windows(d):
-    """Format date as 'D Month YYYY' — works on Windows (no %-d)."""
+    """Format date as 'D Month YYYY' without a zero-padded day (portable: no %-d)."""
+    return f"{d.day} {d:%B %Y}"
+
+
+def _risk_tier(application):
+    """The model's risk tier for the decision on record, or None without a scored decision."""
+    decision = getattr(application, "decision", None)  # no LoanDecision -> None
+    confidence = getattr(decision, "confidence", None)
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        return None
+    # Imported here: the rate tables do not need the ML app at import time.
+    from apps.ml_engine.services.scoring.pricing_engine import quoted_tier
+
     try:
-        return d.strftime("%-d %B %Y")
+        # confidence is the approval probability, so PD = 1 - confidence (as
+        # in decision_assembly).
+        return quoted_tier(pd_score=1.0 - float(confidence), segment=application.purpose)
     except ValueError:
-        # Windows doesn't support %-d, use #-d or manual strip
-        return d.strftime("%d %B %Y").lstrip("0")
+        return None
 
 
 def calculate_loan_pricing(application):
     """Calculate all pricing details for a loan application.
+
+    The rate starts from the credit-score band and employment type, then is
+    held inside the band of the model's risk tier (PD = 1 - the decision's
+    confidence): a high-PD applicant with a high bureau score is not quoted a
+    prime rate. Repayments and the comparison rate use the held rate.
 
     Args:
         application: LoanApplication instance
@@ -211,29 +222,34 @@ def calculate_loan_pricing(application):
     emp_adj = EMPLOYMENT_ADJUSTMENTS.get(employment_type, 0.0)
     fixed_rate = round(base_fixed + emp_adj, 2)
 
-    # Use fixed rate as the primary rate for the email
-    primary_rate = fixed_rate
+    tier = _risk_tier(application)
+    if tier is not None:
+        fixed_rate = round(min(max(fixed_rate, tier.rate_min), tier.rate_max), 2)
+
+    # The fixed rate is the primary rate quoted in the email
     rate_type = "Fixed"
 
     # Fees
     establishment_fee = ESTABLISHMENT_FEES.get(purpose, 250.00)
 
-    # Comparison rate via IRR per ASIC RG 262 using benchmark amounts
+    # Comparison rate via IRR per ASIC RG 262 using the ASIC benchmark amounts
     if purpose == "home":
         benchmark_principal = 150_000.0
         benchmark_term = 300  # 25 years
+        comparison_benchmark = "$150,000 secured home loan over a 25-year term"
     else:
         benchmark_principal = 30_000.0
         benchmark_term = 60  # 5 years
+        comparison_benchmark = f"$30,000 unsecured {purpose} loan over a 5-year term"
     comparison_rate = _comparison_rate_irr(
         benchmark_principal,
-        primary_rate,
+        fixed_rate,
         benchmark_term,
         establishment_fee,
     )
 
     # Monthly repayment
-    monthly_payment = _monthly_repayment(loan_amount, primary_rate, term_months)
+    monthly_payment = _monthly_repayment(loan_amount, fixed_rate, term_months)
 
     # Dates
     first_repayment = _first_repayment_date(30)
@@ -246,15 +262,9 @@ def calculate_loan_pricing(application):
     else:
         term_display = f"{term_months} months"
 
-    # Comparison rate benchmark amount (ASIC standard)
-    if purpose == "home":
-        comparison_benchmark = "$150,000 secured home loan over a 25-year term"
-    else:
-        comparison_benchmark = f"$30,000 unsecured {purpose} loan over a 5-year term"
-
     return {
-        "interest_rate": f"{primary_rate}% p.a.",
-        "interest_rate_number": primary_rate,
+        "interest_rate": f"{fixed_rate}% p.a.",
+        "interest_rate_number": fixed_rate,
         "rate_type": rate_type,
         "comparison_rate": f"{comparison_rate}% p.a.",
         "comparison_rate_number": comparison_rate,
@@ -268,4 +278,5 @@ def calculate_loan_pricing(application):
         "sign_by_date": _format_date_windows(sign_by),
         "comparison_benchmark": comparison_benchmark,
         "credit_band": band,
+        "risk_tier": tier.tier if tier is not None else None,
     }

@@ -1,13 +1,22 @@
 'use client'
 
 import { useRef } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { agentsApi, tasksApi } from '@/lib/api'
-import { AgentRun, TaskStatus } from '@/types'
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { agentsApi } from '@/lib/api'
+import { nextPollInterval } from '@/lib/polling'
+import { AgentRun } from '@/types'
 
-/** Exponential backoff: 2s -> 4s -> 8s -> 16s -> 30s max */
-function nextBackoff(pollCount: number): number {
-  return Math.min(2000 * Math.pow(2, pollCount), 30000)
+/** Queries that change once a pipeline run is (re)started for a loan. */
+export function invalidateRunQueries(queryClient: QueryClient, loanId: string) {
+  queryClient.invalidateQueries({ queryKey: ['agentRun', loanId] })
+  queryClient.invalidateQueries({ queryKey: ['application', loanId] })
+  queryClient.invalidateQueries({ queryKey: ['email', loanId] })
+}
+
+function rateLimitedError(error: any): Error {
+  const retryAfter = error.response.headers?.['retry-after']
+  const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
+  return new Error(`Rate limited — try again in ${waitSec}s`)
 }
 
 export function useAgentRun(loanId: string, options?: { pipelineQueued?: boolean }) {
@@ -29,16 +38,11 @@ export function useAgentRun(loanId: string, options?: { pipelineQueued?: boolean
     gcTime: 30_000, // 30s: polled data, drop fast after unmount
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      // Keep polling while the run is active, with exponential backoff
-      if (status === 'pending' || status === 'running') {
-        const interval = nextBackoff(pollCountRef.current)
-        pollCountRef.current += 1
-        return interval
-      }
-      // Also keep polling if the frontend knows a new run is expected
-      // (the current data is the OLD completed run; Celery hasn't created the new one yet)
-      if (pipelineQueued) {
-        const interval = nextBackoff(pollCountRef.current)
+      // Keep polling (with exponential backoff) while the run is active, or
+      // while the frontend knows a new run is expected (the current data is
+      // the OLD completed run; Celery hasn't created the new one yet).
+      if (status === 'pending' || status === 'running' || pipelineQueued) {
+        const interval = nextPollInterval(pollCountRef.current)
         pollCountRef.current += 1
         return interval
       }
@@ -48,31 +52,40 @@ export function useAgentRun(loanId: string, options?: { pipelineQueued?: boolean
   })
 }
 
+/** Friendly messages for orchestrate failures; anything else passes through. */
+function orchestrateError(error: any): Error {
+  // Surface throttle errors so the button doesn't just silently fail
+  if (error?.response?.status === 429) return rateLimitedError(error)
+  if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
+    return new Error('Request timed out — the backend may be starting up. Please try again.')
+  }
+  return error
+}
+
+function forceRerunError(error: any): Error {
+  const status = error?.response?.status
+  if (status === 403) return new Error('Force rerun requires staff role.')
+  if (status === 400) return new Error(error?.response?.data?.detail || 'A reason is required.')
+  if (status === 429) return rateLimitedError(error)
+  return error
+}
+
+// Errors are mapped inside mutationFn, not onError: TanStack Query ignores a
+// value thrown from onError (it becomes an unhandled rejection) and callers
+// still receive the original AxiosError.
 export function useOrchestrate() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async (loanId: string) => {
-      const { data } = await agentsApi.orchestrate(loanId)
-      return data
-    },
-    onSuccess: (_data, loanId) => {
-      queryClient.invalidateQueries({ queryKey: ['agentRun', loanId] })
-      queryClient.invalidateQueries({ queryKey: ['application', loanId] })
-      queryClient.invalidateQueries({ queryKey: ['email', loanId] })
-    },
-    onError: (error: any) => {
-      // Surface throttle errors so the button doesn't just silently fail
-      if (error?.response?.status === 429) {
-        const retryAfter = error.response.headers?.['retry-after']
-        const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
-        throw new Error(`Rate limited — try again in ${waitSec}s`)
+      try {
+        const { data } = await agentsApi.orchestrate(loanId)
+        return data
+      } catch (error) {
+        throw orchestrateError(error)
       }
-      if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
-        throw new Error('Request timed out — the backend may be starting up. Please try again.')
-      }
-      throw error
     },
+    onSuccess: (_data, loanId) => invalidateRunQueries(queryClient, loanId),
   })
 }
 
@@ -81,54 +94,13 @@ export function useForceRerun() {
 
   return useMutation({
     mutationFn: async ({ loanId, reason }: { loanId: string; reason: string }) => {
-      const { data } = await agentsApi.forceRerun(loanId, reason)
-      return data
-    },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['agentRun', variables.loanId] })
-      queryClient.invalidateQueries({ queryKey: ['application', variables.loanId] })
-      queryClient.invalidateQueries({ queryKey: ['email', variables.loanId] })
-    },
-    onError: (error: any) => {
-      if (error?.response?.status === 403) {
-        throw new Error('Force rerun requires staff role.')
+      try {
+        const { data } = await agentsApi.forceRerun(loanId, reason)
+        return data
+      } catch (error) {
+        throw forceRerunError(error)
       }
-      if (error?.response?.status === 400) {
-        throw new Error(error?.response?.data?.detail || 'A reason is required.')
-      }
-      if (error?.response?.status === 429) {
-        const retryAfter = error.response.headers?.['retry-after']
-        const waitSec = retryAfter ? parseInt(retryAfter, 10) : 60
-        throw new Error(`Rate limited — try again in ${waitSec}s`)
-      }
-      throw error
     },
-  })
-}
-
-export function useTaskStatus(taskId: string, options?: { enabled?: boolean }) {
-  const taskPollCountRef = useRef(0)
-
-  return useQuery<TaskStatus>({
-    queryKey: ['taskStatus', taskId],
-    queryFn: async () => {
-      const { data } = await tasksApi.getStatus(taskId)
-      if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
-        taskPollCountRef.current = 0
-      }
-      return data
-    },
-    enabled: !!taskId && (options?.enabled ?? true),
-    gcTime: 30_000, // 30s: polled data, drop fast after unmount
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      if (status === 'SUCCESS' || status === 'FAILURE') {
-        taskPollCountRef.current = 0
-        return false
-      }
-      const interval = nextBackoff(taskPollCountRef.current)
-      taskPollCountRef.current += 1
-      return interval
-    },
+    onSuccess: (_data, variables) => invalidateRunQueries(queryClient, variables.loanId),
   })
 }

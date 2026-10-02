@@ -5,14 +5,15 @@ during Arm C Phase 1. Given the model's raw positive-class probability, it:
 
 - Resolves the approval threshold (model_version.optimal_threshold or 0.5
   fallback with a warning).
-- Applies the per-employment-type group threshold if configured
-  (EEOC 80% rule compliance).
+- Applies that one threshold to every applicant (no per-group thresholds).
 - Derives the `approved`/`denied` label.
-- Flags borderline cases + drift=severe cases for human review.
+- Records borderline and severe-drift cases as refer reasons. They do not
+  route to human review (that queue is only for bias flags); the model
+  decision stands and the reason is kept on the decision record.
 - Calls the D4 pricing engine, which may further decline an approved label
   when PD is above the top tier cutoff.
 
-All six output fields are returned as a single dict so the caller doesn't
+All output fields are returned as a single dict so the caller doesn't
 have to thread them through its own locals.
 """
 
@@ -21,7 +22,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from apps.ml_engine.services.scoring.decision_assembly import assemble_decision
+import pytest
+
+from apps.ml_engine.services.scoring.decision_assembly import PricingUnavailable, assemble_decision
 
 
 def _mk_version(optimal_threshold=0.5, id_="mv-1"):
@@ -52,8 +55,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.8,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -61,8 +62,7 @@ class TestAssembleDecision:
         assert result["prediction_label"] == "approved"
         assert result["probability"] == 0.8
         assert result["threshold"] == 0.6
-        assert result["effective_threshold"] == 0.6
-        assert result["requires_human_review"] is False
+        assert result["refer_reasons"] == []
 
     def test_denied_below_threshold(self):
         mv = _mk_version(optimal_threshold=0.6)
@@ -70,8 +70,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.3,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -84,8 +82,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.7,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -94,23 +90,7 @@ class TestAssembleDecision:
         log.warning.assert_called_once()
         assert "optimal_threshold" in log.warning.call_args.args[0]
 
-    def test_group_threshold_overrides_default(self):
-        mv = _mk_version(optimal_threshold=0.6)
-        with _patch_pricing():
-            result = assemble_decision(
-                probability_positive=0.55,
-                model_version=mv,
-                group_thresholds={"casual": 0.4},
-                employment_type="casual",
-                drift_warnings=[],
-                segment="personal",
-            )
-
-        # Default threshold would deny at 0.55 < 0.6; casual group threshold 0.4 approves.
-        assert result["effective_threshold"] == 0.4
-        assert result["prediction_label"] == "approved"
-
-    def test_borderline_within_5pp_flags_review(self):
+    def test_borderline_within_5pp_is_a_refer_reason(self):
         # _BORDERLINE_MARGIN was reduced from 0.10 to 0.05 (M11).
         # Use 0.53 so |0.53 - 0.5| = 0.03 is clearly inside the 5pp window.
         mv = _mk_version(optimal_threshold=0.5)
@@ -118,29 +98,27 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.53,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
 
-        # |0.53 - 0.5| = 0.03 <= 0.05 → borderline
-        assert result["requires_human_review"] is True
+        # |0.53 - 0.5| = 0.03 <= 0.05 → borderline: recorded, decision stands
+        assert result["prediction_label"] == "approved"
+        assert [r["code"] for r in result["refer_reasons"]] == ["BORDERLINE"]
 
-    def test_drift_severity_escalates_review(self):
+    def test_drift_severity_is_a_refer_reason(self):
         mv = _mk_version(optimal_threshold=0.5)
         with _patch_pricing():
             result = assemble_decision(
                 probability_positive=0.90,  # well clear of threshold
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[{"severity": "drift"}],
                 segment="personal",
             )
 
-        # Not borderline, but drift severity forces review.
-        assert result["requires_human_review"] is True
+        # Not borderline, but drift severity is recorded; decision stands.
+        assert result["prediction_label"] == "approved"
+        assert [r["code"] for r in result["refer_reasons"]] == ["FEATURE_DRIFT"]
 
     def test_pricing_tier_can_override_approved_to_denied(self):
         mv = _mk_version(optimal_threshold=0.5)
@@ -148,8 +126,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.85,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -164,36 +140,51 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.2,  # model already denies
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
 
         assert result["prediction_label"] == "denied"
 
-    def test_pricing_failure_is_failsafe_and_flags_review(self):
+    def test_pricing_failure_on_an_approval_raises(self):
+        """The pricing tier is a hard risk gate that can DECLINE a model
+        approval. If it cannot be computed the approval must not ship
+        unchecked, and it cannot go to human review (that queue is bias-only):
+        raise, so the pipeline fails the prediction step and the application
+        returns to PENDING for a re-run."""
+        mv = _mk_version(optimal_threshold=0.5)
+        with (
+            patch(
+                "apps.ml_engine.services.scoring.decision_assembly.get_tier",
+                side_effect=RuntimeError("pricing engine broken"),
+            ),
+            pytest.raises(PricingUnavailable),
+        ):
+            assemble_decision(
+                probability_positive=0.8,
+                model_version=mv,
+                drift_warnings=[],
+                segment="personal",
+            )
+
+    def test_pricing_failure_on_a_denial_keeps_the_denial(self):
+        """Pricing can only turn an approval into a decline, so a denial does
+        not depend on it: the denial stands and the gap is recorded."""
         mv = _mk_version(optimal_threshold=0.5)
         with patch(
             "apps.ml_engine.services.scoring.decision_assembly.get_tier",
             side_effect=RuntimeError("pricing engine broken"),
         ):
             result = assemble_decision(
-                probability_positive=0.8,
+                probability_positive=0.2,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
 
-        # Fail-SAFE (review G2): the pricing tier is a hard risk gate that can
-        # decline a model approval, so a transient failure must NOT read as a
-        # clean approve. The model's own label is preserved, but the gate is
-        # reported not-approved and the decision is flagged for human review.
-        assert result["prediction_label"] == "approved"
+        assert result["prediction_label"] == "denied"
         assert result["pricing_payload"] == {"tier": "unavailable", "approved": False}
-        assert result["requires_human_review"] is True
+        assert [r["code"] for r in result["refer_reasons"]] == ["PRICING_UNAVAILABLE"]
 
     def test_probability_rounded_to_four_places(self):
         mv = _mk_version(optimal_threshold=0.5)
@@ -201,8 +192,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.123456789,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -215,8 +204,6 @@ class TestAssembleDecision:
             result = assemble_decision(
                 probability_positive=0.5,
                 model_version=mv,
-                group_thresholds=None,
-                employment_type="full_time",
                 drift_warnings=[],
                 segment="personal",
             )
@@ -224,8 +211,65 @@ class TestAssembleDecision:
         assert set(result.keys()) == {
             "probability",
             "threshold",
-            "effective_threshold",
             "prediction_label",
-            "requires_human_review",
+            "refer_reasons",
             "pricing_payload",
         }
+
+
+class TestDeclineOverrides:
+    """A denial made by a rule over a model approval carries the rule's code,
+    so the waterfall and the denial email do not present it as the model's."""
+
+    def test_pricing_decline_of_a_model_approval_is_marked(self):
+        # Real pricing table: home PD 0.15 is above the 0.10 cutoff -> Decline.
+        result = assemble_decision(
+            probability_positive=0.85, model_version=_mk_version(0.5), drift_warnings=[], segment="home"
+        )
+
+        assert result["prediction_label"] == "denied"
+        assert result["pricing_payload"].get("declined_model_approval") is True
+
+    def test_pricing_decline_reports_its_reason_code(self):
+        from apps.ml_engine.services.scoring.decision_assembly import decline_overrides
+
+        result = assemble_decision(
+            probability_positive=0.85, model_version=_mk_version(0.5), drift_warnings=[], segment="home"
+        )
+        overrides = decline_overrides(
+            {"prediction": result["prediction_label"], "pricing_tier": result["pricing_payload"]}
+        )
+
+        assert [o["code"] for o in overrides] == ["PRICING_TIER_DECLINE"]
+        assert overrides[0]["detail"]
+
+    def test_a_model_denial_has_no_override(self):
+        from apps.ml_engine.services.scoring.decision_assembly import decline_overrides
+
+        result = assemble_decision(
+            probability_positive=0.3, model_version=_mk_version(0.5), drift_warnings=[], segment="home"
+        )
+
+        assert result["pricing_payload"]["declined_model_approval"] is False
+        assert decline_overrides({"prediction": "denied", "pricing_tier": result["pricing_payload"]}) == []
+
+    def test_enforce_policy_hard_fails_report_policy_codes(self):
+        from apps.ml_engine.services.scoring.decision_assembly import decline_overrides
+
+        policy = {
+            "mode": "enforce",
+            "changed_model_decision": True,
+            "hard_fails": ["P03"],
+            "rationale_by_code": {"P03": "Undischarged bankrupt"},
+        }
+
+        assert decline_overrides({"prediction": "denied", "policy_decision": policy}) == [
+            {"code": "POLICY_DECLINE_P03", "detail": "Undischarged bankrupt"}
+        ]
+
+    def test_shadow_policy_never_reports_a_decline(self):
+        from apps.ml_engine.services.scoring.decision_assembly import decline_overrides
+
+        policy = {"mode": "shadow", "changed_model_decision": False, "hard_fails": ["P03"]}
+
+        assert decline_overrides({"prediction": "denied", "policy_decision": policy}) == []

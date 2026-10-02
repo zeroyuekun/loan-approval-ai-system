@@ -20,15 +20,25 @@ spec:
         app.kubernetes.io/component: scheduler
         app.kubernetes.io/part-of: aussieloanai
     spec:
-      # Dockerfile: adduser (Debian) creates appuser at UID 1000
+      automountServiceAccountToken: false
+      # Dockerfile: adduser (Debian) creates appuser at UID/GID 1000.
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: celery-beat
           image: ghcr.io/OWNER/loan-approval-ai-system/backend:latest
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # The root filesystem is read-only, so the PersistentScheduler state
+          # file goes to /tmp. Losing it on restart only means beat recomputes
+          # the next run times from the code-defined schedule.
           command:
             - celery
             - -A
@@ -36,11 +46,15 @@ spec:
             - beat
             - -l
             - info
+            - --schedule=/tmp/celerybeat-schedule
           envFrom:
             - configMapRef:
                 name: loan-approval-config
             - secretRef:
                 name: loan-approval-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: 128Mi
@@ -48,3 +62,7 @@ spec:
             limits:
               memory: 256Mi
               cpu: 200m
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

@@ -4,7 +4,9 @@ URL configuration for loan approval AI system.
 
 import hmac
 import json
+from datetime import date
 
+import redis
 from django.conf import settings
 from django.contrib import admin
 from django.http import HttpResponse, JsonResponse
@@ -15,6 +17,8 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.policy import is_staff_role
+from apps.agents.services.api_budget import open_circuit_providers
 from apps.loans.models import LoanApplication
 from config.ops_auth import require_ops_auth
 
@@ -36,12 +40,21 @@ class TaskStatusView(APIView):
         }
     )
 
+    @staticmethod
+    def _result_envelope(task_id, result):
+        return {
+            "task_id": task_id,
+            "status": result.status,
+            "result": result.result,
+            "date_done": result.date_done.isoformat() if result.date_done else None,
+        }
+
     def get(self, request, task_id):
         """Check the status of an async Celery task with ownership verification."""
         from django_celery_results.models import TaskResult
 
         user = request.user
-        is_staff = user.role in ("admin", "officer")
+        is_staff = is_staff_role(user)
 
         try:
             result = TaskResult.objects.get(task_id=task_id)
@@ -53,14 +66,7 @@ class TaskStatusView(APIView):
 
         # Staff have full visibility of any task's real status.
         if is_staff:
-            return Response(
-                {
-                    "task_id": task_id,
-                    "status": result.status,
-                    "result": result.result,
-                    "date_done": result.date_done.isoformat() if result.date_done else None,
-                }
-            )
+            return Response(self._result_envelope(task_id, result))
 
         # Non-staff path: return the real result ONLY when the task is
         # complete AND the application_id in the result belongs to this user.
@@ -71,14 +77,7 @@ class TaskStatusView(APIView):
                 result_data = json.loads(result.result) if isinstance(result.result, str) else result.result
                 app_id = result_data.get("application_id") if isinstance(result_data, dict) else None
                 if app_id and LoanApplication.objects.filter(pk=app_id, applicant=user).exists():
-                    return Response(
-                        {
-                            "task_id": task_id,
-                            "status": result.status,
-                            "result": result.result,
-                            "date_done": result.date_done.isoformat() if result.date_done else None,
-                        }
-                    )
+                    return Response(self._result_envelope(task_id, result))
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -109,10 +108,8 @@ def deep_health_check(request):
 
     Restricted: requires HEALTH_CHECK_TOKEN header or staff session.
     """
-    from django.conf import settings as django_settings
-
-    token = getattr(django_settings, "HEALTH_CHECK_TOKEN", "") or ""
-    debug = getattr(django_settings, "DEBUG", False)
+    token = getattr(settings, "HEALTH_CHECK_TOKEN", "") or ""
+    debug = getattr(settings, "DEBUG", False)
 
     if not token:
         if not debug:
@@ -141,10 +138,7 @@ def deep_health_check(request):
 
     # Redis
     try:
-        import redis
-        from django.conf import settings as django_settings
-
-        broker_url = django_settings.CELERY_BROKER_URL
+        broker_url = settings.CELERY_BROKER_URL
         r = redis.from_url(broker_url, socket_connect_timeout=3)
         r.ping()
         checks["redis"] = "ok"
@@ -168,10 +162,7 @@ def deep_health_check(request):
 
     # Celery queue depth (non-blocking)
     try:
-        import redis
-        from django.conf import settings as django_settings
-
-        r = redis.from_url(django_settings.CELERY_BROKER_URL, socket_connect_timeout=2)
+        r = redis.from_url(settings.CELERY_BROKER_URL, socket_connect_timeout=2)
         queue_depths = {}
         for queue_name in ("celery", "ml", "email", "agents"):
             queue_depths[queue_name] = r.llen(queue_name)
@@ -188,23 +179,18 @@ def deep_health_check(request):
 
     # API budget remaining (non-blocking)
     try:
-        from datetime import date
-
-        import redis
-        from django.conf import settings as django_settings
-
-        r = redis.from_url(django_settings.CELERY_BROKER_URL, socket_connect_timeout=2)
+        r = redis.from_url(settings.CELERY_BROKER_URL, socket_connect_timeout=2)
         today = date.today().isoformat()
         cost_cents = int(r.get(f"ai_budget:{today}:cost_cents") or 0)
         call_count = int(r.get(f"ai_budget:{today}:calls") or 0)
-        budget_limit = getattr(django_settings, "AI_DAILY_BUDGET_LIMIT_USD", 5.0)
-        call_limit = getattr(django_settings, "AI_DAILY_CALL_LIMIT", 500)
+        budget_limit = getattr(settings, "AI_DAILY_BUDGET_LIMIT_USD", 5.0)
+        call_limit = getattr(settings, "AI_DAILY_CALL_LIMIT", 500)
         checks["api_budget"] = {
             "spent_usd": round(cost_cents / 100, 2),
             "limit_usd": budget_limit,
             "calls_today": call_count,
             "call_limit": call_limit,
-            "circuit_breaker": "open" if r.exists("ai_budget:circuit_breaker") else "closed",
+            "circuit_breaker": "open" if open_circuit_providers(r) else "closed",
         }
     except Exception:
         checks["api_budget"] = "unavailable"

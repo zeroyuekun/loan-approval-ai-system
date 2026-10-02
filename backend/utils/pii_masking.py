@@ -2,7 +2,7 @@
 
 Provides a serializer mixin that redacts sensitive fields based on the
 requesting user's role, implementing defense-in-depth alongside the
-field-level AES-256 encryption already in the database layer.
+field-level Fernet (AES-128-CBC + HMAC) encryption in the database layer.
 
 Security principle: even if a user gains access to an API endpoint they
 shouldn't see, the response won't contain raw PII unless their role permits it.

@@ -22,6 +22,7 @@ from sklearn.preprocessing import StandardScaler
 
 from ..metrics import (
     MetricsService,
+    VintageAnalyser,
     brier_decomposition,
     ks_statistic,
     psi_by_feature,
@@ -32,6 +33,16 @@ from .monotone_constraints import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _sklearn_accepts_cv_params(version: str) -> bool:
+    """Whether cross_val_score takes ``params=`` (scikit-learn >= 1.4).
+
+    Compared as versions: as strings "1.10" < "1.4".
+    """
+    from packaging.version import Version
+
+    return Version(version) >= Version("1.4")
 
 
 class _CalibratedModel:
@@ -679,7 +690,7 @@ class ModelTrainer:
         # Save original test indices before transform() resets them
         test_original_indices = df_test.index.copy()
 
-        # Save raw copies BEFORE preprocessing for WOE scorecard (C4 fix).
+        # Save raw copies BEFORE preprocessing for the WOE scorecard.
         # WOE bins must be in interpretable units (credit_score 650-750),
         # not z-score units from StandardScaler.
         df_train_raw = self.add_derived_features(df_train.copy())
@@ -710,7 +721,6 @@ class ModelTrainer:
             iv_max=1.5,
         )
         selected_numeric = iv_result["selected_features"]
-        self._iv_result = iv_result  # store for metrics later
         self._original_numeric_cols = list(self.NUMERIC_COLS)
 
         logger.info(
@@ -773,7 +783,7 @@ class ModelTrainer:
         # with train_quarters_snapshot (the original split), so it must run on
         # these pre-RI copies. Running it on the augmented set misaligns against
         # the snapshot and the diagnostic gets silently skipped/failed whenever
-        # reject inference runs (#8).
+        # reject inference runs.
         _y_train_pre_ri_len = len(y_train)
         _X_train_pre_ri = X_train
         _y_train_pre_ri = y_train
@@ -892,12 +902,8 @@ class ModelTrainer:
         temporal_cv_auc_mean = None
         temporal_cv_folds_used = 0
         cv_drift_signal = None
-        # Align the quarter snapshot to the PRE-reject-inference split. RI
-        # augmentation above reassigned X_train/y_train to a larger set, but the
-        # snapshot is row-aligned only to the original split — so temporal CV runs
-        # on the pre-RI copies (#8: previously it used the augmented X_train and
-        # was silently skipped/failed whenever RI ran). Guard on length in case
-        # preprocessing trimmed rows before the snapshot.
+        # Temporal CV runs on the pre-RI copies (see the snapshot above); guard on
+        # length in case preprocessing trimmed rows before the snapshot.
         if train_quarters_snapshot is not None and len(train_quarters_snapshot) == _y_train_pre_ri_len:
             try:
                 temporal_cv_auc_mean, temporal_cv_folds_used = self._compute_temporal_cv_auc(
@@ -948,8 +954,8 @@ class ModelTrainer:
         self._conformal_scores = np.sort(np.abs(y_val_prob - y_val.values))
 
         # Evaluate on the test set at the OPERATING threshold the system deploys
-        # (the cost-optimal threshold the per-group fairness search is anchored
-        # to), NOT the model's 0.5 cutoff — which would describe a classifier the
+        # for every applicant (the cost-optimal threshold chosen on validation),
+        # NOT the model's 0.5 cutoff — which would describe a classifier the
         # serving path never runs. AUC/Gini/KS/Brier/ECE are threshold-independent.
         y_prob = model.predict_proba(X_test)[:, 1]
         y_pred = (y_prob >= optimal_threshold).astype(int)
@@ -971,7 +977,7 @@ class ModelTrainer:
         metrics["threshold_analysis"] = self.metrics_service.compute_threshold_analysis(y_test, y_prob)
         metrics["decile_analysis"] = self.metrics_service.compute_decile_analysis(y_test, y_prob)
 
-        # D5 — production-grade metrics for champion-challenger promotion.
+        # Production-grade metrics for champion-challenger promotion.
         # `ks` is the bare float, distinct from `ks_statistic` (rounded) so
         # gate comparisons carry full precision. Brier decomposition lets the
         # MRM dossier and promotion gate separate calibration error
@@ -1004,6 +1010,12 @@ class ModelTrainer:
                 overfitting_gap,
             )
 
+        # The overfitting gate uses no test data: it judges the train-vs-validation
+        # gap. The train-vs-test gap above stays as the final independent figure.
+        # y_val_prob is the calibrated model's validation output computed above.
+        val_auc = round(float(roc_auc_score(y_val, y_val_prob)), 4)
+        overfitting_gap_val = round(train_auc - val_auc, 4)
+
         # Logistic-regression baseline on core credit features. Lets us report
         # the XGBoost lift over a simple scorecard — the credit-risk interview
         # question "how much better is your model than credit_score alone?"
@@ -1030,6 +1042,8 @@ class ModelTrainer:
             "training_time_seconds": training_time,
             "overfitting_gap": overfitting_gap,
             "train_auc": round(train_auc, 4),
+            "val_auc": val_auc,
+            "overfitting_gap_val": overfitting_gap_val,
             "n_features": len(feature_cols),
             "cv_auc_mean": cv_mean,
             "cv_auc_std": cv_std,
@@ -1044,13 +1058,21 @@ class ModelTrainer:
             "xgb_lift_over_baseline": xgb_lift_over_baseline,
             "optimal_threshold": optimal_threshold,
             "calibration_method": getattr(model, "calibration_method", "unknown"),
-            "group_thresholds": getattr(self, "_group_thresholds", {}),
-            "iv_features_selected": len(getattr(self, "_iv_result", {}).get("selected_features", [])),
-            "iv_features_excluded_weak": len(getattr(self, "_iv_result", {}).get("excluded_weak", [])),
-            "iv_features_excluded_leakage": len(getattr(self, "_iv_result", {}).get("excluded_leakage", [])),
+            # The decision rule actually deployed: one threshold for every
+            # applicant, chosen on the validation split. Fairness metrics and
+            # the fairness gate are computed at this same threshold.
+            "decision_threshold": {
+                "value": optimal_threshold,
+                "applies_to": "all_applicants",
+                "selected_on": "validation",
+                "method": "cost_optimal",
+            },
+            "iv_features_selected": len(iv_result.get("selected_features", [])),
+            "iv_features_excluded_weak": len(iv_result.get("excluded_weak", [])),
+            "iv_features_excluded_leakage": len(iv_result.get("excluded_leakage", [])),
             # Kept-but-flagged: IV above the standard 0.5 leakage line but <= the
-            # (higher) iv_max used for exclusion — the honest leakage signal (#13).
-            "iv_features_elevated": len(getattr(self, "_iv_result", {}).get("elevated_iv", [])),
+            # (higher) iv_max used for exclusion — the honest leakage signal.
+            "iv_features_elevated": len(iv_result.get("elevated_iv", [])),
             # Per-feature PSI (test vs train) — consumed by model_selector._max_psi,
             # the MRM dossier, and mrm_compliance._compliance_status via training_metadata.
             "psi_by_feature": metrics.get("psi_by_feature", {}),
@@ -1091,46 +1113,6 @@ class ModelTrainer:
                     )
                     fairness_metrics[col] = fairness_result
         metrics["fairness"] = fairness_metrics
-
-        # Post-processing: per-group threshold adjustment for employment_type
-        # Ensures disparate impact meets EEOC 80% rule (DI >= 0.80)
-        group_thresholds = {}
-        target_di = getattr(settings, "ML_FAIRNESS_TARGET_DI", 0.80)
-
-        if "employment_type" in fairness_metrics and "employment_type" in df_test_raw.columns:
-            emp_groups = fairness_metrics["employment_type"]["groups"]
-            max_approval = max(g["predicted_approval_rate"] for g in emp_groups.values())
-            target_approval = max_approval * target_di
-
-            # Use raw test data for group membership (before one-hot encoding)
-            test_emp_values = df_test_raw["employment_type"].values
-
-            for group_name, group_data in emp_groups.items():
-                if group_data["predicted_approval_rate"] >= target_approval:
-                    group_thresholds[group_name] = optimal_threshold
-                else:
-                    group_mask = test_emp_values == group_name
-                    group_probs = y_prob[group_mask]
-                    if len(group_probs) == 0:
-                        group_thresholds[group_name] = optimal_threshold
-                        continue
-                    # Lower threshold until approval rate meets target
-                    for t in np.arange(optimal_threshold, 0.05, -0.01):
-                        rate = float((group_probs >= t).mean())
-                        if rate >= target_approval:
-                            group_thresholds[group_name] = float(round(t, 2))
-                            break
-                    else:
-                        group_thresholds[group_name] = 0.05  # floor
-
-            logger.info(
-                "Per-group fairness thresholds: %s (target DI: %.2f, target approval: %.3f)",
-                group_thresholds,
-                target_di,
-                target_approval,
-            )
-
-        self._group_thresholds = group_thresholds
 
         # WOE/IV analysis on RAW (unscaled) data so bin edges are in
         # interpretable units (credit_score 650-750, not z-scores).
@@ -1181,8 +1163,6 @@ class ModelTrainer:
 
         # Vintage analysis (if temporal data present)
         if all(c in df_test_raw.columns for c in ["origination_quarter", "months_on_book"]):
-            from ..metrics import VintageAnalyser
-
             test_with_temporal = df_test_raw.copy()
             test_with_temporal["default_flag"] = y_test
             test_with_temporal["prediction_probability"] = y_prob
@@ -1261,8 +1241,8 @@ class ModelTrainer:
 
         # Build monotonic constraints from feature names
         monotonic = self._build_monotonic_constraints(list(X_train.columns))
-        max_bin = getattr(settings, "ML_MAX_BIN", 512)
-        n_optuna_trials = getattr(settings, "ML_OPTUNA_TRIALS", 50)
+        max_bin = settings.ML_MAX_BIN
+        n_optuna_trials = settings.ML_OPTUNA_TRIALS
 
         # 3-fold stratified CV for objective evaluation
         cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
@@ -1302,7 +1282,7 @@ class ModelTrainer:
             # On older environments every Optuna trial silently crashes without it.
             import sklearn as _sklearn
 
-            if cv_fit_params and _sklearn.__version__ >= "1.4":
+            if cv_fit_params and _sklearn_accepts_cv_params(_sklearn.__version__):
                 scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", params=cv_fit_params)
             else:
                 # sklearn <1.4: pass sample_weight via fit_params (deprecated in 1.4)
@@ -1377,7 +1357,6 @@ class ModelTrainer:
             # coverage. Stored as sorted array for fast quantile lookup.
             "conformal_scores": getattr(self, "_conformal_scores", np.array([])),
             "feature_bounds": getattr(self, "_feature_bounds", {}),
-            "group_thresholds": getattr(self, "_group_thresholds", {}),
         }
         # Self-healing: validate pipeline consistency before saving
         self._validate_pipeline_consistency(bundle)

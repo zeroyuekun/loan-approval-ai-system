@@ -6,9 +6,11 @@ metadata:
   labels:
     app.kubernetes.io/name: loan-approval
     app.kubernetes.io/part-of: aussieloanai
+  # The class is chosen by spec.ingressClassName only: the API server rejects
+  # an Ingress that also sets the legacy kubernetes.io/ingress.class annotation.
   annotations:
-    kubernetes.io/ingress.class: nginx
-    nginx.ingress.kubernetes.io/rate-limit: "100"
+    # Per client IP, enforced by ingress-nginx (burst = 5x by default).
+    nginx.ingress.kubernetes.io/limit-rps: "100"
     nginx.ingress.kubernetes.io/proxy-body-size: 10m
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:

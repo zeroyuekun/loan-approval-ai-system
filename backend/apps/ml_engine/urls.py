@@ -13,4 +13,5 @@ urlpatterns = [
     path("models/<uuid:pk>/traffic/", views.ModelTrafficView.as_view(), name="model-traffic"),
     path("models/compare/", views.ModelCompareView.as_view(), name="model-compare"),
     path("models/active/drift-reports/", views.DriftReportListView.as_view(), name="drift-report-list"),
+    path("models/active/score/", views.AdhocScoreView.as_view(), name="model-score"),
 ]

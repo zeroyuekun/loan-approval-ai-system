@@ -2,9 +2,7 @@
 
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
-import { authApi } from '@/lib/api'
-import { CustomerActivity, GeneratedEmail, MarketingEmail } from '@/types'
+import { GeneratedEmail, MarketingEmail } from '@/types'
 import { EmailPreview } from '@/components/emails/EmailPreview'
 import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -12,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, Mail, FileText, ChevronRight } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { useCustomerActivity } from '@/hooks/useCustomerActivity'
 
 type AnyEmail =
   | { kind: 'decision'; email: GeneratedEmail }
@@ -71,14 +70,7 @@ export default function CustomerEmailsPage() {
   const router = useRouter()
   const customerId = Number(params.id)
 
-  const { data: activity, isLoading } = useQuery<CustomerActivity>({
-    queryKey: ['customerActivity', customerId],
-    queryFn: async () => {
-      const { data } = await authApi.getCustomerActivity(customerId)
-      return data
-    },
-    enabled: !isNaN(customerId),
-  })
+  const { data: activity, isLoading } = useCustomerActivity(customerId)
 
   if (isLoading) {
     return (

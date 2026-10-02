@@ -21,6 +21,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.loans.models import AuditLog
 from apps.ml_engine.models import ModelValidationReport, ModelVersion
+from apps.ml_engine.services.scoring.prediction_cache import file_sha256
 from apps.ml_engine.services.validation_gate_mode import (
     DEFAULT_MODE,
     VALID_MODES,
@@ -68,7 +69,8 @@ def model_version(db, models_dir):
         algorithm="xgb",
         version="v_signoff_test",
         file_path=str(file_path),
-        file_hash="b" * 64,
+        # The activation service verifies the artefact hash before any gate.
+        file_hash=file_sha256(file_path),
         is_active=False,
         segment=ModelVersion.SEGMENT_UNIFIED,
         traffic_percentage=0,
@@ -167,8 +169,9 @@ class TestModelActivateValidationGate:
             response = authed_admin_client.post(url)
         assert response.status_code == 409
         body = response.json()
-        assert body["error"] == "validation_signoff_required"
-        assert body["details"]["reason"] == "no_report"
+        assert body["error"] == "activation_blocked"
+        assert body["blocked_gates"] == ["validation"]
+        assert body["gates"]["validation"]["result"]["reason"] == "no_report"
 
         # Verify the row was NOT activated.
         model_version.refresh_from_db()

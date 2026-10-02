@@ -1,16 +1,15 @@
-import os
 import time
 from datetime import date
 
 import anthropic
-import httpx
 
-from apps.agents.services.api_budget import BudgetExhausted, guarded_api_call
-from apps.email_engine.services.guardrails import GuardrailChecker
+from apps.agents.services.api_budget import ApiGateClosed, guarded_api_call
+from apps.email_engine.services.guardrails import GuardrailChecker, nbo_offer_amounts
 
 # Use the hardened shared sanitizer (NFKC + zero-width strip + broader
 # blocklist + pipe removal) instead of a weaker local copy (L26). The alias
 # preserves the module-level name existing callers/tests import.
+from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 MARKETING_EMAIL_PROMPT = """You are filling in a templated follow-up email for AussieLoanAI. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline.
@@ -52,7 +51,7 @@ Subject: Next steps for your AussieLoanAI loan application
 
 Dear {applicant_first_name},
 
-We appreciate your interest in banking with AussieLoanAI and we've put together some options that might work better for you:
+Following your recent loan application with us, we've looked at your profile and there are a few options worth considering:
 
 [FOR EACH OFFER in the OFFER DATA above, output one block in this exact format. Output up to 3 offers.]
 
@@ -66,8 +65,8 @@ Option [N]: [Offer Name]
 
 [END FOR EACH]
 
-If any of these options interest you, I'd be happy to talk them through with you. You can contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-Thanks for coming to us, {applicant_first_name}. We'd love to help you find the right option when you're ready.
+If any of these options interest you, I'd be happy to talk them through with you. Call me on 1300 000 000 (Mon\u2013Fri, 8:30am\u20135:30pm AEST) or reply to this email.
+Thanks for coming to us, {applicant_first_name}. When you're ready, we'd like to help you find the right option.
 
 Kind regards,
 Sarah Mitchell
@@ -112,14 +111,7 @@ class MarketingAgent:
     MAX_RETRIES = 3
 
     def __init__(self):
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if api_key:
-            self.client = anthropic.Anthropic(
-                api_key=api_key,
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
-        else:
-            self.client = None
+        self.client = make_anthropic_client()
         self.guardrail_checker = GuardrailChecker()
 
     def generate(self, application, nbo_result, denial_reasons=""):
@@ -168,21 +160,24 @@ class MarketingAgent:
             nbo_analysis=sanitized_nbo_analysis,
         )
 
-        # Extract NBO offer amounts for guardrail validation
-        nbo_amounts = []
-        for offer in nbo_result.get("offers", []):
-            if offer.get("amount"):
-                nbo_amounts.append(float(offer["amount"]))
-            if offer.get("monthly_repayment"):
-                nbo_amounts.append(float(offer["monthly_repayment"]))
-            if offer.get("fortnightly_repayment"):
-                nbo_amounts.append(float(offer["fortnightly_repayment"]))
+        return self._generate_with_retries(application, prompt, start_time, nbo_result=nbo_result)
 
-        return self._generate_with_retries(
-            application, prompt, start_time, nbo_amounts=nbo_amounts, nbo_result=nbo_result
-        )
+    @staticmethod
+    def _guardrail_context(application, nbo_result):
+        """Guardrail context shared by the LLM and template paths.
 
-    def _generate_with_retries(self, application, prompt, start_time, attempt=1, nbo_amounts=None, nbo_result=None):
+        The offers and their amounts let the hallucinated-numbers check accept
+        figures the email quotes from the NBO result.
+        """
+        offers = (nbo_result or {}).get("offers", [])
+        return {
+            "decision": "denied",
+            "loan_amount": float(application.loan_amount) if application.loan_amount else None,
+            "nbo_amounts": nbo_offer_amounts(offers),
+            "nbo_offers": offers,
+        }
+
+    def _generate_with_retries(self, application, prompt, start_time, attempt=1, nbo_result=None):
         """Generate the email with guardrail retry logic."""
         from django.conf import settings as django_settings
 
@@ -196,53 +191,59 @@ class MarketingAgent:
 
         _logger = _logging.getLogger("agents.marketing_agent")
 
-        # Single API attempt — no in-worker sleep/retry loop.
-        # time.sleep() in a Celery worker blocks the thread and prevents other
-        # tasks from running.  Transient errors (RateLimit, Timeout, Connection,
-        # 5xx) fall back to the template immediately; non-transient errors
-        # propagate so Celery's autoretry / task-level error handling owns them.
-        # Budget / auth failures also take the template path (unchanged behaviour).
+        # One attempt per call. The SDK client's own bounded backoff is the only
+        # retry; no extra sleep/retry loop here, which would hold the Celery
+        # worker thread longer.
+        # Transient, budget, circuit and auth failures use the template;
+        # unexpected errors raise and fail the marketing_email_generation step.
+        # Each fallback arm only logs; the single template return follows the try.
         response = None
         try:
             response = guarded_api_call(
                 self.client,
+                _service="marketing_email",
+                _loan_application_id=application.pk,
+                # MARKETING_EMAIL_PROMPT interpolates name, loan amount, credit
+                # score, income, employment, decline factors and banking profile.
+                _pii_categories=[
+                    "name",
+                    "loan_amount",
+                    "credit_score",
+                    "income",
+                    "employment",
+                    "credit_assessment",
+                    "financial_profile",
+                ],
                 model="claude-sonnet-4-6",
                 max_tokens=1500,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
                 messages=[{"role": "user", "content": current_prompt}],
             )
-        except BudgetExhausted:
-            _logger.info("Marketing email API budget exhausted or no API key — using template")
-            return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
+        except ApiGateClosed:
+            _logger.info("Marketing email API budget exhausted, circuit open, or no API key — using template")
         except anthropic.AuthenticationError as api_err:
             _logger.error("Marketing email API auth error (not retryable): %s", api_err)
-            return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
-        except anthropic.RateLimitError as api_err:
-            # Transient: rate limit → template fallback (no sleep)
-            _logger.warning("Marketing email API rate limited — using template: %s", api_err)
-            return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
-        except (anthropic.APITimeoutError, anthropic.APIConnectionError) as api_err:
-            # Transient: network/timeout → template fallback (no sleep)
-            _logger.warning("Marketing email API connection/timeout — using template: %s", api_err)
-            return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
+        except (anthropic.RateLimitError, anthropic.APIConnectionError) as api_err:
+            # Transient (rate limit, network, timeout) → template fallback (no sleep).
+            # APITimeoutError subclasses APIConnectionError.
+            _logger.warning("Marketing email API %s — using template: %s", type(api_err).__name__, api_err)
         except anthropic.APIStatusError as api_err:
             if api_err.status_code >= 500:
-                # Transient: server error → template fallback (no sleep)
                 _logger.warning(
                     "Marketing email API server error (%d) — using template: %s",
                     api_err.status_code,
                     api_err,
                 )
-                return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
             elif "credit" in str(api_err).lower() or "balance" in str(api_err).lower():
                 _logger.warning("Marketing email API credit insufficient — using template")
-                return self._marketing_template_fallback(application, nbo_amounts, start_time, nbo_result=nbo_result)
             else:
                 _logger.error("Marketing email API client error (%d, not retryable): %s", api_err.status_code, api_err)
                 raise
         except Exception as api_err:
             _logger.critical("Marketing email API UNEXPECTED failure: %s", api_err, exc_info=True)
             raise
+        if response is None:
+            return self._marketing_template_fallback(application, start_time, nbo_result=nbo_result)
 
         response_text = response.content[0].text
         generation_time_ms = int((time.time() - start_time) * 1000)
@@ -253,9 +254,7 @@ class MarketingAgent:
         # Include customer profile amounts so guardrails don't flag them
         # as hallucinated (income, savings are real data cited in the email).
         context = {
-            "decision": "denied",
-            "loan_amount": float(application.loan_amount) if application.loan_amount else None,
-            "nbo_amounts": nbo_amounts or [],
+            **self._guardrail_context(application, nbo_result),
             "annual_income": float(application.annual_income) if application.annual_income else None,
         }
         try:
@@ -273,9 +272,7 @@ class MarketingAgent:
         if not all_passed and attempt < self.MAX_RETRIES:
             failed_checks = [r for r in guardrail_results if not r["passed"]]
             self._last_feedback = "; ".join(f"{r['check_name']}: {r['details']}" for r in failed_checks)
-            return self._generate_with_retries(
-                application, prompt, start_time, attempt + 1, nbo_amounts=nbo_amounts, nbo_result=nbo_result
-            )
+            return self._generate_with_retries(application, prompt, start_time, attempt + 1, nbo_result=nbo_result)
 
         return {
             "subject": subject,
@@ -287,7 +284,7 @@ class MarketingAgent:
             "attempt_number": attempt,
         }
 
-    def _marketing_template_fallback(self, application, nbo_amounts, start_time, nbo_result=None):
+    def _marketing_template_fallback(self, application, start_time, nbo_result=None):
         """Generate a template marketing email with actual customer-specific offers."""
         import time as _time
 
@@ -360,10 +357,10 @@ class MarketingAgent:
                 f"profile and there are a few options worth considering.\n\n"
                 f"{offers_text}\n\n"
                 f"If any of these options interest you, I'd be happy to talk them through "
-                f"with you. You can contact me directly at 1300 000 000 "
-                f"(Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.\n"
-                f"Thanks for coming to us, {first_name}. We'd love to help you find the "
-                f"right option when you're ready.\n\n"
+                f"with you. Call me on 1300 000 000 "
+                f"(Mon\u2013Fri, 8:30am\u20135:30pm AEST) or reply to this email.\n"
+                f"Thanks for coming to us, {first_name}. When you're ready, we'd like to "
+                f"help you find the right option.\n\n"
                 f"Kind regards,\n"
                 f"Sarah Mitchell\n"
                 f"Senior Lending Officer\n"
@@ -396,11 +393,7 @@ class MarketingAgent:
 
         generation_time_ms = int((_time.time() - start_time) * 1000)
         checker = GuardrailChecker()
-        context = {
-            "decision": "denied",
-            "loan_amount": float(application.loan_amount) if application.loan_amount else None,
-            "nbo_amounts": nbo_amounts or [],
-        }
+        context = self._guardrail_context(application, nbo_result)
         guardrail_results = checker.run_all_checks(body, context, email_type="marketing")
         all_passed = all(r["passed"] for r in guardrail_results if r.get("severity") != "warning")
 

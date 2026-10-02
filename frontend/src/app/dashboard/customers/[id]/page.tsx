@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useContext } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { authApi, loansApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
-import { StaffCustomerDetail, LoanApplication, CustomerActivity, PaginatedResponse } from '@/types'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { StaffCustomerDetail, LoanApplication, PaginatedResponse } from '@/types'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,7 +18,8 @@ import { WorkflowTimeline } from '@/components/agents/WorkflowTimeline'
 import { AgentStepCard } from '@/components/agents/AgentStepCard'
 import { NextBestOfferCard } from '@/components/agents/NextBestOfferCard'
 import { MarketingEmailCard } from '@/components/agents/MarketingEmailCard'
-import { formatCurrency, formatDate, formatPurpose, getStatusColor, getDisplayStatus } from '@/lib/utils'
+import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
+import { formatCurrency, formatDate, formatPurpose, getStatusColor } from '@/lib/utils'
 import {
   tierColors,
   residencyLabels,
@@ -47,6 +48,9 @@ import {
   Save,
   X,
 } from 'lucide-react'
+import { useCustomerActivity } from '@/hooks/useCustomerActivity'
+import { buildProfilePatch } from '@/lib/profilePatch'
+import { useSeededForm } from '@/hooks/useSeededForm'
 
 function BoolIndicator({ value, label }: { value: boolean; label: string }) {
   return (
@@ -64,7 +68,7 @@ function BoolIndicator({ value, label }: { value: boolean; label: string }) {
 
 type EditableFields = {
   // Personal details
-  date_of_birth?: string
+  date_of_birth?: string | null
   phone?: string
   address_line_1?: string
   address_line_2?: string
@@ -96,13 +100,13 @@ type EditableFields = {
   occupation?: string
   industry?: string
   employment_status?: string
-  years_in_current_role?: number
+  years_in_current_role?: number | null
   previous_employer?: string
   // Income
-  gross_annual_income?: number
-  other_income?: number
+  gross_annual_income?: number | null
+  other_income?: number | null
   other_income_source?: string
-  partner_annual_income?: number
+  partner_annual_income?: number | null
   // Assets
   estimated_property_value?: number
   vehicle_value?: number
@@ -115,7 +119,7 @@ type EditableFields = {
   rent_or_board_monthly?: number
   // Living Situation
   housing_situation?: string
-  time_at_current_address_years?: number
+  time_at_current_address_years?: number | null
   number_of_dependants?: number
   previous_suburb?: string
   previous_state?: string
@@ -154,8 +158,13 @@ function EditableField({
       <span className="text-muted-foreground shrink-0">{label}</span>
       <Input
         type={type}
-        value={editData[field] as string ?? ''}
-        onChange={(e) => onChange(field, type === 'number' ? Number(e.target.value) : e.target.value)}
+        value={(editData[field] as string | number | null | undefined) ?? ''}
+        onChange={(e) => {
+          const raw = e.target.value
+          // A cleared number or date is "no value" (null), never 0 or ''.
+          if (type !== 'text' && raw === '') return onChange(field, null)
+          onChange(field, type === 'number' ? Number(raw) : raw)
+        }}
         className="max-w-[200px] h-8 text-sm"
       />
     </div>
@@ -164,7 +173,6 @@ function EditableField({
 
 function EditableSelect({
   label,
-  value,
   displayValue,
   field,
   editing,
@@ -173,7 +181,6 @@ function EditableSelect({
   options,
 }: {
   label: string
-  value: string
   displayValue: string
   field: keyof EditableFields
   editing: boolean
@@ -247,7 +254,6 @@ export default function CustomerProfilePage() {
   const [expandedEmail, setExpandedEmail] = useState<string | null>(null)
   const [expandedRun, setExpandedRun] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
-  const [editData, setEditData] = useState<EditableFields>({})
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const isAdmin = currentUser?.role === 'admin'
@@ -270,19 +276,79 @@ export default function CustomerProfilePage() {
     enabled: !isNaN(userId),
   })
 
-  const { data: activity, isLoading: activityLoading } = useQuery<CustomerActivity>({
-    queryKey: ['customerActivity', userId],
-    queryFn: async () => {
-      const { data } = await authApi.getCustomerActivity(userId)
-      return data
-    },
-    enabled: !isNaN(userId),
-  })
+  const { data: activity, isLoading: activityLoading } = useCustomerActivity(userId)
+
+  // Seeded from the server profile; the admin's edits are layered on top so a
+  // refetch never overwrites a field that is being edited.
+  const seed = useMemo<EditableFields | undefined>(
+    () =>
+      profile
+        ? {
+            date_of_birth: profile.date_of_birth ?? null,
+            phone: profile.phone || '',
+            address_line_1: profile.address_line_1 || '',
+            address_line_2: profile.address_line_2 || '',
+            suburb: profile.suburb || '',
+            state: profile.state || '',
+            postcode: profile.postcode || '',
+            marital_status: profile.marital_status || '',
+            residency_status: profile.residency_status || '',
+            primary_id_type: profile.primary_id_type || '',
+            secondary_id_type: profile.secondary_id_type || '',
+            tax_file_number_provided: profile.tax_file_number_provided,
+            is_politically_exposed: profile.is_politically_exposed,
+            savings_balance: Number(profile.savings_balance),
+            checking_balance: Number(profile.checking_balance),
+            account_tenure_years: profile.account_tenure_years,
+            loyalty_tier: profile.loyalty_tier || '',
+            num_products: profile.num_products,
+            has_credit_card: profile.has_credit_card,
+            has_mortgage: profile.has_mortgage,
+            has_auto_loan: profile.has_auto_loan,
+            on_time_payment_pct: profile.on_time_payment_pct,
+            previous_loans_repaid: profile.previous_loans_repaid,
+            // Employment
+            employer_name: profile.employer_name || '',
+            occupation: profile.occupation || '',
+            industry: profile.industry || '',
+            employment_status: profile.employment_status || '',
+            years_in_current_role: profile.years_in_current_role ?? null,
+            previous_employer: profile.previous_employer || '',
+            // Income
+            gross_annual_income: profile.gross_annual_income ?? null,
+            other_income: profile.other_income ?? null,
+            other_income_source: profile.other_income_source || '',
+            partner_annual_income: profile.partner_annual_income ?? null,
+            // Assets
+            estimated_property_value: Number(profile.estimated_property_value) || 0,
+            vehicle_value: Number(profile.vehicle_value) || 0,
+            savings_other_institutions: Number(profile.savings_other_institutions) || 0,
+            investment_value: Number(profile.investment_value) || 0,
+            superannuation_balance: Number(profile.superannuation_balance) || 0,
+            // Liabilities
+            other_loan_repayments_monthly: Number(profile.other_loan_repayments_monthly) || 0,
+            other_credit_card_limits: Number(profile.other_credit_card_limits) || 0,
+            rent_or_board_monthly: Number(profile.rent_or_board_monthly) || 0,
+            // Living Situation
+            housing_situation: profile.housing_situation || '',
+            time_at_current_address_years: profile.time_at_current_address_years ?? null,
+            number_of_dependants: profile.number_of_dependants ?? 0,
+            previous_suburb: profile.previous_suburb || '',
+            previous_state: profile.previous_state || '',
+            previous_postcode: profile.previous_postcode || '',
+            // Contact
+            preferred_contact_method: profile.preferred_contact_method || '',
+          }
+        : undefined,
+    [profile],
+  )
+  const { form: editData, updateField: handleEditField, resetEdits } = useSeededForm(seed)
 
   const updateMutation = useMutation({
     mutationFn: (data: EditableFields) => authApi.updateCustomerDetail(userId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customerDetail', userId] })
+      // Saved: drop local edits once the refetched server values are in
+      void queryClient.invalidateQueries({ queryKey: ['customerDetail', userId] }).then(resetEdits)
       setEditing(false)
       setSaveError(null)
     },
@@ -291,80 +357,21 @@ export default function CustomerProfilePage() {
     },
   })
 
-  const handleEditField = (field: keyof EditableFields, value: any) => {
-    setEditData((prev) => ({ ...prev, [field]: value }))
-  }
-
   const startEditing = () => {
     if (!profile) return
-    setEditData({
-      date_of_birth: profile.date_of_birth || '',
-      phone: profile.phone || '',
-      address_line_1: profile.address_line_1 || '',
-      address_line_2: profile.address_line_2 || '',
-      suburb: profile.suburb || '',
-      state: profile.state || '',
-      postcode: profile.postcode || '',
-      marital_status: profile.marital_status || '',
-      residency_status: profile.residency_status || '',
-      primary_id_type: profile.primary_id_type || '',
-      secondary_id_type: profile.secondary_id_type || '',
-      tax_file_number_provided: profile.tax_file_number_provided,
-      is_politically_exposed: profile.is_politically_exposed,
-      savings_balance: Number(profile.savings_balance),
-      checking_balance: Number(profile.checking_balance),
-      account_tenure_years: profile.account_tenure_years,
-      loyalty_tier: profile.loyalty_tier || '',
-      num_products: profile.num_products,
-      has_credit_card: profile.has_credit_card,
-      has_mortgage: profile.has_mortgage,
-      has_auto_loan: profile.has_auto_loan,
-      on_time_payment_pct: profile.on_time_payment_pct,
-      previous_loans_repaid: profile.previous_loans_repaid,
-      // Employment
-      employer_name: profile.employer_name || '',
-      occupation: profile.occupation || '',
-      industry: profile.industry || '',
-      employment_status: profile.employment_status || '',
-      years_in_current_role: profile.years_in_current_role ?? 0,
-      previous_employer: profile.previous_employer || '',
-      // Income
-      gross_annual_income: Number(profile.gross_annual_income) || 0,
-      other_income: Number(profile.other_income) || 0,
-      other_income_source: profile.other_income_source || '',
-      partner_annual_income: Number(profile.partner_annual_income) || 0,
-      // Assets
-      estimated_property_value: Number(profile.estimated_property_value) || 0,
-      vehicle_value: Number(profile.vehicle_value) || 0,
-      savings_other_institutions: Number(profile.savings_other_institutions) || 0,
-      investment_value: Number(profile.investment_value) || 0,
-      superannuation_balance: Number(profile.superannuation_balance) || 0,
-      // Liabilities
-      other_loan_repayments_monthly: Number(profile.other_loan_repayments_monthly) || 0,
-      other_credit_card_limits: Number(profile.other_credit_card_limits) || 0,
-      rent_or_board_monthly: Number(profile.rent_or_board_monthly) || 0,
-      // Living Situation
-      housing_situation: profile.housing_situation || '',
-      time_at_current_address_years: profile.time_at_current_address_years ?? 0,
-      number_of_dependants: profile.number_of_dependants ?? 0,
-      previous_suburb: profile.previous_suburb || '',
-      previous_state: profile.previous_state || '',
-      previous_postcode: profile.previous_postcode || '',
-      // Contact
-      preferred_contact_method: profile.preferred_contact_method || '',
-    })
+    resetEdits()
     setSaveError(null)
     setEditing(true)
   }
 
   const cancelEditing = () => {
     setEditing(false)
-    setEditData({})
+    resetEdits()
     setSaveError(null)
   }
 
   const saveChanges = () => {
-    updateMutation.mutate(editData)
+    updateMutation.mutate(buildProfilePatch(seed, editData))
   }
 
   if (profileLoading) {
@@ -573,7 +580,7 @@ export default function CustomerProfilePage() {
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <EditableField label="Date of Birth" value={profile.date_of_birth ? formatDate(profile.date_of_birth) : null} field="date_of_birth" editing={editing} editData={editData} onChange={handleEditField} type="date" />
-            <EditableSelect label="Marital Status" value={profile.marital_status} displayValue={maritalLabels[profile.marital_status] || profile.marital_status} field="marital_status" editing={editing} editData={editData} onChange={handleEditField} options={maritalLabels} />
+            <EditableSelect label="Marital Status" displayValue={maritalLabels[profile.marital_status] || profile.marital_status} field="marital_status" editing={editing} editData={editData} onChange={handleEditField} options={maritalLabels} />
             <EditableField label="Phone" value={profile.phone} field="phone" editing={editing} editData={editData} onChange={handleEditField} />
             {editing ? (
               <>
@@ -602,7 +609,7 @@ export default function CustomerProfilePage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <EditableSelect label="Housing Situation" value={profile.housing_situation} displayValue={housingSituationLabels[profile.housing_situation] || profile.housing_situation} field="housing_situation" editing={editing} editData={editData} onChange={handleEditField} options={housingSituationLabels} />
+              <EditableSelect label="Housing Situation" displayValue={housingSituationLabels[profile.housing_situation] || profile.housing_situation} field="housing_situation" editing={editing} editData={editData} onChange={handleEditField} options={housingSituationLabels} />
               <EditableField label="Time at Current Address (Years)" value={profile.time_at_current_address_years} field="time_at_current_address_years" editing={editing} editData={editData} onChange={handleEditField} type="number" />
               <EditableField label="Number of Dependants" value={profile.number_of_dependants} field="number_of_dependants" editing={editing} editData={editData} onChange={handleEditField} type="number" />
               {editing ? (
@@ -622,7 +629,7 @@ export default function CustomerProfilePage() {
                   ) : null
                 })()
               )}
-              <EditableSelect label="Preferred Contact Method" value={profile.preferred_contact_method} displayValue={contactMethodLabels[profile.preferred_contact_method] || profile.preferred_contact_method} field="preferred_contact_method" editing={editing} editData={editData} onChange={handleEditField} options={contactMethodLabels} />
+              <EditableSelect label="Preferred Contact Method" displayValue={contactMethodLabels[profile.preferred_contact_method] || profile.preferred_contact_method} field="preferred_contact_method" editing={editing} editData={editData} onChange={handleEditField} options={contactMethodLabels} />
             </CardContent>
           </Card>
 
@@ -635,12 +642,12 @@ export default function CustomerProfilePage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <EditableSelect label="Residency" value={profile.residency_status} displayValue={residencyLabels[profile.residency_status] || profile.residency_status} field="residency_status" editing={editing} editData={editData} onChange={handleEditField} options={residencyLabels} />
-              <EditableSelect label="Primary ID" value={profile.primary_id_type} displayValue={idTypeLabels[profile.primary_id_type] || profile.primary_id_type} field="primary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={idTypeLabels} />
+              <EditableSelect label="Residency" displayValue={residencyLabels[profile.residency_status] || profile.residency_status} field="residency_status" editing={editing} editData={editData} onChange={handleEditField} options={residencyLabels} />
+              <EditableSelect label="Primary ID" displayValue={idTypeLabels[profile.primary_id_type] || profile.primary_id_type} field="primary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={idTypeLabels} />
               {editing && (
                 <EditableField label="Primary ID Number" value="" field="primary_id_number" editing={editing} editData={editData} onChange={handleEditField} />
               )}
-              <EditableSelect label="Secondary ID" value={profile.secondary_id_type} displayValue={idTypeLabels[profile.secondary_id_type] || profile.secondary_id_type} field="secondary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={{...idTypeLabels, '': 'None'}} />
+              <EditableSelect label="Secondary ID" displayValue={idTypeLabels[profile.secondary_id_type] || profile.secondary_id_type} field="secondary_id_type" editing={editing} editData={editData} onChange={handleEditField} options={{...idTypeLabels, '': 'None'}} />
               {editing && (
                 <EditableField label="Secondary ID Number" value="" field="secondary_id_number" editing={editing} editData={editData} onChange={handleEditField} />
               )}
@@ -679,8 +686,8 @@ export default function CustomerProfilePage() {
             <div className="space-y-3">
               <EditableField label="Employer Name" value={profile.employer_name} field="employer_name" editing={editing} editData={editData} onChange={handleEditField} />
               <EditableField label="Occupation" value={profile.occupation} field="occupation" editing={editing} editData={editData} onChange={handleEditField} />
-              <EditableSelect label="Industry" value={profile.industry} displayValue={industryLabels[profile.industry] || profile.industry} field="industry" editing={editing} editData={editData} onChange={handleEditField} options={industryLabels} />
-              <EditableSelect label="Employment Status" value={profile.employment_status} displayValue={employmentStatusLabels[profile.employment_status] || profile.employment_status} field="employment_status" editing={editing} editData={editData} onChange={handleEditField} options={employmentStatusLabels} />
+              <EditableSelect label="Industry" displayValue={industryLabels[profile.industry] || profile.industry} field="industry" editing={editing} editData={editData} onChange={handleEditField} options={industryLabels} />
+              <EditableSelect label="Employment Status" displayValue={employmentStatusLabels[profile.employment_status] || profile.employment_status} field="employment_status" editing={editing} editData={editData} onChange={handleEditField} options={employmentStatusLabels} />
               <EditableField label="Years in Current Role" value={profile.years_in_current_role} field="years_in_current_role" editing={editing} editData={editData} onChange={handleEditField} type="number" />
               <EditableField label="Previous Employer" value={profile.previous_employer} field="previous_employer" editing={editing} editData={editData} onChange={handleEditField} />
             </div>
@@ -774,9 +781,7 @@ export default function CustomerProfilePage() {
                     <TableCell>{formatPurpose(loan.purpose)}</TableCell>
                     <TableCell>{loan.credit_score}</TableCell>
                     <TableCell>
-                      {(() => { const s = getDisplayStatus(loan.status, loan.decision); return (
-                        <Badge className={s.color} variant="outline">{s.label}</Badge>
-                      ) })()}
+                      <ApplicationStatusBadge status={loan.status} decision={loan.decision} />
                     </TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(loan.created_at)}</TableCell>
                   </TableRow>

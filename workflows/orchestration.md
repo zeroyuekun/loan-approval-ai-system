@@ -1,10 +1,10 @@
-# Orchestration Workflow
+# Orchestration workflow
 
 ## Objective
 
-Chain all three levels of the AI loan approval system into a single agentic pipeline: ML prediction, email generation, and bias detection, with retry logic, next-best-offer generation for denials, and full step tracking via `AgentRun` records.
+Chain all three levels of the AI loan approval system (ML prediction, email generation, and bias detection) into a single agentic pipeline, with retry logic, next-best-offer generation for denials, and full step tracking in `AgentRun` records.
 
-## Required Inputs
+## Required inputs
 
 - `loan_id`: ID of the loan application to process
 - Active trained model (loaded from `ModelVersion` with `is_active=True`)
@@ -12,11 +12,11 @@ Chain all three levels of the AI loan approval system into a single agentic pipe
 
 ## Tools
 
-The orchestrator (`backend/apps/agents/services/orchestrator.py`) chains together the ML predictor, email generator, bias detector, NBO generator, and marketing agent. Each lives in its own service file under `backend/apps/` — see the individual workflow files for details on each one.
+The orchestrator (`backend/apps/agents/services/orchestrator.py`) chains together the ML predictor, email generator, bias detector, NBO generator, and marketing agent. Each lives in its own service file under `backend/apps/`. See the individual workflow files for details on each one.
 
 ## Steps
 
-1. **Receive loan_id** - Validate that the loan application exists and is in `pending` status. If not found or already processed, abort with appropriate error.
+1. **Receive loan_id.** Validate that the loan application exists and is in `pending` status. If it isn't found or was already processed, abort with an appropriate error.
 
 2. **Run ML prediction** (Level 1)
    - Load the active model version from `ModelVersion.objects.filter(is_active=True)`
@@ -25,19 +25,19 @@ The orchestrator (`backend/apps/agents/services/orchestrator.py`) chains togethe
    - Record step: `{"step": "ml_prediction", "result": {"approved": bool, "confidence": float}, "duration_ms": int}`
 
 3. **Generate email** (Level 2)
-   - Pass loan details and prediction result to the email generator
+   - Pass the loan details and prediction result to the email generator
    - Follow the email generation workflow (see `workflows/email_generation.md`)
    - Record step: `{"step": "email_generation", "result": {"attempt": int, "guardrail_passed": bool}, "duration_ms": int}`
 
 4. **Run bias check** (Level 3)
-   - Send generated email to bias detector
+   - Send the generated email to the bias detector
    - Follow the bias detection workflow (see `workflows/bias_detection.md`)
    - Record step: `{"step": "bias_detection", "result": {"score": int, "action": str}, "duration_ms": int}`
 
 5. **Handle bias result**:
    - **Pass** (score 0-30): Proceed to finalization
-   - **Review** (score 31-60): Mark for human review, proceed to finalization with `requires_review=True`
-   - **Reject** (score 61-100): Regenerate email with bias feedback, re-run bias check (max 2 retries from this step)
+   - **Review** (score 31-60): Mark for human review, then proceed to finalization with `requires_review=True`
+   - **Reject** (score 61-100): Regenerate the email with the bias feedback and re-run the bias check (max 2 retries from this step)
    - Record each retry as a separate step entry
 
 6. **Generate NBO** (if denied)
@@ -45,15 +45,15 @@ The orchestrator (`backend/apps/agents/services/orchestrator.py`) chains togethe
    - Consider: lower loan amount, different term, secured vs. unsecured, co-signer suggestion
    - Record step: `{"step": "nbo_generation", "result": {"offer_type": str}, "duration_ms": int}`
 
-7. **Generate Marketing Message** (if NBO succeeded)
+7. **Generate marketing message** (if NBO succeeded)
    - Generate a customer-facing marketing message summarising the NBO offers
    - Update the NBO record with the marketing message
 
-8. **Marketing Agent Email** (if NBO succeeded)
+8. **Marketing agent email** (if NBO succeeded)
    - The Marketing Agent generates a full follow-up email presenting the alternative offers
    - The email is forward-looking (no decline references) and includes a clear call to action
    - Runs marketing-specific guardrails: prohibited language, tone, no decline language, call to action
-   - Retries up to 3 times if guardrails fail
+   - Retries up to 3 times if the guardrails fail
    - Saves a `MarketingEmail` record linked to the `AgentRun`
    - Record step: `{"step": "marketing_email_generation", "result": {"subject": str, "passed_guardrails": bool}, "duration_ms": int}`
 
@@ -63,7 +63,7 @@ The orchestrator (`backend/apps/agents/services/orchestrator.py`) chains togethe
    - Store the final email in `GeneratedEmail` model
    - Set `AgentRun.status` to `completed` (or `review_needed` if flagged)
 
-## AgentRun Schema
+## AgentRun schema
 
 ```python
 AgentRun(
@@ -93,16 +93,16 @@ AgentRun(
 - NBO record (if applicable)
 - `MarketingEmail` record with follow-up marketing email (if denied and NBO generated)
 
-## Edge Cases
+## Edge cases
 
 - **Model not found**: If no active model version exists, abort with `"No active model. Train a model first."` and set `AgentRun.status = "failed"`.
-- **Prediction failure**: Log the error, set status to `failed`, do not proceed to email generation.
+- **Prediction failure**: Log the error, set status to `failed`, and do not proceed to email generation.
 - **Email generation exhausts retries**: Set status to `failed`, log all attempts.
 - **Bias check exhausts retries**: Set status to `failed`, flag for manual email composition.
 - **Database error during save**: Wrap the entire pipeline in a transaction. If any save fails, roll back and set status to `failed`.
-- **Celery timeout**: Set a hard time limit of 120 seconds on the orchestrator task. If exceeded, mark as `failed`.
+- **Celery timeout**: Set a hard time limit of 120 seconds on the orchestrator task. If it is exceeded, mark the run as `failed`.
 
-## Celery Integration
+## Celery integration
 
 The orchestrator runs as a single Celery task on the `agents` queue:
 

@@ -40,7 +40,9 @@ spec:
         - protocol: TCP
           port: 53
 ---
-# Allow backend + celery workers/beat → postgres:5432
+# Allow app pods → PostgreSQL:5432, either an in-cluster `postgres` pod or a
+# managed database inside the VPC (terraform RDS). The ipBlock must match
+# terraform var.vpc_cidr; narrow it to the private subnets if you prefer.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -57,11 +59,14 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: postgres
+        - ipBlock:
+            cidr: 10.0.0.0/16
       ports:
         - protocol: TCP
           port: 5432
 ---
-# Allow backend + celery workers/beat → redis:6379
+# Allow app pods → Redis:6379, in-cluster or ElastiCache in the VPC (see the
+# postgres rule above for the ipBlock).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -78,6 +83,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: redis
+        - ipBlock:
+            cidr: 10.0.0.0/16
       ports:
         - protocol: TCP
           port: 6379
@@ -99,6 +106,9 @@ spec:
         - protocol: TCP
           port: 443
 ---
+# The Ingress routes /api straight to the backend Service, and the browser
+# calls the API directly, so the ingress-nginx controller pods (another
+# namespace) must be admitted alongside the frontend pods (server-side fetches).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -108,13 +118,40 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: backend
+  policyTypes:
+    - Ingress
   ingress:
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: frontend
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
       ports:
-        - port: 8000
+        - protocol: TCP
+          port: 8000
+---
+# Frontend pods → backend:8000 (server-side rendering / route handlers).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-egress-backend
+  namespace: loan-approval
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: backend
+      ports:
+        - protocol: TCP
+          port: 8000
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -125,6 +162,13 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: frontend
+  policyTypes:
+    - Ingress
   ingress:
-    - ports:
-        - port: 3000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000

@@ -112,7 +112,7 @@ def mkt_model_version(db, settings):
 def mkt_mocks(mkt_model_version):
     with (
         patch(f"{ORCH}.ModelPredictor") as mp,
-        patch(f"{EMAIL_PIPE}.EmailGenerator") as eg,
+        patch("apps.email_engine.services.decision_email.EmailGenerator") as eg,
         patch(f"{EMAIL_PIPE}.BiasDetector") as bd,
         patch(f"{MKT_PIPE}.MarketingBiasDetector") as mbd,
         patch(f"{MKT_PIPE}.MarketingEmailReviewer") as mer,

@@ -2,6 +2,7 @@
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Label } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { titleCase } from '@/lib/utils'
 import { useChartHover, ChartHoverPanel, renderEmptyTooltip } from './ChartHoverPanel'
 
 interface FairnessCardProps {
@@ -16,10 +17,6 @@ type GroupStats = {
   fpr: number
   included_in_fairness?: boolean
 }
-
-// Title-case a label while preserving existing capitals: "self_employed" -> "Self Employed",
-// "payg casual" -> "Payg Casual", and already-uppercase codes like "NSW"/"NT" stay intact.
-const titleCase = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
 function FairnessAttributeCard({ attribute, data }: { attribute: string; data: any }) {
   const { active, hoverProps } = useChartHover()

@@ -1,15 +1,22 @@
 import logging
 import time
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 
 from apps.agents.exceptions import LLMServiceError
+from apps.agents.metrics import bias_review_total, bias_review_ttr_seconds
 from apps.agents.models import AgentRun
-from apps.email_engine.services.email_generator import EmailGenerator
-from apps.email_engine.services.persistence import EmailPersistenceService
+from apps.email_engine.services.decision_email import deliver_decision_email, generate_decision_email
 from apps.loans.models import LoanApplication, LoanDecision
+from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
+from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action_reasons
 
+from .api_budget import bind_api_call_context
+from .bias.core import BiasDetector
 from .context_builder import ApplicationContextBuilder
+from .email_pipeline import build_denial_email_context, screen_bias
 from .marketing_pipeline import MarketingPipelineService
 from .step_tracker import StepTracker
 
@@ -19,17 +26,12 @@ logger = logging.getLogger("agents.orchestrator")
 def build_denial_reason_summary(shap_values: dict, feature_importances: dict) -> str:
     """Human-readable denial-reason summary for the marketing/NBO step.
 
-    Uses the shared DecisionExplanation ranking + reason codes instead of the
-    old ad-hoc `"feature: 0.123"` float dump.
+    Uses the shared DecisionExplanation ranking + reason codes.
     """
-    from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action_reasons
-
     reasons = generate_adverse_action_reasons(shap_values or {}, "denied")
     if reasons:
         return "; ".join(r["reason"] for r in reasons)
     if feature_importances:
-        from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
-
         drivers = ranked_denial_drivers(shap_values=shap_values or {}, feature_importances=feature_importances, max_n=3)
         return ", ".join(name.replace("_", " ") for name, _ in drivers)
     return ""
@@ -42,7 +44,15 @@ class HumanReviewHandler:
         self.tracker = step_tracker
         self.context_builder = context_builder
 
-    def resume_after_review(self, agent_run_id, reviewer="", note=""):
+    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve", reviewer_id=None):
+        """Issue the decision on record after a reviewer approved or denied.
+
+        Both outcomes take the same path: generate the decision email, run the
+        bias pre-screen/check, deliver once, then apply the decision. For a
+        deny the view has already written the denial onto the LoanDecision.
+        The decision's status transition records ``reviewer_id`` as its user,
+        so the four-eyes check on a later decision review finds the decider.
+        """
         start_time = time.time()
         logger.info("Resuming agent run %s after human review", agent_run_id)
 
@@ -56,8 +66,12 @@ class HumanReviewHandler:
                 AgentRun.objects.select_for_update().select_related("application__applicant").get(pk=agent_run_id)
             )
 
-            if agent_run.status != "escalated":
-                raise ValueError(f'Cannot resume agent run with status {agent_run.status!r} (expected "escalated")')
+            # The review view claims the run (RUNNING) when it dispatches this
+            # resume; ESCALATED is still accepted for direct callers.
+            if agent_run.status not in ("escalated", "running"):
+                raise ValueError(
+                    f'Cannot resume agent run with status {agent_run.status!r} (expected "escalated" or "running")'
+                )
 
             # Capture the escalation timestamp BEFORE we flip status, since
             # the save below will bump updated_at. Used for the bias-review
@@ -65,6 +79,7 @@ class HumanReviewHandler:
             escalated_at = agent_run.updated_at
 
             application = agent_run.application
+            bind_api_call_context(application_id=application.pk)
 
             # Lock application to prevent two simultaneous reviews from resuming
             LoanApplication.objects.select_for_update().get(pk=application.pk)
@@ -72,11 +87,9 @@ class HumanReviewHandler:
                 raise ValueError(f'Cannot resume: application status is {application.status!r} (expected "review")')
 
             try:
-                _ = application.decision
+                decision = application.decision.decision
             except LoanDecision.DoesNotExist as err:
                 raise ValueError(f"No decision found for application {application.id}") from err
-
-            decision = application.decision.decision
 
             # Mark as running inside the lock to prevent duplicate resume
             agent_run.status = "running"
@@ -87,197 +100,174 @@ class HumanReviewHandler:
         profile_context = self.context_builder.build_profile_context(application)
         steps = agent_run.steps or []
 
-        # Record the human approval
-        step = self.tracker.start_step("human_review_approved")
+        # Record the human outcome
+        step = self.tracker.start_step("human_review_denied" if action == "deny" else "human_review_approved")
         step = self.tracker.complete_step(
             step,
             result_summary={
                 "reviewer": reviewer,
                 "note": note,
-                "action": "approve",
+                "action": action,
             },
         )
         steps.append(step)
 
-        if decision == "approved":
-            # Human approved an escalated application — re-generate and send approval email
-            step = self.tracker.start_step("email_generation")
+        # Decision email, for BOTH outcomes: regenerate (template fallback on
+        # provider trouble or guardrail exhaustion), re-run the bias check the
+        # original pipeline ran, then deliver once with sent_at stamped. A
+        # denied run previously skipped this and sent only the marketing
+        # follow-up, whose prompt assumes the customer already has the notice.
+        email_context = profile_context
+        if decision == "denied":
+            email_context = build_denial_email_context(application, profile_context)
+
+        step = self.tracker.start_step("email_generation")
+        generated_email = None
+        try:
+            email_result, generated_email = generate_decision_email(
+                application,
+                decision,
+                confidence=application.decision.confidence,
+                profile_context=email_context,
+            )
+            step = self.tracker.complete_step(
+                step,
+                result_summary={
+                    "subject": email_result["subject"],
+                    "passed_guardrails": email_result["passed_guardrails"],
+                    "template_fallback": email_result.get("template_fallback", False),
+                },
+            )
+        except (LLMServiceError, ConnectionError, TimeoutError) as e:
+            logger.error("Agent run %s: %s email generation failed: %s", agent_run_id, decision, e)
+            step = self.tracker.fail_step(step, str(e), failure_category="transient")
+            email_result = None
+        except Exception as e:
+            logger.critical(
+                "Agent run %s: UNEXPECTED failure at %s email_generation: %s",
+                agent_run_id,
+                decision,
+                e,
+                exc_info=True,
+            )
+            step = self.tracker.fail_step(step, str(e), failure_category=None)
+            email_result = None
+        steps.append(step)
+
+        # Guardrail failure on resume (the template failed too): withhold the
+        # email and still apply the reviewer's decision, as the pipeline does.
+        # Only bias findings go to the review queue.
+        if email_result and not email_result.get("passed_guardrails"):
+            failed_checks = [r["check_name"] for r in email_result.get("guardrail_results", []) if not r["passed"]]
+            logger.warning(
+                "Agent run %s: %s email guardrails failed on resume — email withheld. Failed checks: %s",
+                agent_run_id,
+                decision,
+                ", ".join(failed_checks),
+            )
+            step = self.tracker.start_step("email_delivery")
+            step = self.tracker.complete_step(
+                step,
+                result_summary={
+                    "sent": False,
+                    "reason": "Guardrails failed on resume — email withheld",
+                    "failed_guardrails": failed_checks,
+                },
+            )
+            steps.append(step)
+            email_result = None  # nothing to bias-check or deliver
+
+        # Re-run bias detection on the regenerated email, with the verdict the
+        # standalone screening uses, so a regenerated email cannot bypass bias
+        # screening by going through the human-review flow. The flagged LLM
+        # text never ships, and its replacement only if it checks clean.
+        if email_result:
+            screening = screen_bias(
+                application,
+                agent_run,
+                decision,
+                email_result,
+                generated_email,
+                detector_class=BiasDetector,
+                tracker=self.tracker,
+                steps=steps,
+                profile_context=email_context,
+                step_name="bias_check_resume",
+            )
+            if screening.check_error is not None and screening.held_reason:
+                # BIAS_FAILURE_MODE=block. The run goes back to ESCALATED
+                # rather than to PENDING (the pipeline's hold) so the
+                # reviewer's decision, already on record for a deny, stays
+                # actionable from the queue it came from.
+                logger.error(
+                    "Agent run %s: bias check failed on resume — re-escalating: %s", agent_run_id, screening.check_error
+                )
+                agent_run.status = "escalated"
+                agent_run.error = f"Bias check failed on resume — withheld for safety: {screening.check_error}"
+                self.tracker.finalize_run(agent_run, steps, start_time)
+                return agent_run
+            if screening.held_reason:
+                logger.warning(
+                    "Agent run %s: %s — re-escalating application %s",
+                    agent_run_id,
+                    screening.held_reason,
+                    application.id,
+                )
+                step_hold = self.tracker.start_step("email_delivery")
+                steps.append(
+                    self.tracker.complete_step(
+                        step_hold, result_summary={"sent": False, "reason": "Bias detected on resume — re-escalating"}
+                    )
+                )
+                with transaction.atomic():
+                    application.refresh_from_db()
+                    if application.status not in (LoanApplication.Status.REVIEW, LoanApplication.Status.PENDING):
+                        application.status = LoanApplication.Status.REVIEW
+                        application.save(update_fields=["status"])
+                agent_run.status = "escalated"
+                agent_run.error = f"{screening.held_reason} — re-escalated"
+                self.tracker.finalize_run(agent_run, steps, start_time)
+                return agent_run
+            email_result, generated_email = screening.email_result, screening.generated_email
+
+        # Send the decision email (once; stamps sent_at so a later standalone
+        # generate/send for the same decision does not email the customer again).
+        if email_result:
+            step = self.tracker.start_step("email_delivery")
             try:
-                generator = EmailGenerator()
-                email_result = generator.generate(
-                    application,
-                    "approved",
-                    confidence=application.decision.confidence,
-                    profile_context=profile_context,
-                )
-
-                generated_email = EmailPersistenceService.save_generated_email(application, "approved", email_result)
-                EmailPersistenceService.save_guardrail_logs(generated_email, email_result.get("guardrail_results", []))
-
-                step = self.tracker.complete_step(
-                    step,
-                    result_summary={
-                        "subject": email_result["subject"],
-                        "passed_guardrails": email_result["passed_guardrails"],
-                    },
-                )
-            except (LLMServiceError, ConnectionError, TimeoutError) as e:
-                logger.error("Agent run %s: approval email generation failed: %s", agent_run_id, e)
+                step = self.tracker.record_delivery(step, deliver_decision_email(generated_email))
+            except (ConnectionError, TimeoutError, OSError) as e:
+                logger.error("Agent run %s: %s email delivery failed: %s", agent_run_id, decision, e)
                 step = self.tracker.fail_step(step, str(e), failure_category="transient")
-                email_result = None
             except Exception as e:
                 logger.critical(
-                    "Agent run %s: UNEXPECTED failure at approval email_generation: %s",
+                    "Agent run %s: UNEXPECTED failure at %s email_delivery: %s",
                     agent_run_id,
+                    decision,
                     e,
                     exc_info=True,
                 )
                 step = self.tracker.fail_step(step, str(e), failure_category=None)
-                email_result = None
             steps.append(step)
 
-            # Guardrail failure on resume -> re-escalate for human review
-            if email_result and not email_result.get("passed_guardrails"):
-                failed_checks = [r["check_name"] for r in email_result.get("guardrail_results", []) if not r["passed"]]
-                logger.warning(
-                    "Agent run %s: approval email guardrails failed on resume — re-escalating. Failed checks: %s",
-                    agent_run_id,
-                    ", ".join(failed_checks),
-                )
-                step = self.tracker.start_step("email_delivery")
-                step = self.tracker.complete_step(
-                    step,
-                    result_summary={
-                        "sent": False,
-                        "reason": "Guardrails failed on resume — re-escalated to human review",
-                        "failed_guardrails": failed_checks,
-                    },
-                )
-                steps.append(step)
-                agent_run.status = "escalated"
-                agent_run.error = f"Email guardrails failed on resume: {', '.join(failed_checks)}"
-                self.tracker.finalize_run(agent_run, steps, start_time)
-                return agent_run
+        # Apply the reviewer's decision before the follow-up below: the
+        # customer may already have the decision email, and a follow-up failure
+        # that put the run back in the review queue would send them a second
+        # one on the next approve.
+        with transaction.atomic():
+            application.refresh_from_db()
+            application.transition_to(
+                decision,
+                user=get_user_model().objects.filter(pk=reviewer_id).first() if reviewer_id else None,
+                details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
+            )
+            # Record that a human was involved, so the ADM disclosure can
+            # truthfully report "assisted" after status moves off 'review'.
+            loan_decision = application.decision
+            if loan_decision.mark_human(LoanDecision.HumanInvolvement.ASSISTED):
+                loan_decision.save(update_fields=["human_involvement"])
 
-            # Re-run bias detection on the regenerated approval email.
-            # The original pipeline ran bias detection before sending; the resume
-            # path must mirror this check so a regenerated email cannot bypass
-            # bias screening by going through the human-review flow.
-            if email_result and email_result.get("passed_guardrails"):
-                from apps.agents.services.bias.core import BiasDetector
-
-                step_bias = self.tracker.start_step("bias_check_resume")
-                try:
-                    bias_detector = BiasDetector()
-                    bias_result = bias_detector.analyze(
-                        email_result["body"],
-                        {
-                            "loan_amount": float(application.loan_amount),
-                            "purpose": application.get_purpose_display(),
-                            "decision": "approved",
-                        },
-                    )
-                    step_bias = self.tracker.complete_step(
-                        step_bias,
-                        result_summary={
-                            "bias_score": bias_result["score"],
-                            "flagged": bias_result["flagged"],
-                        },
-                    )
-                    steps.append(step_bias)
-
-                    if bias_result.get("flagged"):
-                        logger.warning(
-                            "Agent run %s: resumed approval email re-flagged by bias detector "
-                            "(score=%s) — re-escalating application %s",
-                            agent_run_id,
-                            bias_result["score"],
-                            application.id,
-                        )
-                        step_hold = self.tracker.start_step("email_delivery")
-                        step_hold = self.tracker.complete_step(
-                            step_hold,
-                            result_summary={
-                                "sent": False,
-                                "reason": "Bias detected on resume — re-escalating",
-                            },
-                        )
-                        steps.append(step_hold)
-                        with transaction.atomic():
-                            application.refresh_from_db()
-                            if application.status not in (
-                                LoanApplication.Status.REVIEW,
-                                LoanApplication.Status.PENDING,
-                            ):
-                                application.status = LoanApplication.Status.REVIEW
-                                application.save(update_fields=["status"])
-                        agent_run.status = "escalated"
-                        agent_run.error = (
-                            f"Resumed email re-flagged by bias detector (score={bias_result['score']}) — re-escalated"
-                        )
-                        self.tracker.finalize_run(agent_run, steps, start_time)
-                        return agent_run
-
-                except Exception as exc:
-                    # Bias check failure on resume — fail-safe: withhold and re-escalate.
-                    logger.error(
-                        "Agent run %s: bias check failed on resume — re-escalating: %s",
-                        agent_run_id,
-                        exc,
-                    )
-                    step_bias = self.tracker.fail_step(step_bias, str(exc), failure_category="transient")
-                    steps.append(step_bias)
-                    agent_run.status = "escalated"
-                    agent_run.error = f"Bias check failed on resume — withheld for safety: {exc}"
-                    self.tracker.finalize_run(agent_run, steps, start_time)
-                    return agent_run
-
-            # Send the approval email
-            if email_result:
-                step = self.tracker.start_step("email_delivery")
-                try:
-                    from apps.email_engine.services.sender import send_decision_email
-
-                    recipient = application.applicant.email
-                    if recipient:
-                        send_result = send_decision_email(
-                            recipient,
-                            email_result["subject"],
-                            email_result["body"],
-                            email_type="approval" if decision == "approved" else "denial",
-                        )
-                        if send_result["sent"]:
-                            step = self.tracker.complete_step(
-                                step,
-                                result_summary={
-                                    "sent": True,
-                                    "recipient": recipient,
-                                },
-                            )
-                        else:
-                            step = self.tracker.fail_step(step, send_result.get("error", "Send failed"))
-                    else:
-                        step = self.tracker.complete_step(
-                            step,
-                            result_summary={
-                                "sent": False,
-                                "reason": "No recipient email",
-                            },
-                        )
-                except (ConnectionError, TimeoutError, OSError) as e:
-                    logger.error("Agent run %s: approval email delivery failed: %s", agent_run_id, e)
-                    step = self.tracker.fail_step(step, str(e), failure_category="transient")
-                except Exception as e:
-                    logger.critical(
-                        "Agent run %s: UNEXPECTED failure at approval email_delivery: %s",
-                        agent_run_id,
-                        e,
-                        exc_info=True,
-                    )
-                    step = self.tracker.fail_step(step, str(e), failure_category=None)
-                steps.append(step)
-
-        elif decision == "denied":
+        if decision == "denied":
             denial_reasons = ""
             try:
                 denial_reasons = build_denial_reason_summary(
@@ -294,37 +284,17 @@ class HumanReviewHandler:
                     },
                 )
 
-            marketing_pipeline = MarketingPipelineService(self.tracker)
-            steps = marketing_pipeline.run(
-                application,
-                agent_run,
-                steps,
-                denial_reasons,
-                profile_context,
+            # Best-effort, as in the pipeline: the decision is applied and announced.
+            steps = MarketingPipelineService(self.tracker).run_best_effort(
+                application, agent_run, steps, denial_reasons, profile_context
             )
 
         # Finalize — finalize_run sets status to 'completed' internally
-        with transaction.atomic():
-            application.refresh_from_db()
-            application.transition_to(
-                decision,
-                details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
-            )
-            # H2: record that a human was involved, so the ADM disclosure can
-            # truthfully report "assisted" after status moves off 'review'.
-            loan_decision = application.decision
-            if loan_decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
-                loan_decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
-                loan_decision.save(update_fields=["human_involvement"])
         self.tracker.finalize_run(agent_run, steps, start_time)
 
         # Emit time-to-resolution for the bias review queue (docs/slo.md).
         try:
-            from django.utils import timezone as _tz
-
-            from apps.agents.metrics import bias_review_total, bias_review_ttr_seconds
-
-            ttr = (_tz.now() - escalated_at).total_seconds()
+            ttr = (timezone.now() - escalated_at).total_seconds()
             bias_review_ttr_seconds.labels(decision=decision).observe(ttr)
             bias_review_total.labels(outcome="human_resolved").inc()
         except Exception as exc:  # noqa: BLE001 — best-effort metric

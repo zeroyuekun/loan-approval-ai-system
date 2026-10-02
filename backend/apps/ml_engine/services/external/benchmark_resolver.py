@@ -233,21 +233,21 @@ class BenchmarkResolver:
 
         latest_quarter = max(self.RBA_RATE_HISTORY.keys())
         if self._use_live_macro and quarter == latest_quarter:
-            try:
-                from .macro_data_service import MacroDataService
+            # MacroDataService falls back to recent published values per
+            # indicator when an API is down; anything else it raises is a real
+            # error and fails the run instead of silently using the tables.
+            from .macro_data import MacroDataService
 
-                if not hasattr(self, "_macro_svc"):
-                    self._macro_svc = MacroDataService()
-                result = {
-                    "rba_cash_rate": self._macro_svc.get_rba_cash_rate(),
-                    "unemployment_rate": self._macro_svc.get_unemployment_rate(state),
-                    "property_growth_12m": self._macro_svc.get_property_growth(state),
-                    "consumer_confidence": self._macro_svc.get_consumer_confidence(),
-                }
-                self._macro_cache[cache_key] = result
-                return result
-            except Exception:
-                pass
+            if not hasattr(self, "_macro_svc"):
+                self._macro_svc = MacroDataService()
+            result = {
+                "rba_cash_rate": self._macro_svc.get_rba_cash_rate(),
+                "unemployment_rate": self._macro_svc.get_unemployment_rate(state),
+                "property_growth_12m": self._macro_svc.get_property_growth(state),
+                "consumer_confidence": self._macro_svc.get_consumer_confidence(),
+            }
+            self._macro_cache[cache_key] = result
+            return result
 
         result = {
             "rba_cash_rate": self.RBA_RATE_HISTORY[quarter],

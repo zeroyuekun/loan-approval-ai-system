@@ -22,9 +22,12 @@ export interface CustomerProfile {
   marital_status: string;
   residency_status: string;
   primary_id_type: string;
-  primary_id_number: string;
+  // ID numbers are write-only: GET returns only the masked copies.
+  primary_id_number?: string;
+  primary_id_number_masked?: string;
   secondary_id_type: string;
-  secondary_id_number: string;
+  secondary_id_number?: string;
+  secondary_id_number_masked?: string;
   tax_file_number_provided: boolean;
   is_politically_exposed: boolean;
   account_tenure_years: number;
@@ -197,13 +200,53 @@ export interface LoanApplication {
   actual_outcome?: string | null;
   months_to_outcome?: number | null;
 
-  status: 'pending' | 'processing' | 'approved' | 'denied' | 'review';
+  status: 'pending' | 'processing' | 'approved' | 'denied' | 'review' | 'queue_failed';
   notes: string;
   conditions: string[];
   conditions_met: boolean;
   created_at: string;
   updated_at: string;
   decision?: LoanDecision;
+}
+
+/**
+ * A loan application as a customer receives it (backend
+ * CustomerLoanApplicationSerializer): money and credit score are masked to
+ * bracket/band strings, and staff-only fields are left out.
+ */
+export interface CustomerLoanApplication
+  extends Pick<
+    LoanApplication,
+    | 'id'
+    | 'loan_term_months'
+    | 'debt_to_income'
+    | 'employment_length'
+    | 'property_value'
+    | 'deposit_amount'
+    | 'number_of_dependants'
+    | 'employment_type'
+    | 'purpose'
+    | 'home_ownership'
+    | 'has_cosigner'
+    | 'has_hecs'
+    | 'status'
+    | 'notes'
+    | 'conditions'
+    | 'conditions_met'
+    | 'created_at'
+    | 'updated_at'
+  > {
+  annual_income: string;
+  credit_score: string;
+  loan_amount: string;
+  monthly_expenses: string | null;
+  consumer_objectives: string;
+  consumer_requirements: string;
+  financial_situation_notes: string;
+  decision?: Pick<
+    LoanDecision,
+    'id' | 'decision' | 'created_at' | 'denial_reasons' | 'reapplication_guidance' | 'counterfactuals' | 'adm_disclosure'
+  > | null;
 }
 
 export interface AdmDisclosure {
@@ -286,6 +329,53 @@ export interface ModelMetrics {
   training_metadata?: Record<string, any> | null;
   is_active: boolean;
   created_at: string;
+}
+
+/** Decision-input facts the "Try it" ad-hoc scoring form collects (backend: LoanApplication.DECISION_INPUT_FIELDS). */
+// Number fields are optional: the form leaves an empty input out of the
+// payload instead of sending 0, and the backend reports a missing required one.
+export interface AdhocScoreFields {
+  annual_income?: number;
+  credit_score?: number;
+  loan_amount?: number;
+  loan_term_months: number;
+  debt_to_income?: number;
+  employment_length?: number;
+  purpose: string;
+  home_ownership: string;
+  employment_type: string;
+  applicant_type: string;
+  state: string;
+  number_of_dependants?: number;
+  property_value?: number | null;
+  deposit_amount?: number | null;
+  monthly_expenses?: number | null;
+  existing_credit_card_limit?: number;
+  has_cosigner?: boolean;
+  has_hecs?: boolean;
+  has_bankruptcy?: boolean;
+}
+
+export interface AdhocScoreTopFactor {
+  feature: string;
+  impact: number;
+}
+
+export interface AdhocScoreResult {
+  probability: number;
+  decision: 'approved' | 'denied';
+  threshold: number;
+  risk_grade: string;
+  top_factors: AdhocScoreTopFactor[];
+  model_version: string;
+  note: string;
+  defaulted_features: string[];
+  /** Credit-policy overlay mode; only "enforce" applies the P-codes below. */
+  policy_mode?: string | null;
+  policy_hard_fails?: string[];
+  policy_refers?: string[];
+  /** Codes of the refer reasons recorded on the decision, e.g. "POLICY_REFER_P11". */
+  refer_reasons?: string[];
 }
 
 export interface GeneratedEmail {
@@ -486,13 +576,6 @@ export interface ModelCard {
   last_updated: string;
 }
 
-export interface TaskStatus {
-  task_id: string;
-  status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE';
-  result: Record<string, unknown> | string | null;
-  date_done: string | null;
-}
-
 export interface PaginatedResponse<T> {
   count: number;
   next: string | null;
@@ -500,36 +583,10 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
-export type StatusLevel = 'none' | 'moderate' | 'significant' | 'unknown'
-
-export interface StatusIndicator {
-  level: StatusLevel
-  detail: string
-}
-
-export interface PendingReviewStatus extends StatusIndicator {
-  count: number
-  oldest_age_hours: number | null
-  sla_breach: boolean
-}
-
-export interface WatchdogStatus extends StatusIndicator {
-  last_check?: string | null
-}
-
-export interface DashboardStatusStrip {
-  drift: StatusIndicator
-  fairness: StatusIndicator
-  pending_review: PendingReviewStatus
-  watchdog: WatchdogStatus
-}
-
 // Dashboard stats — response shape of GET /loans/dashboard-stats/.
-// Fields added in PR-1 of the dashboard persona refit are marked.
 export interface DashboardStats {
   total_applications: number
   approval_rate: number
-  // PR-1 additions:
   approved_count: number
   denied_count: number
   avg_processing_seconds: number | null
@@ -538,7 +595,6 @@ export interface DashboardStats {
   decisions_24h_count: number
   llm_spend_today_usd: number
   llm_spend_cap_usd: number
-  // end PR-1 additions
   active_model: {
     name: string | null
     auc: number | null
@@ -552,7 +608,6 @@ export interface DashboardStats {
     escalated: number
     success_rate: number
   }
-  status_strip: DashboardStatusStrip
 }
 
 export interface AuditLogEntry {

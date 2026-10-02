@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.ml_engine.models import ModelValidationReport, ModelVersion
+from apps.ml_engine.services.model_selector import monitoring_model_version
 
 
 class ModelCardGenerator:
@@ -17,7 +18,7 @@ class ModelCardGenerator:
 
     def __init__(self, model_version: ModelVersion | None = None):
         if model_version is None:
-            model_version = ModelVersion.objects.filter(is_active=True).first()
+            model_version = monitoring_model_version()
         if model_version is None:
             raise ValueError("No active model found")
         self.model_version = model_version
@@ -36,7 +37,7 @@ class ModelCardGenerator:
             "fairness_analysis": self._fairness_analysis(mv),
             "governance": self._governance(mv),
             "independent_validation": self._independent_validation(mv),
-            "limitations": self._limitations(),
+            "limitations": self._limitations(metadata),
             "synthetic_data_validation": self._synthetic_data_validation(mv),
             "regulatory_compliance": self._regulatory_compliance(),
             "last_updated": mv.created_at.isoformat(),
@@ -168,13 +169,21 @@ class ModelCardGenerator:
         }
 
     @staticmethod
-    def _limitations() -> list[str]:
-        return [
+    def _limitations(metadata: dict) -> list[str]:
+        limitations = [
             "Trained on synthetic data — TSTR framework estimates 3-8% AUC "
             "degradation vs real data (see synthetic_data_validation section)",
             "Point-in-time prediction — does not model time-to-default",
             "State-level geographic granularity only",
         ]
+        if metadata.get("overfitting_gap_val") is not None:
+            limitations.append(
+                "The validation split used for the train-vs-validation overfitting gap is "
+                "the same split used for early stopping, probability calibration and "
+                "threshold choice, so this gap can understate true overfitting; the "
+                "train-vs-test gap is the independent check."
+            )
+        return limitations
 
     @staticmethod
     def _synthetic_data_validation(mv: ModelVersion) -> dict[str, Any]:

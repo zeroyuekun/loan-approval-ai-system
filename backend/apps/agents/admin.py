@@ -1,10 +1,15 @@
 from django.contrib import admin
 
+from apps.common.admin import ViewOnlyModelAdmin
+
 from .models import AgentRun, APICallLog, BiasReport, NextBestOffer
 
 
 @admin.register(AgentRun)
-class AgentRunAdmin(admin.ModelAdmin):
+class AgentRunAdmin(ViewOnlyModelAdmin):
+    """View-only: a run's status changes only through the pipeline and the
+    audited human-review workflow."""
+
     list_display = ("id", "application", "status", "total_time_ms", "created_at")
     list_filter = ("status",)
     search_fields = ("application__applicant__username",)
@@ -12,20 +17,27 @@ class AgentRunAdmin(admin.ModelAdmin):
 
 
 @admin.register(BiasReport)
-class BiasReportAdmin(admin.ModelAdmin):
+class BiasReportAdmin(ViewOnlyModelAdmin):
+    """View-only: clearing `flagged` or a score by hand would release a
+    decision email the bias review held back."""
+
     list_display = ("id", "agent_run", "bias_score", "flagged", "requires_human_review", "created_at")
     list_filter = ("flagged", "requires_human_review")
     readonly_fields = ("id", "created_at")
 
 
 @admin.register(NextBestOffer)
-class NextBestOfferAdmin(admin.ModelAdmin):
+class NextBestOfferAdmin(ViewOnlyModelAdmin):
+    """View-only: the offers the pipeline made to a declined customer."""
+
     list_display = ("id", "agent_run", "application", "created_at")
     readonly_fields = ("id", "created_at")
 
 
 @admin.register(APICallLog)
-class APICallLogAdmin(admin.ModelAdmin):
+class APICallLogAdmin(ViewOnlyModelAdmin):
+    """View-only: the APP 8 record of each cross-border LLM call."""
+
     list_display = ("id", "service", "provider", "model_used", "loan_application", "timestamp")
     list_filter = ("service", "provider", "destination_country")
     search_fields = ("loan_application__id", "service")

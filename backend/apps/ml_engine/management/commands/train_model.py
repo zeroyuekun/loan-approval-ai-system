@@ -1,16 +1,13 @@
-import hashlib
-from datetime import datetime
+from django.core.management.base import BaseCommand, CommandError
 
-from django.conf import settings
-from django.core.management.base import BaseCommand
-
-from apps.ml_engine.models import ModelVersion
-from apps.ml_engine.services.scoring.predictor import clear_model_cache
-from apps.ml_engine.services.training.trainer import ModelTrainer
+from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
 
 
 class Command(BaseCommand):
-    help = "Train a loan approval ML model"
+    help = (
+        "Train a loan approval ML model. Same path as the 'Train Model' button: holds the training "
+        "lock, registers the model in its segment, and activates it only if the governance gates allow."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -26,85 +23,51 @@ class Command(BaseCommand):
             default=".tmp/synthetic_loans.csv",
             help="Path to training data CSV (default: .tmp/synthetic_loans.csv)",
         )
+        parser.add_argument(
+            "--segment",
+            type=str,
+            default=SEGMENT_UNIFIED,
+            help=f"Product segment to train and activate in (default: {SEGMENT_UNIFIED})",
+        )
 
     def handle(self, *args, **options):
+        from apps.ml_engine.models import ModelVersion
+        from apps.ml_engine.tasks import _do_train, acquire_train_lock, release_train_lock
+
         algorithm = options["algorithm"]
         data_path = options["data_path"]
 
+        lock = acquire_train_lock()
+        if lock is None:
+            raise CommandError("A training run is already in progress; wait for it to finish.")
+
         self.stdout.write(f"Training {algorithm.upper()} model with data from {data_path}...")
+        try:
+            result = _do_train(None, algorithm, data_path, lock, segment=options["segment"])
+        except Exception:
+            release_train_lock(lock)
+            raise
 
-        # Self-heal: parity with the Celery "Train Model" path so a fresh clone
-        # (no .tmp/synthetic_loans.csv) doesn't die with a cryptic FileNotFoundError.
-        from apps.ml_engine.tasks import _ensure_training_data
-
-        if _ensure_training_data(data_path):
-            self.stdout.write(self.style.WARNING(f"No training data at {data_path} — generated a synthetic dataset."))
-
-        trainer = ModelTrainer()
-        model, metrics = trainer.train(data_path, algorithm=algorithm)
-
-        # Save model file
-        version_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_filename = f"{algorithm}_{version_str}.joblib"
-        model_path = str(settings.ML_MODELS_DIR / model_filename)
-        trainer.save_model(model, model_path)
-
-        # Compute SHA-256 hash of saved model file for integrity verification
-        sha256 = hashlib.sha256()
-        with open(model_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                sha256.update(chunk)
-        file_hash = sha256.hexdigest()
-
-        # Deactivate existing active models before creating the new one
-        ModelVersion.objects.filter(is_active=True).update(is_active=False)
-        mv = ModelVersion.objects.create(
-            algorithm=algorithm,
-            version=version_str,
-            file_path=model_path,
-            file_hash=file_hash,
-            is_active=True,
-            accuracy=metrics["accuracy"],
-            precision=metrics["precision"],
-            recall=metrics["recall"],
-            f1_score=metrics["f1_score"],
-            auc_roc=metrics["auc_roc"],
-            brier_score=metrics.get("brier_score"),
-            gini_coefficient=metrics.get("gini_coefficient"),
-            ks_statistic=metrics.get("ks_statistic"),
-            log_loss_value=metrics.get("log_loss"),
-            ece=metrics.get("calibration_data", {}).get("ece"),
-            # Persist the SAME operating threshold the per-group fairness search
-            # is anchored to (cost-optimal), so the disparate-impact guarantee
-            # holds at serving and the reported metrics match deployment.
-            optimal_threshold=metrics.get("optimal_threshold"),
-            confusion_matrix=metrics["confusion_matrix"],
-            feature_importances=metrics["feature_importances"],
-            roc_curve_data=metrics["roc_curve"],
-            training_params=metrics["training_params"],
-            calibration_data=metrics.get("calibration_data", {}),
-            threshold_analysis=metrics.get("threshold_analysis", {}),
-            decile_analysis=metrics.get("decile_analysis", {}),
-            fairness_metrics=metrics.get("fairness", {}),
-            training_metadata=metrics.get("training_metadata", {}),
-        )
-
-        # Invalidate cached models so workers pick up the new version
-        clear_model_cache()
-
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"Model trained successfully: {mv}\n"
-                f"  Accuracy:  {metrics['accuracy']:.4f}\n"
-                f"  Precision: {metrics['precision']:.4f}\n"
-                f"  Recall:    {metrics['recall']:.4f}\n"
-                f"  F1 Score:  {metrics['f1_score']:.4f}\n"
-                f"  AUC-ROC:   {metrics['auc_roc']:.4f}\n"
-                f"  Gini:      {metrics.get('gini_coefficient', 'N/A')}\n"
-                f"  KS Stat:   {metrics.get('ks_statistic', 'N/A')}\n"
-                f"  Brier:     {metrics.get('brier_score', 'N/A')}\n"
-                f"  ECE:       {metrics.get('calibration_data', {}).get('ece', 'N/A')}\n"
-                f"  Threshold: {metrics.get('optimal_threshold', 'N/A')}\n"
-                f"  Saved to:  {model_path}"
+        mv = ModelVersion.objects.get(pk=result["model_version_id"])
+        metrics = result["metrics"]
+        if result["activated"]:
+            status = self.style.SUCCESS(f"Model trained and activated in segment '{mv.segment}': {mv}")
+        else:
+            blocked = ", ".join(mv.training_metadata.get("activation_blocked", []))
+            status = self.style.WARNING(
+                f"Model trained but NOT activated (blocked by: {blocked}); the current champion keeps serving: {mv}"
             )
+        self.stdout.write(
+            f"{status}\n"
+            f"  Accuracy:  {metrics['accuracy']:.4f}\n"
+            f"  Precision: {metrics['precision']:.4f}\n"
+            f"  Recall:    {metrics['recall']:.4f}\n"
+            f"  F1 Score:  {metrics['f1_score']:.4f}\n"
+            f"  AUC-ROC:   {metrics['auc_roc']:.4f}\n"
+            f"  Gini:      {metrics.get('gini_coefficient', 'N/A')}\n"
+            f"  KS Stat:   {metrics.get('ks_statistic', 'N/A')}\n"
+            f"  Brier:     {metrics.get('brier_score', 'N/A')}\n"
+            f"  ECE:       {metrics.get('calibration_data', {}).get('ece', 'N/A')}\n"
+            f"  Threshold: {metrics.get('optimal_threshold', 'N/A')}\n"
+            f"  Saved to:  {mv.file_path}"
         )

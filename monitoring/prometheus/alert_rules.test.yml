@@ -1,0 +1,118 @@
+# Unit tests for alert_rules.yml. Run with:
+#   promtool test rules monitoring/prometheus/alert_rules.test.yml
+# Series use the label sets the real exporters emit (celery-exporter 0.10.x,
+# postgres-exporter 0.17.x, django-prometheus on job "django-backend").
+rule_files:
+  - alert_rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: queue backlog names the queue
+    interval: 1m
+    input_series:
+      - series: 'celery_queue_length{job="celery-exporter", queue_name="ml"}'
+        values: '150x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CeleryQueueBacklog
+        exp_alerts:
+          - exp_labels: {severity: warning, job: celery-exporter, queue_name: ml}
+            exp_annotations:
+              summary: "Celery queue ml has 150 pending tasks — check worker capacity"
+
+  - name: pipeline SLO burn fires from exporter runtime histogram
+    interval: 1m
+    input_series:
+      # Every orchestrator run lands in the 60-120s bucket.
+      - series: 'celery_task_runtime_bucket{name="apps.agents.tasks.orchestrate_pipeline_task", hostname="w1", queue_name="agents", le="60.0"}'
+        values: '0x40'
+      - series: 'celery_task_runtime_bucket{name="apps.agents.tasks.orchestrate_pipeline_task", hostname="w1", queue_name="agents", le="120.0"}'
+        values: '0+10x40'
+      - series: 'celery_task_runtime_bucket{name="apps.agents.tasks.orchestrate_pipeline_task", hostname="w1", queue_name="agents", le="+Inf"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 36m
+        alertname: PipelineE2ESLOBurn
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "Pipeline p95 runtime 117s exceeds 2x the SLO (30s)"
+              description: "Decision pipeline p95 > 60s for 30 minutes — investigate orchestrator, Celery queue depth, Claude API latency."
+
+  - name: task failure rate per task name
+    interval: 1m
+    input_series:
+      - series: 'celery_task_failed_total{name="apps.agents.tasks.orchestrate_pipeline_task", hostname="w1", exception="RuntimeError", queue_name="agents"}'
+        values: '0+2x40'
+      - series: 'celery_task_succeeded_total{name="apps.agents.tasks.orchestrate_pipeline_task", hostname="w1", queue_name="agents"}'
+        values: '0+8x40'
+      # A healthy task must not alert.
+      - series: 'celery_task_succeeded_total{name="apps.email_engine.tasks.generate_email_task", hostname="w1", queue_name="email"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: CeleryTaskFailureRate
+        exp_alerts:
+          - exp_labels: {severity: critical, name: apps.agents.tasks.orchestrate_pipeline_task}
+            exp_annotations:
+              summary: "apps.agents.tasks.orchestrate_pipeline_task failure rate 20% > 5%"
+              description: "Decision tasks are raising. Check worker logs, model availability, the Claude API and recent deploys."
+
+  - name: task failure rate when a task never succeeds
+    interval: 1m
+    input_series:
+      - series: 'celery_task_failed_total{name="apps.ml_engine.tasks.run_prediction_task", hostname="w2", exception="ValueError", queue_name="ml"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: CeleryTaskFailureRate
+        exp_alerts:
+          - exp_labels: {severity: critical, name: apps.ml_engine.tasks.run_prediction_task}
+            exp_annotations:
+              summary: "apps.ml_engine.tasks.run_prediction_task failure rate 100% > 5%"
+              description: "Decision tasks are raising. Check worker logs, model availability, the Claude API and recent deploys."
+
+  - name: worker down
+    interval: 1m
+    input_series:
+      - series: 'celery_worker_up{job="celery-exporter", hostname="celery@io-1"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CeleryWorkerDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: celery-exporter, hostname: celery@io-1}
+            exp_annotations:
+              summary: "Celery worker celery@io-1 has stopped sending heartbeats"
+
+  - name: db connection pool across several datname/state series
+    interval: 1m
+    input_series:
+      - series: 'pg_stat_activity_count{datname="loan_approval", state="active"}'
+        values: '50x10'
+      - series: 'pg_stat_activity_count{datname="loan_approval", state="idle"}'
+        values: '40x10'
+      - series: 'pg_settings_max_connections{server="db:5432"}'
+        values: '100x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: DBConnectionPoolHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "PostgreSQL connection usage is at 90% of max — risk of pool exhaustion"
+
+  - name: web memory alert matches the scrape job name
+    interval: 1m
+    input_series:
+      - series: 'process_resident_memory_bytes{job="django-backend", instance="backend:8000"}'
+        values: '600000000x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HighMemoryUsage
+        exp_alerts:
+          - exp_labels: {severity: warning, job: django-backend, instance: "backend:8000"}
+            exp_annotations:
+              summary: "Django web process using >500MB memory"
+              description: "Check for memory leaks in model cache or guardrail processing."

@@ -1,16 +1,15 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/lib/auth'
-import { authApi } from '@/lib/api'
 import { useApplications } from '@/hooks/useApplications'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import type { CustomerLoanApplication } from '@/types'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { getDisplayStatus, formatCurrency, formatDate, formatPurpose } from '@/lib/utils'
+import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
+import { formatDate, formatPurpose } from '@/lib/utils'
 import { Plus, ArrowRight, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
-import { CustomerProfile } from '@/types'
+import { useCustomerProfile } from '@/hooks/useCustomerProfile'
 
 const FIELD_LABELS: Record<string, string> = {
   date_of_birth: 'Date of birth',
@@ -24,45 +23,37 @@ const FIELD_LABELS: Record<string, string> = {
   primary_id_number: 'Primary ID number',
 }
 
+/** Shown until the customer's profile has every field required to apply. */
+function ProfileBanner({ missing }: { missing: string[] }) {
+  return (
+    <Card className="border-amber-300 bg-amber-50">
+      <CardContent className="flex items-start gap-4 py-5">
+        <AlertTriangle className="h-6 w-6 text-amber-600 mt-0.5 shrink-0" />
+        <div className="space-y-2">
+          <p className="font-semibold text-amber-900">Complete your profile to apply</p>
+          <p className="text-sm text-amber-800">
+            Under Australian lending regulations (NCCP Act 2009 and AML/CTF Act 2006),
+            we need your personal details and identity documents before you can submit a loan application.
+          </p>
+          {missing.length > 0 && (
+            <p className="text-sm text-amber-700">
+              Missing: {missing.map(f => FIELD_LABELS[f] || f.replace(/_/g, ' ')).join(', ')}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function CustomerApplyPage() {
   const { user } = useAuth()
-  const { data, isLoading } = useApplications()
+  const { data, isLoading } = useApplications<CustomerLoanApplication>()
 
-  const { data: profile, isLoading: profileLoading } = useQuery<CustomerProfile>({
-    queryKey: ['customerProfile'],
-    queryFn: async () => {
-      const { data } = await authApi.getCustomerProfile()
-      return data
-    },
-  })
+  const { data: profile, isLoading: profileLoading } = useCustomerProfile()
 
   const profileComplete = profile?.is_profile_complete ?? false
   const applications = data?.results || []
-
-
-  const ProfileBanner = () => {
-    if (profileLoading || profileComplete) return null
-    const missing = profile?.missing_profile_fields || []
-    return (
-      <Card className="border-amber-300 bg-amber-50">
-        <CardContent className="flex items-start gap-4 py-5">
-          <AlertTriangle className="h-6 w-6 text-amber-600 mt-0.5 shrink-0" />
-          <div className="space-y-2">
-            <p className="font-semibold text-amber-900">Complete your profile to apply</p>
-            <p className="text-sm text-amber-800">
-              Under Australian lending regulations (NCCP Act 2009 and AML/CTF Act 2006),
-              we need your personal details and identity documents before you can submit a loan application.
-            </p>
-            {missing.length > 0 && (
-              <p className="text-sm text-amber-700">
-                Missing: {missing.map(f => FIELD_LABELS[f] || f.replace(/_/g, ' ')).join(', ')}
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
 
   return (
     <div className="space-y-6">
@@ -75,7 +66,9 @@ export default function CustomerApplyPage() {
         </p>
       </div>
 
-      <ProfileBanner />
+      {!profileLoading && !profileComplete && (
+        <ProfileBanner missing={profile?.missing_profile_fields || []} />
+      )}
 
       {isLoading || profileLoading ? (
         <div className="space-y-4">
@@ -129,16 +122,14 @@ export default function CustomerApplyPage() {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">{formatCurrency(app.loan_amount)}</p>
+                      <p className="font-semibold">{app.loan_amount}</p>
                       <p className="text-sm text-muted-foreground">
                         {app.loan_term_months} months
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    {(() => { const s = getDisplayStatus(app.status, app.decision); return (
-                      <Badge className={s.color} variant="outline">{s.label}</Badge>
-                    ) })()}
+                    <ApplicationStatusBadge status={app.status} decision={app.decision} />
                     <ArrowRight className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </CardContent>

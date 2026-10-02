@@ -1,7 +1,7 @@
 """Pattern constants used by GuardrailChecker.
 
-Extracted from the original monolithic guardrails.py so the check methods
-live in engine.py free of ~370 lines of regex tables. The class attrs on
+Kept in their own module so the check methods in engine.py stay free of the
+regex tables. The class attrs on
 GuardrailChecker re-export every name here, so `self.PROHIBITED_TERMS`
 and `GuardrailChecker.PROHIBITED_TERMS` both still work.
 """
@@ -330,7 +330,7 @@ PSYCHOLOGY_REFRAMES = {
     "weak_closings": [
         (
             re.compile(r"\bwe wish you (?:well|all the best|good luck|the best)\b", re.IGNORECASE),
-            "use specific warmth: \"Thanks for coming to us, [Name]. We'd love to help you find the right option when you're ready.\"",
+            "use specific warmth: \"Thanks for coming to us, [Name]. When you're ready, we'd like to help you find the right option.\"",
             "Peak-end rule: generic well-wishes feel dismissive",
         ),
         (

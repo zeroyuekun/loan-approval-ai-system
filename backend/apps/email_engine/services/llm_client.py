@@ -26,8 +26,8 @@ structural change. The adapter:
   * normalises the OpenAI response back into the Anthropic-ish object shape the
     caller reads (``.content[].type/.input/.text``, ``.usage.input_tokens/
     output_tokens``, ``.stop_reason``),
-  * raises ``anthropic.RateLimitError`` on HTTP 429 so the existing retry seam
-    in ``EmailGenerator`` is reused unchanged,
+  * raises the typed ``RateLimited`` signal on HTTP 429 (parsing ``Retry-After``)
+    so the Celery task can ``self.retry(countdown=...)``,
   * raises ``EmailBackendError`` on 4xx/5xx/transport failures so the caller
     degrades to the deterministic template.
 
@@ -46,10 +46,9 @@ Ollama notes (see ADR 010 + the research that drove this):
 import json
 import logging
 
-import anthropic
 import httpx
 
-from .exceptions import EmailBackendError
+from .exceptions import EmailBackendError, RateLimited
 
 logger = logging.getLogger("email_engine.llm_client")
 
@@ -177,18 +176,49 @@ class OpenAICompatibleLLMClient:
             raise EmailBackendError(f"{self.provider} request failed: {exc}") from exc
 
         if resp.status_code == 429:
-            raise self._rate_limit_error(resp)
+            # RateLimited reaches the Celery task, which retries after Retry-After.
+            # Header missing, or an http-date: use RateLimited's default.
+            retry_after = resp.headers.get("retry-after", "").strip()
+            raise RateLimited(retry_after=int(retry_after)) if retry_after.isdigit() else RateLimited()
         if resp.status_code >= 400:
             # 4xx (e.g. 413 request-too-large on a small free tier) / 5xx →
             # degrade to the template rather than hard-error.
-            raise EmailBackendError(f"{self.provider} API error {resp.status_code}: {resp.text[:300]}")
+            raise EmailBackendError(
+                f"{self.provider} API error {resp.status_code}: {resp.text[:300]}", status_code=resp.status_code
+            )
 
         return self._normalise(resp.json())
 
+    # Anthropic-shaped kwargs the adapter knows how to translate/forward. Anything
+    # else would be silently dropped — which is an audit-integrity hazard (e.g.
+    # api_budget._extract_prompt_text hashes kwargs["system"] into the APP 8
+    # record), so unrecognized kwargs are logged loudly in _build_payload.
+    _KNOWN_KWARGS = frozenset({"model", "messages", "system", "temperature", "max_tokens", "tools", "tool_choice"})
+
     def _build_payload(self, kwargs):
+        messages = list(kwargs.get("messages", []))
+
+        # Anthropic passes the system prompt as a top-level kwarg; OpenAI-style
+        # endpoints expect a leading {"role": "system"} message. Dropping it
+        # would mean the audit record hashes a prompt that was never sent.
+        system = kwargs.get("system")
+        if system:
+            if not isinstance(system, str):
+                # Anthropic also allows a list of text blocks.
+                system = "\n".join(b.get("text", "") for b in system if isinstance(b, dict))
+            messages.insert(0, {"role": "system", "content": system})
+
+        unknown = set(kwargs) - self._KNOWN_KWARGS
+        if unknown:
+            logger.warning(
+                "%s adapter dropping unrecognized kwargs %s — they are NOT sent to the provider",
+                self.provider,
+                sorted(unknown),
+            )
+
         payload = {
             "model": kwargs.get("model") or self._default_model,
-            "messages": kwargs.get("messages", []),
+            "messages": messages,
             # AI_TEMPERATURE_DECISION_EMAIL is 0.0; seed makes the model
             # best-effort reproducible for the same prompt.
             "temperature": kwargs.get("temperature", 0.0),
@@ -209,15 +239,6 @@ class OpenAICompatibleLLMClient:
             # text — handled by the text block emitted in _normalise.)
             payload["tool_choice"] = {"type": "function", "function": {"name": tool_choice["name"]}}
         return payload
-
-    def _rate_limit_error(self, resp):
-        """Build an ``anthropic.RateLimitError`` so EmailGenerator's existing
-        ``except anthropic.RateLimitError`` seam is reused. Falls back to a
-        generic error if the SDK signature differs."""
-        try:
-            return anthropic.RateLimitError(f"{self.provider} API rate limited", response=resp, body=None)
-        except Exception:  # noqa: BLE001 — defensive against SDK signature drift
-            return EmailBackendError(f"{self.provider} API rate limited (429)")
 
     def _normalise(self, data):
         """Convert an OpenAI chat-completion dict into the Anthropic-ish shape."""

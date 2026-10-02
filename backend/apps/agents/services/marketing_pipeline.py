@@ -37,6 +37,20 @@ class MarketingPipelineService:
             return False
         return bool(profile and profile.marketing_consent)
 
+    def run_best_effort(self, application, agent_run, steps, denial_reasons, profile_context):
+        """``run`` for callers that have already applied and announced the decision.
+
+        Never raises: a failure (including the soft time limit) is recorded as
+        a failed ``marketing_followup`` step and the caller's run completes.
+        Returns the updated steps list.
+        """
+        try:
+            return self.run(application, agent_run, steps, denial_reasons, profile_context)
+        except Exception as exc:  # noqa: BLE001 — post-decision follow-up is best-effort
+            logger.error("Application %s: NBO/marketing follow-up failed after the decision: %s", application.pk, exc)
+            steps.append(StepTracker.post_decision_failure_step("marketing_followup", exc))
+            return steps
+
     def run(self, application, agent_run, steps, denial_reasons, profile_context):
         """Run the full NBO + marketing email pipeline. Returns updated steps list."""
         nbo_result = None
@@ -133,6 +147,7 @@ class MarketingPipelineService:
                         "passed_guardrails": email_result_marketing["passed_guardrails"],
                         "attempt_number": email_result_marketing["attempt_number"],
                         "generation_time_ms": email_result_marketing["generation_time_ms"],
+                        "template_fallback": email_result_marketing.get("template_fallback", False),
                     },
                 )
             except (LLMServiceError, ConnectionError, TimeoutError) as e:

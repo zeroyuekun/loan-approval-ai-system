@@ -57,14 +57,14 @@ def test_failures_trip_breaker():
     r = MagicMock()
     r.incr.return_value = 3
     _guard(r).record_failure()
-    r.setex.assert_called_once_with("ai_budget:circuit_breaker", 600, 1)
+    r.setex.assert_called_once_with("ai_budget:circuit_breaker:anthropic", 600, 1)
 
 
 def test_success_resets_failures():
     """record_success deletes the consecutive failure counter."""
     r = MagicMock()
     _guard(r).record_success()
-    r.delete.assert_called_once_with("ai_budget:consecutive_failures")
+    r.delete.assert_called_once_with("ai_budget:consecutive_failures:anthropic")
 
 
 def test_redis_down_allows_brief_blip():

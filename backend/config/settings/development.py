@@ -9,6 +9,17 @@ from .base import *  # noqa: F401, F403
 DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
+# base.py derived these from the DJANGO_DEBUG env var before DEBUG was forced
+# on here; development is plain HTTP whatever that var says.
+JWT_COOKIE_SECURE = False
+SECURE_SSL_REDIRECT = False
+SECURE_HSTS_SECONDS = 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
+
+# Hand-made model bundles without a stored hash may be loaded (with a warning).
+ML_ALLOW_UNHASHED_MODELS = True
+
 # Use PostgreSQL if POSTGRES_HOST is set (Docker), otherwise SQLite
 if os.environ.get("POSTGRES_HOST"):
     DATABASES = {
@@ -19,7 +30,7 @@ if os.environ.get("POSTGRES_HOST"):
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
             "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-            # Tag connections so the watchdog idle-in-transaction reaper (L24)
+            # Tag connections so the watchdog idle-in-transaction reaper
             # can scope its kill to this app. Keep in sync with DB_APPLICATION_NAME.
             "OPTIONS": {
                 "application_name": DB_APPLICATION_NAME,  # noqa: F405 — from base via star-import

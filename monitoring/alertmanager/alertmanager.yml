@@ -1,6 +1,12 @@
 global:
   resolve_timeout: 5m
 
+# Every route ends at a receiver defined below. Both receivers currently post
+# to the PLACEHOLDER `alert-sink` service in docker-compose.yml, which only
+# logs the payload. For real paging, replace the webhook_configs with
+# slack_configs / email_configs / pagerduty_configs (keep secrets in files:
+# api_url_file, auth_password_file, routing_key_file), then drop alert-sink.
+# CI runs `amtool check-config` on this file.
 route:
   group_by: ['alertname', 'severity']
   group_wait: 10s
@@ -8,13 +14,13 @@ route:
   repeat_interval: 4h
   receiver: 'default-webhook'
   routes:
-    - match:
-        severity: critical
+    - matchers:
+        - severity = "critical"
       receiver: 'critical-webhook'
       group_wait: 10s
       repeat_interval: 1h
-    - match:
-        severity: warning
+    - matchers:
+        - severity = "warning"
       receiver: 'default-webhook'
       group_wait: 30s
       repeat_interval: 4h
@@ -22,21 +28,17 @@ route:
 receivers:
   - name: 'default-webhook'
     webhook_configs:
-      - url: 'http://alertmanager-webhook:9095/webhook'
+      - url: 'http://alert-sink:9095/default'  # PLACEHOLDER receiver, see above
         send_resolved: true
   - name: 'critical-webhook'
     webhook_configs:
-      - url: 'http://alertmanager-webhook:9095/webhook'
+      - url: 'http://alert-sink:9095/critical'  # PLACEHOLDER receiver, see above
         send_resolved: true
 
 inhibit_rules:
-  - source_match:
-      alertname: HealthCheckFailing
-    target_match:
-      alertname: HighErrorRate
-    equal: ['instance']
-  - source_match:
-      severity: critical
-    target_match:
-      severity: warning
+  # A firing critical alert suppresses the warning-level alert of the same name.
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
     equal: ['alertname']

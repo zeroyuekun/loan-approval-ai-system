@@ -1,7 +1,7 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
-import { useAgentRun, useTaskStatus } from '@/hooks/useAgentStatus'
+import { useAgentRun, useForceRerun, useOrchestrate } from '@/hooks/useAgentStatus'
 import { server } from '@/test/mocks/server'
 
 const API_URL = 'http://localhost:8000/api/v1'
@@ -113,44 +113,61 @@ describe('useAgentRun', () => {
   })
 })
 
-describe('useTaskStatus', () => {
-  it('fetches task status', async () => {
+describe('mutation error mapping', () => {
+  const unhandled: unknown[] = []
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+  beforeEach(() => {
+    unhandled.length = 0
+    process.on('unhandledRejection', onUnhandled)
+  })
+  afterEach(() => {
+    process.off('unhandledRejection', onUnhandled)
+  })
+
+  it('surfaces the friendly force-rerun message to callers and mutation.error', async () => {
     server.use(
-      http.get(`${API_URL}/tasks/:taskId/status/`, () => {
-        return HttpResponse.json({
-          task_id: 'task-abc',
-          status: 'SUCCESS',
-          result: { agent_run_id: 'run-1' },
-        })
-      }),
+      http.post(`${API_URL}/agents/orchestrate/loan-123/`, () =>
+        HttpResponse.json({ detail: 'You do not have permission' }, { status: 403 }),
+      ),
     )
+    const { result } = renderHook(() => useForceRerun(), { wrapper: createWrapper() })
 
-    const { result } = renderHook(() => useTaskStatus('task-abc'), {
-      wrapper: createWrapper(),
+    let caught: Error | null = null
+    await act(async () => {
+      try {
+        await result.current.mutateAsync({ loanId: 'loan-123', reason: 'bias resolved' })
+      } catch (e) {
+        caught = e as Error
+      }
     })
 
+    expect(caught).not.toBeNull()
+    expect(caught!.message).toBe('Force rerun requires staff role.')
     await waitFor(() => {
-      expect(result.current.data).toBeDefined()
+      expect(result.current.error?.message).toBe('Force rerun requires staff role.')
     })
-    expect(result.current.data?.status).toBe('SUCCESS')
+    // No replacement error thrown from onError (it became an unhandled rejection)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(unhandled).toHaveLength(0)
   })
 
-  it('does not fetch when disabled', () => {
-    const { result } = renderHook(
-      () => useTaskStatus('task-abc', { enabled: false }),
-      { wrapper: createWrapper() },
+  it('maps a 429 on orchestrate to the retry-after message', async () => {
+    server.use(
+      http.post(`${API_URL}/agents/orchestrate/loan-123/`, () =>
+        HttpResponse.json({ detail: 'Throttled' }, { status: 429, headers: { 'Retry-After': '42' } }),
+      ),
     )
+    const { result } = renderHook(() => useOrchestrate(), { wrapper: createWrapper() })
 
-    expect(result.current.data).toBeUndefined()
-    expect(result.current.isFetching).toBe(false)
-  })
-
-  it('does not fetch with empty taskId', () => {
-    const { result } = renderHook(() => useTaskStatus(''), {
-      wrapper: createWrapper(),
+    let caught: Error | null = null
+    await act(async () => {
+      try {
+        await result.current.mutateAsync('loan-123')
+      } catch (e) {
+        caught = e as Error
+      }
     })
 
-    expect(result.current.data).toBeUndefined()
-    expect(result.current.isFetching).toBe(false)
-  })
+    expect(caught!.message).toBe('Rate limited — try again in 42s')
+  }, 15000)
 })

@@ -31,7 +31,7 @@ def _prediction(decision="approved", probability=0.85, model_version_id=None):
         "model_version": model_version_id or "00000000-0000-0000-0000-000000000001",
         "feature_importances": {"credit_score": 0.35, "annual_income": 0.25, "dti": 0.15},
         "processing_time_ms": 42,
-        "requires_human_review": False,
+        "refer_reasons": [],
     }
 
 
@@ -144,7 +144,7 @@ def orch_mocks(model_version):
     """
     with (
         patch(f"{ORCH}.ModelPredictor") as mock_predictor,
-        patch(f"{EMAIL_PIPE}.EmailGenerator") as mock_email_gen,
+        patch("apps.email_engine.services.decision_email.EmailGenerator") as mock_email_gen,
         patch(f"{EMAIL_PIPE}.BiasDetector") as mock_bias,
         patch(f"{MKT_PIPE}.MarketingBiasDetector") as mock_mkt_bias,
         patch(f"{MKT_PIPE}.MarketingEmailReviewer") as mock_mkt_reviewer,
@@ -206,18 +206,29 @@ def test_denied_with_nbo(sample_application, orch_mocks):
 
 @CACHE_OVERRIDE
 @pytest.mark.django_db
-def test_ml_prediction_failure(sample_application, orch_mocks):
-    """Predictor raises -> run failed, app set to review."""
-    orch_mocks["predictor"].return_value.predict.side_effect = Exception("Model unavailable")
+@pytest.mark.parametrize("error", [Exception("Model unavailable"), ConnectionError("model store unreachable")])
+def test_ml_prediction_failure(sample_application, orch_mocks, error):
+    """Predictor raises -> run failed, app back to PENDING (re-runnable), reason recorded.
+
+    The human review queue is only for bias flags, so a prediction failure
+    (transient or unexpected) must not park the application there."""
+    orch_mocks["predictor"].return_value.predict.side_effect = error
 
     from apps.agents.services.orchestrator import PipelineOrchestrator
+    from apps.loans.models import AuditLog
 
     run = PipelineOrchestrator().orchestrate(sample_application.pk)
 
     assert run.status == "failed"
     sample_application.refresh_from_db()
-    assert sample_application.status == "review"
+    assert sample_application.status == "pending"
     orch_mocks["email_gen"].return_value.generate.assert_not_called()
+    last = AuditLog.objects.filter(resource_id=str(sample_application.pk), action="status_transition").latest(
+        "timestamp"
+    )
+    assert last.details["to_status"] == "pending"
+    assert last.details["source"] == "orchestrator_ml_prediction_failure"
+    assert str(error) in last.details["error"]
 
 
 @CACHE_OVERRIDE
@@ -236,6 +247,61 @@ def test_email_generation_failure(sample_application, orch_mocks):
     assert run.status == "failed"
     sample_application.refresh_from_db()
     assert sample_application.status == "approved"
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
+def test_follow_up_failure_after_the_decision_email_keeps_the_decision(sample_application, orch_mocks):
+    """The NBO step hits the soft time limit after the denial email was sent.
+    The application keeps its decision, and a re-run does not email the
+    customer a second denial."""
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    from apps.agents.tasks import orchestrate_pipeline_task
+
+    _wire_denied(orch_mocks)
+    orch_mocks["nbo"].return_value.generate.side_effect = SoftTimeLimitExceeded()
+
+    orchestrate_pipeline_task.apply(args=(str(sample_application.pk),))
+
+    sample_application.refresh_from_db()
+    assert sample_application.status == "denied", "a follow-up failure undid the decision the customer was sent"
+    assert orch_mocks["send"].call_count == 1
+
+    orchestrate_pipeline_task.apply(args=(str(sample_application.pk),))
+    assert orch_mocks["send"].call_count == 1, "the re-run sent a second decision email"
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
+def test_policy_decline_of_a_model_approval_is_not_recorded_as_the_model_s(sample_application, orch_mocks):
+    """The model approved; an enforce-mode credit-policy hard fail declined.
+    The waterfall says so, with the rule's code, instead of MODEL_DENIED."""
+    from apps.loans.models import LoanDecision
+
+    _wire_denied(orch_mocks)
+    orch_mocks["predictor"].return_value.predict.return_value = {
+        **_prediction("denied", 0.82, orch_mocks["model_version_id"]),
+        "policy_decision": {
+            "mode": "enforce",
+            "passed": False,
+            "changed_model_decision": True,
+            "hard_fails": ["P03"],
+            "refers": [],
+            "rationale_by_code": {"P03": "Undischarged bankrupt or within 7-year bankruptcy window"},
+        },
+    }
+
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    PipelineOrchestrator().orchestrate(sample_application.pk)
+
+    waterfall = LoanDecision.objects.get(application=sample_application).decision_waterfall
+    ml_entry = next(e for e in waterfall if e["step"] == "ml_prediction")
+    assert ml_entry["reason_code"] != "MODEL_DENIED", "a policy decline was recorded as the model's decision"
+    assert ml_entry["reason_code"] == "MODEL_APPROVED"
+    policy = [e for e in waterfall if e["reason_code"] == "POLICY_DECLINE_P03"]
+    assert policy and policy[0]["result"] == "fail"
 
 
 @CACHE_OVERRIDE
@@ -318,6 +384,29 @@ def test_stale_pipeline_resets(sample_application, orch_mocks):
 
 @CACHE_OVERRIDE
 @pytest.mark.django_db
+def test_queue_failed_application_runs_and_leaves_the_outbox(sample_application, orch_mocks):
+    """A run started for an application whose first dispatch failed (staff
+    "Run AI Pipeline", or the customer's own retry) goes ahead instead of
+    raising on queue_failed -> processing, and the outbox row is cleared so
+    the drain does not dispatch it again."""
+    from apps.loans.models import PipelineDispatchOutbox
+
+    _wire_approved(orch_mocks)
+    LoanApplication.objects.filter(pk=sample_application.pk).update(status="queue_failed")
+    PipelineDispatchOutbox.objects.create(application=sample_application)
+
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    run = PipelineOrchestrator().orchestrate(sample_application.pk)
+
+    assert run.status == "completed"
+    sample_application.refresh_from_db()
+    assert sample_application.status == "approved"
+    assert not PipelineDispatchOutbox.objects.filter(application=sample_application).exists()
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
 def test_concurrent_pipeline_rejected(sample_application, orch_mocks):
     """Application currently processing (recent updated_at) raises ValueError."""
     sample_application.status = "processing"
@@ -350,3 +439,28 @@ def test_no_profile_graceful_degradation(application_no_profile, orch_mocks):
     # profile_context is passed (auto-created profile) — pipeline should still work
     call_args = orch_mocks["email_gen"].return_value.generate.call_args
     assert "profile_context" in call_args.kwargs
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
+def test_llm_calls_run_inside_application_and_run_context(sample_application, orch_mocks):
+    """I6: every LLM call made during a run is attributable to the application
+    and the AgentRun in the APP 8 log (guarded_api_call reads this context)."""
+    from apps.agents.services.api_budget import current_api_call_context
+
+    _wire_approved(orch_mocks)
+    seen = {}
+
+    def _generate(*args, **kwargs):
+        seen.update(current_api_call_context())
+        return _email()
+
+    orch_mocks["email_gen"].return_value.generate.side_effect = _generate
+
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    run = PipelineOrchestrator().orchestrate(sample_application.pk)
+
+    assert seen.get("application_id") == sample_application.pk
+    assert seen.get("agent_run_id") == run.pk
+    assert current_api_call_context() == {}, "context must not leak past the run"

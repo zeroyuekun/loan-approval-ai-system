@@ -1,5 +1,5 @@
 class RateLimited(Exception):
-    """Raised by EmailGenerator when the Claude API rate-limits.
+    """Raised when the email LLM provider rate-limits (HTTP 429).
 
     The Celery task converts this into a ``self.retry(countdown=...)`` so the
     worker is freed instead of blocking inside a hard ``time_limit`` with a
@@ -8,7 +8,7 @@ class RateLimited(Exception):
 
     def __init__(self, retry_after=30):
         self.retry_after = retry_after
-        super().__init__(f"Claude API rate limited; retry after {retry_after}s")
+        super().__init__(f"Email LLM API rate limited; retry after {retry_after}s")
 
 
 class EmailBackendError(Exception):
@@ -22,4 +22,11 @@ class EmailBackendError(Exception):
     compliant email. A 429 is handled separately as ``RateLimited`` (Celery
     retry); programming errors (AttributeError, KeyError, ...) are NOT wrapped in
     this, so they still surface as real bugs.
+
+    ``status_code`` is the provider's HTTP status, or None for a transport
+    failure; the circuit breaker uses it to tell a transient 5xx from a 4xx.
     """
+
+    def __init__(self, message="", status_code=None):
+        self.status_code = status_code
+        super().__init__(message)

@@ -18,6 +18,11 @@ describe('PipelineControls', () => {
     expect(screen.getByText('Run AI Pipeline')).toBeInTheDocument()
   })
 
+  it('shows "Run AI Pipeline" when the first dispatch failed (queue_failed), since it never ran', () => {
+    render(<PipelineControls {...defaultProps} applicationStatus="queue_failed" />)
+    expect(screen.getByText('Run AI Pipeline')).toBeInTheDocument()
+  })
+
   it('shows "Re-run AI Pipeline" for non-pending status', () => {
     render(<PipelineControls {...defaultProps} applicationStatus="approved" />)
     expect(screen.getByText('Re-run AI Pipeline')).toBeInTheDocument()
@@ -104,5 +109,52 @@ describe('PipelineControls', () => {
     // Cancel and confirm buttons should be disabled
     expect(screen.getByRole('button', { name: /Cancel/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Deleting/i })).toBeDisabled()
+  })
+
+  describe('force re-run confirmation', () => {
+    const promptProps = {
+      ...defaultProps,
+      applicationStatus: 'denied',
+      forceRerunPrompt: true,
+      forceRerunPending: false,
+      forceRerunError: null,
+      onForceRerunConfirm: vi.fn(),
+      onForceRerunCancel: vi.fn(),
+    }
+
+    it('asks for a reason before a forced re-run and only enables confirm once one is typed', async () => {
+      const user = userEvent.setup()
+      const onForceRerunConfirm = vi.fn()
+      render(<PipelineControls {...promptProps} onForceRerunConfirm={onForceRerunConfirm} />)
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      const confirm = screen.getByRole('button', { name: /confirm force rerun/i })
+      expect(confirm).toBeDisabled()
+
+      await user.type(screen.getByLabelText(/reason/i), 'Model retrained')
+      expect(confirm).toBeEnabled()
+      await user.click(confirm)
+      expect(onForceRerunConfirm).toHaveBeenCalledWith('Model retrained')
+    })
+
+    it('shows the error and calls cancel', async () => {
+      const user = userEvent.setup()
+      const onForceRerunCancel = vi.fn()
+      render(
+        <PipelineControls
+          {...promptProps}
+          forceRerunError="Force rerun requires staff role."
+          onForceRerunCancel={onForceRerunCancel}
+        />,
+      )
+      expect(screen.getByText('Force rerun requires staff role.')).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(onForceRerunCancel).toHaveBeenCalled()
+    })
+
+    it('renders no dialog when no confirmation is pending', () => {
+      render(<PipelineControls {...defaultProps} />)
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
   })
 })

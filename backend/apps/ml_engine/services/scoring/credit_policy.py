@@ -9,10 +9,11 @@ is categorical. Two kinds of verdict:
   manuals — bankrupt, minor, >95% LVR with no LMI path, DTI above APRA's
   interventions, etc.
 
-* **Refer** (P08-P12): flags the application for human review. The model
-  may still score it as high probability but certain combinations demand
-  eyes-on underwriting — large LTI, hardship history, self-employed new
-  business, TMD mismatch.
+* **Refer** (P08-P12): records why the application deserves a second look
+  — large LTI, hardship history, self-employed new business, TMD mismatch.
+  A refer does not change the model decision and does not route it to the
+  human review queue (that queue is only for bias flags); the refer codes
+  are kept on the decision record and the D6 referral audit fields.
 
 Only a handful of applicants hit any given rule, but the ones who do
 typically carry outsized default risk, and regulators (ASIC RG 209, APRA
@@ -22,8 +23,8 @@ Rollout is gated by env var `CREDIT_POLICY_OVERLAY_MODE`:
   * `off`     — overlay is evaluated but not applied; purely observational
   * `shadow`  — decisions are logged and attached to the response as
                 `policy_decision`, but the model verdict stands
-  * `enforce` — hard-fails override the model; refers route to a human
-                review record (see D6)
+  * `enforce` — hard-fails override the model; refers are recorded as refer
+                reasons on the decision (see D6)
 
 Default is `shadow` until the rule set has been calibrated against backtest
 data. Promotion to `enforce` is a separate ops change.
@@ -389,8 +390,9 @@ def current_mode() -> str:
     """Read the active overlay mode from settings or the environment.
 
     Settings wins if defined (so Django config is authoritative); otherwise
-    the raw env var is used. Unknown values collapse to `shadow` so a
-    misconfigured deployment never silently downgrades safety.
+    the raw env var is used. Unknown values collapse to `shadow` (the model
+    decision stands), which is weaker than `enforce`: production settings
+    therefore reject an unknown value at start-up.
     """
     try:
         from django.conf import settings
@@ -419,7 +421,6 @@ def apply_overlay_to_decision(decision: str, result: PolicyResult, mode: str) ->
         return decision
     if result.has_hard_fail:
         return "denied"
-    if result.has_refer and decision == "approved":
-        # Approve-path with refer rules hit → route to human review instead.
-        return "review"
+    # Refer rules do not change the decision: the human review queue is only
+    # for bias flags. The caller records the refer codes on the decision.
     return decision

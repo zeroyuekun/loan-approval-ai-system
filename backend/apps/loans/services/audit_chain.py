@@ -1,7 +1,5 @@
 """Hash-chained AuditLog — tamper evidence for the audit trail.
 
-PR-2 of the security gap-closure cycle.
-
 Every AuditLog row carries:
   - hash_prev: the hash_self of the chronologically prior row (or
     GENESIS_HASH for the first row).
@@ -93,17 +91,6 @@ def audit_log_insert_lock():
     else:
         with _PROCESS_LOCAL_LOCK:
             yield
-
-
-def latest_hash_self() -> str:
-    """Return the chain head's hash_self, or GENESIS_HASH if the chain
-    is empty. Caller must hold the audit_log_insert_lock or accept
-    races."""
-    # Avoid circular import — AuditLog imports from this module.
-    from apps.loans.models import AuditLog
-
-    prior = AuditLog.objects.order_by("-timestamp", "-id").only("hash_self").first()
-    return prior.hash_self if prior and prior.hash_self else GENESIS_HASH
 
 
 def compute_for_row(audit_log) -> str:

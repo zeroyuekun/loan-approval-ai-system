@@ -5,8 +5,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+const AUD_FORMATTER = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' })
+
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(amount)
+  return AUD_FORMATTER.format(amount)
 }
 
 export function formatPercent(value: number): string {
@@ -17,15 +19,43 @@ export function formatDate(date: string): string {
   return new Date(date).toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+const STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-yellow-100 text-yellow-800',
+  processing: 'bg-blue-100 text-blue-800',
+  approved: 'bg-green-100 text-green-800',
+  denied: 'bg-red-100 text-red-800',
+  review: 'bg-amber-100 text-amber-800',
+  queue_failed: 'bg-orange-100 text-orange-800',
+}
+
+// Statuses whose raw value is not a readable label
+const STATUS_LABELS: Record<string, string> = {
+  queue_failed: 'Processing Delayed',
+}
+
+/** Title-case display name for an application status, e.g. for a filter list. */
+export function getStatusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status.charAt(0).toUpperCase() + status.slice(1)
+}
+
+/**
+ * The pipeline has not run yet: the application was just submitted, or its
+ * dispatch failed and the backend is retrying it.
+ */
+export function isAwaitingPipeline(status: string): boolean {
+  return status === 'pending' || status === 'queue_failed'
+}
+
+/**
+ * Assessment is under way or about to start. queue_failed is excluded: it is
+ * stalled until the backend's next dispatch retry, not in progress.
+ */
+export function isAssessmentInFlight(status: string): boolean {
+  return status === 'pending' || status === 'processing'
+}
+
 export function getStatusColor(status: string): string {
-  const colors: Record<string, string> = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    processing: 'bg-blue-100 text-blue-800',
-    approved: 'bg-green-100 text-green-800',
-    denied: 'bg-red-100 text-red-800',
-    review: 'bg-amber-100 text-amber-800',
-  }
-  return colors[status] || 'bg-gray-100 text-gray-800'
+  return STATUS_COLORS[status] || 'bg-gray-100 text-gray-800'
 }
 
 /**
@@ -33,14 +63,15 @@ export function getStatusColor(status: string): string {
  * taking the ML decision into account when status is 'review'.
  */
 export function getDisplayStatus(status: string, decision?: { decision: string } | null): { label: string; color: string } {
-  if (status === 'review' && decision?.decision) {
-    const d = decision.decision
-    if (d === 'approved') return { label: 'APPROVED', color: 'bg-green-100 text-green-800' }
-    if (d === 'denied') return { label: 'DENIED', color: 'bg-red-100 text-red-800' }
+  const d = decision?.decision
+  if (status === 'review' && (d === 'approved' || d === 'denied')) {
+    return { label: d.toUpperCase(), color: STATUS_COLORS[d] }
   }
-  const label = status.toUpperCase()
-  return { label, color: getStatusColor(status) }
+  return { label: getStatusLabel(status).toUpperCase(), color: getStatusColor(status) }
 }
+
+/** Display names for the model algorithms the backend can train. */
+export const ALGORITHM_LABELS: Record<string, string> = { rf: 'Random Forest', xgb: 'XGBoost' }
 
 const PURPOSE_LABELS: Record<string, string> = {
   home: 'Home Purchase',
@@ -51,12 +82,18 @@ const PURPOSE_LABELS: Record<string, string> = {
   education: 'Education',
 }
 
+/**
+ * snake_case -> "Title Case": underscores become spaces and each word's first
+ * letter is capitalised. Existing capitals are preserved, so codes like
+ * "NSW"/"NT" stay intact ("payg casual" -> "Payg Casual").
+ */
+export function titleCase(value: string): string {
+  return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 export function formatPurpose(purpose: string | null | undefined): string {
   if (!purpose) return ''
   const key = purpose.toLowerCase()
-  if (PURPOSE_LABELS[key]) return PURPOSE_LABELS[key]
-  return key
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
+  return PURPOSE_LABELS[key] || titleCase(key)
 }
 

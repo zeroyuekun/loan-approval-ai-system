@@ -1,46 +1,15 @@
 'use client'
 
-import { useEffect } from 'react'
-import Link from 'next/link'
-import { AlertTriangle } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { RouteError, type RouteErrorProps } from '@/components/layout/RouteError'
 
-export default function Error({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string }
-  reset: () => void
-}) {
-  useEffect(() => {
-    console.error(error)
-  }, [error])
-
+export default function Error(props: Pick<RouteErrorProps, 'error' | 'reset'>) {
   return (
-    <div className="flex items-center justify-center min-h-[60vh]">
-      <Card className="max-w-md w-full">
-        <CardContent className="pt-6 text-center space-y-4">
-          <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto" />
-          <h2 className="text-xl font-semibold">Application Error</h2>
-          <p className="text-muted-foreground">
-            Failed to load application details.
-          </p>
-          {error.message && (
-            <pre className="text-xs text-muted-foreground bg-muted rounded p-3 overflow-auto max-h-32 text-left">
-              {error.message}
-            </pre>
-          )}
-          <div className="flex gap-3 justify-center pt-2">
-            <Button onClick={reset} variant="default">
-              Try Again
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/dashboard/applications">Back to Applications</Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    <RouteError
+      {...props}
+      title="Application Error"
+      message="Failed to load application details."
+      backHref="/dashboard/applications"
+      backLabel="Back to Applications"
+    />
   )
 }

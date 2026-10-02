@@ -103,6 +103,8 @@ describe('useApplicationForm', () => {
       // New envelope format: { savedAt, data }
       expect(envelope.savedAt).toBeGreaterThan(0)
       expect(envelope.data.annual_income).toBe(95000)
+      // The draft records who saved it so a later login by someone else drops it
+      expect(envelope.owner).toBe(adminUser.username)
     })
   })
 

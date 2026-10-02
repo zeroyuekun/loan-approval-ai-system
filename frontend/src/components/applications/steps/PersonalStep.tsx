@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectItem } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { FormData } from '@/hooks/useApplicationForm'
+import { APPLICANT_TYPE_OPTIONS, HOME_OWNERSHIP_OPTIONS } from '@/lib/loanFieldOptions'
 
 interface PersonalStepProps {
   register: UseFormRegister<FormData>
@@ -37,8 +38,9 @@ export function PersonalStep({ register, errors, user }: PersonalStepProps) {
           <div>
             <Label htmlFor="applicant_type">Applicant Type</Label>
             <Select id="applicant_type" {...register('applicant_type')}>
-              <SelectItem value="single">Single Applicant</SelectItem>
-              <SelectItem value="couple">Joint Applicants (Couple)</SelectItem>
+              {APPLICANT_TYPE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
             </Select>
             {errors.applicant_type && <p className="text-sm text-destructive mt-1">{errors.applicant_type.message}</p>}
           </div>
@@ -51,9 +53,9 @@ export function PersonalStep({ register, errors, user }: PersonalStepProps) {
         <div>
           <Label htmlFor="home_ownership">Current Living Situation</Label>
           <Select id="home_ownership" {...register('home_ownership')}>
-            <SelectItem value="own">Own Outright</SelectItem>
-            <SelectItem value="mortgage">Own with Mortgage</SelectItem>
-            <SelectItem value="rent">Renting</SelectItem>
+            {HOME_OWNERSHIP_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
           </Select>
           {errors.home_ownership && <p className="text-sm text-destructive mt-1">{errors.home_ownership.message}</p>}
         </div>

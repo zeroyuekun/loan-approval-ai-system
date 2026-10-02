@@ -1,4 +1,4 @@
-"""Risk-based pricing tiers (D4).
+"""Risk-based pricing tiers.
 
 Maps a PD score + product segment to an indicative interest-rate band and
 pricing-tier label. AU challenger banks publish coarse pricing bands by
@@ -112,7 +112,8 @@ def _resolve_segment(segment: str) -> str:
     """Normalise a segment string to either 'personal' or 'home'.
 
     Accepts the D2 constants (home_owner_occupier / home_investor / personal),
-    the raw LoanApplication.purpose values ("home", "investment", "personal"),
+    every LoanApplication.purpose value (home, auto, education, personal,
+    business) plus "investment",
     and the unified fallback (routes to personal for pricing purposes, since
     unified-model approvals default to the widest risk tolerance band).
     """
@@ -127,7 +128,10 @@ def _resolve_segment(segment: str) -> str:
         # granularity. A later revision may split into a dedicated investor
         # table; see spec §D4 follow-up.
         return SEGMENT_HOME
-    if s in ("personal", "education", "auto", "unified"):
+    if s in ("personal", "education", "auto", "business", "unified"):
+        # Business loans here are unsecured small-business lending: they price
+        # on the unsecured (personal) band, whose PD decline cutoff (0.25) is
+        # the one that applies to them.
         return SEGMENT_PERSONAL
     raise ValueError(f"Unknown segment for pricing: {segment!r}")
 
@@ -173,3 +177,18 @@ def get_tier(pd_score: float, segment: str) -> PricingTier:
         rate_max=None,
         rationale=(f"PD {pd_score:.4f} exceeds maximum priced tier cutoff ({top_cutoff}) — risk outside appetite"),
     )
+
+
+def quoted_tier(pd_score: float, segment: str) -> PricingTier:
+    """The tier a granted loan is priced in.
+
+    Its own tier, or the top priced tier when the PD is beyond every cutoff:
+    a decline the pricing gate made can still be approved by a person (a
+    decision-review overturn), and that loan is priced at the riskiest band
+    the bank publishes, not left unpriced.
+    """
+    tier = get_tier(pd_score, segment)
+    if tier.approved:
+        return tier
+    tiers = _HOME_TIERS if tier.segment == SEGMENT_HOME else _PERSONAL_TIERS
+    return get_tier(tiers[-1][1], segment)

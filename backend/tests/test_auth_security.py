@@ -4,9 +4,12 @@ failed login tracking, and account lockout.
 Uses pytest + Django test client with cookie-based JWT auth.
 """
 
+from datetime import timedelta
 from unittest.mock import patch
+from urllib.parse import urlencode
 
 import pytest
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -42,6 +45,10 @@ CSRF_URL = "/api/v1/auth/csrf/"
 PASSWORD = "testpass123"
 
 
+def _post_login(client, username, password):
+    return client.post(LOGIN_URL, {"username": username, "password": password})
+
+
 @pytest.fixture
 def auth_client():
     return APIClient()
@@ -73,13 +80,7 @@ class TestCSRFTokenRotation:
         initial_csrf = auth_client.cookies.get("csrftoken")
 
         # Step 2: Login
-        login_resp = auth_client.post(
-            LOGIN_URL,
-            {
-                "username": login_user.username,
-                "password": PASSWORD,
-            },
-        )
+        login_resp = _post_login(auth_client, login_user.username, PASSWORD)
         assert login_resp.status_code == status.HTTP_200_OK
 
         # Step 3: Verify CSRF token changed
@@ -102,13 +103,7 @@ class TestRefreshTokenBlacklisting:
     def test_old_refresh_token_rejected_after_rotation(self, auth_client, login_user):
         """After using a refresh token, the old one should be blacklisted."""
         # Step 1: Login to get tokens
-        login_resp = auth_client.post(
-            LOGIN_URL,
-            {
-                "username": login_user.username,
-                "password": PASSWORD,
-            },
-        )
+        login_resp = _post_login(auth_client, login_user.username, PASSWORD)
         assert login_resp.status_code == status.HTTP_200_OK
         old_refresh = auth_client.cookies.get("refresh_token")
         assert old_refresh is not None, "refresh_token cookie should be set after login"
@@ -135,13 +130,7 @@ class TestHttpOnlyCookies:
 
     def test_login_sets_httponly_cookies(self, auth_client, login_user):
         """access_token and refresh_token cookies must have httponly=True."""
-        login_resp = auth_client.post(
-            LOGIN_URL,
-            {
-                "username": login_user.username,
-                "password": PASSWORD,
-            },
-        )
+        login_resp = _post_login(auth_client, login_user.username, PASSWORD)
         assert login_resp.status_code == status.HTTP_200_OK
 
         access_cookie = login_resp.cookies.get("access_token")
@@ -163,13 +152,7 @@ class TestFailedLoginTracking:
     def test_failed_login_increments_counter(self, auth_client, login_user):
         """Three failed login attempts should set failed_login_attempts to 3."""
         for _ in range(3):
-            resp = auth_client.post(
-                LOGIN_URL,
-                {
-                    "username": login_user.username,
-                    "password": "wrong_password",
-                },
-            )
+            resp = _post_login(auth_client, login_user.username, "wrong_password")
             assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
         login_user.refresh_from_db()
@@ -181,25 +164,13 @@ class TestFailedLoginTracking:
         """A successful login after failures should reset the counter to 0."""
         # Fail twice
         for _ in range(2):
-            auth_client.post(
-                LOGIN_URL,
-                {
-                    "username": login_user.username,
-                    "password": "wrong_password",
-                },
-            )
+            _post_login(auth_client, login_user.username, "wrong_password")
 
         login_user.refresh_from_db()
         assert login_user.failed_login_attempts == 2
 
         # Succeed
-        resp = auth_client.post(
-            LOGIN_URL,
-            {
-                "username": login_user.username,
-                "password": PASSWORD,
-            },
-        )
+        resp = _post_login(auth_client, login_user.username, PASSWORD)
         assert resp.status_code == status.HTTP_200_OK
 
         login_user.refresh_from_db()
@@ -215,13 +186,7 @@ class TestAccountLockout:
         """After 5 failed attempts the account should be locked, rejecting even valid creds."""
         # Fail 5 times to trigger lockout (threshold is 5 per accounts/models.py)
         for i in range(5):
-            resp = auth_client.post(
-                LOGIN_URL,
-                {
-                    "username": login_user.username,
-                    "password": "wrong_password",
-                },
-            )
+            resp = _post_login(auth_client, login_user.username, "wrong_password")
             assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
                 f"Attempt {i + 1}: expected 400, got {resp.status_code}"
             )
@@ -231,13 +196,7 @@ class TestAccountLockout:
         assert login_user.is_locked, "Account should be locked after 5 failures"
 
         # Now try with the CORRECT password -- should still be rejected
-        resp = auth_client.post(
-            LOGIN_URL,
-            {
-                "username": login_user.username,
-                "password": PASSWORD,
-            },
-        )
+        resp = _post_login(auth_client, login_user.username, PASSWORD)
         assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
             "Login with correct password should fail while account is locked"
         )
@@ -247,10 +206,7 @@ class TestAccountLockout:
         lockout + failed-attempt accounting (regression: email login bypassed the
         lockout entirely because the view resolved the user only by username)."""
         for i in range(5):
-            resp = auth_client.post(
-                LOGIN_URL,
-                {"username": login_user.email, "password": "wrong_password"},
-            )
+            resp = _post_login(auth_client, login_user.email, "wrong_password")
             assert resp.status_code == status.HTTP_400_BAD_REQUEST, f"Attempt {i + 1}"
 
         login_user.refresh_from_db()
@@ -258,10 +214,7 @@ class TestAccountLockout:
         assert login_user.is_locked, "Account should lock after 5 email-based failures"
 
         # Correct password via email must still be rejected while locked.
-        resp = auth_client.post(
-            LOGIN_URL,
-            {"username": login_user.email, "password": PASSWORD},
-        )
+        resp = _post_login(auth_client, login_user.email, PASSWORD)
         assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
             "Correct password via email should fail while the account is locked"
         )
@@ -273,11 +226,7 @@ class TestCookieAuthCSRFEnforcement:
     """Cookie-based JWT auth must enforce CSRF on mutating requests."""
 
     def _login(self, client, user):
-        resp = client.post(
-            LOGIN_URL,
-            {"username": user.username, "password": PASSWORD},
-            format="json",
-        )
+        resp = _post_login(client, user.username, PASSWORD)
         assert resp.status_code == status.HTTP_200_OK, resp.content
         return resp
 
@@ -317,3 +266,143 @@ class TestCookieAuthCSRFEnforcement:
             HTTP_AUTHORIZATION=f"Bearer {token}",
         )
         assert not (resp.status_code == 403 and "CSRF" in (resp.json().get("detail") or ""))
+
+
+@pytest.mark.django_db
+@patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
+class TestFailedLoginsExpire:
+    """Failures stop adding up after LOGIN_FAILURE_WINDOW (see settings)."""
+
+    def _fail_once(self, client, user):
+        resp = _post_login(client, user.username, "wrong_password")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize(
+        "last_failure_age",
+        [
+            pytest.param(timedelta(hours=25), id="long-ago"),
+            # Rows from before migration 0013 have a count but no failure time.
+            pytest.param(None, id="never-recorded"),
+        ],
+    )
+    def test_stale_count_starts_again(self, auth_client, login_user, last_failure_age):
+        now = timezone.now()
+        CustomUser.objects.filter(pk=login_user.pk).update(
+            failed_login_attempts=15,
+            locked_until=now - timedelta(minutes=1),
+            last_failed_login_at=None if last_failure_age is None else now - last_failure_age,
+        )
+
+        self._fail_once(auth_client, login_user)
+
+        login_user.refresh_from_db()
+        assert login_user.failed_login_attempts == 1
+        assert not login_user.is_locked
+
+    def test_failures_inside_the_window_still_add_up(self, auth_client, login_user):
+        CustomUser.objects.filter(pk=login_user.pk).update(
+            failed_login_attempts=4, last_failed_login_at=timezone.now() - timedelta(minutes=5)
+        )
+
+        self._fail_once(auth_client, login_user)
+
+        login_user.refresh_from_db()
+        assert login_user.failed_login_attempts == 5
+        assert login_user.is_locked
+
+    def test_lock_lasts_minutes_not_a_day(self, login_user):
+        for _ in range(20):
+            login_user.record_failed_login()
+
+        login_user.refresh_from_db()
+        assert login_user.is_locked
+        assert login_user.locked_until <= timezone.now() + timedelta(minutes=15)
+
+
+@pytest.fixture
+def hash_calls(monkeypatch):
+    """Record every password hash computed or verified. All hashes in these
+    tests use Argon2, the first configured hasher, and its verify() does not
+    call encode(), so each entry is one hash."""
+    from django.contrib.auth.hashers import Argon2PasswordHasher
+
+    from apps.accounts.views import _dummy_password_hash
+
+    _dummy_password_hash()  # built once per process, before counting starts
+    calls = []
+    for name in ("encode", "verify"):
+        original = getattr(Argon2PasswordHasher, name)
+
+        def counted(self, *args, _original=original, _name=name, **kwargs):
+            calls.append(_name)
+            return _original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Argon2PasswordHasher, name, counted)
+    return calls
+
+
+@pytest.mark.django_db
+@patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
+class TestLoginSpendsOneHash:
+    """Every sign-in branch spends exactly one password hash (see LoginView)."""
+
+    @pytest.mark.parametrize(
+        ("username", "password", "expected_status"),
+        [
+            pytest.param("no_such_user", "wrong_password", status.HTTP_400_BAD_REQUEST, id="unknown-username"),
+            pytest.param("nobody@test.com", "wrong_password", status.HTTP_400_BAD_REQUEST, id="unknown-email"),
+            pytest.param("security_test_user", "wrong_password", status.HTTP_400_BAD_REQUEST, id="wrong-password"),
+            pytest.param("security_test_user", "", status.HTTP_400_BAD_REQUEST, id="blank-password"),
+            pytest.param("security_test_user", PASSWORD, status.HTTP_200_OK, id="success"),
+        ],
+    )
+    def test_one_hash(self, auth_client, login_user, hash_calls, username, password, expected_status):
+        hash_calls.clear()
+        resp = _post_login(auth_client, username, password)
+        assert resp.status_code == expected_status
+        assert len(hash_calls) == 1, hash_calls
+
+    def test_locked_account(self, auth_client, login_user, hash_calls):
+        CustomUser.objects.filter(pk=login_user.pk).update(locked_until=timezone.now() + timedelta(minutes=5))
+        hash_calls.clear()
+        resp = _post_login(auth_client, login_user.username, PASSWORD)
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert len(hash_calls) == 1, hash_calls
+
+
+# The two bodies an HTML form on another site can post without a preflight.
+_NON_JSON_BODIES = {
+    "form-encoded": lambda body: {"data": urlencode(body), "content_type": "application/x-www-form-urlencoded"},
+    "multipart": lambda body: {"data": body, "format": "multipart"},
+}
+
+
+@pytest.mark.django_db
+@patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
+@patch("apps.accounts.views.RegisterRateThrottle.allow_request", _no_throttle)
+class TestAuthEndpointsAcceptJsonOnly:
+    """Login and registration accept JSON only (see LoginView.parser_classes)."""
+
+    @pytest.mark.parametrize("encoding", _NON_JSON_BODIES)
+    def test_non_json_login_is_rejected(self, auth_client, login_user, encoding):
+        body = {"username": login_user.username, "password": PASSWORD}
+        resp = auth_client.post(LOGIN_URL, **_NON_JSON_BODIES[encoding](body))
+        assert resp.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+        assert "access_token" not in resp.cookies
+
+    def test_form_encoded_register_is_rejected(self, auth_client):
+        body = {
+            "username": "form_registrant",
+            "email": "form@test.com",
+            "password": "Long-Enough-Pass-1",
+            "password2": "Long-Enough-Pass-1",
+        }
+        resp = auth_client.post("/api/v1/auth/register/", **_NON_JSON_BODIES["form-encoded"](body))
+        assert resp.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+        assert "access_token" not in resp.cookies
+        assert not CustomUser.objects.filter(username="form_registrant").exists()
+
+    def test_json_login_still_works(self, auth_client, login_user):
+        resp = _post_login(auth_client, login_user.username, PASSWORD)
+        assert resp.status_code == status.HTTP_200_OK
+        assert "access_token" in resp.cookies

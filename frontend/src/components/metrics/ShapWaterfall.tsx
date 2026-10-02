@@ -11,18 +11,16 @@ import {
   Cell,
 } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { titleCase } from '@/lib/utils'
 
 interface ShapWaterfallProps {
   shapValues: Record<string, number>
 }
 
 export function ShapWaterfall({ shapValues }: ShapWaterfallProps) {
-  const toTitleCase = (s: string) =>
-    s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-
   const data = Object.entries(shapValues)
     .map(([name, value]) => ({
-      name: toTitleCase(name),
+      name: titleCase(name),
       value: Number(value),
     }))
     .filter((d) => Number.isFinite(d.value) && d.value !== 0)

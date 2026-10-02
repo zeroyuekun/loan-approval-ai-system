@@ -32,7 +32,7 @@ labels: ["bug"]
 </details>
 
 ## Severity
-- [ ] Critical — production outage, data loss, security
-- [ ] High — major feature broken, no workaround
-- [ ] Medium — feature impaired, workaround exists
-- [ ] Low — cosmetic or edge case
+- [ ] Critical: production outage, data loss, security
+- [ ] High: major feature broken, no workaround
+- [ ] Medium: feature impaired, workaround exists
+- [ ] Low: cosmetic or edge case

@@ -2,38 +2,28 @@
 
 import { useState, useEffect, useCallback, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import { AuthContext } from '@/lib/auth'
-import { authApi, type RegisterPayload } from '@/lib/api'
+import api, { authApi, type RegisterPayload } from '@/lib/api'
+import { clearSession, readSessionUser, setRoleCookie, storeSessionUser } from '@/lib/session'
+import { clearForeignDraft, resetClientState } from '@/lib/clientState'
 import { User } from '@/types'
-
-function setRoleCookie(role: string) {
-  const secure = window.location.hostname !== 'localhost' ? ';Secure' : ''
-  document.cookie = `user_role=${role};path=/;max-age=${60 * 60 * 24 * 30};SameSite=Lax${secure}`
-}
-
-function clearRoleCookie() {
-  document.cookie = 'user_role=;path=/;max-age=0'
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
+  const queryClient = useQueryClient()
 
   const fetchProfile = useCallback(async () => {
     try {
       const { data } = await authApi.getProfile()
       setUser(data)
-      // Store only non-PII fields needed for instant UI render (role + username).
-      // id and email are intentionally excluded to minimise same-tab JS exposure.
-      const safeUser = { role: data.role, username: data.username }
-      sessionStorage.setItem('user', JSON.stringify(safeUser))
-      setRoleCookie(data.role)
+      storeSessionUser(data)
       return true
     } catch {
       setUser(null)
-      sessionStorage.removeItem('user')
-      clearRoleCookie()
+      clearSession()
       return false
     }
   }, [])
@@ -41,10 +31,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // On mount, try to restore session from HttpOnly cookies
   useEffect(() => {
     // Load cached user from sessionStorage for instant render
-    const cached = sessionStorage.getItem('user')
+    const cached = readSessionUser()
     if (cached) {
       try {
         const parsed = JSON.parse(cached)
+        // Must run after hydration: the provider is server-prerendered and the
+        // server has no sessionStorage, so a useState initializer would mismatch.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setUser(parsed)
         setRoleCookie(parsed.role)
       } catch {}
@@ -57,14 +50,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Ensure we have a CSRF token before the login POST
     await authApi.getCsrfToken()
     const { data } = await authApi.login({ username, password })
-    // Server sets HttpOnly cookies — store only non-PII metadata for instant render
-    const safeUser = { role: data.user.role, username: data.user.username }
-    sessionStorage.setItem('user', JSON.stringify(safeUser))
+    if (!data?.user?.role || !data.user.username) {
+      throw new Error('Unexpected login response from the server.')
+    }
+
+    // A new session starts with an empty cache: React Query keys are not
+    // user-scoped, so anything cached before this point belongs to whoever
+    // used this browser last.
+    queryClient.clear()
+    clearForeignDraft(data.user.username)
+    // Server sets HttpOnly cookies; we keep only the non-PII render hints
+    storeSessionUser(data.user)
     setUser(data.user)
-    setRoleCookie(data.user.role)
     setIsLoading(false)
     router.replace(data.user.role === 'customer' ? '/apply' : '/dashboard')
-  }, [router])
+  }, [router, queryClient])
 
   const register = useCallback(async (formData: RegisterPayload) => {
     await authApi.getCsrfToken()
@@ -75,16 +75,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     try {
       // POST to logout — server blacklists refresh token and clears cookies
-      const api = (await import('@/lib/api')).default
       await api.post('/auth/logout/')
     } catch {
       // Logout even if the API call fails
     }
-    sessionStorage.removeItem('user')
-    clearRoleCookie()
+    // Session hints, the query cache and per-user local storage (drafts)
+    resetClientState(queryClient)
     setUser(null)
     router.replace('/login')
-  }, [router])
+  }, [router, queryClient])
 
   return (
     <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>

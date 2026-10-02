@@ -1,6 +1,7 @@
 import { UseFormWatch } from 'react-hook-form'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { FormData } from '@/hooks/useApplicationForm'
+import { formatPercent } from '@/lib/utils'
 
 interface ReviewStepProps {
   watch: UseFormWatch<FormData>
@@ -89,7 +90,7 @@ export function ReviewStep({ watch, user }: ReviewStepProps) {
                 <div className="text-muted-foreground">Estimated LVR</div>
                 <div>
                   {watch('property_value') && Number(watch('property_value')) > 0
-                    ? `${((Number(watch('loan_amount')) / Number(watch('property_value'))) * 100).toFixed(1)}%`
+                    ? formatPercent(Number(watch('loan_amount')) / Number(watch('property_value')))
                     : '\u2014'}
                 </div>
               </>

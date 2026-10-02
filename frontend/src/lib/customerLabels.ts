@@ -10,6 +10,9 @@
  * backend TextChoices additions here.
  */
 
+/** Australian states and territories, in the order the address selects list them. */
+export const AU_STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']
+
 export const tierColors: Record<string, string> = {
   standard: 'bg-gray-100 text-gray-800',
   silver: 'bg-slate-200 text-slate-800',

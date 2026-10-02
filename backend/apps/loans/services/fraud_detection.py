@@ -12,6 +12,8 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from apps.loans.models import LoanApplication
+
 logger = logging.getLogger("loans.fraud_detection")
 
 # ---------------------------------------------------------------------------
@@ -79,8 +81,6 @@ class FraudDetectionService:
         Only counts applications still in the intake pipeline (pending/processing)
         — already-decided applications are not stacking attempts.
         """
-        from apps.loans.models import LoanApplication
-
         cutoff = timezone.now() - timedelta(days=30)
 
         duplicates = LoanApplication.objects.filter(
@@ -113,8 +113,6 @@ class FraudDetectionService:
         threshold is `recent_count >= 10` (the +1 in messages includes the
         current application).
         """
-        from apps.loans.models import LoanApplication
-
         cutoff = timezone.now() - timedelta(days=7)
         recent_count = (
             LoanApplication.objects.filter(

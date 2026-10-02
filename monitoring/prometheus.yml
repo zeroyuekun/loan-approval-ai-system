@@ -16,10 +16,14 @@ scrape_configs:
     static_configs:
       - targets: ['backend:8000']
     scrape_interval: 10s
+    # /metrics is gated by X-Health-Token (config/ops_auth.py). Prometheus does
+    # NOT expand ${ENV_VARS} in this file, so the token is read from a file.
+    # docker-compose.yml mounts the HEALTH_CHECK_TOKEN value from .env at this
+    # path as a compose secret; in k8s, mount a Secret key at the same path.
     http_headers:
       X-Health-Token:
-        values:
-          - ${HEALTH_CHECK_TOKEN}
+        files:
+          - /run/secrets/health_check_token
 
   # TODO: Redis does not expose Prometheus metrics natively; scraping :6379
   # produces TCP errors every interval. Add oliver006/redis_exporter:9121 as a

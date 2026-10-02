@@ -1,19 +1,19 @@
-"""DRF serializers for AgentRun and its nested artifacts (L13/L14).
+"""DRF serializers for AgentRun and its nested artifacts.
 
-These replace the hand-built response dicts in ``agents/views.py`` that were
-duplicated across the list and detail endpoints. The serialized shapes are
-byte-equal to the legacy dicts: UUIDs render via ``str(...)`` and timestamps
-via ``.isoformat()`` (hence SerializerMethodField rather than raw
-UUIDField/DateTimeField, which would change the representation).
+Shared by the list and detail endpoints in ``agents/views.py``. UUIDs render
+via ``str(...)`` and timestamps via ``.isoformat()`` (hence
+SerializerMethodField rather than raw UUIDField/DateTimeField, which would
+change the representation the frontend relies on).
 
 The list endpoint nests ``MarketingEmailListSerializer`` (no ``html_body``) so
-the 1k-LOC regex HTML renderer is not invoked per marketing email per row in
-the paginated hot path (L14). The detail endpoint nests
+the ~1k-line regex HTML renderer is not invoked per marketing email per row in
+the paginated hot path. The detail endpoint nests
 ``MarketingEmailDetailSerializer`` (with ``html_body``).
 """
 
 from rest_framework import serializers
 
+from apps.accounts.policy import is_staff_role
 from apps.email_engine.services.html_renderer import render_html
 
 
@@ -133,3 +133,87 @@ class AgentRunSerializer(serializers.Serializer):
         include_html = self.context.get("include_html", False)
         ser = MarketingEmailDetailSerializer if include_html else MarketingEmailListSerializer
         return ser(obj.marketing_emails.all(), many=True).data
+
+
+# ---------------------------------------------------------------------------
+# Customer-facing variants (I5)
+#
+# The applicant may see what was issued to them, never the internal compliance
+# artefacts behind it: bias analyses, the NBO retention strategy and score,
+# marketing drafts that were blocked or never sent, guardrail results, and raw
+# step errors / result summaries (which carry bias scores, retention scores
+# and provider error text). Keys that the frontend reads stay present with
+# empty values so the response shape holds; purely internal fields are dropped.
+# ---------------------------------------------------------------------------
+
+
+class CustomerNextBestOfferSerializer(serializers.Serializer):
+    id = serializers.SerializerMethodField()
+    offers = serializers.JSONField()
+    personalized_message = serializers.CharField()
+    marketing_message = serializers.CharField()
+    created_at = serializers.SerializerMethodField()
+
+    def get_id(self, obj):
+        return str(obj.id)
+
+    def get_created_at(self, obj):
+        return obj.created_at.isoformat()
+
+
+class CustomerMarketingEmailListSerializer(serializers.Serializer):
+    id = serializers.SerializerMethodField()
+    subject = serializers.CharField()
+    body = serializers.CharField()
+    passed_guardrails = serializers.BooleanField()
+    created_at = serializers.SerializerMethodField()
+
+    def get_id(self, obj):
+        return str(obj.id)
+
+    def get_created_at(self, obj):
+        return obj.created_at.isoformat()
+
+
+class CustomerMarketingEmailDetailSerializer(CustomerMarketingEmailListSerializer):
+    html_body = serializers.SerializerMethodField()
+
+    def get_html_body(self, obj):
+        return render_html(obj.body, email_type="marketing")
+
+
+_CUSTOMER_STEP_KEYS = ("step_name", "status", "started_at", "completed_at")
+
+
+class CustomerAgentRunSerializer(AgentRunSerializer):
+    error = serializers.SerializerMethodField()
+    steps = serializers.SerializerMethodField()
+
+    def get_error(self, obj):
+        return None
+
+    def get_steps(self, obj):
+        return [
+            {**{k: step.get(k) for k in _CUSTOMER_STEP_KEYS}, "result_summary": None, "error": None}
+            for step in (obj.steps or [])
+            if isinstance(step, dict)
+        ]
+
+    def get_bias_reports(self, obj):
+        return []
+
+    def get_next_best_offers(self, obj):
+        return CustomerNextBestOfferSerializer(obj.next_best_offers.all(), many=True).data
+
+    def get_marketing_emails(self, obj):
+        include_html = self.context.get("include_html", False)
+        ser = CustomerMarketingEmailDetailSerializer if include_html else CustomerMarketingEmailListSerializer
+        # Filter in Python so a Prefetch on marketing_emails is reused.
+        return ser([m for m in obj.marketing_emails.all() if m.sent], many=True).data
+
+
+def agent_run_serializer_class(user):
+    """Staff get the full run; everyone else gets the customer-facing view."""
+    if is_staff_role(user):
+        return AgentRunSerializer
+    return CustomerAgentRunSerializer

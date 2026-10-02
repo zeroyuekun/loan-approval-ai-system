@@ -19,7 +19,7 @@ def _flush_budget_keys(guard):
     r = guard._get_redis()
     r.delete(guard._daily_key("cost_cents"))
     r.delete(guard._daily_key("calls"))
-    r.delete("ai_budget:circuit_breaker")
+    r.delete("ai_budget:circuit_breaker:anthropic")
 
 
 @skip_without_redis

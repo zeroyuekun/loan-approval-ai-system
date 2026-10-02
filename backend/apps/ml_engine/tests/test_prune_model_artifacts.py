@@ -6,6 +6,8 @@ files), dry-run mode, and orphan-file handling.
 
 from __future__ import annotations
 
+import os
+import time
 from io import StringIO
 from pathlib import Path
 
@@ -24,8 +26,11 @@ def models_dir(tmp_path, settings):
     return tmp_path
 
 
-def _make_file(path: Path, size: int = 1024) -> Path:
+def _make_file(path: Path, size: int = 1024, *, age_minutes: int = 120) -> Path:
     path.write_bytes(b"\0" * size)
+    # Older than the default --min-age-minutes, so it is eligible for pruning.
+    old = time.time() - age_minutes * 60
+    os.utime(path, (old, old))
     return path
 
 
@@ -116,3 +121,16 @@ def test_prune_reports_bytes_reclaimed(models_dir: Path):
 
     output = out.getvalue().lower()
     assert "bytes reclaimed" in output or "bytes freed" in output
+
+
+def test_prune_skips_files_younger_than_min_age(models_dir: Path):
+    """I8: a training run writes the .joblib before it registers the
+    ModelVersion row; in that window the file looks like an orphan. Files
+    younger than --min-age-minutes (default 60) are never deleted."""
+    fresh = _make_file(models_dir / "xgb_being_registered.joblib", age_minutes=1)
+    old_orphan = _make_file(models_dir / "xgb_old_orphan.joblib")
+
+    call_command("prune_model_artifacts", stdout=StringIO())
+
+    assert fresh.exists()
+    assert not old_orphan.exists()

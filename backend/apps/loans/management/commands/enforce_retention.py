@@ -29,11 +29,16 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from apps.accounts.models import CustomerProfile
+from apps.loans.models import AuditLog, LoanApplication
+from apps.ml_engine.models import DriftReport, PredictionLog
+
 logger = logging.getLogger(__name__)
 
 # Retention periods (days)
 RETENTION_POLICY = {
     "soft_deleted_records": 90,  # Privacy Act APP 11.2 — purge soft-deleted PII
+    "loan_applications": 7 * 365,  # AML/CTF Act s 107 — floor for purging a soft-deleted application
     "prediction_logs": 5 * 365,  # APRA CPG 235 — model audit trail
     "drift_reports": 3 * 365,  # Internal governance policy
     # Loan applications, audit logs, KYC, emails, bias reports: 7 years
@@ -64,12 +69,13 @@ class Command(BaseCommand):
         # ── 1. Purge soft-deleted records past retention ──
         cutoff_soft = now - timedelta(days=RETENTION_POLICY["soft_deleted_records"])
 
-        from apps.accounts.models import CustomerProfile
-        from apps.loans.models import LoanApplication
-
-        for model_cls in [CustomerProfile, LoanApplication]:
+        # A soft-deleted application is purged only once its 7-year retention
+        # has also run: the purge CASCADEs to the decision, bias reports and
+        # emails, which carry their own 7-year retention.
+        cutoff_app = now - timedelta(days=RETENTION_POLICY["loan_applications"])
+        for model_cls, extra in ((CustomerProfile, {}), (LoanApplication, {"created_at__lt": cutoff_app})):
             name = model_cls.__name__
-            expired = model_cls.all_objects.dead().filter(deleted_at__lt=cutoff_soft)
+            expired = model_cls.all_objects.dead().filter(deleted_at__lt=cutoff_soft, **extra)
             count = expired.count()
 
             if count > 0:
@@ -79,8 +85,6 @@ class Command(BaseCommand):
                 )
                 if not dry_run:
                     # Log before purging for audit trail
-                    from apps.loans.models import AuditLog
-
                     AuditLog.objects.create(
                         action="retention_purge",
                         resource_type=name,
@@ -91,73 +95,37 @@ class Command(BaseCommand):
                             "policy": f"{RETENTION_POLICY['soft_deleted_records']} days",
                         },
                     )
-                    expired.delete()
+                    expired.hard_delete()
                     self.stdout.write(self.style.SUCCESS(f"    Purged {count} {name} records"))
                 total_purged += count
             else:
                 self.stdout.write(f"  {name}: no expired soft-deleted records")
 
-        # ── 2. Archive old prediction logs ──
-        cutoff_predictions = now - timedelta(days=RETENTION_POLICY["prediction_logs"])
+        # ── 2. Archive old prediction logs and drift reports ──
+        for model_cls, policy_key in ((PredictionLog, "prediction_logs"), (DriftReport, "drift_reports")):
+            name = model_cls.__name__
+            cutoff = now - timedelta(days=RETENTION_POLICY[policy_key])
+            old_records = model_cls.objects.filter(created_at__lt=cutoff)
+            count = old_records.count()
 
-        from apps.ml_engine.models import PredictionLog
-
-        old_predictions = PredictionLog.objects.filter(created_at__lt=cutoff_predictions)
-        pred_count = old_predictions.count()
-
-        if pred_count > 0:
-            self.stdout.write(
-                f"  PredictionLog: {pred_count} record(s) older than {RETENTION_POLICY['prediction_logs'] // 365} years"
-            )
-            if not dry_run:
-                from apps.loans.models import AuditLog
-
-                AuditLog.objects.create(
-                    action="retention_archive",
-                    resource_type="PredictionLog",
-                    resource_id="batch",
-                    details={
-                        "count": pred_count,
-                        "cutoff": cutoff_predictions.isoformat(),
-                        "policy": f"{RETENTION_POLICY['prediction_logs']} days",
-                    },
-                )
-                old_predictions.delete()
-                self.stdout.write(self.style.SUCCESS(f"    Archived {pred_count} PredictionLog records"))
-            total_archived += pred_count
-        else:
-            self.stdout.write("  PredictionLog: no records past retention")
-
-        # ── 3. Archive old drift reports ──
-        cutoff_drift = now - timedelta(days=RETENTION_POLICY["drift_reports"])
-
-        from apps.ml_engine.models import DriftReport
-
-        old_drift = DriftReport.objects.filter(created_at__lt=cutoff_drift)
-        drift_count = old_drift.count()
-
-        if drift_count > 0:
-            self.stdout.write(
-                f"  DriftReport: {drift_count} record(s) older than {RETENTION_POLICY['drift_reports'] // 365} years"
-            )
-            if not dry_run:
-                from apps.loans.models import AuditLog
-
-                AuditLog.objects.create(
-                    action="retention_archive",
-                    resource_type="DriftReport",
-                    resource_id="batch",
-                    details={
-                        "count": drift_count,
-                        "cutoff": cutoff_drift.isoformat(),
-                        "policy": f"{RETENTION_POLICY['drift_reports']} days",
-                    },
-                )
-                old_drift.delete()
-                self.stdout.write(self.style.SUCCESS(f"    Archived {drift_count} DriftReport records"))
-            total_archived += drift_count
-        else:
-            self.stdout.write("  DriftReport: no records past retention")
+            if count > 0:
+                self.stdout.write(f"  {name}: {count} record(s) older than {RETENTION_POLICY[policy_key] // 365} years")
+                if not dry_run:
+                    AuditLog.objects.create(
+                        action="retention_archive",
+                        resource_type=name,
+                        resource_id="batch",
+                        details={
+                            "count": count,
+                            "cutoff": cutoff.isoformat(),
+                            "policy": f"{RETENTION_POLICY[policy_key]} days",
+                        },
+                    )
+                    old_records.delete()
+                    self.stdout.write(self.style.SUCCESS(f"    Archived {count} {name} records"))
+                total_archived += count
+            else:
+                self.stdout.write(f"  {name}: no records past retention")
 
         # ── Summary ──
         self.stdout.write("")

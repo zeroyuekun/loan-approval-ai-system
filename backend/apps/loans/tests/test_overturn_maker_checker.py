@@ -1,9 +1,9 @@
 """L29 (OPTIONAL): maker/checker gate dispatcher for high-value overturns.
 
 The pure dispatcher decides whether an officer overturn may proceed given the
-loan amount, a threshold, the gate mode, and whether the officer has a verified
-2FA device. Default mode is "off" (no behaviour change). Wiring tests exercise
-the resolve endpoint in "2fa" mode.
+loan amount, a threshold and the gate mode. Default mode is "off" (no
+behaviour change). Wiring tests exercise the resolve endpoint in
+"second_approver" mode and with the legacy "2fa" value.
 """
 
 import pytest
@@ -25,30 +25,24 @@ def test_default_mode_is_off():
 
 
 def test_off_mode_allows_any_amount():
-    gate = evaluate_overturn_gate(amount=500000, threshold=100000, mode="off", officer_has_2fa=False)
-    assert gate["allowed"] is True
+    assert evaluate_overturn_gate(amount=500000, threshold=100000, mode="off")["allowed"] is True
 
 
 def test_below_threshold_allowed_regardless_of_mode():
-    gate = evaluate_overturn_gate(amount=50000, threshold=100000, mode="2fa", officer_has_2fa=False)
-    assert gate["allowed"] is True
-
-
-def test_2fa_mode_blocks_high_value_without_verified_device():
-    gate = evaluate_overturn_gate(amount=150000, threshold=100000, mode="2fa", officer_has_2fa=False)
-    assert gate["allowed"] is False
-    assert gate["reason"]
-
-
-def test_2fa_mode_allows_with_verified_device():
-    gate = evaluate_overturn_gate(amount=150000, threshold=100000, mode="2fa", officer_has_2fa=True)
-    assert gate["allowed"] is True
+    assert evaluate_overturn_gate(amount=50000, threshold=100000, mode="second_approver")["allowed"] is True
 
 
 def test_second_approver_mode_blocks_high_value():
-    gate = evaluate_overturn_gate(amount=150000, threshold=100000, mode="second_approver", officer_has_2fa=True)
+    gate = evaluate_overturn_gate(amount=150000, threshold=100000, mode="second_approver")
     assert gate["allowed"] is False
     assert gate["reason"]
+
+
+def test_legacy_2fa_mode_maps_to_second_approver():
+    # 2FA was removed. A deployment still configured with "2fa" must keep a
+    # gate, so the value maps to the stricter remaining mode, never to "off".
+    assert normalize_overturn_mode("2fa") == "second_approver"
+    assert evaluate_overturn_gate(amount=150000, threshold=100000, mode="2fa")["allowed"] is False
 
 
 def test_unknown_mode_collapses_to_off():
@@ -57,7 +51,7 @@ def test_unknown_mode_collapses_to_off():
 
 
 # ---------------------------------------------------------------------------
-# Endpoint wiring (DB) — "2fa" mode
+# Endpoint wiring (DB)
 # ---------------------------------------------------------------------------
 
 
@@ -84,15 +78,11 @@ def _denied_app_with_review(django_user_model, amount=150000):
     return cust, app, review
 
 
-@pytest.mark.django_db
-def test_resolve_overturn_blocked_without_2fa(django_user_model, settings):
-    settings.DECISION_OVERTURN_GATE_MODE = "2fa"
-    settings.DECISION_OVERTURN_THRESHOLD = 100000.0
+def _resolve_as_officer(django_user_model, username):
     officer = django_user_model.objects.create_user(
-        username="ovt_officer", password="x", role="officer", email="ovt_officer@x.com"
+        username=username, password="x", role="officer", email=f"{username}@x.com"
     )
     _cust, _app, review = _denied_app_with_review(django_user_model, amount=150000)
-
     client = APIClient()
     client.force_authenticate(officer)
     resp = client.post(
@@ -100,47 +90,23 @@ def test_resolve_overturn_blocked_without_2fa(django_user_model, settings):
         {"outcome": "overturned"},
         format="json",
     )
-    assert resp.status_code == 403
     review.refresh_from_db()
+    return resp, review
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("mode", ["second_approver", "2fa"])
+def test_resolve_high_value_overturn_blocked(django_user_model, settings, mode):
+    settings.DECISION_OVERTURN_GATE_MODE = mode
+    settings.DECISION_OVERTURN_THRESHOLD = 100000.0
+    resp, review = _resolve_as_officer(django_user_model, "ovt_officer")
+    assert resp.status_code == 403
     assert review.status != "resolved"
 
 
 @pytest.mark.django_db
-def test_resolve_overturn_allowed_with_verified_2fa(django_user_model, settings):
-    from django_otp.plugins.otp_totp.models import TOTPDevice
-
-    settings.DECISION_OVERTURN_GATE_MODE = "2fa"
-    settings.DECISION_OVERTURN_THRESHOLD = 100000.0
-    officer = django_user_model.objects.create_user(
-        username="ovt_officer2", password="x", role="officer", email="ovt_officer2@x.com"
-    )
-    TOTPDevice.objects.create(user=officer, name="d", confirmed=True)
-    _cust, _app, review = _denied_app_with_review(django_user_model, amount=150000)
-
-    client = APIClient()
-    client.force_authenticate(officer)
-    resp = client.post(
-        f"/api/v1/loans/decision-reviews/{review.id}/resolve/",
-        {"outcome": "overturned"},
-        format="json",
-    )
-    assert resp.status_code == 200
-
-
-@pytest.mark.django_db
-def test_resolve_overturn_default_off_allows_without_2fa(django_user_model, settings):
+def test_resolve_overturn_default_off_allows(django_user_model, settings):
     # Default mode (off) must not change behaviour — overturn proceeds.
     settings.DECISION_OVERTURN_GATE_MODE = "off"
-    officer = django_user_model.objects.create_user(
-        username="ovt_officer3", password="x", role="officer", email="ovt_officer3@x.com"
-    )
-    _cust, _app, review = _denied_app_with_review(django_user_model, amount=150000)
-
-    client = APIClient()
-    client.force_authenticate(officer)
-    resp = client.post(
-        f"/api/v1/loans/decision-reviews/{review.id}/resolve/",
-        {"outcome": "overturned"},
-        format="json",
-    )
+    resp, _review = _resolve_as_officer(django_user_model, "ovt_officer3")
     assert resp.status_code == 200

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { connection } from 'next/server'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
@@ -11,11 +12,16 @@ export const metadata: Metadata = {
   description: 'AI-powered loan approval and processing system',
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  // Render every page per request. The CSP nonce (src/proxy.ts) is only
+  // applied to scripts during dynamic rendering; a page prerendered at build
+  // time has no nonce and the browser would block its inline scripts.
+  await connection()
+
   return (
     <html lang="en">
       <body className={inter.className}>

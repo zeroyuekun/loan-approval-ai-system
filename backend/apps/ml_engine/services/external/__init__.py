@@ -1,10 +1,6 @@
 """External integration adapters (CDR sandbox, credit bureau, property,
 macro, geocoding, benchmarks).
 
-This subpackage was extracted from the flat ml_engine/services/ directory
-on 2026-05-26 as PR-1 of the decomposition cycle (see
-docs/superpowers/specs/2026-05-25-ml-engine-decomposition-design.md).
-
 Re-exports preserve the public API. Direct imports from this subpackage
 are preferred for new code:
 

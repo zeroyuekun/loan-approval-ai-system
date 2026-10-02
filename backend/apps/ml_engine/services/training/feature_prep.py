@@ -6,12 +6,13 @@
   numeric features against the service's hard bounds, optionally widened by
   training-data-driven user bounds. Raises `ApplicationValidationError` with
   all violations aggregated so the caller can show them in one error.
+- `clip_to_training_range(features, reference_distribution, hard_bounds)` —
+  for columns with no hard bound, clip a value outside the range the model
+  was trained on back into it (for the model only) and report the clip.
 - `FEATURE_BOUNDS` — canonical hard-bounds dict consumed by `validate_input`,
-  `open_banking_service`, `macro_data_service`, and regression tests. Lives
-  here (with `validate_input`) so the constraint and its enforcer stay
-  co-located; re-exported from `predictor` for back-compat.
-
-Extracted in Arm C Phase 1 so the predictor focuses on orchestration.
+  the `external` adapters (open_banking, macro_data, credit_bureau), and
+  regression tests. Lives here (with `validate_input`) so the constraint and
+  its enforcer stay co-located; re-exported from `predictor`.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import math
 __all__ = [
     "ApplicationValidationError",
     "FEATURE_BOUNDS",
+    "clip_to_training_range",
     "safe_get_state",
     "validate_input",
 ]
@@ -105,7 +107,15 @@ FEATURE_BOUNDS = {
 
 
 class ApplicationValidationError(ValueError):
-    """Raised when an application's feature values fail basic sanity checks."""
+    """Raised when an application's feature values fail basic sanity checks.
+
+    `fields` names the offending columns so a caller can report them without
+    echoing the submitted values that the message text contains.
+    """
+
+    def __init__(self, message: str, *, fields=()):
+        super().__init__(message)
+        self.fields = list(fields)
 
 
 def safe_get_state(application) -> str:
@@ -133,25 +143,26 @@ def validate_input(
 
     `feature_bounds` is the hard-coded service bounds map (min, max per field).
     `user_bounds` is an optional data-driven map (e.g. training-set quantiles).
-    Per the v1.9 guarantee, user_bounds may only WIDEN hard bounds — never
-    narrow them — so legitimate edge-case applicants (credit_score 620, 3-mo
-    arrears, etc.) cannot be rejected by a too-tight training sample.
+    User bounds may only WIDEN a hard bound — never narrow it — and never
+    reject on their own: a column with no hard bound is only checked for
+    being a finite number. A value beyond the training range is a reason to
+    clip for the model (`clip_to_training_range`), not to refuse a decision.
 
     Missing keys pass silently. Non-numeric or nan/inf values are rejected.
     All violations are collected and reported together so the caller shows a
     single actionable error.
     """
-    bounds = {**feature_bounds}
+    bounds: dict = {**feature_bounds}
     if user_bounds:
         for col, (data_lo, data_hi) in user_bounds.items():
-            if col in bounds:
+            if bounds.get(col) is not None:
                 hard_lo, hard_hi = bounds[col]
                 bounds[col] = (min(hard_lo, data_lo), max(hard_hi, data_hi))
             else:
-                bounds[col] = (data_lo, data_hi)
+                bounds[col] = None  # finite-number check only
 
     errors: list[str] = []
-    for col, (lo, hi) in bounds.items():
+    for col, limits in bounds.items():
         val = features.get(col)
         if val is None:
             continue
@@ -163,8 +174,56 @@ def validate_input(
         if math.isnan(val) or math.isinf(val):
             errors.append(f"{col}: invalid value (nan/inf not allowed)")
             continue
+        if limits is None:
+            continue
+        lo, hi = limits
         if val < lo or val > hi:
             errors.append(f"{col}: {val} is outside valid range [{lo}, {hi}]")
 
     if errors:
-        raise ApplicationValidationError("Input validation failed: " + "; ".join(errors))
+        raise ApplicationValidationError(
+            "Input validation failed: " + "; ".join(errors),
+            fields=[e.split(":", 1)[0] for e in errors],  # each entry starts "<col>: "
+        )
+
+
+def clip_to_training_range(features: dict, reference_distribution: dict | None, *, hard_bounds: dict) -> list[dict]:
+    """Clip, in place, values the model never saw in training; return what was clipped.
+
+    Only columns WITHOUT a hard (policy) bound are clipped: those used to be
+    rejected on the training 1st/99th percentiles alone. The range is the
+    training min/max (`percentiles[0]` / `percentiles[-1]` of the reference
+    distribution), so a tree model scores the value at the edge of what it
+    learned. Each clip is returned as a warning entry for the prediction record.
+    """
+    clipped: list[dict] = []
+    if not reference_distribution:
+        return clipped
+    for col, ref in reference_distribution.items():
+        if col in hard_bounds or not isinstance(ref, dict) or features.get(col) is None:
+            continue
+        percentiles = ref.get("percentiles") or []
+        if len(percentiles) < 2:
+            continue
+        try:
+            val = float(features[col])
+        except (TypeError, ValueError):
+            continue
+        lo, hi = float(percentiles[0]), float(percentiles[-1])
+        if lo <= val <= hi:
+            continue
+        bound = lo if val < lo else hi
+        features[col] = bound
+        clipped.append(
+            {
+                "feature": col,
+                "value": val,
+                "clipped_to": bound,
+                "severity": "warning",
+                "message": (
+                    f"{col} value ({val:,.2f}) is outside the training range "
+                    f"[{lo:,.2f}, {hi:,.2f}]; scored as {bound:,.2f}"
+                ),
+            }
+        )
+    return clipped

@@ -2,10 +2,10 @@
 
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
 import { LoanApplication } from '@/types'
-import { formatCurrency, formatDate, getDisplayStatus } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 
 interface RecentApplicationsProps {
   applications: LoanApplication[]
@@ -29,7 +29,6 @@ export function RecentApplications({ applications }: RecentApplicationsProps) {
           </TableHeader>
           <TableBody>
             {applications.slice(0, 5).map((app) => {
-              const s = getDisplayStatus(app.status, app.decision)
               return (
                 <TableRow key={app.id} className="hover:bg-muted/50">
                   <TableCell>
@@ -42,7 +41,7 @@ export function RecentApplications({ applications }: RecentApplicationsProps) {
                   </TableCell>
                   <TableCell>{formatCurrency(app.loan_amount)}</TableCell>
                   <TableCell>
-                    <Badge className={s.color} variant="outline">{s.label}</Badge>
+                    <ApplicationStatusBadge status={app.status} decision={app.decision} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">{formatDate(app.created_at)}</TableCell>
                 </TableRow>

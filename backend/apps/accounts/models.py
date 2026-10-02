@@ -2,17 +2,24 @@ import datetime
 import uuid
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from apps.accounts.fields import EncryptedCharField  # noqa: F401 — used by this module and migrations
-from apps.accounts.utils.encryption import get_fernet
+from apps.accounts.fields import EncryptedCharField
 from apps.common.models import SoftDeleteModel
 
-# Backward-compatible alias — existing tests and commands import _get_fernet from here.
-_get_fernet = get_fernet
+
+def _to_decimal(value, default):
+    """Parse an encrypted-at-rest decimal string; ``default`` when empty or malformed."""
+    if not value:
+        return default
+    try:
+        return Decimal(value)
+    except (InvalidOperation, TypeError):
+        return default
 
 
 class CustomUser(AbstractUser):
@@ -25,6 +32,11 @@ class CustomUser(AbstractUser):
     phone = models.CharField(max_length=20, blank=True)
     failed_login_attempts = models.IntegerField(default=0)
     locked_until = models.DateTimeField(null=True, blank=True)
+    # Latest failure in the current count (see LOGIN_FAILURE_WINDOW).
+    last_failed_login_at = models.DateTimeField(null=True, blank=True)
+    # Set by data_retention_cleanup; the job's idempotency marker. Not the
+    # email domain, which the user can set themselves.
+    deidentified_at = models.DateTimeField(null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -33,29 +45,29 @@ class CustomUser(AbstractUser):
 
     @property
     def is_locked(self):
-        if self.locked_until and self.locked_until > timezone.now():
-            return True
-        return False
+        return bool(self.locked_until and self.locked_until > timezone.now())
 
     def record_failed_login(self):
-        from django.db.models import F
+        now = timezone.now()
+        # One UPDATE, so concurrent failures cannot lose a count.
+        CustomUser.objects.filter(pk=self.pk).update(
+            failed_login_attempts=models.Case(
+                models.When(
+                    last_failed_login_at__gt=now - settings.LOGIN_FAILURE_WINDOW,
+                    then=models.F("failed_login_attempts") + 1,
+                ),
+                default=models.Value(1),
+            ),
+            last_failed_login_at=now,
+        )
+        self.refresh_from_db(fields=["failed_login_attempts", "last_failed_login_at"])
 
-        CustomUser.objects.filter(pk=self.pk).update(failed_login_attempts=F("failed_login_attempts") + 1)
-        self.refresh_from_db()
-
-        if self.failed_login_attempts >= 15:
-            lock_minutes = 1440  # 24 hours
-        elif self.failed_login_attempts >= 10:
-            lock_minutes = 30
-        elif self.failed_login_attempts >= 8:
-            lock_minutes = 5
-        elif self.failed_login_attempts >= 5:
-            lock_minutes = 1
-        else:
-            lock_minutes = 0
-
+        lock_minutes = next(
+            (minutes for failures, minutes in settings.LOGIN_LOCKOUT_TIERS if self.failed_login_attempts >= failures),
+            0,
+        )
         if lock_minutes > 0:
-            self.locked_until = timezone.now() + timezone.timedelta(minutes=lock_minutes)
+            self.locked_until = now + datetime.timedelta(minutes=lock_minutes)
             CustomUser.objects.filter(pk=self.pk).update(locked_until=self.locked_until)
 
     def reset_failed_logins(self):
@@ -64,21 +76,6 @@ class CustomUser(AbstractUser):
             locked_until=None,
         )
         self.refresh_from_db(fields=["failed_login_attempts", "locked_until"])
-
-    def has_confirmed_totp(self) -> bool:
-        """True if the user has at least one confirmed TOTP device.
-
-        Used by both the LoginView's 2FA gate (PR-4 of security
-        gap-closure) and the IsAdminOrOfficer permission when
-        ENFORCE_2FA_FOR_STAFF is on. Lazy-imports django_otp so the
-        model can be imported in environments where django_otp isn't
-        loaded yet (e.g., management commands during initial migration).
-        """
-        try:
-            from django_otp.plugins.otp_totp.models import TOTPDevice
-        except ImportError:
-            return False
-        return TOTPDevice.objects.filter(user=self, confirmed=True).exists()
 
 
 class EmploymentStatus(models.TextChoices):
@@ -284,35 +281,17 @@ class CustomerProfile(SoftDeleteModel):
     @property
     def gross_annual_income_decimal(self) -> Decimal | None:
         """Return gross_annual_income as Decimal, or None."""
-        val = self.gross_annual_income
-        if not val or val == "":
-            return None
-        try:
-            return Decimal(val)
-        except (InvalidOperation, TypeError):
-            return None
+        return _to_decimal(self.gross_annual_income, None)
 
     @property
     def other_income_decimal(self) -> Decimal:
         """Return other_income as Decimal (defaults to 0)."""
-        val = self.other_income
-        if not val or val == "":
-            return Decimal("0")
-        try:
-            return Decimal(val)
-        except (InvalidOperation, TypeError):
-            return Decimal("0")
+        return _to_decimal(self.other_income, Decimal("0"))
 
     @property
     def partner_annual_income_decimal(self) -> Decimal | None:
         """Return partner_annual_income as Decimal, or None."""
-        val = self.partner_annual_income
-        if not val or val == "":
-            return None
-        try:
-            return Decimal(val)
-        except (InvalidOperation, TypeError):
-            return None
+        return _to_decimal(self.partner_annual_income, None)
 
     @property
     def total_deposits(self):

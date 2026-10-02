@@ -44,7 +44,7 @@ def _clear_correlation_id(**kwargs):
     _correlation_id.value = None
 
 
-# --- Worker tuning (B2) -----------------------------------------------------
+# --- Worker tuning -----------------------------------------------------
 # Prefer fair dispatch + at-least-once semantics over raw throughput.
 # Per-queue prefetch is configured on the worker command line in
 # docker-compose (ml=1, agents=1, email=2). This is the safe global default.
@@ -63,23 +63,22 @@ app.conf.accept_content = ["json"]
 
 # Worker restart every N tasks to mitigate memory leaks (common with
 # ML worker processes importing large libs). Env-var override available for
-# tuning without a redeploy; production.py no longer duplicates this value.
+# tuning without a redeploy.
 app.conf.worker_max_tasks_per_child = int(os.environ.get("CELERY_WORKER_MAX_TASKS_PER_CHILD", "1000"))
 
-# Surface broker enqueue failures instead of silently dropping (L23).
+# Surface broker enqueue failures instead of silently dropping.
 # For the Redis transport, fail fast on publish-time connection errors so
 # .delay() raises and the outbox loop keeps the durable row rather than
 # deleting it on a phantom "success". (AMQP would instead use confirm_publish.)
 # NOTE: these flags are GLOBAL across all queues, not just the outbox path —
-# they change startup/retry behaviour everywhere, so a healthy-broker smoke
-# (docker compose up; confirm workers connect) is required before merge.
+# they change startup/retry behaviour everywhere.
 app.conf.broker_transport_options = {
     "socket_timeout": 5,
     "socket_connect_timeout": 5,
     "retry_on_timeout": False,
 }
 # Retry broker connection on startup so workers survive a brief Redis restart
-# or a race during docker compose bring-up (H27). Set CELERY_RETRY_ON_STARTUP=false
+# or a race during docker compose bring-up. Set CELERY_RETRY_ON_STARTUP=false
 # to disable in environments where a clean fail-fast is preferred.
 app.conf.broker_connection_retry_on_startup = os.environ.get("CELERY_RETRY_ON_STARTUP", "true").lower() != "false"
 
@@ -117,5 +116,11 @@ app.conf.beat_schedule = {
     "retry-failed-dispatches": {
         "task": "apps.loans.tasks.retry_failed_dispatches",
         "schedule": 60.0,
+    },
+    # A hard-killed orchestrate task runs no cleanup; reset what it left in PROCESSING
+    # back to PENDING (re-runnable). Never to REVIEW: that queue is for bias flags only.
+    "recover-stuck-processing": {
+        "task": "apps.agents.tasks.recover_stuck_processing_applications",
+        "schedule": 300.0,
     },
 }

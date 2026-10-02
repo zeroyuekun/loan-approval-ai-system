@@ -4,54 +4,34 @@ Calculates which products the customer qualifies for using APRA serviceability
 rules and real Australian lending criteria. All amounts, rates, and eligibility
 are computed deterministically — the LLM only writes messaging text.
 
-Financial constants (ASSESSMENT_BUFFER, BASE_RATE, FLOOR_RATE, HEM_TABLE,
-INCOME_SHADING, tax brackets) are replicated from data_generator.py which is
-the source of truth for the synthetic data pipeline.
+Serviceability inputs (HEM benchmark, income shading, tax, existing-debt
+servicing, APRA assessment buffer and floor rate) come from
+``UnderwritingEngine`` and its helpers, the rules that label the training
+data, so an offer is sized with the same expense floor and the same shaded
+income the model learned from.
 """
 
 import logging
 import math
 from dataclasses import dataclass, field
 
+from apps.ml_engine.services.datagen.underwriting_engine import UnderwritingEngine
+from apps.ml_engine.services.underwriting_helpers import (
+    EXISTING_DEBT_MONTHLY_RATE,
+    apply_tenure_shading,
+    marginal_tax,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants — copied from ml_engine/services/data_generator.py
+# Constants
 # ---------------------------------------------------------------------------
 
-ASSESSMENT_BUFFER = 0.03
-BASE_RATE = 0.065
-FLOOR_RATE = 0.0575
+ASSESSMENT_BUFFER = UnderwritingEngine.ASSESSMENT_BUFFER
+FLOOR_RATE = UnderwritingEngine.FLOOR_RATE
 
-HEM_TABLE = {
-    ("single", 0, "low"): 1600,
-    ("single", 0, "mid"): 2050,
-    ("single", 0, "high"): 2500,
-    ("single", 1, "low"): 2150,
-    ("single", 1, "mid"): 2600,
-    ("single", 1, "high"): 3050,
-    ("single", 2, "low"): 2500,
-    ("single", 2, "mid"): 3050,
-    ("single", 2, "high"): 3500,
-    ("couple", 0, "low"): 2400,
-    ("couple", 0, "mid"): 2950,
-    ("couple", 0, "high"): 3500,
-    ("couple", 1, "low"): 2850,
-    ("couple", 1, "mid"): 3400,
-    ("couple", 1, "high"): 3950,
-    ("couple", 2, "low"): 3200,
-    ("couple", 2, "mid"): 3850,
-    ("couple", 2, "high"): 4400,
-}
-
-INCOME_SHADING = {
-    "payg_permanent": 1.00,
-    "payg_casual": 0.80,
-    "self_employed": 0.75,
-    "contract": 0.85,
-}
-
-CREDIT_CARD_MONTHLY_RATE = 0.03
+CREDIT_CARD_MONTHLY_RATE = UnderwritingEngine.CREDIT_CARD_MONTHLY_RATE
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +62,8 @@ class CustomerSnapshot:
     has_cosigner: bool
     has_hecs: bool
     has_bankruptcy: bool
+    # HEM is state-adjusted; NSW matches UnderwritingEngine.get_hem's default.
+    state: str = "NSW"
 
     # From profile
     savings_balance: float = 0.0
@@ -103,44 +85,41 @@ class CustomerSnapshot:
     effective_expenses: float = field(init=False)
     existing_debt_monthly: float = field(init=False)
     credit_card_monthly: float = field(init=False)
-    hecs_monthly: float = field(init=False)
     monthly_surplus: float = field(init=False)
     total_deposits: float = field(init=False)
     risk_tier: str = field(init=False)
 
     def __post_init__(self):
-        shade = INCOME_SHADING.get(self.employment_type, 1.0)
+        base_shade = UnderwritingEngine.INCOME_SHADING.get(self.employment_type, 1.0)
+        shade = float(apply_tenure_shading(base_shade, self.employment_type, self.employment_length))
         self.shaded_monthly_income = (self.annual_income * shade) / 12
 
-        annual_tax = _calculate_tax(self.annual_income)
-        self.monthly_tax = annual_tax / 12
+        self.monthly_tax = float(marginal_tax(self.annual_income)) / 12
 
-        self.hem_expenses = _get_hem(
+        self.hem_expenses = UnderwritingEngine().get_hem(
             self.applicant_type,
             self.number_of_dependants,
             self.annual_income,
+            self.state,
         )
         self.effective_expenses = max(self.monthly_expenses, self.hem_expenses)
 
-        # Existing debt servicing: replicate data_generator logic
         # debt_to_income includes the new loan; existing_dti = dti - (loan_amount / income)
         new_loan_dti = self.loan_amount / self.annual_income if self.annual_income > 0 else 0
         existing_dti = max(self.debt_to_income - new_loan_dti, 0)
         total_existing_debt = self.annual_income * existing_dti
-        self.existing_debt_monthly = total_existing_debt * 0.0072
+        self.existing_debt_monthly = total_existing_debt * EXISTING_DEBT_MONTHLY_RATE
 
         self.credit_card_monthly = self.existing_credit_card_limit * CREDIT_CARD_MONTHLY_RATE
 
-        self.hecs_monthly = (self.annual_income * 0.035 / 12) if self.has_hecs else 0.0
-
-        # Monthly surplus BEFORE new loan repayment
+        # Monthly surplus BEFORE new loan repayment. HECS/HELP is left out, as
+        # in UnderwritingEngine.compute_approval (Big 4 policy, 30 Sept 2025).
         self.monthly_surplus = (
             self.shaded_monthly_income
             - self.monthly_tax
             - self.effective_expenses
             - self.existing_debt_monthly
             - self.credit_card_monthly
-            - self.hecs_monthly
         )
 
         self.total_deposits = self.savings_balance + self.checking_balance
@@ -170,32 +149,6 @@ class ProductRecommendation:
 # ---------------------------------------------------------------------------
 # Standalone calculation helpers
 # ---------------------------------------------------------------------------
-
-
-def _calculate_tax(annual_income: float) -> float:
-    """Australian Stage 3 marginal tax. Returns annual tax amount."""
-    if annual_income <= 18200:
-        return 0.0
-    elif annual_income <= 45000:
-        return (annual_income - 18200) * 0.16
-    elif annual_income <= 135000:
-        return 4288 + (annual_income - 45000) * 0.30
-    elif annual_income <= 190000:
-        return 31288 + (annual_income - 135000) * 0.37
-    else:
-        return 51638 + (annual_income - 190000) * 0.45
-
-
-def _get_hem(applicant_type: str, dependants: int, annual_income: float) -> float:
-    """HEM lookup — same logic as DataGenerator._get_hem."""
-    if annual_income < 60000:
-        bracket = "low"
-    elif annual_income < 120000:
-        bracket = "mid"
-    else:
-        bracket = "high"
-    dep_key = min(dependants, 2)
-    return HEM_TABLE.get((applicant_type, dep_key, bracket), 2950)
 
 
 def _get_risk_tier(credit_score: int) -> str:
@@ -431,6 +384,7 @@ class RecommendationEngine:
             "has_cosigner": bool(application.has_cosigner),
             "has_hecs": bool(application.has_hecs),
             "has_bankruptcy": bool(application.has_bankruptcy),
+            "state": application.state,
         }
 
         try:
@@ -569,9 +523,11 @@ class RecommendationEngine:
         # Re-size max_amount at the ACTUAL selected term (M19). The secured path
         # previously sized for 60mo but quoted the repayment at the chosen
         # shorter term, so the quote could exceed the surplus the sizing assumed.
+        # Size against target_repayment, not raw surplus, so the quote stays
+        # within the same min(15%-of-gross, surplus) cap the term loop used.
         max_amount = min(
             s.savings_balance * 0.90,
-            _max_serviceable_amount(s.monthly_surplus, rate, term),
+            _max_serviceable_amount(target_repayment, rate, term),
             catalog["max_amount"],
         )
         max_amount = math.floor(max_amount / 1000) * 1000
@@ -641,8 +597,10 @@ class RecommendationEngine:
 
         # Re-size max_amount using the ACTUAL selected term, not the 60-month
         # ceiling used for initial sizing above (M19 — previously hardcoded 60).
+        # Size against target_repayment, not raw surplus, so the quote stays
+        # within the same min(15%-of-gross, surplus) cap the term loop used.
         max_amount = min(
-            _max_serviceable_amount(s.monthly_surplus, rate, term),
+            _max_serviceable_amount(target_repayment, rate, term),
             catalog["max_amount"],
         )
         max_amount = math.floor(max_amount / 1000) * 1000

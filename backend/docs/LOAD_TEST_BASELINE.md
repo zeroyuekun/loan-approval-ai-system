@@ -1,4 +1,4 @@
-# Load Test Baseline
+# Load test baseline
 
 Baseline performance targets and load testing procedures for the Loan Approval AI System.
 
@@ -6,7 +6,7 @@ Last updated: 2026-03-30
 
 ---
 
-## Test Script
+## Test script
 
 The k6 load test script lives at:
 
@@ -14,11 +14,11 @@ The k6 load test script lives at:
 tests/load/pipeline_load_test.js
 ```
 
-It is also run automatically in CI on pushes to `master` (see `.github/workflows/ci.yml`, job `load-test`).
+CI also runs it automatically on pushes to `master` (see `.github/workflows/ci.yml`, job `load-test`).
 
 ---
 
-## Test Configuration
+## Test configuration
 
 ### Scenarios
 
@@ -27,7 +27,7 @@ It is also run automatically in CI on pushes to `master` (see `.github/workflows
 | Smoke | constant-vus | 5 | 30s | Verify basic functionality under minimal load |
 | Load | ramping-vus | 0 -> 20 -> 50 -> 0 | ~2m30s (starts after smoke) | Simulate realistic traffic with ramp-up and peak |
 
-### Environment Variables
+### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -37,7 +37,7 @@ It is also run automatically in CI on pushes to `master` (see `.github/workflows
 
 ---
 
-## Endpoints Tested
+## Endpoints tested
 
 | Group | Endpoint | Method | Auth | Description |
 |-------|----------|--------|------|-------------|
@@ -49,7 +49,7 @@ It is also run automatically in CI on pushes to `master` (see `.github/workflows
 
 ---
 
-## How to Run Locally
+## How to run locally
 
 ### Prerequisites
 
@@ -107,11 +107,11 @@ The script also writes a summary to `tests/load/results/summary.json` via the `h
 
 ---
 
-## Baseline SLA Targets
+## Baseline SLA targets
 
-These are the performance targets the system must meet. Thresholds are enforced in the k6 script -- breaching them causes the test to fail.
+These are the performance targets the system must meet. The k6 script enforces them as thresholds, and breaching any of them fails the test.
 
-### Response Time (p95)
+### Response time (p95)
 
 | Endpoint Category | p95 Target | Rationale |
 |-------------------|------------|-----------|
@@ -127,7 +127,7 @@ Notes on ML and email targets:
 - ML prediction latency depends on model size and feature computation. The 2s target assumes a warm model in memory.
 - Email generation latency is dominated by the Claude API round-trip. The 5s target accounts for network latency and token generation.
 
-### Error Rate
+### Error rate
 
 | Metric | Target | Notes |
 |--------|--------|-------|
@@ -143,11 +143,11 @@ Notes on ML and email targets:
 
 ---
 
-## How to Interpret Results
+## How to interpret results
 
-### k6 Output Metrics
+### k6 output metrics
 
-After a run, k6 prints a summary. Key metrics to review:
+After a run, k6 prints a summary. The metrics to review:
 
 | Metric | What it means |
 |--------|---------------|
@@ -165,7 +165,7 @@ After a run, k6 prints a summary. Key metrics to review:
 
 The k6 script defines thresholds that map to the SLA targets above. If any threshold is breached, k6 exits with a non-zero code and prints which thresholds failed. In CI, the load test job uses `continue-on-error: true` so it does not block the pipeline, but results are uploaded as artifacts for review.
 
-### JSON Summary
+### JSON summary
 
 The `handleSummary` hook writes a structured JSON file to `tests/load/results/summary.json` with:
 
@@ -195,7 +195,7 @@ Compare `results` values against `sla_targets` to identify regressions.
 
 ---
 
-## Baseline Results
+## Baseline results
 
 > Results have not yet been captured against localhost:8500. Run the load test locally and update this section with actual numbers.
 
@@ -222,7 +222,7 @@ Then copy the p95 values from the console output or from `tests/load/results/sum
 
 ---
 
-## CI Integration
+## CI integration
 
 The load test runs automatically in GitHub Actions on pushes to `master`:
 
@@ -230,18 +230,18 @@ The load test runs automatically in GitHub Actions on pushes to `master`:
 - **Trigger**: Only on `master` branch pushes (not on PRs)
 - **Profile**: Smoke test only (5 VUs, 30s) to keep CI fast
 - **Artifacts**: Results uploaded to `load-test-results` artifact (retained 30 days)
-- **Failure mode**: `continue-on-error: true` -- load test failures do not block deployment
+- **Failure mode**: `continue-on-error: true`, so load test failures do not block deployment
 
-### Running the Full Load Profile in CI
+### Running the full load profile in CI
 
 The CI job overrides the script to run a smoke-only profile. To run the full ramping profile, remove the `--duration 30s --vus 5` flags from the CI step.
 
 ---
 
-## Scaling Considerations
+## Scaling considerations
 
-- **Database connections**: At 50 VUs, each iteration opens a session. Ensure PostgreSQL `max_connections` can handle the load (default 100).
+- **Database connections**: At 50 VUs, each iteration opens a session. Check that PostgreSQL `max_connections` can handle the load (default 100).
 - **Celery workers**: Pipeline triggers queue Celery tasks. Under load, tasks may queue up if workers are saturated. Monitor `celery inspect active` during tests.
 - **Redis**: Used as both Celery broker and cache. Watch memory usage under sustained load.
 - **Claude API rate limits**: Email generation tasks call the Claude API. Under heavy pipeline load, rate limiting may cause email generation failures. The system has a $5/day cost cap.
-- **Model warm-up**: First ML prediction after a cold start may exceed the 2s target due to model loading. Subsequent predictions should be within target.
+- **Model warm-up**: The first ML prediction after a cold start may exceed the 2s target while the model loads. Later predictions should be within target.

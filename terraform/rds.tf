@@ -15,11 +15,14 @@ resource "aws_security_group" "rds" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description     = "PostgreSQL from EKS nodes"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.eks_cluster.id]
+    description = "PostgreSQL from EKS nodes and pods"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    # Managed node groups attach the EKS-created cluster security group to
+    # every node (and so to every pod using node networking), not the custom
+    # control-plane group in vpc.tf.
+    security_groups = [aws_eks_cluster.main.vpc_config[0].cluster_security_group_id]
   }
 
   egress {
@@ -52,7 +55,10 @@ resource "aws_db_instance" "main" {
 
   db_name  = var.db_name
   username = var.db_username
-  password = var.db_password
+  # RDS generates the master password and keeps it in Secrets Manager, so it
+  # never passes through a tfvars file, the CLI, or Terraform state. Read it
+  # with the ARN in the rds_master_user_secret_arn output.
+  manage_master_user_password = true
 
   multi_az               = var.db_multi_az
   db_subnet_group_name   = aws_db_subnet_group.main.name

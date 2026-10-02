@@ -1,12 +1,17 @@
+import { formatPercent } from '@/lib/utils'
+
 export const STEP_LABELS: Record<string, string> = {
   fraud_check: 'Fraud Check',
   ml_prediction: 'ML Prediction',
   email_generation: 'Email Generation',
   email_delivery: 'Email Delivery',
   bias_check: 'Bias Check',
+  bias_regeneration: 'Template Replacement (Bias Re-check)',
+  bias_agent2_regeneration: 'Agent 2 Rewrite (Bias Re-check + Senior Review)',
   ai_email_review: 'AI Email Review',
   human_escalation: 'Human Escalation',
   human_escalation_severe_bias: 'Human Escalation (Severe Bias)',
+  human_escalation_moderate_bias: 'Human Escalation (Moderate Bias)',
   human_escalation_after_retries: 'Human Escalation (After Retries)',
   human_escalation_low_confidence: 'Human Escalation (Low Confidence)',
   human_review_required: 'Human Review Required',
@@ -29,10 +34,58 @@ function capitaliseWord(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1)
 }
 
+function humaniseKey(key: string): string {
+  return key.split('_').map(capitaliseWord).join(' ')
+}
+
 export function formatStepName(name: string | undefined | null): string {
   if (!name) return 'Unknown Step'
-  if (STEP_LABELS[name]) return STEP_LABELS[name]
-  return name.split('_').map(capitaliseWord).join(' ')
+  return STEP_LABELS[name] || humaniseKey(name)
+}
+
+const RESULT_KEY_LABELS: Record<string, string> = {
+  prediction: 'Prediction',
+  probability: 'Confidence',
+  subject: 'Subject',
+  passed_guardrails: 'Guardrails',
+  template_fallback: 'Template Fallback',
+  flagged: 'Flagged',
+  bias_score: 'Bias Score',
+  sent: 'Sent',
+  recipient: 'Recipient',
+  num_offers: 'Offers',
+  customer_retention_score: 'Retention Score',
+  message_length: 'Message Length',
+  generation_time_ms: 'Generation Time',
+  attempt_number: 'Attempts',
+  reason: 'Reason',
+  error: 'Error',
+  action: 'Action',
+  note: 'Note',
+  ml_recommendation: 'ML Recommendation',
+  review_category: 'Review Category',
+  passed: 'Passed',
+  risk_score: 'Risk Score',
+  flagged_reasons: 'Flagged Reasons',
+}
+
+function formatResultValue(key: string, v: unknown): string {
+  if (key === 'prediction' && typeof v === 'string') {
+    return v.charAt(0).toUpperCase() + v.slice(1)
+  }
+  if (typeof v === 'boolean') {
+    // Contextual display for booleans; everything else reads Yes/No
+    if (key === 'passed_guardrails') return v ? 'Passed' : 'Failed'
+    if (key === 'sent') return v ? 'Delivered' : 'Not Sent'
+    return v ? 'Yes' : 'No'
+  }
+  if (typeof v === 'number') {
+    if (key === 'probability') return formatPercent(v)
+    if (key === 'generation_time_ms') return v < 1000 ? `${v}ms` : `${(v / 1000).toFixed(1)}s`
+    if (key === 'message_length') return `${v} chars`
+    if (key === 'bias_score' || key === 'customer_retention_score') return `${v}/100`
+  }
+  return String(v)
 }
 
 /** Pretty-print known result_summary keys. Returns label/value pairs. */
@@ -42,61 +95,10 @@ export function formatResultSummary(
   if (!summary) return []
   if (typeof summary === 'string') return [{ label: '', value: summary }]
 
-  const KEY_LABELS: Record<string, string> = {
-    prediction: 'Prediction',
-    probability: 'Confidence',
-    subject: 'Subject',
-    passed_guardrails: 'Guardrails',
-    template_fallback: 'Template Fallback',
-    flagged: 'Flagged',
-    bias_score: 'Bias Score',
-    sent: 'Sent',
-    recipient: 'Recipient',
-    num_offers: 'Offers',
-    customer_retention_score: 'Retention Score',
-    message_length: 'Message Length',
-    generation_time_ms: 'Generation Time',
-    attempt_number: 'Attempts',
-    reason: 'Reason',
-    error: 'Error',
-    action: 'Action',
-    note: 'Note',
-    ml_recommendation: 'ML Recommendation',
-    review_category: 'Review Category',
-    passed: 'Passed',
-    risk_score: 'Risk Score',
-    flagged_reasons: 'Flagged Reasons',
-  }
-
   return Object.entries(summary)
     .filter(([, v]) => v !== null && v !== undefined && v !== '')
-    .map(([k, v]) => {
-      const label = KEY_LABELS[k] || k.split('_').map(capitaliseWord).join(' ')
-
-      let value: string
-      if (k === 'prediction' && typeof v === 'string') {
-        value = v.charAt(0).toUpperCase() + v.slice(1)
-      } else if (typeof v === 'boolean') {
-        // Contextual display for booleans
-        if (k === 'passed_guardrails') value = v ? 'Passed' : 'Failed'
-        else if (k === 'flagged') value = v ? 'Yes' : 'No'
-        else if (k === 'sent') value = v ? 'Delivered' : 'Not Sent'
-        else if (k === 'template_fallback') value = v ? 'Yes' : 'No'
-        else value = v ? 'Yes' : 'No'
-      } else if (k === 'probability' && typeof v === 'number') {
-        value = `${(v * 100).toFixed(1)}%`
-      } else if (k === 'generation_time_ms' && typeof v === 'number') {
-        value = v < 1000 ? `${v}ms` : `${(v / 1000).toFixed(1)}s`
-      } else if (k === 'message_length' && typeof v === 'number') {
-        value = `${v} chars`
-      } else if (k === 'bias_score' && typeof v === 'number') {
-        value = `${v}/100`
-      } else if (k === 'customer_retention_score' && typeof v === 'number') {
-        value = `${v}/100`
-      } else {
-        value = String(v)
-      }
-
-      return { label, value }
-    })
+    .map(([k, v]) => ({
+      label: RESULT_KEY_LABELS[k] || humaniseKey(k),
+      value: formatResultValue(k, v),
+    }))
 }

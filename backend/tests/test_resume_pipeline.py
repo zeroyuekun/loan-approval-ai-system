@@ -1,6 +1,6 @@
 """Tests for PipelineOrchestrator.resume_after_review() -- resuming escalated pipelines."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
@@ -78,8 +78,8 @@ def _noop_select_for_update(self, **kwargs):
 def resume_mocks():
     with (
         patch(f"{ORCH}.ModelPredictor") as mp,
-        patch(f"{HUMAN_REVIEW}.EmailGenerator") as eg,
-        patch(f"{HUMAN_REVIEW}.EmailPersistenceService") as eps,
+        patch("apps.email_engine.services.decision_email.EmailGenerator") as eg,
+        patch("apps.email_engine.services.decision_email.EmailPersistenceService") as eps,
         patch(f"{MKT_PIPE}.MarketingBiasDetector") as mbd,
         patch(f"{MKT_PIPE}.MarketingEmailReviewer") as mer,
         patch(f"{MKT_PIPE}.NextBestOfferGenerator") as nbo,
@@ -104,7 +104,17 @@ def resume_mocks():
 def test_resume_approved(escalated_agent_run, resume_mocks):
     """Resuming an escalated approved run regenerates and sends approval email."""
     resume_mocks["email_gen"].return_value.generate.return_value = _email()
-    resume_mocks["persistence"].save_generated_email.return_value = MagicMock(id="e1")
+    # A real row: the resume's bias report is persisted against the email.
+    from apps.email_engine.models import GeneratedEmail
+
+    resume_mocks["persistence"].save_generated_email.return_value = GeneratedEmail.objects.create(
+        application=escalated_agent_run.application,
+        decision="approved",
+        subject="Your Loan Decision",
+        body="Dear Customer, ...",
+        prompt_used="p",
+        passed_guardrails=True,
+    )
     resume_mocks["persistence"].save_guardrail_logs.return_value = []
 
     from apps.agents.services.orchestrator import PipelineOrchestrator
@@ -126,6 +136,18 @@ def test_resume_denied(escalated_agent_run, resume_mocks):
     decision.feature_importances = {"credit_score": 0.4, "income": 0.3, "dti": 0.2}
     decision.save()
 
+    # The denied resume now issues the denial email before the marketing follow-up.
+    from apps.email_engine.models import GeneratedEmail
+
+    resume_mocks["email_gen"].return_value.generate.return_value = _email()
+    resume_mocks["persistence"].save_generated_email.return_value = GeneratedEmail.objects.create(
+        application=escalated_agent_run.application,
+        decision="denied",
+        subject="Your Loan Decision",
+        body="Dear Customer, ...",
+        prompt_used="p",
+        passed_guardrails=True,
+    )
     resume_mocks["nbo"].return_value.generate.return_value = _nbo()
     resume_mocks["nbo"].return_value.generate_marketing_message.return_value = _marketing_msg()
     resume_mocks["marketing_agent"].return_value.generate.return_value = _marketing_email()
@@ -146,6 +168,8 @@ def test_resume_denied(escalated_agent_run, resume_mocks):
     escalated_agent_run.application.refresh_from_db()
     assert escalated_agent_run.application.status == "denied"
     resume_mocks["nbo"].return_value.generate.assert_called_once()
+    denial_sends = [c for c in resume_mocks["send"].call_args_list if c.kwargs.get("email_type") == "denial"]
+    assert len(denial_sends) == 1
 
 
 @CACHE_OVERRIDE
@@ -192,3 +216,129 @@ def test_resume_no_decision(sample_application, resume_mocks):
 
     with pytest.raises(ValueError, match="No decision found"):
         PipelineOrchestrator().resume_after_review(run.pk)
+
+
+# --- Bias routing on resume matches the pipeline --------------------------
+# The pipeline escalates only at/above BIAS_THRESHOLD_REVIEW, withholds the
+# email (but applies the decision) on a guardrail failure, and fails open in
+# BIAS_FAILURE_MODE=warn. The resume used to re-escalate on any flag (> 30)
+# and on guardrail failures, so a moderate score looped in review forever.
+
+
+def _approved_resume_email(escalated_agent_run, resume_mocks, *, passed_guardrails=True):
+    from apps.email_engine.models import GeneratedEmail
+
+    email = _email()
+    email["passed_guardrails"] = passed_guardrails
+    if not passed_guardrails:
+        email["guardrail_results"] = [{"check_name": "tone", "passed": False}]
+    resume_mocks["email_gen"].return_value.generate.return_value = email
+    resume_mocks["persistence"].save_generated_email.return_value = GeneratedEmail.objects.create(
+        application=escalated_agent_run.application,
+        decision="approved",
+        subject="Your Loan Decision",
+        body="Dear Customer, ...",
+        prompt_used="p",
+        passed_guardrails=passed_guardrails,
+    )
+    resume_mocks["persistence"].save_guardrail_logs.return_value = []
+
+
+def _bias(score):
+    return {
+        "score": score,
+        "flagged": score > 30,
+        "requires_human_review": score > 30,
+        "categories": [],
+        "analysis": "",
+        "score_source": "composite",
+    }
+
+
+@CACHE_OVERRIDE
+@override_settings(BIAS_THRESHOLD_REVIEW=60)
+@pytest.mark.django_db
+def test_resume_completes_a_moderately_flagged_run_whose_template_checks_clean(escalated_agent_run, resume_mocks):
+    """A moderate score on resume completes the run when the template that
+    replaces the LLM text checks clean, instead of sending it back to the
+    review queue it came from."""
+    _approved_resume_email(escalated_agent_run, resume_mocks)
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    with patch(f"{HUMAN_REVIEW}.BiasDetector") as bd:
+        bd.return_value.analyze.side_effect = [_bias(40), _bias(5)]
+        run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
+
+    assert run.status == "completed"
+    escalated_agent_run.application.refresh_from_db()
+    assert escalated_agent_run.application.status == "approved"
+    assert resume_mocks["send"].call_count == 1
+
+
+@CACHE_OVERRIDE
+@override_settings(BIAS_THRESHOLD_REVIEW=60)
+@pytest.mark.django_db
+def test_resume_reescalates_a_severe_email(escalated_agent_run, resume_mocks):
+    _approved_resume_email(escalated_agent_run, resume_mocks)
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    with patch(f"{HUMAN_REVIEW}.BiasDetector") as bd:
+        bd.return_value.analyze.return_value = _bias(60)
+        run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
+
+    assert run.status == "escalated"
+    escalated_agent_run.application.refresh_from_db()
+    assert escalated_agent_run.application.status == "review"
+    resume_mocks["send"].assert_not_called()
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
+def test_resume_guardrail_failure_withholds_the_email_and_applies_the_decision(escalated_agent_run, resume_mocks):
+    _approved_resume_email(escalated_agent_run, resume_mocks, passed_guardrails=False)
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
+
+    assert run.status == "completed"
+    delivery = [s for s in run.steps if s.get("step_name") == "email_delivery"]
+    assert delivery and delivery[-1]["result_summary"]["sent"] is False
+    assert delivery[-1]["result_summary"]["failed_guardrails"] == ["tone"]
+    escalated_agent_run.application.refresh_from_db()
+    assert escalated_agent_run.application.status == "approved"
+    resume_mocks["send"].assert_not_called()
+
+
+@CACHE_OVERRIDE
+@override_settings(BIAS_FAILURE_MODE="warn")
+@pytest.mark.django_db
+def test_resume_bias_unavailable_in_warn_mode_fails_open(escalated_agent_run, resume_mocks):
+    _approved_resume_email(escalated_agent_run, resume_mocks)
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    with patch(f"{HUMAN_REVIEW}.BiasDetector") as bd:
+        bd.return_value.analyze.side_effect = RuntimeError("bias service down")
+        run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
+
+    assert run.status == "completed"
+    escalated_agent_run.application.refresh_from_db()
+    assert escalated_agent_run.application.status == "approved"
+    assert resume_mocks["send"].call_count == 1
+
+
+@CACHE_OVERRIDE
+@override_settings(BIAS_FAILURE_MODE="block")
+@pytest.mark.django_db
+def test_resume_bias_unavailable_in_block_mode_holds_the_run_in_review(escalated_agent_run, resume_mocks):
+    """Block mode keeps the reviewer's case actionable instead of dropping it to PENDING."""
+    _approved_resume_email(escalated_agent_run, resume_mocks)
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    with patch(f"{HUMAN_REVIEW}.BiasDetector") as bd:
+        bd.return_value.analyze.side_effect = RuntimeError("bias service down")
+        run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
+
+    assert run.status == "escalated"
+    escalated_agent_run.application.refresh_from_db()
+    assert escalated_agent_run.application.status == "review"
+    resume_mocks["send"].assert_not_called()

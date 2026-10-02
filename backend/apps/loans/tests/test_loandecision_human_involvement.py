@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
@@ -108,13 +108,23 @@ def test_resume_stamps_human_involvement_assisted(_resume_setup):
     run, application = _resume_setup
 
     with (
-        patch(f"{HUMAN_REVIEW}.EmailGenerator") as eg,
-        patch(f"{HUMAN_REVIEW}.EmailPersistenceService") as eps,
+        patch("apps.email_engine.services.decision_email.EmailGenerator") as eg,
+        patch("apps.email_engine.services.decision_email.EmailPersistenceService") as eps,
         patch(SENDER, return_value={"sent": True}),
         patch("django.db.models.QuerySet.select_for_update", _noop_select_for_update),
     ):
         eg.return_value.generate.return_value = _email()
-        eps.save_generated_email.return_value = MagicMock(id="e1")
+        # A real row: the resume's bias report is persisted against the email.
+        from apps.email_engine.models import GeneratedEmail
+
+        eps.save_generated_email.return_value = GeneratedEmail.objects.create(
+            application=application,
+            decision="approved",
+            subject="Your Loan Decision",
+            body="Dear Customer, ...",
+            prompt_used="p",
+            passed_guardrails=True,
+        )
         eps.save_guardrail_logs.return_value = []
 
         from apps.agents.services.orchestrator import PipelineOrchestrator
@@ -193,3 +203,23 @@ def test_overturn_stamps_human_involvement_overridden(django_user_model):
     # End-to-end: the persisted stamp flows through to the ADM disclosure mode.
     explanation = build_explanation_from_decision(app.decision)
     assert explanation["adm_disclosure"]["mode"] == "human"
+
+
+@pytest.mark.parametrize(
+    ("current", "kind", "expected", "changed"),
+    [
+        ("none", "assisted", "assisted", True),
+        ("none", "overridden", "overridden", True),
+        ("assisted", "overridden", "overridden", True),
+        ("assisted", "assisted", "assisted", False),
+        ("overridden", "assisted", "overridden", False),
+        ("overridden", "none", "overridden", False),
+        ("assisted", "none", "assisted", False),
+    ],
+)
+def test_mark_human_only_promotes(current, kind, expected, changed):
+    from apps.loans.models import LoanDecision
+
+    decision = LoanDecision(human_involvement=current)
+    assert decision.mark_human(kind) is changed
+    assert decision.human_involvement == expected

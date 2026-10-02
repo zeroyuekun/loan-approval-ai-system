@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import api from '@/lib/api'
+import { emailApi } from '@/lib/api'
 import { GeneratedEmail, PaginatedResponse } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -43,7 +43,7 @@ export default function EmailsPage() {
   const { data, isLoading } = useQuery<PaginatedResponse<GeneratedEmail>>({
     queryKey: ['emails'],
     queryFn: async () => {
-      const { data } = await api.get('/emails/', { params: { page_size: 100 } })
+      const { data } = await emailApi.list({ page_size: 100 })
       return data
     },
   })

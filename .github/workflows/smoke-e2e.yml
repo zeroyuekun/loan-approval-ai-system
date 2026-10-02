@@ -28,7 +28,9 @@ jobs:
           } >> .env
 
       - name: Build + up
-        run: docker compose up -d
+        # --wait fails the step if any service exits or never turns healthy
+        # (frontend included), rather than leaving a crash loop unnoticed.
+        run: docker compose up -d --wait --wait-timeout 600
 
       - name: Migrate + seed minimal dataset
         run: |

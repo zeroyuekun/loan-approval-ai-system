@@ -6,9 +6,8 @@ import type { DashboardStats } from '@/types'
 
 /**
  * Fetches the operator-grade dashboard stats payload from
- * /api/v1/loans/dashboard-stats/. Includes the rolling-24h decision
- * latency percentiles and today's LLM spend, both added in PR-1 of
- * the dashboard persona refit.
+ * /api/v1/loans/dashboard-stats/, including the rolling-24h decision
+ * latency percentiles and today's LLM spend.
  *
  * Cached for 30 seconds server-side (DashboardStatsView), so a 30s
  * staleTime on the client side avoids redundant fetches.

@@ -70,6 +70,8 @@ SECTION_LABELS = [
     "We'd Still Like to Help:",
     "Attachments:",
     "Conditions of Approval:",
+    "The main factors in our decision:",
+    # Lead-in used by denial emails issued before 2026-10; kept so stored emails still render.
     "This decision was based on a thorough review of your financial profile, specifically:",
 ]
 
@@ -289,7 +291,7 @@ def _render_signature_block(sig_lines: list[str]) -> str:
     name = non_blank[0] if len(non_blank) > 0 else ""
     title = non_blank[1] if len(non_blank) > 1 else ""
     company = non_blank[2] if len(non_blank) > 2 else ""
-    contact = [ln for ln in non_blank[3:] if ln.startswith(("ABN ", "Ph:", "Phone:", "Email:", "Website:"))]
+    contact = [ln for ln in non_blank[3:] if ln.startswith(CONTACT_PREFIXES)]
     contact_html = "".join(
         f'<div style="font-size:{TOKENS["FINE_SIZE"]}; color:{TOKENS["FINE"]}; padding:2px 0;">{_e(ln)}</div>'
         for ln in contact
@@ -321,7 +323,8 @@ FACTOR_TRIGGER_PREFIX = "This decision was based on"
 OFFER_HEADER_RE = re.compile(r"^Option\s+(\d+)[\s:.\-\u2013\u2014]+(.+)$")
 UNSUBSCRIBE_LINE_RE = re.compile(r"^Unsubscribe:\s*(\S+)", re.MULTILINE)
 CALL_SARAH_LINE_RE = re.compile(r"^Call Sarah on\s+(\d[\d\s]+)", re.I)
-MARKETING_BREAK_PREFIXES = ("ABN ", "Ph:", "Phone:", "Email:", "Website:", "Unsubscribe:")
+CONTACT_PREFIXES = ("ABN ", "Ph:", "Phone:", "Email:", "Website:")
+MARKETING_BREAK_PREFIXES = (*CONTACT_PREFIXES, "Unsubscribe:")
 BUREAU_BULLET_RE = re.compile(r"^[\u2022•]\s*(Equifax|Illion|Experian)\b", re.I)
 
 
@@ -869,12 +872,14 @@ def _render_hero(email_type: EmailType, body: str) -> str:
     )
 
 
-def _render_legacy_body(body: str) -> str:
-    """Convert plain-text body lines to inline HTML (legacy per-line parser).
+_BULLET_PREFIX_RE = re.compile(r"^[\u2022•]\s*")
+_NUM_PREFIX_RE = re.compile(r"^\s+\d+\.\s+")
 
-    This matches the historical sender._plain_text_to_html output. Per-type
-    block replacements land in PRs 3-5; this function is the fallback for
-    any line that does not match a structured block.
+
+def _render_legacy_body(body: str) -> str:
+    """Convert plain-text body lines to inline HTML (per-line parser).
+
+    The fallback for any line that does not match a structured block.
     """
     lines = body.split("\n")
     html_parts: list[str] = []
@@ -894,9 +899,6 @@ def _render_legacy_body(body: str) -> str:
                 continue
             return bool(pattern.match(target))
         return False
-
-    _BULLET_PREFIX_RE = re.compile(r"^[\u2022•]\s*")
-    _NUM_PREFIX_RE = re.compile(r"^\s+\d+\.\s+")
 
     td_label = 'style="padding:4px 8px 4px 0;color:#888;border-bottom:1px solid #f0f0f0;"'
     td_value = 'style="padding:4px 0 4px 8px;text-align:right;border-bottom:1px solid #f0f0f0;"'
@@ -921,7 +923,7 @@ def _render_legacy_body(body: str) -> str:
             html_parts.append(f'<p style="margin:20px 0 4px 0;"><strong>{_e(stripped)}</strong></p>')
             continue
 
-        bullet_match = re.match(r"^[\u2022•]\s*(.+)$", stripped)
+        bullet_match = BULLET_LINE_RE.match(stripped)
         if bullet_match:
             _flush_detail_rows()
             bottom = "2px" if _next_nonblank_matches(idx, _BULLET_PREFIX_RE) else "12px"
@@ -930,7 +932,7 @@ def _render_legacy_body(body: str) -> str:
             )
             continue
 
-        num_match = re.match(r"^\s+(\d+)\.\s+(.+)$", line)
+        num_match = NUMBERED_STEP_RE.match(line)
         if num_match:
             _flush_detail_rows()
             bottom = "2px" if _next_nonblank_matches(idx, _NUM_PREFIX_RE, use_raw=True) else "12px"
@@ -949,7 +951,7 @@ def _render_legacy_body(body: str) -> str:
 
         _flush_detail_rows()
 
-        if re.match(r"^[\u2500\u2501\-]{5,}$", stripped):
+        if HR_RE.match(stripped):
             html_parts.append('<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;">')
             continue
 

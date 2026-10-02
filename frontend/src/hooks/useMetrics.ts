@@ -2,15 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { mlApi, tasksApi } from '@/lib/api'
+import { mlApi, tasksApi, withNotFoundFallback } from '@/lib/api'
+import { nextPollInterval } from '@/lib/polling'
 import { ModelMetrics } from '@/types'
-
-const TRAINING_STORAGE_KEY = 'aussieloanai_training_task'
-
-/** Exponential backoff: 2s -> 4s -> 8s -> 16s -> 30s max. Mirrors useAgentStatus. */
-function nextTrainBackoff(pollCount: number): number {
-  return Math.min(2000 * Math.pow(2, pollCount), 30000)
-}
+import { TRAINING_STORAGE_KEY } from '@/lib/clientState'
 
 function saveTrainingTask(taskId: string, algorithm: string) {
   localStorage.setItem(TRAINING_STORAGE_KEY, JSON.stringify({ taskId, algorithm, startedAt: Date.now() }))
@@ -39,21 +34,11 @@ function clearTrainingTask() {
 export function useModelMetrics() {
   return useQuery<ModelMetrics | null>({
     queryKey: ['modelMetrics'],
-    queryFn: async () => {
-      try {
-        const { data } = await mlApi.getMetrics()
-        return data
-      } catch (err: any) {
-        if (err.response?.status === 404) {
-          return null
-        }
-        throw err
-      }
-    },
+    queryFn: () => withNotFoundFallback(async () => (await mlApi.getMetrics()).data, null),
   })
 }
 
-type TrainingStatus = 'idle' | 'training' | 'success' | 'failure' | 'skipped'
+export type TrainingStatus = 'idle' | 'training' | 'success' | 'failure' | 'skipped' | 'blocked'
 
 function parseTaskResult(result: unknown): Record<string, any> | null {
   if (result == null) return null
@@ -74,6 +59,9 @@ export function useTrainModel() {
   const [taskId, setTaskId] = useState<string | null>(null)
   const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>('idle')
   const [trainingAlgorithm, setTrainingAlgorithm] = useState<string>('')
+  // Gates that kept a freshly trained model inactive (task result
+  // `activation_blocked`); empty unless trainingStatus is 'blocked'.
+  const [blockedGates, setBlockedGates] = useState<string[]>([])
   const pollCountRef = useRef(0)
 
   // On mount, check if there's a training task in progress
@@ -93,6 +81,7 @@ export function useTrainModel() {
     },
     onSuccess: (data) => {
       pollCountRef.current = 0  // reset backoff for new job so first poll is 2s, not up to 30s
+      setBlockedGates([])
       setTaskId(data.task_id)
       setTrainingAlgorithm(data.algorithm)
       setTrainingStatus('training')
@@ -131,34 +120,35 @@ export function useTrainModel() {
     gcTime: 30_000, // 30s: polled data, drop fast after unmount
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      if (status === 'SUCCESS') {
+      if (status !== 'SUCCESS' && status !== 'FAILURE') {
+        const interval = nextPollInterval(pollCountRef.current)
+        pollCountRef.current += 1
+        return interval
+      }
+      const taskResult = parseTaskResult(query.state.data?.result)
+      if (status === 'FAILURE') {
+        setTrainingStatus('failure')
+      } else if (taskResult?.status === 'skipped') {
         // A Celery SUCCESS can still be a no-op run (the task short-circuited
         // because another training was already holding the lock). Inspect the
         // payload so we don't mislead the operator.
-        const parsed = parseTaskResult(query.state.data?.result)
-        if (parsed?.status === 'skipped') {
-          setTrainingStatus('skipped')
-        } else {
-          setTrainingStatus('success')
-          queryClient.invalidateQueries({ queryKey: ['modelMetrics'] })
-        }
-        setTaskId(null)
-        clearTrainingTask()
-        pollCountRef.current = 0
-        return false
+        setTrainingStatus('skipped')
+      } else if (taskResult?.activated === false) {
+        // Trained, but a pre-activation gate in block mode kept the new model
+        // inactive; the current champion keeps serving.
+        const gates = taskResult.activation_blocked
+        setBlockedGates(Array.isArray(gates) ? gates.map(String) : [])
+        setTrainingStatus('blocked')
+      } else {
+        setTrainingStatus('success')
+        queryClient.invalidateQueries({ queryKey: ['modelMetrics'] })
       }
-      if (status === 'FAILURE') {
-        setTrainingStatus('failure')
-        setTaskId(null)
-        clearTrainingTask()
-        pollCountRef.current = 0
-        return false
-      }
-      const interval = nextTrainBackoff(pollCountRef.current)
-      pollCountRef.current += 1
-      return interval
+      setTaskId(null)
+      clearTrainingTask()
+      pollCountRef.current = 0
+      return false
     },
   })
 
-  return { ...mutation, trainingStatus, trainingAlgorithm, errorMessage }
+  return { ...mutation, trainingStatus, trainingAlgorithm, blockedGates, errorMessage }
 }

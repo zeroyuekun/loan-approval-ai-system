@@ -2,9 +2,9 @@
 
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
 import { LoanApplication } from '@/types'
-import { formatDate, formatPercent, formatPurpose, getDisplayStatus } from '@/lib/utils'
+import { formatDate, formatPercent, formatPurpose } from '@/lib/utils'
 
 interface ApplicationHeaderProps {
   application: LoanApplication
@@ -29,9 +29,7 @@ export function ApplicationHeader({ application }: ApplicationHeaderProps) {
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Status</span>
-          {(() => { const s = getDisplayStatus(application.status, application.decision); return (
-            <Badge className={s.color} variant="outline">{s.label}</Badge>
-          ) })()}
+          <ApplicationStatusBadge status={application.status} decision={application.decision} />
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Created</span>

@@ -5,11 +5,13 @@ import time
 import anthropic
 import httpx
 
+from apps.ml_engine.services.scoring.decision_assembly import POLICY_DECLINE_PREFIX, PRICING_TIER_DECLINE
+from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from .documentation import build_documentation_checklist
 from .exceptions import EmailBackendError
-from .guardrails import GuardrailChecker
+from .guardrails import GuardrailChecker, nbo_offer_amounts
 from .pricing import calculate_loan_pricing
 from .prompts import APPROVAL_EMAIL_PROMPT, DENIAL_EMAIL_PROMPT
 
@@ -29,6 +31,28 @@ def _record_email_metric(decision: str, source: str, passed_guardrails: bool) ->
         ).inc()
     except Exception as exc:  # noqa: BLE001 — metric emission is best-effort
         _metrics_logger.debug("email_generation_total emission failed: %s", exc)
+
+
+# Memoized LLM clients, keyed by the full construction config per backend.
+# EmailGenerator() is built per Celery task, so the cache lets tasks share one
+# connection pool. httpx.Client and anthropic.Anthropic are thread-safe, and
+# Celery prefork gives each child process its own module state.
+_CLIENT_CACHE = {}
+
+
+def _cached_client(key, build):
+    """Return the memoized client for ``key``, building it on first use."""
+    client = _CLIENT_CACHE.get(key)
+    if client is None:
+        client = _CLIENT_CACHE[key] = build()
+    return client
+
+
+def _email_llm_seed():
+    try:
+        return int(os.environ.get("EMAIL_LLM_SEED") or 0)
+    except ValueError:
+        return 0
 
 
 EMAIL_SUBMIT_TOOL = {
@@ -83,7 +107,8 @@ class EmailGenerator:
         Returns ``(client_or_None, provider_name, model_id)``. A missing API key
         yields a ``None`` client, which routes ``generate()`` to the
         deterministic template fallback — the system never depends on any API to
-        produce a compliant, sendable email.
+        produce a compliant, sendable email. Clients are memoized in
+        ``_CLIENT_CACHE`` (see its comment).
         """
         if backend == "groq":
             from .llm_client import DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, GroqLLMClient
@@ -92,16 +117,17 @@ class EmailGenerator:
             api_key = os.environ.get("GROQ_API_KEY", "")
             if not api_key:
                 return None, "groq", model
-            try:
-                seed = int(os.environ.get("EMAIL_LLM_SEED", "0") or "0")
-            except ValueError:
-                seed = 0
-            client = GroqLLMClient(
-                api_key=api_key,
-                base_url=os.environ.get("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
-                model=model,
-                seed=seed,
-                timeout=httpx.Timeout(60.0, connect=10.0),
+            seed = _email_llm_seed()
+            base_url = os.environ.get("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL)
+            client = _cached_client(
+                ("groq", api_key, base_url, model, seed),
+                lambda: GroqLLMClient(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    seed=seed,
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                ),
             )
             return client, "groq", model
 
@@ -115,23 +141,23 @@ class EmailGenerator:
             # -> EmailBackendError -> deterministic template fallback — not by
             # nulling the client here.
             api_key = os.environ.get("OLLAMA_API_KEY", "ollama")
-            try:
-                seed = int(os.environ.get("EMAIL_LLM_SEED", "0") or "0")
-            except ValueError:
-                seed = 0
-            client = OpenAICompatibleLLMClient(
-                api_key=api_key,
-                base_url=os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
-                model=model,
-                seed=seed,
-                # Local CPU inference is slow: a warm attempt on the ~4.5k-token
-                # prompt takes ~2 min, and a COLD first call also pays model-load
-                # time. 180s bounced cold starts to the template fallback; 300s
-                # lets a slow (not failed) generation finish instead of looking
-                # like an outage. Email runs in the async Celery queue, so the
-                # extra wall-clock is invisible to the request path.
-                timeout=httpx.Timeout(300.0, connect=10.0),
-                provider="ollama",
+            seed = _email_llm_seed()
+            base_url = os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
+            client = _cached_client(
+                ("ollama", api_key, base_url, model, seed),
+                lambda: OpenAICompatibleLLMClient(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    seed=seed,
+                    # Local CPU inference is slow: a warm attempt on the ~4.5k-token
+                    # prompt takes ~2 min, and a COLD first call also pays model-load
+                    # time. 300s lets a slow (not failed) generation finish instead
+                    # of looking like an outage. Email runs in the async Celery
+                    # queue, so the extra wall-clock is invisible to the request path.
+                    timeout=httpx.Timeout(300.0, connect=10.0),
+                    provider="ollama",
+                ),
             )
             return client, "ollama", model
 
@@ -140,10 +166,8 @@ class EmailGenerator:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             return None, "anthropic", model
-        client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        # The model is a per-request kwarg, so the key alone identifies the client.
+        client = _cached_client(("anthropic", api_key), make_anthropic_client)
         return client, "anthropic", model
 
     # Map ML feature names to plain-language denial reasons
@@ -210,13 +234,47 @@ class EmailGenerator:
         "bnpl_monthly_commitment": "Your buy-now-pay-later commitments reduce the amount we can lend",
     }
 
-    def _format_denial_reasons(self, feature_importances, shap_values=None):
+    # Lending rules that can decline an application the model approved. The
+    # decision waterfall records them by these codes (decision_assembly), and
+    # they, not the model's feature attributions, are why the loan was declined.
+    DECLINE_RULE_REASON_MAP = {
+        PRICING_TIER_DECLINE: "The assessed risk for this loan is above the level we can offer a rate for",
+        f"{POLICY_DECLINE_PREFIX}P01": "Your residency status doesn't meet the eligibility requirements for this loan",
+        f"{POLICY_DECLINE_PREFIX}P02": "The loan term doesn't meet our age eligibility requirements",
+        f"{POLICY_DECLINE_PREFIX}P03": "There's a current or recent bankruptcy on your credit file",
+        f"{POLICY_DECLINE_PREFIX}P04": "There's an outstanding tax debt default recorded against you",
+        f"{POLICY_DECLINE_PREFIX}P05": "Your credit score is below the minimum we lend at",
+        f"{POLICY_DECLINE_PREFIX}P06": "The loan amount is too high relative to the property value",
+        f"{POLICY_DECLINE_PREFIX}P07": "Your total debt is too high relative to your income",
+    }
+
+    def _decline_rule_reasons(self, decision_waterfall):
+        """Plain-language reasons for the lending rules that declined the application, or []."""
+        reasons = []
+        for entry in decision_waterfall or []:
+            code = entry.get("reason_code") if isinstance(entry, dict) else None
+            if code == PRICING_TIER_DECLINE or (code or "").startswith(POLICY_DECLINE_PREFIX):
+                reason = self.DECLINE_RULE_REASON_MAP.get(code, "Your application didn't meet our lending policy")
+                if reason not in reasons:
+                    reasons.append(reason)
+        return reasons
+
+    def _format_denial_reasons(self, feature_importances, shap_values=None, decision_waterfall=None):
         """Convert per-applicant SHAP values to plain-language denial reasons.
 
-        Prefers SHAP values (per-applicant, explains why THIS person was denied)
-        over global feature importances (model-wide weights, same for everyone).
-        Falls back to global importances when SHAP values are unavailable.
+        A lending rule that declined a model approval (pricing tier, credit
+        policy) is the reason when the decision waterfall records one: the
+        attributions explain the model's score, which was an approval.
+
+        Otherwise prefers SHAP values (per-applicant, explains why THIS person
+        was denied) over global feature importances (model-wide weights, same
+        for everyone). Falls back to global importances when SHAP values are
+        unavailable.
         """
+        rule_reasons = self._decline_rule_reasons(decision_waterfall)
+        if rule_reasons:
+            return "; ".join(rule_reasons)
+
         if not feature_importances and not shap_values:
             return "Credit assessment criteria not met"
 
@@ -243,29 +301,63 @@ class EmailGenerator:
     def _render_nbo_block(self, nbo_offer):
         """Render a neutral, factual alternative-offer teaser for denial emails.
 
-        No apology/emotion language (locked project rule). Returns "" when no
-        usable offer is supplied so the prompt is unchanged.
+        Delegates to ``template_fallback.render_nbo_block`` (shared by this
+        LLM prompt path and the deterministic template path).
+        """
+        from .template_fallback import render_nbo_block
+
+        return render_nbo_block(nbo_offer)
+
+    @staticmethod
+    def _add_nbo_context(context, nbo_offer):
+        """Add the next-best-offer figures to the guardrail context, if present.
+
+        Shared by the LLM path (``generate``) and the template path
+        (``generate_template`` / ``_generate_fallback``) so both whitelist the
+        teaser's dollar figure and rate against the hallucinated-numbers
+        guardrail (engine.py) the same way.
         """
         if not nbo_offer:
-            return ""
-        name = nbo_offer.get("name") or nbo_offer.get("type")
-        amount = nbo_offer.get("amount")
-        if not name or amount is None:
-            return ""
-        rate = nbo_offer.get("estimated_rate")
-        monthly = nbo_offer.get("monthly_repayment")
-        headline = f"${float(amount):,.0f}"
-        if rate:
-            headline += f" at {float(rate):.2f}% p.a."
-        if monthly:
-            headline += f", around ${float(monthly):,.0f}/month"
-        return (
-            "A specific option you may qualify for now:\n"
-            f"  •  {name}: {headline}\n"
-            "You can discuss this option using the contact details below."
-        )
+            return
+        nbo_amounts = nbo_offer_amounts([nbo_offer])
+        if nbo_amounts:
+            context["nbo_amounts"] = nbo_amounts
+        # The offer itself carries estimated_rate, so the teaser's
+        # "at X% p.a." is validated against the real rate (S1-F1).
+        context["nbo_offers"] = [nbo_offer]
 
-    def generate(self, application, decision, attempt=1, confidence=None, profile_context=None):
+    @staticmethod
+    def _applicant_name(application):
+        applicant_name = _sanitize_prompt_input(
+            f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
+            max_length=200,
+        )
+        if not applicant_name:
+            applicant_name = _sanitize_prompt_input(application.applicant.username, max_length=200)
+        return applicant_name
+
+    def _base_context(self, application, decision):
+        """Guardrail context shared by the LLM and template paths."""
+        return {
+            "applicant_name": self._applicant_name(application),
+            "loan_amount": float(application.loan_amount),
+            "purpose": application.get_purpose_display(),
+            "decision": decision,
+        }
+
+    def generate_template(self, application, decision, profile_context=None):
+        """Issue the deterministic, guardrail-checked template email directly.
+
+        Used by callers that must degrade without an LLM round trip (for
+        example on a provider 429 outside the Celery email task). ``profile_context``
+        carries ``nbo_offer`` for denials, exactly like the LLM path in ``generate()``.
+        """
+        context = self._base_context(application, decision)
+        if decision != "approved":
+            self._add_nbo_context(context, (profile_context or {}).get("nbo_offer"))
+        return self._generate_fallback(application, decision, context, time.time())
+
+    def generate(self, application, decision, attempt=1, confidence=None, profile_context=None, bias_feedback=None):
         """Generate an approval/denial email for the given loan application."""
         # Reset retry state only on the first attempt (not recursive retries)
         if attempt == 1:
@@ -273,19 +365,8 @@ class EmailGenerator:
 
         start_time = time.time()
 
-        applicant_name = _sanitize_prompt_input(
-            f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
-            max_length=200,
-        )
-        if not applicant_name:
-            applicant_name = _sanitize_prompt_input(application.applicant.username, max_length=200)
-
-        context = {
-            "applicant_name": applicant_name,
-            "loan_amount": float(application.loan_amount),
-            "purpose": application.get_purpose_display(),
-            "decision": decision,
-        }
+        context = self._base_context(application, decision)
+        applicant_name = context["applicant_name"]
 
         # Build banking context string from profile data
         # Sanitize all string values to prevent prompt injection
@@ -317,6 +398,13 @@ class EmailGenerator:
             if profile_context.get("has_mortgage"):
                 lines.append("- Existing mortgage holder")
             banking_context = "\n".join(lines) if lines else banking_context
+
+        # APP 8: the personal-data categories this prompt actually carries.
+        pii_categories = ["name", "loan_amount", "credit_assessment"]
+        if decision == "approved":
+            pii_categories.append("employment")
+        if profile_context and banking_context != "No banking relationship data available":
+            pii_categories.append("financial_profile")
 
         # Resolve confidence: prefer explicit param, then decision model, then 0.0
         if confidence is None:
@@ -368,6 +456,7 @@ class EmailGenerator:
             reasons = self._format_denial_reasons(
                 decision_obj.feature_importances if decision_obj else None,
                 shap_values=decision_obj.shap_values if decision_obj else None,
+                decision_waterfall=decision_obj.decision_waterfall if decision_obj else None,
             )
             nbo_offer = (profile_context or {}).get("nbo_offer")
             alternative_offer = self._render_nbo_block(nbo_offer)
@@ -381,14 +470,16 @@ class EmailGenerator:
             )
             # Whitelist the teaser figures so the hallucinated-numbers guardrail
             # (engine.py:61) recognises them on the decision email.
-            if nbo_offer:
-                nbo_amounts = []
-                for key in ("amount", "monthly_repayment", "fortnightly_repayment"):
-                    val = nbo_offer.get(key)
-                    if val:
-                        nbo_amounts.append(float(val))
-                if nbo_amounts:
-                    context["nbo_amounts"] = nbo_amounts
+            self._add_nbo_context(context, nbo_offer)
+
+        if bias_feedback:
+            prompt += (
+                "\n\n=== COMPLIANCE REVIEW FEEDBACK ===\n"
+                "A compliance reviewer flagged an earlier draft of this email for possible bias:\n"
+                f"{_sanitize_prompt_input(bias_feedback, max_length=2000)}\n\n"
+                "Write the email again so none of these issues appear. Describe the application and "
+                "its circumstances, never the person. Keep every required section.\n"
+            )
 
         # Add retry feedback if not first attempt.
         # The feedback is structured to tell Claude exactly what failed,
@@ -430,12 +521,12 @@ class EmailGenerator:
         # Call Claude API with tool_use for structured output (with budget check)
         from django.conf import settings as django_settings
 
-        from apps.agents.services.api_budget import ApiBudgetGuard, BudgetExhausted, CircuitOpen, guarded_api_call
+        from apps.agents.services.api_budget import ApiBudgetGuard, ApiGateClosed, guarded_api_call
 
         budget = ApiBudgetGuard()
         try:
-            budget.check_budget()
-        except (BudgetExhausted, CircuitOpen):
+            budget.check_budget(provider=self.provider)
+        except ApiGateClosed:
             # CircuitOpen: the shared breaker may have been tripped by ANOTHER
             # AI service's failures — the customer still gets a template email.
             return self._generate_fallback(application, decision, context, start_time)
@@ -456,6 +547,9 @@ class EmailGenerator:
             # self.retry(countdown=...) and free the worker (M6/L25).
             response = guarded_api_call(
                 self.client,
+                _service="email_generation",
+                _loan_application_id=application.pk,
+                _pii_categories=pii_categories,
                 model=_model,
                 max_tokens=token_limit,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_DECISION_EMAIL", 0.0),
@@ -469,12 +563,15 @@ class EmailGenerator:
             if usage:
                 input_tokens = getattr(usage, "input_tokens", 0)
                 output_tokens = getattr(usage, "output_tokens", 0)
-        except (BudgetExhausted, CircuitOpen):
+        except ApiGateClosed:
             return self._generate_fallback(application, decision, context, start_time)
         except anthropic.RateLimitError as exc:
+            # Anthropic-backend seam only: the OpenAI-compatible adapter raises
+            # RateLimited directly (with the provider's Retry-After), which is
+            # not caught here and propagates to the Celery task by design.
             from .exceptions import RateLimited
 
-            raise RateLimited(retry_after=30) from exc
+            raise RateLimited() from exc
         except (anthropic.APIError, EmailBackendError) as exc:
             # A provider error (timeout, connection drop, 4xx/5xx — e.g. a free
             # tier returning 413 "request too large") must NOT leave a customer
@@ -522,10 +619,30 @@ class EmailGenerator:
                 )
             self._last_feedback = "\n".join(feedback_parts)
             return self.generate(
-                application, decision, attempt=attempt + 1, confidence=confidence, profile_context=profile_context
+                application,
+                decision,
+                attempt=attempt + 1,
+                confidence=confidence,
+                profile_context=profile_context,
+                bias_feedback=bias_feedback,
             )
 
         _record_email_metric(decision=decision, source="claude_api", passed_guardrails=all_passed)
+
+        if not all_passed:
+            # Every LLM attempt failed the guardrails. The decision still has to
+            # reach the customer, so issue the compliant deterministic template
+            # (itself guardrail-checked) rather than withholding the notice.
+            # Only if the template ALSO fails is the email withheld.
+            logging.getLogger("email_engine.generator").warning(
+                "email LLM output failed guardrails on all %d attempts (%s) — issuing template",
+                attempt,
+                ", ".join(r["check_name"] for r in guardrail_results if not r["passed"]),
+            )
+            fallback = self._generate_fallback(application, decision, context, start_time)
+            fallback["attempt_number"] = attempt
+            fallback["prompt_used"] = "[TEMPLATE FALLBACK — LLM output failed guardrails on every attempt]"
+            return fallback
 
         return {
             "subject": subject,
@@ -539,6 +656,7 @@ class EmailGenerator:
             "template_fallback": False,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "model_used": f"{self.provider}:{_model}",
         }
 
     def _parse_tool_response(self, response):
@@ -611,13 +729,7 @@ class EmailGenerator:
         from .pricing import calculate_loan_pricing
         from .template_fallback import generate_approval_template, generate_denial_template
 
-        applicant_name = (
-            _sanitize_prompt_input(
-                f"{application.applicant.first_name} {application.applicant.last_name}".strip(),
-                max_length=200,
-            )
-            or application.applicant.username
-        )
+        applicant_name = self._applicant_name(application)
 
         pricing = None
         if decision == "approved":
@@ -642,14 +754,19 @@ class EmailGenerator:
             # Gather rich denial context
             feature_importances = None
             shap_values = None
+            decision_waterfall = None
             if hasattr(application, "decision") and application.decision:
                 feature_importances = application.decision.feature_importances
                 shap_values = application.decision.shap_values
+                decision_waterfall = application.decision.decision_waterfall
 
-            denial_reasons = self._format_denial_reasons(feature_importances, shap_values=shap_values)
+            denial_reasons = self._format_denial_reasons(
+                feature_importances, shap_values=shap_values, decision_waterfall=decision_waterfall
+            )
 
             credit_score = getattr(application, "credit_score", None)
             debt_to_income = getattr(application, "debt_to_income", None)
+            nbo_offer = (context.get("nbo_offers") or [None])[0]
 
             result = generate_denial_template(
                 applicant_name,
@@ -660,6 +777,7 @@ class EmailGenerator:
                 credit_score=int(credit_score) if credit_score else None,
                 debt_to_income=float(debt_to_income) if debt_to_income else None,
                 employment_type=application.get_employment_type_display(),
+                nbo_offer=nbo_offer,
             )
 
         generation_time = int((time.time() - start_time) * 1000)
@@ -694,4 +812,5 @@ class EmailGenerator:
             "template_fallback": True,
             "input_tokens": 0,
             "output_tokens": 0,
+            "model_used": "template",
         }

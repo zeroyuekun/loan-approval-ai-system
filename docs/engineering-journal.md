@@ -1,68 +1,64 @@
-# Engineering Journal — Loan Approval AI System
+# Engineering journal: Loan Approval AI System
 
-> A narrative record of how this project was built, why each major decision was made, what went wrong, and how the rough edges were ground down. Written so a reader (hiring manager, teammate, future-me) can understand not just *what* was shipped but *why it was shipped that way*.
+> A running record of how this project was built, why the major decisions went the way they did, what went wrong, and how the rough edges got ground down. It's written so a reader (hiring manager, teammate, future-me) can see why things were shipped the way they were, as well as what was shipped.
 
 **Project:** Australian Loan Approval AI System
 **Timeline:** project start → v1.10.4 SLO instrumentation (2026-04-19)
 **Current version:** see `CHANGELOG.md` top entry (v1.10.4)
-**Status:** portfolio / demonstrator — not in production use
+**Status:** portfolio / demonstrator, not in production use
 
 ---
 
 ## 1. Project origin and framing
 
-The brief was a three-level AI lending system: ML scoring, LLM email generation, and an agentic pipeline on top. The interesting engineering question wasn't the three-level shape — it was whether the system could hold up to the regulatory load that a real Australian lender carries: NCCP responsible lending, Privacy Act APP obligations, APRA serviceability buffers, Banking Code transparency on denials. If that layer is thin, nothing else matters for the role it's targeted at.
+The brief was a three-level AI lending system: ML scoring, LLM email generation, and an agentic pipeline on top. The three-level shape wasn't the interesting engineering question. The interesting one was whether the system could hold up under the regulatory load a real Australian lender carries: NCCP responsible lending, Privacy Act APP obligations, APRA serviceability buffers, and Banking Code transparency on denials. If that layer is thin, nothing else matters for the role the project is aimed at.
 
-That reframing drove every subsequent decision. The ML model is useful but not the point. The email generation is impressive but not the point. The point is: can this thing defend the decision it just made, in the language a regulator expects, with an audit trail that holds up?
+That reframing drove every decision after it. The ML model is useful and the email generation is impressive, but neither is the point. The point is whether this thing can defend the decision it just made, in the language a regulator expects, with an audit trail that holds up.
 
-## 2. Architecture — the WAT layering
+## 2. Architecture: the WAT layering
 
-The system follows the Workflows-Agents-Tools (WAT) pattern:
+The system uses the Workflows-Agents-Tools (WAT) pattern. Workflows are markdown SOPs in `workflows/` that describe the procedure. Agents (the AI reasoning) choose which tool to call and when. Tools are the Python services in `backend/apps/*/services/`, and they're deterministic.
 
-- **Workflows** (markdown SOPs in `workflows/`) describe the procedure
-- **Agents** (AI reasoning) choose which tool to invoke and when
-- **Tools** (Python services in `backend/apps/*/services/`) are deterministic
+The split is useful because it keeps the probabilistic parts (Claude writing an email, SHAP picking reason codes) apart from the deterministic ones (guardrail checks, APRA buffer calculations, retention policy enforcement). Every probabilistic output has to pass a deterministic gate before it reaches a customer.
 
-This is useful because the probabilistic parts (Claude writing an email, SHAP picking reason codes) are cleanly separated from the deterministic parts (guardrail checks, APRA buffer calculations, retention policy enforcement). It means every probabilistic output flows through a deterministic gate before it reaches a customer.
+The Django layout uses a service layer instead of fat views. Each app has `services/` modules that do the real work, and the views stay thin. Tests target the services. ADR 007 (`docs/adr/007-wat-architecture.md`) has the reasoning.
 
-For the Django layout, service-layer patterns were chosen over fat views: each app has `services/` modules that do the real work, views are thin. Tests target the services. ADR 007 (`backend/docs/adr/007-wat-architecture.md`) captures the reasoning.
+## 3. Data: the big rewrite in v1.6.0
 
-## 3. Data — the big rewrite in v1.6.0
+The first data generator produced clean synthetic records with label leakage, and models trained on them hit 0.99 AUC. That felt fraudulent. In v1.6.0 (March 2026) the generator was rewritten from end to end:
 
-The original data generator produced clean, label-leaked synthetic records that trained models to 0.99 AUC. That felt fraudulent. In v1.6.0 (March 2026) the generator was rewritten end-to-end:
-
-- Gaussian copula correlations between income, credit score, expenses, DTI, LVR
+- Gaussian copula correlations between income, credit score, expenses, DTI and LVR
 - Six borrower sub-populations with realistic state-specific profiles
-- ATO, ABS, APRA, RBA, Equifax statistics as calibration anchors
+- ATO, ABS, APRA, RBA and Equifax statistics as calibration anchors
 - Latent variables the model can't see (documentation quality, savings patterns, employer stability)
 - Underwriter disagreement noise and measurement error
-- A 1000-line rules-based underwriting engine producing the labels, with outcomes run through a separate loan-performance simulator
+- A 1000-line rules-based underwriting engine that produces the labels, with outcomes run through a separate loan-performance simulator
 
-Result: test AUC settled at 0.87–0.88 with Optuna-tuned XGBoost, 0.84–0.85 with default hyperparameters. That number is honest — measured on a held-out test set, reproducible via `python manage.py train_model --algorithm xgb` with the seeded generator config in `backend/apps/ml_engine/services/data_generator.py`. ADR 001 covers the copula choice.
+After that, test AUC settled at 0.87-0.88 with Optuna-tuned XGBoost and 0.84-0.85 with default hyperparameters. That number is honest. It's measured on a held-out test set, and you can reproduce it with `python manage.py train_model --algorithm xgb` using the seeded generator config in `backend/apps/ml_engine/services/data_generator.py`. ADR 001 explains the copula choice.
 
-## 4. The model — XGBoost with guardrails on top
+## 4. The model: XGBoost with guardrails on top
 
-XGBoost with 21 monotonic constraints (higher income → lower risk, etc.) was chosen over an LR scorecard for lift, with the tradeoff that monotonicity is what makes the model defensible. ADR 002 documents it. Every training run fits a logistic-regression baseline on the four core features and records `training_metadata.baseline_auc` plus `xgb_lift_over_baseline` — so "why did you use XGBoost" has a specific number, not marketing copy.
+XGBoost with 21 monotonic constraints (higher income → lower risk, and so on) was chosen over an LR scorecard because of the lift. The trade-off is that the monotonicity is what keeps the model defensible. ADR 002 documents it. Every training run also fits a logistic-regression baseline on the four core features and records `training_metadata.baseline_auc` plus `xgb_lift_over_baseline`, so the answer to "why did you use XGBoost" is a specific number rather than marketing copy.
 
-Other ML parts that came in over time:
+Other ML pieces came in over time:
 
-- **IV-based feature selection** so the 71 inputs don't all fight for the model's attention
-- **PSI/CSI drift monitoring** with a weekly Celery beat task
-- **SR 11-7-style ModelValidationReport** — the output is what a regulator expects, not a notebook dump
-- **Conformal prediction intervals** on top of raw probabilities for high-stakes decisions
-- **APRA +3% stress buffer** baked into the serviceability rule
-- **SHAP-mapped adverse-action reason codes** (70 of them, compiled from real denial-letter language)
-- **Reject inference** using the parcelling method so the training label space isn't biased by who actually got approved in the simulator
-- **Walk-forward temporal CV** recorded alongside the random-CV AUC so the drift gap is visible
+- IV-based feature selection, so the 71 inputs don't all fight for the model's attention
+- PSI/CSI drift monitoring with a weekly Celery beat task
+- An SR 11-7-style ModelValidationReport, whose output is what a regulator expects to read instead of a notebook dump
+- Conformal prediction intervals on top of the raw probabilities for high-stakes decisions
+- The APRA +3% stress buffer, built into the serviceability rule
+- SHAP-mapped adverse-action reason codes (70 of them, compiled from real denial-letter language)
+- Reject inference using the parcelling method, so the training label space isn't biased by who actually got approved in the simulator
+- Walk-forward temporal CV, recorded next to the random-CV AUC so the drift gap is visible
 
-## 5. The emails — template-first with a Claude escape hatch
+## 5. The emails: template-first, with a Claude escape hatch
 
-Claude is not writing every denial letter from scratch. That would be: expensive, slow, inconsistent, and regulatorially dangerous. The pattern is **template-first**: every email starts from an audited template, and Claude is only invoked to generate the personalised reason-code section. The whole thing then runs through 15 deterministic guardrails before it goes out:
+Claude doesn't write every denial letter from scratch. That would be expensive, slow, inconsistent and regulatorially dangerous. Instead the design is template-first. Every email starts from an audited template, and Claude is only called to write the personalised reason-code section. The result then runs through 15 deterministic guardrails before it goes out:
 
 1. Prohibited language (discrimination acts)
 2. Hallucinated dollar amounts (validated against application data)
 3. Aggressive tone
-4. Overly formal / corporate phrasing
+4. Overly formal or corporate phrasing
 5. Unprofessional financial language
 6. Markdown / HTML rejection (plain text only)
 7. Word count limits
@@ -70,142 +66,142 @@ Claude is not writing every denial letter from scratch. That would be: expensive
 9. Double sign-off detection
 10. Sentence rhythm uniformity (flags suspiciously even sentence lengths)
 
-Plus five more added over the project for the Australian denial tone specifically — including enforced **no apology / no disappointment language**, which matters because Australian banking guidance interprets that language as admission of wrongdoing. ADR 006 covers the cost cap (<$5/day on the Anthropic API) and the fallback when the cap is hit.
+Five more were added over the course of the project, specifically for the Australian denial tone. One of them enforces no apology and no disappointment language, because Australian banking guidance reads that language as an admission of wrongdoing. ADR 006 covers the cost cap (<$5/day on the Anthropic API) and the fallback when the cap is hit.
 
-The guardrails layer has its own regression suite (`tests/test_guardrails.py`, `test_guardrails_comprehensive.py`) — every guardrail is a pure function, so tests run in ms.
+The guardrails have their own regression suite (`tests/test_guardrails.py`, `test_guardrails_comprehensive.py`). Every guardrail is a pure function, so the tests run in milliseconds.
 
-## 6. Bias — three layers
+## 6. Bias: three layers
 
-ADR 003 documents the pipeline: regex pre-screen scores 0–100, Claude reviews the 60–80 band with a confidence gate, everything >80 or Claude-confidence <0.70 goes to human review. This wasn't my first attempt.
+ADR 003 documents the pipeline. A regex pre-screen scores from 0 to 100, Claude reviews the 60 to 80 band with a confidence gate, and anything above 80 or with Claude confidence below 0.70 goes to human review. This wasn't my first attempt.
 
-The v1 bias detector was a 989-LOC god class that did detection, scoring, escalation, audit logging, and notification. It worked but was unmaintainable. PR #13 (commit `d18ce4c`) split it into a `bias/` package with single-responsibility modules. The split happened specifically because a code-quality review flagged that the file was holding concerns that changed at different cadences — the regex patterns change with new discrimination law, the Claude review logic changes with prompt engineering, the escalation routing changes with org structure. Keeping them in one file made every change a merge conflict.
+The v1 bias detector was a 989-LOC god class that handled detection, scoring, escalation, audit logging and notification. It worked, but it was unmaintainable. PR #13 (commit `d18ce4c`) split it into a `bias/` package of single-responsibility modules. The split happened because a code-quality review pointed out that the file held concerns that changed at different cadences. The regex patterns change with new discrimination law, the Claude review logic changes with prompt engineering, and the escalation routing changes with org structure. With all of them in one file, every change was a merge conflict.
 
 ## 7. The Celery pipeline
 
-All work behind the API is a single orchestrator Celery task that moves an `AgentRun` record through states. That was a deliberate choice: one task per pipeline means one log trace, one error path, one retry unit. The alternative — micro-tasks chained through Celery groups — was rejected because debugging a broken pipeline with four handoffs and three retry policies is where engineer-hours go to die.
+All the work behind the API runs as a single orchestrator Celery task that moves an `AgentRun` record through its states. That was deliberate. One task per pipeline means one log trace, one error path and one retry unit. The alternative was micro-tasks chained through Celery groups, which was ruled out because debugging a broken pipeline with four handoffs and three retry policies is where engineer-hours go to die.
 
-What makes it resilient:
+What keeps it running when things go wrong:
 
-- **Separate queues per workload** (`ml`, `email`, `agents`) so a CPU-bound ML run can't starve a fast bias-review task
-- **`task_acks_late=True`** (added in the April 2026 polish pass) so workers killed mid-task don't drop work
-- **`task_reject_on_worker_lost=True`** for the same reason
-- **`prefetch_multiplier=1`** on the ML queue specifically (CPU-bound work gets one task at a time so the worker can't hold a second ML task hostage while it's running)
-- **`worker_max_tasks_per_child=1000`** to recycle any accumulated native state (XGBoost + OpenMP threads leak across tasks)
-- **A watchdog service** in the core stack that polls every 30 seconds for applications stuck >5 minutes and re-queues them — so transient broker failures self-recover rather than zombie the pipeline
+- Separate queues per workload (`ml`, `email`, `agents`), so a CPU-bound ML run can't starve a fast bias-review task
+- `task_acks_late=True` (added in the April 2026 polish pass), so a worker killed mid-task doesn't drop the work
+- `task_reject_on_worker_lost=True`, for the same reason
+- `prefetch_multiplier=1` on the ML queue only. CPU-bound work gets one task at a time, so a worker can't hold a second ML task hostage while it's busy with the first
+- `worker_max_tasks_per_child=1000` to recycle accumulated native state (XGBoost and OpenMP threads leak across tasks)
+- A watchdog service in the core stack that polls every 30 seconds for applications stuck for more than 5 minutes and re-queues them, so transient broker failures recover on their own rather than zombie the pipeline
 
-## 8. Security — learned from code review, not intuition
+## 8. Security: learned from code review, not intuition
 
-The security story was aggressive but not theatrical. Every piece came from an actual review finding, not a checklist:
+The security work was aggressive but not for show. Each piece came from an actual review finding rather than a checklist:
 
-- JWT with HttpOnly cookies (not localStorage)
-- Argon2 password hashing (not bcrypt — it tolerates GPU attacks worse)
-- 60-minute access / 7-day refresh with rotation and blacklist
-- Fernet field-level encryption for PII at rest (key rotation via `rotate_encryption_key` command)
+- JWT in HttpOnly cookies (not localStorage)
+- Argon2 password hashing (not bcrypt, which tolerates GPU attacks worse)
+- 60-minute access / 7-day refresh tokens with rotation and a blacklist
+- Fernet field-level encryption for PII at rest (key rotation via the `rotate_encryption_key` command)
 - Rate limiting: 20/min anon, 60/min auth
-- CORS locked to frontend origin
+- CORS locked to the frontend origin
 - Three RBAC roles with per-endpoint permission checks
-- Prompt injection defences on user text entering LLM prompts
+- Prompt injection defences on user text going into LLM prompts
 - Trivy container scanning pinned to commit SHAs after the supply-chain advisory in April 2026
-- Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST on every CI run
+- Bandit SAST, gitleaks, npm audit and OWASP ZAP DAST on every CI run
 
 ADR 008 documents the layered threat model.
 
 ## 9. The mistakes
 
-**Over-engineered denial emails in v0.** The first denial emails tried to be empathetic. They triggered the regulatory red flag (apology language). The fix was a hard-coded guardrail rule plus a persistent note in the memory layer so future work can't re-introduce it.
+**Over-engineered denial emails in v0.** The first denial emails tried to be empathetic, and the apology language in them set off the regulatory red flag. The fix was a hard-coded guardrail rule, plus a persistent note in the memory layer so future work can't re-introduce it.
 
-**Dev frontend container exit-243 crash loop.** The Next.js dev server inside the container kept dying. For months the response was "restart it". The April 2026 polish pass finally root-caused it: Node heap default was larger than the cgroup memory, so the OS reaped it with signal 15 → exit code 243. The fix is three lines in `docker-compose.yml` (`NODE_OPTIONS=--max-old-space-size=768`, `mem_limit: 1g`, `healthcheck.start_period: 90s`). Documented in `docs/runbooks/frontend-exit-243.md`.
+**Dev frontend container exit-243 crash loop.** The Next.js dev server inside the container kept dying. For months the response was "restart it". The April 2026 polish pass finally found the root cause: the default Node heap was larger than the cgroup memory, so the OS reaped the process with signal 15 → exit code 243. The fix is three lines in `docker-compose.yml` (`NODE_OPTIONS=--max-old-space-size=768`, `mem_limit: 1g`, `healthcheck.start_period: 90s`), documented in `docs/runbooks/frontend-exit-243.md`.
 
-**Flaky Hypothesis tests.** Hypothesis would generate edge cases that revealed real bugs, then the same generation would pass next run. For a while these were marked `@skip`. That's a lie — it tells your CI the code works when it doesn't. PR #12 (`3c48b71`) pinned the seeds, simplified the strategies, and removed the skip guards.
+**Flaky Hypothesis tests.** Hypothesis would generate edge cases that exposed real bugs, and then the same generation would pass on the next run. For a while these tests were marked `@skip`. That's a lie: it tells your CI the code works when it doesn't. PR #12 (`3c48b71`) pinned the seeds, simplified the strategies and removed the skip guards.
 
 **989-LOC bias_detector.** Covered above. The lesson: when a file is doing three things that change on different clocks, the file is wrong.
 
-**CounterfactualEngine timeout mismatch.** The DiCE counterfactual engine was called with `timeout_seconds=10` but internally defaulted to `timeout_seconds=15`. Rarely the internal timeout won, which meant the caller saw "no fallback" while logs showed a timeout. April 2026 fix (PR #36): align both to 20s and cut `total_CFs=5→3` to hit the budget.
+**CounterfactualEngine timeout mismatch.** The DiCE counterfactual engine was called with `timeout_seconds=10` but internally defaulted to `timeout_seconds=15`. Once in a while the internal timeout won, so the caller saw "no fallback" while the logs showed a timeout. The April 2026 fix (PR #36) aligned both to 20s and cut `total_CFs=5→3` to stay inside the budget.
 
-**Assumed the model was the product.** For the first few months the polish went into making AUC look better. The realisation that regulatory defensibility, audit trails, and guardrail breadth were the actual product came later and reframed everything after that point.
+**Assumed the model was the product.** For the first few months the polish went into making AUC look better. Only later did I realise that regulatory defensibility, audit trails and guardrail breadth were the actual product, and that changed how I approached everything after that point.
 
 ## 10. The rating journey
 
-Self-rating after an exhaustive audit in April 2026 was 8.9/10. The polish pass to push it toward 9.5/10 drove this set of PRs:
+My self-rating after an exhaustive audit in April 2026 was 8.9/10. The polish pass to push it toward 9.5/10 produced this set of PRs:
 
-- **A1** — ADR scaffold so architectural decisions live in version control, not memory
-- **A2** — Mermaid architecture diagram + 60-second quickstart in the README
-- **A3** — pre-commit config with ruff, gitleaks, hygiene hooks
-- **A4** — `pyproject.toml` + split dev dependencies
-- **A5** — Dependabot config for pip, npm, and github-actions
-- **A6** — CODEOWNERS + PR/issue templates
-- **A7** — operational runbooks (frontend exit-243, Celery backpressure, migration rollback)
-- **A8** — SLI/SLO catalogue
-- **A9** — Australian compliance doc mapping every obligation to a code path
-- **A10** — this engineering journal + the interview talking-points companion
-- **B1** — DiCE counterfactual timeout/total_CFs fix (engineering honesty: the code didn't match the spec)
-- **B2** — Celery prefetch and ack tuning (covered in §7)
-- **B3/B4/B5** — three targeted fixes from the P0 baseline code review (state-machine bypass audit, api_budget thread-safety, Celery integration test assertions)
+- A1: ADR scaffold, so architectural decisions live in version control instead of in memory
+- A2: Mermaid architecture diagram and a 60-second quickstart in the README
+- A3: pre-commit config with ruff, gitleaks and hygiene hooks
+- A4: `pyproject.toml` and split dev dependencies
+- A5: Dependabot config for pip, npm and github-actions
+- A6: CODEOWNERS and PR/issue templates
+- A7: operational runbooks (frontend exit-243, Celery backpressure, migration rollback)
+- A8: SLI/SLO catalogue
+- A9: Australian compliance doc mapping every obligation to a code path
+- A10: this engineering journal and the companion interview talking points
+- B1: DiCE counterfactual timeout/total_CFs fix (an engineering honesty fix: the code didn't match the spec)
+- B2: Celery prefetch and ack tuning (covered in §7)
+- B3/B4/B5: three targeted fixes from the P0 baseline code review (state-machine bypass audit, api_budget thread-safety, Celery integration test assertions)
 
-The polish pass is itself an example of the engineering philosophy: observe what's there, cite with specifics, fix the minimum, leave breadcrumbs for future-you.
+The polish pass is itself an example of how I like to work: look at what's actually there, cite specifics, fix the minimum, and leave breadcrumbs for future-you.
 
 ## 11. What would a production rollout need
 
-This is a portfolio project. Before real users, it would need:
+This is a portfolio project. Before it had real users, it would need:
 
-- **Real historical training data**, not synthetic — the TSTR validator estimates real-world AUC around 0.82, but that's a guess
-- **Compliance sign-off** — no licensed professional has reviewed the Australian obligations doc yet
-- **Paging on SLO breach** — the SLO catalogue lists targets but nothing pages
-- **Multi-region failover** — currently single-region Docker Compose
-- **Secrets management beyond .env** — Vault or AWS Secrets Manager rather than environment variables
-- **Pre-deploy migration review** — for anything touching `Application` or `AuditLog`
-- **Model-card sign-off workflow** — new `ModelVersion` should require a formal review step before `is_active=True`
+- Real historical training data instead of synthetic. The TSTR validator estimates real-world AUC at around 0.82, but that's a guess.
+- Compliance sign-off. No licensed professional has reviewed the Australian obligations doc yet.
+- Paging on SLO breach. The SLO catalogue lists targets, but nothing pages anyone.
+- Multi-region failover. Right now it's single-region Docker Compose.
+- Secrets management beyond .env, using Vault or AWS Secrets Manager rather than environment variables.
+- Pre-deploy migration review for anything touching `Application` or `AuditLog`.
+- A model-card sign-off workflow. A new `ModelVersion` should require a formal review step before `is_active=True`.
 
 ## 12. What I'd do differently
 
-- **Start with the compliance doc, not the model.** Knowing the regulatory frame earlier would have shaped data generation, the AuditLog schema, and the retention command. Instead compliance was reverse-engineered after the fact, which meant rewriting.
-- **Write ADRs from day one.** Without them, "why is it this way" lives only in commit messages, which drift and get squashed. The ADRs added in April 2026 recover decisions that were clear at the time but hard to reconstruct.
-- **Separate the probabilistic and deterministic layers sooner.** The WAT pattern clicked six months in. Before that, guardrails were mixed into email generators, bias detection into orchestrators. The rewrite cost time that could have been saved by drawing the boundaries early.
+- Start with the compliance doc, not the model. Knowing the regulatory frame earlier would have shaped data generation, the AuditLog schema and the retention command. Instead, compliance was reverse-engineered after the fact, which meant rewriting.
+- Write ADRs from day one. Without them, "why is it this way" lives only in commit messages, which drift and get squashed. The ADRs added in April 2026 recover decisions that were clear at the time but hard to reconstruct.
+- Separate the probabilistic and deterministic layers sooner. The WAT pattern clicked six months in. Before that, guardrails were mixed into email generators and bias detection into orchestrators. The rewrite cost time that drawing the boundaries early would have saved.
 
 ---
 
-*Reviewed: 2026-04-17. Next review on the next major polish pass or if the project restarts after ≥90 days of dormancy.*
+*Reviewed: 2026-04-17. Next review at the next major polish pass, or if the project restarts after ≥90 days of dormancy.*
 
 ---
 
 ## 13. The v1.9.x → v1.10.x sprint (2026-04-17 → 2026-04-19)
 
-The 8.9 → 9.5 polish pass landed v1.9.0. Over the next forty-eight hours the project went through six successive review cycles — internal, two adversarial passes from Codex, a senior engineer review, and a final SLO/observability gap check — that produced fifteen tagged releases and roughly forty merged PRs. The pattern that held throughout: keep PRs small and atomic, land each one green, accept that "consolidation release" is a category of work that's worth its own version bump.
+The 8.9 → 9.5 polish pass landed v1.9.0. Over the next forty-eight hours the project went through six review cycles in a row (internal, two adversarial passes from Codex, a senior engineer review, and a final SLO/observability gap check). Together they produced fifteen tagged releases and roughly forty merged PRs. The same pattern held the whole way through: keep PRs small and atomic, land each one green, and accept that a "consolidation release" is a real category of work that deserves its own version bump.
 
-**v1.9.1 (review response, 2026-04-17).** External review surfaced four concrete defects. Coverage moved from 61.35% to 63.98% in the same release, and the 60% CI floor was tightened to 63%.
+**v1.9.1 (review response, 2026-04-17).** An external review found four concrete defects. Coverage went from 61.35% to 63.98% in the same release, and the CI floor was raised from 60% to 63%.
 
-**v1.9.2 — v1.9.4 (Codex adversarial passes, 2026-04-18).** Two rounds of Codex review caught: missing CSRF on a Celery-triggered endpoint; an ops endpoint that was authenticated but not staff-gated; an idempotency hole in `force_rerun`; an outbox edge case where a worker crash could lose a queued email; throttle caps on complaint-filing and data-export endpoints. Each PR landed one fix, ran green, and merged independently — no bundled "Codex round 2" PR.
+**v1.9.2 to v1.9.4 (Codex adversarial passes, 2026-04-18).** Two rounds of Codex review caught: missing CSRF on a Celery-triggered endpoint; an ops endpoint that was authenticated but not staff-gated; an idempotency hole in `force_rerun`; an outbox edge case where a worker crash could lose a queued email; and throttle caps on the complaint-filing and data-export endpoints. Each PR landed one fix, ran green and merged on its own. There was no bundled "Codex round 2" PR.
 
-**v1.9.5 — v1.9.6 (workstream cleanup, 2026-04-18).** Workstream D removed 610 lines of dead frontend code (eight unused components carried from earlier iterations). Workstream B added throttle caps. Workstream C extracted customer-label maps out of a 1,400-line component file. The Optuna pin (PR #86) fixed a regression where "Train New Model" silently 500'd because Optuna's API had moved.
+**v1.9.5 to v1.9.6 (workstream cleanup, 2026-04-18).** Workstream D removed 610 lines of dead frontend code (eight unused components carried over from earlier iterations). Workstream B added throttle caps. Workstream C pulled the customer-label maps out of a 1,400-line component file. The Optuna pin (PR #86) fixed a regression where "Train New Model" silently 500'd because Optuna's API had moved.
 
-**v1.10.0 (Australian-lender parity, 2026-04-18).** Arm A of the AU-lender parity work shipped eight deliverables — APRA serviceability buffer at +3% baked into the rules engine; LVR and DTI rules calibrated against actual CBA / Westpac credit policies; postcode default-rate noise tightened; a 1,000-record reproducibility benchmark in `docs/experiments/benchmark.md`; and a CI regression gate that fails if AUC on the held-out benchmark drops by more than 2 points. Arm C Phase 1 refactored `predictor.py` from 1,217 lines down to 436 by extracting ten focused modules (calibration, conformal, SHAP mapping, explanation, etc.) — the kind of refactor that's safer once the regression gate is in place.
+**v1.10.0 (Australian-lender parity, 2026-04-18).** Arm A of the AU-lender parity work shipped eight deliverables: the APRA serviceability buffer at +3% built into the rules engine; LVR and DTI rules calibrated against actual CBA / Westpac credit policies; tighter postcode default-rate noise; a 1,000-record reproducibility benchmark in `docs/experiments/benchmark.md`; and a CI regression gate that fails if AUC on the held-out benchmark drops by more than 2 points. Arm C Phase 1 cut `predictor.py` from 1,217 lines to 436 by extracting ten focused modules (calibration, conformal, SHAP mapping, explanation, etc.). That kind of refactor is safer once the regression gate is in place.
 
-**v1.10.1 (production hardening, 2026-04-19).** Six PRs (D1–D6): `tools/smoke_e2e.sh` exercising the full pipeline against a live stack; a `workflow_dispatch` GitHub Actions job that runs it in CI; a mypy gate on ten modules (start small, expand outward); httpx swap on the watchdog (the previous `requests` dependency wasn't installed); calibration lazy-import (a top-of-file sklearn import was crashing in production); Python 3.13 datetime deprecation cleanup.
+**v1.10.1 (production hardening, 2026-04-19).** Six PRs (D1 to D6): `tools/smoke_e2e.sh`, which exercises the full pipeline against a live stack; a `workflow_dispatch` GitHub Actions job that runs it in CI; a mypy gate on ten modules (start small, expand outward); an httpx swap in the watchdog (the old `requests` dependency wasn't installed); a lazy import for calibration (a top-of-file sklearn import was crashing in production); and Python 3.13 datetime deprecation cleanup.
 
-**v1.10.2 (consolidation, 2026-04-19).** Seven deliverables that fit the "fix latent bugs without changing model behaviour" bar. Notable: removed the dead DiCE counterfactual code path (DiCE was never in `requirements.txt`; `CounterfactualEngine` always fell through to binary search), split `make clean` into `clean-soft` (caches only) and `clean` (full wipe including the Postgres volume) to stop people accidentally nuking their seed data, and required a `GRAFANA_ADMIN_PASSWORD` env var instead of shipping a default `admin/changeme`.
+**v1.10.2 (consolidation, 2026-04-19).** Seven deliverables that met the "fix latent bugs without changing model behaviour" bar. The notable ones: removing the dead DiCE counterfactual code path (DiCE was never in `requirements.txt`, so `CounterfactualEngine` always fell through to binary search); splitting `make clean` into `clean-soft` (caches only) and `clean` (full wipe including the Postgres volume) so people stop nuking their seed data by accident; and requiring a `GRAFANA_ADMIN_PASSWORD` env var instead of shipping a default `admin/changeme`.
 
-**v1.10.3 (senior code review, 2026-04-19).** Four atomic PRs from a full senior-engineer review: caught a `Fernet.InvalidToken` swallowed by a bare `except Exception` (which would have masked rotation failures silently), corrected a bias-threshold `>` → `>=`, replaced a hand-rolled `useEffect`+`setInterval` polling loop with TanStack Query's `refetchInterval` (the manual cleanup was the source of subtle race conditions on unmount), and pinned every monitoring-stack image so `:latest` couldn't silently major-upgrade a production observability tool.
+**v1.10.3 (senior code review, 2026-04-19).** Four atomic PRs from a full senior-engineer review. It caught a `Fernet.InvalidToken` being swallowed by a bare `except Exception` (which would have silently masked rotation failures). The PRs also corrected a bias threshold from `>` to `>=`, replaced a hand-rolled `useEffect`+`setInterval` polling loop with TanStack Query's `refetchInterval` (the manual cleanup was causing subtle race conditions on unmount), and pinned every monitoring-stack image so `:latest` couldn't silently major-upgrade a production observability tool.
 
-**v1.10.4 (SLO instrumentation, 2026-04-19).** The `docs/slo.md` catalogue had four SLOs whose underlying metrics were marked _"follow-up issue tracks this"_ and were never actually emitted. Grafana panels couldn't render them; alerts couldn't fire. This release wired up `pipeline_e2e_seconds`, `email_generation_total`, an `algorithm` label on `ml_prediction_latency_seconds`, and `bias_review_ttr_seconds` — every emission wrapped in `try/except` with a debug log so a Prometheus client failure can't propagate into the pipeline. Also: ephemeral per-CI-run Fernet key generation (replacing a hardcoded test key — flagged as credential-in-source by the senior review), Bandit gate tightened to `--severity-level high --confidence-level high`, and an eight-test regression suite for the `enforce_retention` management command (which was previously at 0% coverage despite enforcing AML/CTF Act, APRA CPG 235, and Privacy Act APP 11.2 retention windows — a silent regression there is a compliance incident).
+**v1.10.4 (SLO instrumentation, 2026-04-19).** The `docs/slo.md` catalogue had four SLOs whose underlying metrics were marked _"follow-up issue tracks this"_ and never actually emitted. Grafana panels couldn't render them and alerts couldn't fire. This release wired up `pipeline_e2e_seconds`, `email_generation_total`, an `algorithm` label on `ml_prediction_latency_seconds`, and `bias_review_ttr_seconds`. Every emission is wrapped in `try/except` with a debug log, so a Prometheus client failure can't spread into the pipeline. The release also added ephemeral Fernet key generation per CI run (replacing a hardcoded test key that the senior review flagged as a credential in source), tightened the Bandit gate to `--severity-level high --confidence-level high`, and added an eight-test regression suite for the `enforce_retention` management command. That command had 0% coverage even though it enforces the AML/CTF Act, APRA CPG 235 and Privacy Act APP 11.2 retention windows, and a silent regression there is a compliance incident.
 
-**Pattern that held:** each cycle started with someone (Codex, senior reviewer, or me reading the SLO doc with fresh eyes) flagging gaps, was scoped into atomic PRs sized for an independent rollback, ran green-CI before merge, and ended with a tagged release + CHANGELOG entry. Forty PRs in forty-eight hours sounds like a sprint death-march; in practice it was sustainable because the discipline of "one thing per PR, green CI before merge" never bent.
+**Pattern that held:** each cycle started with someone (Codex, the senior reviewer, or me reading the SLO doc with fresh eyes) flagging gaps. The gaps were scoped into atomic PRs, each small enough to roll back on its own, and every PR had green CI before merge. The cycle ended with a tagged release and a CHANGELOG entry. Forty PRs in forty-eight hours sounds like a death march. In practice it was sustainable, because the rule of "one thing per PR, green CI before merge" never bent.
 
-**What's left.** HTML-escape parity between the Python and TypeScript email renderers (deferred since v1.10.3 — needs coordinated regen of fifteen byte-for-byte parity snapshots), and an unsubscribe-URL protocol allowlist that bundles with it. Both are scoped for a single coordinated future PR rather than a panicked spot-fix.
+**What's left.** HTML-escape parity between the Python and TypeScript email renderers (deferred since v1.10.3, because it needs a coordinated regen of fifteen byte-for-byte parity snapshots), and an unsubscribe-URL protocol allowlist that goes with it. Both are scoped for one coordinated PR later, not a panicked spot-fix.
 
 *Reviewed: 2026-04-19.*
 
 ---
 
-## Making the email LLM swappable — a free backend, chosen on data-safety grounds (2026-06-10)
+## Making the email LLM swappable: a free backend, chosen on data-safety grounds (2026-06-10)
 
-The email writer started as the paid Claude API. For a demonstrator that should run end-to-end with no spend, that's friction, so I made the backend pluggable and added a free option. The interesting part wasn't the plumbing — it was *which* free option, and saying why.
+The email writer started out on the paid Claude API. For a demonstrator that should run end to end without spending anything, that's friction, so I made the backend pluggable and added a free option. The plumbing wasn't the interesting part. Picking *which* free option was, along with being able to say why.
 
-The naive move is to point the email prompt at whatever free AI endpoint is cheapest. For a lending system that's the wrong instinct, and it's worth being explicit about why: most *free* consumer AI tiers train on the prompts you send them, and some have humans review them. Several of the big free tiers (Google Gemini's free tier, Mistral's free Experiment plan) do exactly that by default. Routing real borrower information to a tier like that is precisely what a real lender must not do — it's an APP 6 use-and-disclosure problem and an APP 8 cross-border problem rolled together.
+The naive move is to point the email prompt at whichever free AI endpoint is cheapest. For a lending system that's the wrong instinct, because most *free* consumer AI tiers train on the prompts you send them, and some have humans review them. Several of the big free tiers (Google Gemini's free tier, Mistral's free Experiment plan) do exactly that by default. Sending real borrower information to a tier like that is precisely what a real lender must not do. It's an APP 6 use-and-disclosure problem and an APP 8 cross-border problem at the same time.
 
-So the backend defaults to Claude, and the free option is **Groq specifically — chosen because its free tier does not train on submitted prompts**, not because it was the first free key I could get. Free tiers that train on prompts are deliberately excluded. On top of that the existing safety story still does the heavy lifting: the system runs entirely on synthetic data (there's no real PII anywhere in the repo), the email prompt already sends only anonymised feature summaries and model scores, and every cloud call is logged with its provider and destination country for APP 8 audit.
+So the backend defaults to Claude, and the free option is Groq specifically. It was chosen because its free tier doesn't train on submitted prompts, not because it was the first free key I could get. Free tiers that train on prompts are deliberately excluded. On top of that, the existing safety setup still does the heavy lifting: the system runs entirely on synthetic data (there's no real PII anywhere in the repo), the email prompt already sends only anonymised feature summaries and model scores, and every cloud call is logged with its provider and destination country for APP 8 audit.
 
-The implementation kept the blast radius small. A thin adapter (`llm_client.py`) duck-types the Anthropic client — same `.messages.create` surface — so the single budget-guarded call site, the 18 guardrails, the retry loop, and the deterministic template fallback are all untouched. It's built on `httpx`, which was already a dependency, so the swap added zero new packages. One deliberate non-decision: I did **not** route the safety-critical bias detection through the free model. The free model writes prose; the compliance gate stays on the deterministic rules (ADR 003), so the safety floor remains auditable and model-independent. Putting a weaker model in charge of the bias check to save nothing would have been a bad trade.
+The implementation kept the blast radius small. A thin adapter (`llm_client.py`) duck-types the Anthropic client with the same `.messages.create` surface, so the single budget-guarded call site, the 18 guardrails, the retry loop and the deterministic template fallback are all untouched. It's built on `httpx`, which was already a dependency, so the swap added zero new packages. One thing I deliberately did not do was route the safety-critical bias detection through the free model. The free model writes prose. The compliance gate stays on the deterministic rules (ADR 003), so the safety floor stays auditable and doesn't depend on any model. Putting a weaker model in charge of the bias check to save nothing would have been a bad trade.
 
-Honest limits: `llama-3.1-8b-instant` is weaker than Claude at forced tool calls and exact-figure reproduction — the guardrail + retry + template-fallback chain absorbs that, but more emails will fall back or retry than on Claude. Groq's `seed` is best-effort, so reproducibility is "near-identical," not bitwise. And for a real production deployment this free tier is not the endpoint to use — you'd point the same toggle at a no-train paid tier or a self-hosted model. That swap is a config change, not a rewrite, which was the whole point of making it pluggable. Full reasoning in ADR 010.
+Honest limits: `llama-3.1-8b-instant` is weaker than Claude at forced tool calls and at reproducing exact figures. The guardrail, retry and template-fallback chain absorbs that, but more emails will fall back or retry than they would on Claude. Groq's `seed` is best-effort, so reproducibility is "near-identical", not bitwise. And this free tier is not the endpoint to use for a real production deployment. There you'd point the same toggle at a no-train paid tier or a self-hosted model. That swap is a config change, not a rewrite, which was the whole reason for making it pluggable. The full reasoning is in ADR 010.
 
 *Reviewed: 2026-06-10.*

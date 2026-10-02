@@ -16,7 +16,7 @@ from prometheus_client import Counter, Histogram
 from apps.ml_engine.services.governance.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
 )
-from apps.ml_engine.services.scoring.consistency import DataConsistencyChecker
+from apps.ml_engine.services.scoring.consistency import ConsistencyError, DataConsistencyChecker
 from apps.ml_engine.services.scoring.decision_assembly import (
     assemble_decision as _assemble_decision_helper,
 )
@@ -59,6 +59,9 @@ from apps.ml_engine.services.scoring.shap_attribution import (
 )
 from apps.ml_engine.services.training.feature_prep import (
     FEATURE_BOUNDS,  # noqa: F401 — re-exported for open_banking_service + tests
+)
+from apps.ml_engine.services.training.feature_prep import (
+    clip_to_training_range as _clip_to_training_range_helper,
 )
 from apps.ml_engine.services.training.feature_prep import (
     safe_get_state as _safe_get_state_helper,
@@ -154,7 +157,9 @@ class ModelPredictor:
 
         self.imputation_values = bundle.get("imputation_values", DEFAULT_IMPUTATION_VALUES)
         self.feature_bounds = bundle.get("feature_bounds", {})
-        self.group_thresholds = bundle.get("group_thresholds", {})
+        # One approval threshold for every applicant: ModelVersion.optimal_threshold.
+        # Older bundles may still carry per-employment-type "group_thresholds";
+        # they are deliberately not read.
         self.conformal_scores = bundle.get("conformal_scores", np.array([]))
         self.consistency_checker = DataConsistencyChecker()
         from ..metrics import MetricsService
@@ -200,7 +205,7 @@ class ModelPredictor:
         """Public seam over the engineered + one-hot/scale pipeline.
 
         Stable contract for cross-app callers (e.g. the agents orchestrator)
-        so internal ``_transform`` changes don't leak across boundaries (L17).
+        so internal ``_transform`` changes don't leak across boundaries.
         """
         return self._transform(df)
 
@@ -208,7 +213,7 @@ class ModelPredictor:
         """Construct a CounterfactualEngine wired to this model's transform
         pipeline. Returns the engine; the caller invokes ``.generate(...)``.
 
-        Keeps the agents orchestrator off ``ModelPredictor`` internals (L17).
+        Keeps the agents orchestrator off ``ModelPredictor`` internals.
         """
         from apps.ml_engine.services.scoring.counterfactual_engine import CounterfactualEngine
 
@@ -272,10 +277,16 @@ class ModelPredictor:
 
         return df
 
-    def predict(self, application):
+    def predict(self, application, *, persist=True):
         """
         Predict approval for a LoanApplication instance.
         Returns dict with prediction, probability, and feature_importances.
+
+        `persist=False` runs a dry-run scoring pass that writes nothing: the
+        D6 referral-audit save on `application` and the shadow-scoring
+        `PredictionLog` rows are both skipped, and so are the production
+        Prometheus metrics and the policy shadow-disagreement log. Used for ad-hoc scoring of an
+        applicant that was never saved as a `LoanApplication`.
         """
         start_time = time.time()
 
@@ -292,8 +303,18 @@ class ModelPredictor:
         # Cross-validate data consistency
         consistency = self.consistency_checker.check_all(features)
         if not consistency["consistent"]:
-            error_msgs = "; ".join(e["message"] for e in consistency["errors"])
-            raise ValueError(f"Data consistency check failed: {error_msgs}")
+            raise ConsistencyError(consistency["errors"])
+
+        # Per-application drift flags on the applicant's actual values (APRA
+        # CPG 235 ongoing monitoring), taken before any clipping for the model.
+        drift_warnings = self._check_feature_drift(features)
+
+        # A value beyond the training range on a column with no policy limit is
+        # scored at the edge of that range rather than rejected.
+        clipped_features = _clip_to_training_range_helper(
+            features, self.reference_distribution, hard_bounds=FEATURE_BOUNDS
+        )
+        drift_warnings.extend(clipped_features)
 
         df = pd.DataFrame([features])
         features_df = df.copy()  # preserve raw features for counterfactual generation
@@ -318,23 +339,16 @@ class ModelPredictor:
         # metric reflects full wall-clock latency including SHAP, stress tests,
         # counterfactuals, and shadow scoring — not just predict_proba().
 
-        # Per-application drift flags: check if key features are far outside
-        # the training distribution (APRA CPG 235 ongoing monitoring)
-        drift_warnings = self._check_feature_drift(features)
-
         decision = _assemble_decision_helper(
             probability_positive=float(probabilities[1]),
             model_version=self.model_version,
-            group_thresholds=self.group_thresholds,
-            employment_type=features.get("employment_type", ""),
             drift_warnings=drift_warnings,
             segment=features.get("purpose", "personal"),
         )
         probability = decision["probability"]
         threshold = decision["threshold"]
-        effective_threshold = decision["effective_threshold"]
         prediction_label = decision["prediction_label"]
-        requires_human_review = decision["requires_human_review"]
+        refer_reasons = decision["refer_reasons"]
         pricing_payload = decision["pricing_payload"]
 
         # Expected Loss (EL = PD x LGD x EAD) — Basel III / APRA APS 113
@@ -351,20 +365,27 @@ class ModelPredictor:
         stress_results = self._stress_test(features, threshold)
         confidence_interval = self._conformal_interval(probability, alpha=0.05)
 
-        # === Credit policy overlay (D3) + referral audit (D6) ======
-        prediction_label, requires_human_review, policy_payload = _apply_policy_overlay_helper(
+        # === Credit policy overlay + referral audit ======
+        prediction_label, policy_payload = _apply_policy_overlay_helper(
             application=application,
             model_version=self.model_version,
             prediction_label=prediction_label,
-            requires_human_review=requires_human_review,
+            persist_referral=persist,
         )
+        if policy_payload.get("mode") == "enforce":
+            rationale = policy_payload.get("rationale_by_code") or {}
+            for code in policy_payload.get("refers") or []:
+                refer_reasons.append({"code": f"POLICY_REFER_{code}", "detail": rationale.get(code, "")})
 
         result = {
             "prediction": prediction_label,
             "probability": probability,
+            "risk_grade": compute_risk_grade(probability),
             "threshold_used": threshold,
-            "effective_threshold": effective_threshold,
-            "requires_human_review": requires_human_review,
+            # Why this decision deserves a second look (borderline, drift,
+            # policy refer, pricing gap). Recorded on the decision; it does not
+            # change the decision or route it to human review (bias-only).
+            "refer_reasons": refer_reasons,
             "feature_importances": importances,
             "shap_values": shap_values_dict,
             "shap_available": shap_available,
@@ -373,6 +394,7 @@ class ModelPredictor:
             "model_version": str(self.model_version.id),
             "consistency_warnings": consistency["warnings"],
             "drift_warnings": drift_warnings,
+            "clipped_features": clipped_features,
             "expected_loss": expected_loss,
             "stress_test": stress_results,
             "confidence_interval": confidence_interval,
@@ -403,18 +425,20 @@ class ModelPredictor:
         # this below so the histogram reflects real SLA-relevant wall time.
         result["processing_time_ms"] = int((time.time() - start_time) * 1000)
 
-        # Emit Prometheus metrics for ML observability
+        # Emit Prometheus metrics for ML observability. A dry run is not a real
+        # decision, so it stays out of the production series Grafana reads.
         try:
-            ml_predictions_total.labels(
-                decision=result["prediction"],
-                model_version=str(self.model_version.id)[:8],
-            ).inc()
-            ml_prediction_latency_seconds.labels(
-                algorithm=getattr(self.model_version, "algorithm", "unknown") or "unknown",
-            ).observe(result["processing_time_ms"] / 1000.0)
-            ml_prediction_confidence.observe(result["probability"])
-            if result.get("drift_warnings"):
-                ml_drift_warnings_total.inc()
+            if persist:
+                ml_predictions_total.labels(
+                    decision=result["prediction"],
+                    model_version=str(self.model_version.id)[:8],
+                ).inc()
+                ml_prediction_latency_seconds.labels(
+                    algorithm=getattr(self.model_version, "algorithm", "unknown") or "unknown",
+                ).observe(result["processing_time_ms"] / 1000.0)
+                ml_prediction_confidence.observe(result["probability"])
+                if result.get("drift_warnings"):
+                    ml_drift_warnings_total.inc()
         except Exception as e:
             logger.debug("Prometheus metrics emission failed (non-blocking): %s", e)
 
@@ -428,14 +452,15 @@ class ModelPredictor:
             label = "approved" if prob >= (challenger_mv.optimal_threshold or 0.5) else "denied"
             return prob, label
 
-        _score_challengers_shadow_helper(
-            application=application,
-            champion_version=self.model_version,
-            champion_probability=probability,
-            champion_prediction_label=prediction_label,
-            features_df=features_df,
-            score_fn=_score_with_challenger,
-        )
+        if persist:
+            _score_challengers_shadow_helper(
+                application=application,
+                champion_version=self.model_version,
+                champion_probability=probability,
+                champion_prediction_label=prediction_label,
+                features_df=features_df,
+                score_fn=_score_with_challenger,
+            )
 
         return result
 

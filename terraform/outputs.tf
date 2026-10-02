@@ -24,14 +24,19 @@ output "rds_database_name" {
   value       = aws_db_instance.main.db_name
 }
 
-output "redis_endpoint" {
-  description = "ElastiCache Redis primary endpoint"
-  value       = aws_elasticache_cluster.main.cache_nodes[0].address
+output "rds_master_user_secret_arn" {
+  description = "Secrets Manager ARN holding the RDS master username/password (managed by RDS)"
+  value       = aws_db_instance.main.master_user_secret[0].secret_arn
+}
+
+output "redis_primary_endpoint" {
+  description = "ElastiCache Redis primary endpoint (TLS; connect with rediss://)"
+  value       = aws_elasticache_replication_group.main.primary_endpoint_address
 }
 
 output "redis_port" {
   description = "ElastiCache Redis port"
-  value       = aws_elasticache_cluster.main.cache_nodes[0].port
+  value       = aws_elasticache_replication_group.main.port
 }
 
 output "kubeconfig_command" {

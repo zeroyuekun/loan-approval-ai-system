@@ -1,9 +1,9 @@
 import json
 import logging
-import os
 
 import anthropic
-import httpx
+
+from utils.anthropic_client import make_anthropic_client
 
 from .api_budget import guarded_api_call
 from .recommendation_engine import RecommendationEngine
@@ -31,6 +31,10 @@ def _extract_tool_result(response, fallback):
         return fallback
 
 
+# Shown when the LLM wording step is unavailable.
+NBO_FALLBACK_MESSAGE = "Thank you for applying with us. Based on your application, these products may suit you."
+
+
 class NextBestOfferGenerator:
     """Generates alternative offers for denied applicants based on their banking profile.
 
@@ -40,14 +44,7 @@ class NextBestOfferGenerator:
     """
 
     def __init__(self):
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if api_key:
-            self.client = anthropic.Anthropic(
-                api_key=api_key,
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
-        else:
-            self.client = None
+        self.client = make_anthropic_client()
         self.engine = RecommendationEngine()
 
     def generate(self, application, denial_reasons=""):
@@ -163,6 +160,11 @@ RULES:
 
             response = guarded_api_call(
                 self.client,
+                _service="nbo_messaging",
+                _loan_application_id=application.pk,
+                # Interpolated: loan amount, credit score, income, decline
+                # factors and the banking-relationship profile.
+                _pii_categories=["loan_amount", "credit_score", "income", "credit_assessment", "financial_profile"],
                 model="claude-sonnet-4-6",
                 max_tokens=1024,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
@@ -191,10 +193,7 @@ RULES:
                     {"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers
                 ],
                 "analysis": "We have identified alternative products based on your financial profile.",
-                "personalized_message": (
-                    "Thank you for your interest in banking with us. "
-                    "We have some tailored options that may suit your needs."
-                ),
+                "personalized_message": NBO_FALLBACK_MESSAGE,
             }
         except Exception as e:
             import logging as _logging
@@ -208,10 +207,7 @@ RULES:
                     {"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers
                 ],
                 "analysis": "We have identified alternative products based on your financial profile.",
-                "personalized_message": (
-                    "Thank you for your interest in banking with us. "
-                    "We have some tailored options that may suit your needs."
-                ),
+                "personalized_message": NBO_FALLBACK_MESSAGE,
             }
 
     def _format_precalculated_offers(self, offers):
@@ -284,6 +280,16 @@ Respond with the marketing message text only, no JSON wrapping."""
         try:
             response = guarded_api_call(
                 self.client,
+                _service="nbo_marketing_message",
+                _loan_application_id=application.pk,
+                _pii_categories=[
+                    "loan_amount",
+                    "credit_score",
+                    "income",
+                    "employment",
+                    "credit_assessment",
+                    "financial_profile",
+                ],
                 model="claude-sonnet-4-6",
                 max_tokens=1024,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),

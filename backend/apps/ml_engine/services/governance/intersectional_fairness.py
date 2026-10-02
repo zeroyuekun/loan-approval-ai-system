@@ -6,6 +6,8 @@ combinations of protected attributes and flags when intersectional disparity
 exceeds the worst single-axis result.
 
 Reference: EEOC Uniform Guidelines 29 CFR 1607.4 (four-fifths rule).
+
+Not yet called by the application pipeline; exercised by its own tests only.
 """
 
 import logging

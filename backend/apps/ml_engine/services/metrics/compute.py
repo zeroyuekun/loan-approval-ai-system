@@ -246,15 +246,16 @@ class MetricsService:
                 "bins": [],
             }
 
-        expected_counts = np.histogram(expected, bins=bin_edges)[0]
-        actual_counts = np.histogram(actual, bins=bin_edges)[0]
+        # Open-ended outer bins, as in the canonical drift_monitor primitive:
+        # values outside the reference range are counted, not dropped.
+        expected_counts = drift_monitor.open_edge_counts(expected, bin_edges)
+        actual_counts = drift_monitor.open_edge_counts(actual, bin_edges)
 
         # Convert to proportions using the SAME scheme as the canonical
         # drift_monitor.compute_psi: epsilon REPLACES zeros only, with NO
-        # re-normalisation. The previous 1e-4 + re-normalise scheme made the
-        # per-bin breakdown fail to sum to the headline psi_value (#14); the
-        # bins share the identical edges with drift_monitor, so matching the
-        # smoothing makes sum(psi_components) reconcile to psi_value.
+        # re-normalisation. The bins share identical edges with drift_monitor,
+        # so matching the smoothing makes sum(psi_components) reconcile to
+        # psi_value.
         eps = 1e-8
         expected_pct = expected_counts / len(expected)
         actual_pct = actual_counts / len(actual)
@@ -262,8 +263,8 @@ class MetricsService:
         actual_pct = np.where(actual_pct == 0, eps, actual_pct)
 
         # PSI = sum((actual% - expected%) * ln(actual% / expected%)). The scalar
-        # routes through the canonical primitive (single source of truth, M1);
-        # the per-bin components now use identical bins + smoothing so they SUM
+        # routes through the canonical primitive (single source of truth);
+        # the per-bin components use identical bins + smoothing so they SUM
         # to it (a presentation breakdown that reconciles to the headline).
         psi_components = (actual_pct - expected_pct) * np.log(actual_pct / expected_pct)
         psi_value = drift_monitor.compute_psi(expected, actual, bins=n_bins)
@@ -292,21 +293,6 @@ class MetricsService:
             "status": status,
             "bins": bins,
         }
-
-    def compute_feature_psi(self, train_df, current_df, numeric_cols, n_bins=10):
-        results = {}
-        for col in numeric_cols:
-            if col in train_df.columns and col in current_df.columns:
-                result = self.compute_psi(
-                    train_df[col].values,
-                    current_df[col].values,
-                    n_bins=n_bins,
-                )
-                results[col] = {
-                    "psi": result["psi"],
-                    "status": result["status"],
-                }
-        return results
 
     def compute_fairness_metrics(self, y_true, y_pred, y_prob, group_labels):
         y_true = np.array(y_true)
@@ -902,7 +888,7 @@ class VintageAnalyser:
 
 
 # ===========================================================================
-# Production-grade metrics (D5) — simple-return wrappers.
+# Production-grade metrics — simple-return wrappers.
 #
 # The MetricsService methods above are the historical API and return dicts
 # with analytics payloads for the dashboard. These module-level helpers return
@@ -919,21 +905,19 @@ def ks_statistic(y_true, y_proba) -> float:
     Returns a float in [0, 1]. ~0.35+ is considered good for retail credit
     scorecards (APRA APS 220 commentary, Basel WG-CR validation guides).
     """
-    import numpy as _np
-
-    y_true = _np.asarray(y_true).astype(int)
-    y_proba = _np.asarray(y_proba, dtype=float)
+    y_true = np.asarray(y_true).astype(int)
+    y_proba = np.asarray(y_proba, dtype=float)
 
     pos = y_proba[y_true == 1]
     neg = y_proba[y_true == 0]
     if len(pos) == 0 or len(neg) == 0:
         return 0.0
 
-    thresholds = _np.unique(_np.concatenate([pos, neg]))
+    thresholds = np.unique(np.concatenate([pos, neg]))
     # F₁(s) - F₀(s) across all unique scores
-    cdf_pos = _np.searchsorted(_np.sort(pos), thresholds, side="right") / len(pos)
-    cdf_neg = _np.searchsorted(_np.sort(neg), thresholds, side="right") / len(neg)
-    return float(_np.max(_np.abs(cdf_pos - cdf_neg)))
+    cdf_pos = np.searchsorted(np.sort(pos), thresholds, side="right") / len(pos)
+    cdf_neg = np.searchsorted(np.sort(neg), thresholds, side="right") / len(neg)
+    return float(np.max(np.abs(cdf_pos - cdf_neg)))
 
 
 def psi(expected_dist, actual_dist, bins: int = 10) -> float:
@@ -944,7 +928,7 @@ def psi(expected_dist, actual_dist, bins: int = 10) -> float:
     so gate logic can `psi(...) <= 0.25` without indexing a dict.
 
     Thin wrapper over the canonical ``drift_monitor.compute_psi`` primitive
-    (single source of truth, M1). The small-sample guard is preserved so the
+    (single source of truth). The small-sample guard is preserved so the
     gate-logic contract (under-`bins` samples → 0.0) is unchanged.
     """
     expected = np.asarray(expected_dist, dtype=float)
@@ -997,10 +981,8 @@ def brier_decomposition(y_true, y_proba, bins: int = 10) -> dict:
         brier_binned = reliability − resolution + uncertainty
         brier        = brier_binned + within_bin_variance
     """
-    import numpy as _np
-
-    y_true = _np.asarray(y_true, dtype=float)
-    y_proba = _np.asarray(y_proba, dtype=float)
+    y_true = np.asarray(y_true, dtype=float)
+    y_proba = np.asarray(y_proba, dtype=float)
     n = len(y_true)
     if n == 0:
         return {
@@ -1012,14 +994,14 @@ def brier_decomposition(y_true, y_proba, bins: int = 10) -> dict:
             "within_bin_variance": 0.0,
         }
 
-    overall = float(_np.mean(y_true))
+    overall = float(np.mean(y_true))
     uncertainty = overall * (1.0 - overall)
-    brier_pointwise = float(_np.mean((y_proba - y_true) ** 2))
+    brier_pointwise = float(np.mean((y_proba - y_true) ** 2))
 
-    edges = _np.linspace(0.0, 1.0, bins + 1)
+    edges = np.linspace(0.0, 1.0, bins + 1)
     # digitize -1 shifts to 0-indexed bins; clamp top bin so predictions of
     # 1.0 fall into the final bin rather than overflowing to bins+1.
-    bin_idx = _np.clip(_np.digitize(y_proba, edges) - 1, 0, bins - 1)
+    bin_idx = np.clip(np.digitize(y_proba, edges) - 1, 0, bins - 1)
 
     reliability = 0.0
     resolution = 0.0
@@ -1031,14 +1013,14 @@ def brier_decomposition(y_true, y_proba, bins: int = 10) -> dict:
             continue
         f_bin = y_proba[mask]
         y_bin = y_true[mask]
-        o_k = float(_np.mean(y_bin))
-        f_k = float(_np.mean(f_bin))
+        o_k = float(np.mean(y_bin))
+        f_k = float(np.mean(f_bin))
         weight = n_k / n
         reliability += weight * (f_k - o_k) ** 2
         resolution += weight * (o_k - overall) ** 2
         # Binned Brier: avg over bin of (f_k - y_i)^2. This is what the
         # 3-term Murphy identity exactly decomposes.
-        brier_binned += _np.sum((f_k - y_bin) ** 2) / n
+        brier_binned += np.sum((f_k - y_bin) ** 2) / n
 
     within_bin_variance = brier_pointwise - float(brier_binned)
 

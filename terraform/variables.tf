@@ -64,12 +64,6 @@ variable "db_username" {
   default     = "aussieloanai"
 }
 
-variable "db_password" {
-  description = "PostgreSQL master password"
-  type        = string
-  sensitive   = true
-}
-
 variable "db_multi_az" {
   description = "Enable Multi-AZ for RDS (recommended for production)"
   type        = bool
@@ -83,9 +77,20 @@ variable "redis_node_type" {
 }
 
 variable "redis_num_cache_nodes" {
-  description = "Number of ElastiCache Redis nodes"
+  description = "Number of ElastiCache Redis nodes (2+ enables automatic failover)"
   type        = number
   default     = 1
+}
+
+variable "redis_auth_token" {
+  description = "Redis AUTH token. Pass via the TF_VAR_redis_auth_token environment variable, never a committed tfvars file."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.redis_auth_token) >= 16 && length(var.redis_auth_token) <= 128 && can(regex("^[-!&#$^<>A-Za-z0-9]+$", var.redis_auth_token))
+    error_message = "ElastiCache requires 16-128 printable characters; allowed specials are ! & # $ ^ < > -."
+  }
 }
 
 variable "vpc_cidr" {

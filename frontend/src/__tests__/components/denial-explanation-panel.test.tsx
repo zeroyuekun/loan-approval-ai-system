@@ -19,19 +19,10 @@ const mockCounterfactuals: Array<{ changes: Record<string, number>; statement: s
   },
 ]
 
-const mockReapplicationGuidance = {
-  improvement_targets: [
-    { feature: 'debt_to_income', current_value: '0.55', target_value: '0.40', description: 'Lower DTI' },
-  ],
-  estimated_review_months: 6,
-  message: 'Consider reapplying after addressing these areas.',
-}
-
 const defaultProps = {
   denialReasons: mockDenialReasons,
   counterfactuals: mockCounterfactuals,
-  reapplicationGuidance: mockReapplicationGuidance,
-  creditScore: 500,
+  creditScore: 'Average (500-699)',
 }
 
 describe('DenialExplanationPanel', () => {
@@ -75,13 +66,6 @@ describe('DenialExplanationPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders credit score with Equifax band', () => {
-    render(<DenialExplanationPanel {...defaultProps} creditScore={500} />)
-
-    expect(screen.getByText(/500/)).toBeInTheDocument()
-    expect(screen.getByText(/Average/)).toBeInTheDocument()
-  })
-
   it('renders "Talk to a specialist" CTA', () => {
     render(<DenialExplanationPanel {...defaultProps} />)
 
@@ -109,8 +93,7 @@ describe('DenialExplanationPanel', () => {
       <DenialExplanationPanel
         denialReasons={[]}
         counterfactuals={mockCounterfactuals}
-        reapplicationGuidance={mockReapplicationGuidance}
-        creditScore={500}
+        creditScore="Average (500-699)"
       />
     )
     expect(container.innerHTML).toBe('')
@@ -121,7 +104,6 @@ describe('DenialExplanationPanel', () => {
       <DenialExplanationPanel
         denialReasons={mockDenialReasons}
         counterfactuals={[]}
-        reapplicationGuidance={mockReapplicationGuidance}
         creditScore={null}
       />
     )
@@ -135,19 +117,11 @@ describe('DenialExplanationPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders correct Equifax band for different scores', () => {
-    const { rerender } = render(
-      <DenialExplanationPanel {...defaultProps} creditScore={400} />
-    )
-    expect(screen.getByText(/Below Average/)).toBeInTheDocument()
+  it('shows a customer-masked score band as given, without deriving an Equifax band', () => {
+    render(<DenialExplanationPanel {...defaultProps} creditScore="Average (500-699)" />)
 
-    rerender(<DenialExplanationPanel {...defaultProps} creditScore={700} />)
-    expect(screen.getByText(/Good/)).toBeInTheDocument()
-
-    rerender(<DenialExplanationPanel {...defaultProps} creditScore={800} />)
-    expect(screen.getByText(/Very Good/)).toBeInTheDocument()
-
-    rerender(<DenialExplanationPanel {...defaultProps} creditScore={900} />)
-    expect(screen.getByText(/Excellent/)).toBeInTheDocument()
+    expect(screen.getByText('Average (500-699)')).toBeInTheDocument()
+    expect(screen.queryByText(/Excellent/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Equifax AU band/)).not.toBeInTheDocument()
   })
 })

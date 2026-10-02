@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { LoanApplication } from '@/types'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatPercent } from '@/lib/utils'
 
 interface FinancialDetailsProps {
   application: LoanApplication
@@ -63,7 +63,7 @@ export function FinancialDetails({ application }: FinancialDetailsProps) {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">LVR</span>
-              <span>{application.property_value > 0 ? `${((application.loan_amount / application.property_value) * 100).toFixed(1)}%` : '—'}</span>
+              <span>{application.property_value > 0 ? formatPercent(application.loan_amount / application.property_value) : '—'}</span>
             </div>
           </>
         )}

@@ -11,6 +11,35 @@ from . import patterns
 
 logger = logging.getLogger("email_engine.guardrails")
 
+NBO_AMOUNT_KEYS = ("amount", "monthly_repayment", "fortnightly_repayment")
+
+
+# --- Hallucinated-number rate patterns (I7) ---------------------------------
+_PERCENT = re.compile(r"(\d+\.?\d*)\s*%")
+_WINDOW = 40  # chars of same-line context inspected around a percentage
+_ADJACENT = 25  # disclaimer term must sit this close to the number to exempt it
+# "7.49% p.a." / "per annum" / "APR" right after the number: an interest-rate claim.
+_RATE_CLAIM_AFTER = re.compile(r"\s*(?:p\.?\s?a\b\.?|per\s+annum\b|APR\b)", re.IGNORECASE)
+# "... interest rate is 7.49%", "comparison rate of 7.89%": a rate claim.
+_RATE_CLAIM_BEFORE = re.compile(
+    r"\b(?:interest|comparison|annual|fixed|variable|introductory|loan|offer)\s+rate\b[^%\d]{0,20}$",
+    re.IGNORECASE,
+)
+# Benchmark rates that are not this lender's pricing.
+_BENCHMARK_RATE_BEFORE = re.compile(r"\b(?:base|cash|official|RBA)\s+rate\b[^%\d]{0,20}$", re.IGNORECASE)
+# Terms that make an ADJACENT bare percentage a non-rate figure.
+_NON_RATE_TERM = re.compile(
+    r"\b(?:LVR|offset|of\s+(?:the|your)\s+(?:loan|income|property|purchase)|"
+    r"Financial Claims Scheme|government|deposit|minimum|withdrawal|"
+    r"threshold|exceeds?|verification|gap|condition|income|on-time|payment rate|utili[sz]ation)\b",
+    re.IGNORECASE,
+)
+
+
+def nbo_offer_amounts(offers):
+    """Dollar figures from NBO offer dicts, for the ``nbo_amounts`` guardrail context."""
+    return [float(offer[key]) for offer in offers for key in NBO_AMOUNT_KEYS if offer.get(key)]
+
 
 class GuardrailChecker:
     """Runs compliance checks on generated emails."""
@@ -135,29 +164,32 @@ class GuardrailChecker:
         has_nbo = len(nbo_amounts_list) > 0
 
         # Pre-compute plausible derived values from each NBO offer principal.
-        # We allow annual interest (principal × rate ≤ 30%), monthly interest,
-        # fortnightly repayment, and the offer amount itself ÷ term.
-        # This replaces the previous blanket "< $5,000 is always fine" which
-        # disabled hallucination detection for the entire sub-$5k range.
+        # Offers passed as `nbo_offers` contribute interest at their actual
+        # estimated_rate; every principal also gets the 30%-rate band below,
+        # which covers callers that pass amounts without rates.
         _nbo_derived: set[float] = set()
+
+        def _add_interest_refs(principal: float, annual_rate: float) -> None:
+            # Annual, monthly and fortnightly (26 periods/year) interest.
+            annual = principal * annual_rate
+            _nbo_derived.update((annual, annual / 12, annual / 26))
+
         if has_nbo:
+            # e.g. $20,000 at 4.90% -> $980/yr, which the 30% band would reject.
+            for _offer in context.get("nbo_offers") or []:
+                try:
+                    _add_interest_refs(float(_offer["amount"]), float(_offer["estimated_rate"]) / 100)
+                except (KeyError, TypeError, ValueError):
+                    continue
             _MAX_RATE = 0.30  # upper bound for realistic interest rates
             for _nbo_raw in nbo_amounts_list:
                 try:
                     _nbo = float(_nbo_raw)
                 except (TypeError, ValueError):
                     continue
-                # Annual interest at maximum plausible rate
-                _annual_interest = _nbo * _MAX_RATE
-                _nbo_derived.add(_annual_interest)
-                # Monthly interest
-                _nbo_derived.add(_annual_interest / 12)
-                # Fortnightly interest (26 periods/year)
-                _nbo_derived.add(_annual_interest / 26)
-                # Monthly principal ÷ 12 (first-year simplified)
-                _nbo_derived.add(_nbo / 12)
-                # Fortnightly principal ÷ 26
-                _nbo_derived.add(_nbo / 26)
+                _add_interest_refs(_nbo, _MAX_RATE)
+                # Principal ÷ 12 and ÷ 26 (first-year simplified repayments)
+                _nbo_derived.update((_nbo / 12, _nbo / 26))
 
         def _is_nbo_derived(val: float) -> bool:
             """Return True if val is within ±10 % of any NBO-derived amount."""
@@ -190,43 +222,54 @@ class GuardrailChecker:
             except ValueError:
                 continue
 
-        # Validate percentages (interest rate, comparison rate) against pricing engine
+        # Validate percentages against every rate the email may legitimately
+        # quote: the pricing engine's rates (approvals) and each NBO offer's
+        # estimated_rate (denial teasers, marketing emails).
+        valid_rates = set()
         if pricing:
-            valid_rates = set()
-            if pricing.get("interest_rate_number") is not None:
-                valid_rates.add(float(pricing["interest_rate_number"]))
-            if pricing.get("comparison_rate_number") is not None:
-                valid_rates.add(float(pricing["comparison_rate_number"]))
+            for key in ("interest_rate", "comparison_rate"):
+                if pricing.get(f"{key}_number") is not None:
+                    valid_rates.add(float(pricing[f"{key}_number"]))
+                elif pricing.get(key):
+                    # Display form only ("6.14% p.a."): read the figure from it.
+                    shown = _PERCENT.search(str(pricing[key]))
+                    if shown:
+                        valid_rates.add(float(shown.group(1)))
+        for offer in context.get("nbo_offers") or []:
+            try:
+                valid_rates.add(float(offer["estimated_rate"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        # A decision email with no rate source (e.g. a denial with no offer)
+        # must not quote an interest rate at all.
+        is_decision_email = context.get("decision") in ("approved", "denied")
 
-            if valid_rates:
-                # Extract percentages from email, excluding common disclaimers
-                # (e.g. "80% LVR", "100% offset", percentage ranges in legal text)
-                pct_pattern = r"(\d+\.?\d*)\s*%"
-                # Exclude lines containing common disclaimer terms
-                disclaimer_pattern = re.compile(
-                    r"\b(?:LVR|offset|of\s+the\s+loan|"
-                    r"Financial Claims Scheme|government|"
-                    r"deposit|minimum|withdrawal|base rate|"
-                    r"threshold|exceeds?|verification|gap|"
-                    r"condition|income|on-time|payment rate)\b",
-                    re.IGNORECASE,
-                )
-                for line in text_to_check.split("\n"):
-                    if disclaimer_pattern.search(line):
-                        continue
-                    pct_matches = re.findall(pct_pattern, line)
-                    for pct_str in pct_matches:
-                        try:
-                            pct_val = float(pct_str)
-                        except ValueError:
-                            continue
-                        # Skip common non-rate percentages
-                        if pct_val in (0, 100) or pct_val > 30:
-                            continue
-                        # Check if this percentage matches a known valid rate
-                        is_valid_rate = any(abs(pct_val - vr) < 0.05 for vr in valid_rates)
-                        if not is_valid_rate:
-                            issues.append(f"Unrecognized interest rate: {pct_str}%")
+        for match in _PERCENT.finditer(text_to_check):
+            try:
+                pct_val = float(match.group(1))
+            except ValueError:
+                continue
+            line_start = text_to_check.rfind("\n", 0, match.start()) + 1
+            line_end = text_to_check.find("\n", match.end())
+            line_end = len(text_to_check) if line_end == -1 else line_end
+            before = text_to_check[max(line_start, match.start() - _WINDOW) : match.start()]
+            after = text_to_check[match.end() : min(line_end, match.end() + _WINDOW)]
+
+            if _BENCHMARK_RATE_BEFORE.search(before):
+                continue  # RBA cash rate / base rate references, not our pricing
+            is_rate_claim = bool(_RATE_CLAIM_AFTER.match(after) or _RATE_CLAIM_BEFORE.search(before))
+            if not is_rate_claim:
+                # Bare percentage: only check it when there is a rate to check
+                # against, and exempt the disclaimer span it sits in ("80% LVR",
+                # "30% of your income") rather than the whole line.
+                if not valid_rates or pct_val in (0, 100) or pct_val > 30:
+                    continue
+                if _NON_RATE_TERM.search(before[-_ADJACENT:]) or _NON_RATE_TERM.search(after[:_ADJACENT]):
+                    continue
+            elif pct_val == 0 or (not valid_rates and not is_decision_email):
+                continue
+            if not any(abs(pct_val - vr) < 0.05 for vr in valid_rates):
+                issues.append(f"Unrecognized interest rate: {match.group(1)}%")
 
         passed = len(issues) == 0
         details = "; ".join(issues) if issues else "All amounts and rates verified"

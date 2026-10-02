@@ -227,61 +227,6 @@ class RealWorldBenchmarks:
     Every method has a hardcoded fallback so generation never breaks.
     """
 
-    # RBA cash rate target (%) — sourced from RBA Table A2
-    RBA_CASH_RATE_HISTORY = {
-        (2022, 1): 0.10,  # Pre-tightening
-        (2022, 2): 0.85,  # First hikes May+Jun 2022
-        (2022, 3): 1.85,  # Jul+Aug+Sep 2022
-        (2022, 4): 3.10,  # Oct+Nov+Dec 2022
-        (2023, 1): 3.35,  # Feb 2023
-        (2023, 2): 3.85,  # Mar+May+Jun 2023
-        (2023, 3): 4.10,  # Aug 2023
-        (2023, 4): 4.35,  # Nov 2023
-        (2024, 1): 4.35,  # Hold
-        (2024, 2): 4.35,  # Hold
-        (2024, 3): 4.35,  # Hold
-        (2024, 4): 4.35,  # Hold
-        (2025, 1): 4.10,  # Feb 2025 cut
-        (2025, 2): 3.85,  # Projected cuts
-        (2025, 3): 3.60,  # Projected
-        (2025, 4): 3.35,  # Projected
-    }
-
-    # Seasonal lending volume index (1.0 = average month)
-    # Source: ABS 5601.0 monthly lending commitments, 5-year average pattern
-    SEASONAL_LENDING_INDEX = {
-        1: 0.85,  # Jan — summer holidays, low activity
-        2: 0.92,  # Feb — market reopens
-        3: 1.05,  # Mar — Q1 refinancing push
-        4: 1.02,  # Apr — post-Easter
-        5: 1.00,  # May — average
-        6: 0.95,  # Jun — EOFY, some rush
-        7: 0.88,  # Jul — winter lull
-        8: 0.93,  # Aug — picking up
-        9: 1.05,  # Sep — spring starts
-        10: 1.15,  # Oct — peak spring
-        11: 1.12,  # Nov — spring continues
-        12: 1.08,  # Dec — pre-Christmas rush then drop
-    }
-
-    # Cumulative default probability curve by months-on-book
-    # Peaks around month 18-24 (seasoning), flattens after month 36
-    # Calibrated so terminal rate ≈ 1.04% (APRA Sep Q 2025 NPL)
-    DEFAULT_HAZARD_CURVE = {
-        3: 0.0010,  # 0.10% — very early defaults (fraud/misrep)
-        6: 0.0025,  # 0.25%
-        9: 0.0045,  # 0.45%
-        12: 0.0065,  # 0.65%
-        15: 0.0080,  # 0.80% — approaching seasoning peak
-        18: 0.0090,  # 0.90%
-        21: 0.0097,  # 0.97%
-        24: 0.0100,  # 1.00% — seasoning plateau
-        30: 0.0103,  # 1.03%
-        36: 0.0104,  # 1.04% — terminal rate
-        48: 0.0104,  # Flat after seasoning
-        60: 0.0104,
-    }
-
     # Monthly state transition probabilities
     # States: performing, 30dpd, 60dpd, 90dpd, default, prepaid
     # Source: Moody's Australian RMBS performance indices, S&P APAC
@@ -501,43 +446,8 @@ class RealWorldBenchmarks:
         return snapshot
 
     # ------------------------------------------------------------------
-    # Temporal benchmark lookups
+    # Loan-performance lookups
     # ------------------------------------------------------------------
-
-    @classmethod
-    def get_cash_rate(cls, year: int, quarter: int) -> float:
-        """Return RBA cash rate for a given year/quarter. Falls back to nearest available."""
-        key = (year, quarter)
-        if key in cls.RBA_CASH_RATE_HISTORY:
-            return cls.RBA_CASH_RATE_HISTORY[key]
-        # Fallback: nearest quarter
-        available = sorted(cls.RBA_CASH_RATE_HISTORY.keys())
-        closest = min(available, key=lambda k: abs((k[0] * 4 + k[1]) - (year * 4 + quarter)))
-        return cls.RBA_CASH_RATE_HISTORY[closest]
-
-    @classmethod
-    def get_seasonal_factor(cls, month: int) -> float:
-        """Return seasonal lending volume multiplier for a given month (1-12)."""
-        return cls.SEASONAL_LENDING_INDEX.get(month, 1.0)
-
-    @classmethod
-    def get_cumulative_default_prob(cls, months_on_book: int) -> float:
-        """Return cumulative default probability for a given months-on-book.
-        Interpolates linearly between defined points."""
-        if months_on_book <= 0:
-            return 0.0
-        breakpoints = sorted(cls.DEFAULT_HAZARD_CURVE.keys())
-        if months_on_book >= breakpoints[-1]:
-            return cls.DEFAULT_HAZARD_CURVE[breakpoints[-1]]
-        # Linear interpolation
-        for i in range(len(breakpoints) - 1):
-            if breakpoints[i] <= months_on_book <= breakpoints[i + 1]:
-                lo, hi = breakpoints[i], breakpoints[i + 1]
-                frac = (months_on_book - lo) / (hi - lo)
-                return cls.DEFAULT_HAZARD_CURVE[lo] + frac * (
-                    cls.DEFAULT_HAZARD_CURVE[hi] - cls.DEFAULT_HAZARD_CURVE[lo]
-                )
-        return cls.DEFAULT_HAZARD_CURVE[breakpoints[-1]]
 
     @classmethod
     def get_transition_probs(cls, current_state: str) -> dict:
@@ -583,30 +493,6 @@ class RealWorldBenchmarks:
             logger.warning("Failed to parse ABS SDMX-JSON response: %s", exc)
         return None
 
-    def _parse_abs_series_values(self, data: dict) -> list[float]:
-        """Extract all observation values from an ABS SDMX-JSON response."""
-        values = []
-        try:
-            datasets = data.get("data", {}).get("dataSets", [])
-            if not datasets:
-                return values
-
-            observations = datasets[0].get("observations", {})
-            if not observations:
-                series = datasets[0].get("series", {})
-                if series:
-                    first_series = next(iter(series.values()), {})
-                    observations = first_series.get("observations", {})
-
-            sorted_keys = sorted(observations.keys(), key=lambda k: int(k.split(":")[-1]))
-            for key in sorted_keys:
-                val = observations[key]
-                if val and val[0] is not None:
-                    values.append(float(val[0]))
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
-            logger.warning("Failed to parse ABS series values: %s", exc)
-        return values
-
     def _fetch_income_percentiles(self, state: str) -> dict | None:
         """Fetch income data from ABS Average Weekly Earnings (cat 6302.0).
 
@@ -617,7 +503,7 @@ class RealWorldBenchmarks:
           3 = Persons, 7 = Private+Public, TOT = All Industries,
           10 = Original, region code, S = Half-yearly
         """
-        from .external.macro_data import _ABS_STATE_CODES
+        from ..external.macro_data import _ABS_STATE_CODES
 
         state_code = _ABS_STATE_CODES.get(state, "AUS")
         sdmx_key = f"1.1.3.7.TOT.10.{state_code}.S"

@@ -1,7 +1,7 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
-import { useApplications, useApplication, useCreateApplication, useUpdateApplication } from '@/hooks/useApplications'
+import { useApplications, useApplication, useCreateApplication } from '@/hooks/useApplications'
 import { server } from '@/test/mocks/server'
 import { mockLoanApplication } from '@/test/mocks/handlers'
 
@@ -148,29 +148,6 @@ describe('useCreateApplication', () => {
 
     await waitFor(() => {
       expect(result.current.isError).toBe(true)
-    })
-  })
-})
-
-describe('useUpdateApplication', () => {
-  it('updates an application', async () => {
-    const updatedApp = { ...mockLoanApplication, notes: 'Updated note' }
-    server.use(
-      http.patch(`${API_URL}/loans/:id/`, () => {
-        return HttpResponse.json(updatedApp)
-      }),
-    )
-
-    const { result } = renderHook(() => useUpdateApplication(), {
-      wrapper: createWrapper(),
-    })
-
-    await act(async () => {
-      result.current.mutate({ id: 'loan-1', data: { notes: 'Updated note' } })
-    })
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true)
     })
   })
 })

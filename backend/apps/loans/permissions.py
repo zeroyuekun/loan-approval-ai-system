@@ -1,5 +1,6 @@
 from rest_framework.exceptions import NotFound, PermissionDenied
 
+from apps.accounts.policy import is_staff_role
 from apps.loans.models import LoanApplication
 
 
@@ -14,7 +15,7 @@ def check_loan_access(request, loan_id):
         raise NotFound("Loan application not found.") from err
 
     user = request.user
-    if user.role in ("admin", "officer"):
+    if is_staff_role(user):
         return application
 
     if application.applicant_id != user.id:

@@ -141,8 +141,8 @@ class DecisionWaterfallTestCase(TestCase):
 
         with (
             patch("apps.agents.services.orchestrator.ModelPredictor", return_value=mock_predictor),
-            patch("apps.agents.services.email_pipeline.EmailGenerator", return_value=mock_generator),
-            patch("apps.agents.services.email_pipeline.EmailPersistenceService") as mock_persist,
+            patch("apps.email_engine.services.decision_email.EmailGenerator", return_value=mock_generator),
+            patch("apps.email_engine.services.decision_email.EmailPersistenceService") as mock_persist,
             patch("apps.agents.services.email_pipeline.BiasDetector", return_value=mock_bias),
             patch("apps.agents.services.orchestrator.FraudDetectionService", return_value=mock_fraud),
             patch("apps.agents.services.orchestrator.FraudCheck"),
@@ -177,6 +177,17 @@ class DecisionWaterfallTestCase(TestCase):
         self.assertIn("policy_rules", step_names)
         self.assertIn("ml_prediction", step_names)
         self.assertIn("final_decision", step_names)
+
+    def test_risk_grade_from_prediction_is_persisted(self):
+        """The predictor's risk_grade reaches LoanDecision (read by the data export and outcome tracker)."""
+        app = _make_application(self.user)
+        pred = {**_mock_prediction("approved", 0.98), "risk_grade": "A"}
+
+        self._run_pipeline_with_mocks(
+            app, pred, _mock_email_result(passed=True), _mock_bias_result(score=20, flagged=False)
+        )
+
+        self.assertEqual(LoanDecision.objects.get(application=app).risk_grade, "A")
 
     def test_approved_waterfall_entry_structure(self):
         """Each waterfall entry must have the required keys."""

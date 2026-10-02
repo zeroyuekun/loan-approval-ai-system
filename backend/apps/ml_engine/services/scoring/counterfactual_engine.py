@@ -52,7 +52,7 @@ class CounterfactualEngine:
     ) -> None:
         self.model = model
         self.feature_cols = feature_cols
-        self.training_data = training_data.copy()
+        # training_data is accepted for API compatibility only (see class docstring).
         self.threshold = threshold
         self._transform_fn = transform_fn
 

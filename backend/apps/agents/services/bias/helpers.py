@@ -1,13 +1,14 @@
 import json
 import logging
-import os
 
 import anthropic
-import httpx
 
+from utils.anthropic_client import (
+    make_anthropic_client as _make_anthropic_client,  # noqa: F401 - re-exported to bias modules
+)
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
-from ..api_budget import BudgetExhausted, CircuitOpen, guarded_api_call
+from ..api_budget import ApiGateClosed, guarded_api_call
 
 logger = logging.getLogger("agents.bias_detector")
 
@@ -34,17 +35,6 @@ def _extract_tool_result(response, fallback):
         return fallback
 
 
-def _make_anthropic_client():
-    """Construct an Anthropic client if ANTHROPIC_API_KEY is set, else None."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if api_key:
-        return anthropic.Anthropic(
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
-    return None
-
-
 # Default for the senior compliance reviewers (Opus 4.8 — free same-price
 # upgrade over legacy 4.7). Configurable via BIAS_REVIEWER_MODEL.
 DEFAULT_REVIEWER_MODEL = "claude-opus-4-8"
@@ -69,44 +59,25 @@ def _format_flag_detail(prescreen):
     return "\n".join(lines)
 
 
-def _call_with_retry(client, fallback, service_name, final_failure_suffix, **api_kwargs):
-    """Call the Anthropic API with a single-attempt policy.
+def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **api_kwargs):
+    """Call the Anthropic API once, returning ``fallback`` on terminal failure.
 
-    time.sleep() inside a Celery worker blocks the thread and prevents other
-    tasks from running, so retry backoff inside the worker has been removed.
-    The caller (bias detector) already handles transient failures gracefully
-    by returning the supplied ``fallback`` dict, which is scored as the worst-
-    case (high-risk) bias result.  Non-transient (4xx) errors are not retried.
-    BudgetExhausted / CircuitOpen propagate so callers can invoke
+    Transient errors are retried by the SDK client's own bounded backoff
+    (policy pinned in utils.anthropic_client); there is no extra retry loop
+    here, which would hold the Celery worker thread longer. Any API error
+    that survives the SDK retries returns ``fallback``, which the
+    bias-detector callers score as the worst-case (high-risk) result.
+    BudgetExhausted and CircuitOpen propagate so callers can invoke
     _handle_bias_unavailable.
-
-    If a single attempt raises a transient error (RateLimit, Timeout, Connection,
-    5xx), the function returns ``fallback`` immediately without sleeping.
     """
     try:
         response = guarded_api_call(client, **api_kwargs)
         return _extract_tool_result(response, fallback)
-    except anthropic.AuthenticationError as e:
-        logger.error("%s auth error (not retryable): %s", service_name, e)
-        return fallback
-    except anthropic.RateLimitError as e:
-        logger.warning("%s rate limited — returning fallback (no sleep): %s", service_name, e)
-        logger.error("%s failed (rate limit) — %s", service_name, final_failure_suffix)
-        return fallback
-    except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
-        logger.warning("%s connection/timeout — returning fallback (no sleep): %s", service_name, e)
-        logger.error("%s failed — %s", service_name, final_failure_suffix)
-        return fallback
-    except anthropic.APIStatusError as e:
-        if e.status_code >= 500:
-            logger.warning("%s server error (%d) — returning fallback (no sleep): %s", service_name, e.status_code, e)
-            logger.error("%s failed (server error) — %s", service_name, final_failure_suffix)
-            return fallback
-        else:
-            logger.error("%s client error (%d, not retryable): %s", service_name, e.status_code, e)
-            return fallback
-    except (BudgetExhausted, CircuitOpen):
+    except ApiGateClosed:
         raise  # let callers invoke _handle_bias_unavailable
+    except anthropic.APIError as e:
+        logger.error("%s failed (%s: %s) — %s", service_name, type(e).__name__, e, final_failure_suffix)
+        return fallback
     except Exception as e:
         logger.critical("%s UNEXPECTED failure: %s", service_name, e, exc_info=True)
         return fallback

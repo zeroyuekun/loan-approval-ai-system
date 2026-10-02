@@ -1,12 +1,9 @@
 """Mode dispatcher for the pre-activation validation sign-off gate (SR 11-7).
 
-Codex adversarial review (v1.10.7) flagged that the existing fairness gate
-(PR #163) and champion-challenger promotion gate (PRs #164–#165) check
-*performance metrics* but never enforce the governance artefact:
-``ModelValidationReport`` is created by the ``validate_model`` management
-command but neither the training task nor manual activation consults it.
-
-This dispatcher closes that gap. It mirrors the warn|block|off pattern of
+The fairness gate and the champion-challenger promotion gate check
+*performance metrics*; this gate enforces the governance artefact: an
+approved, signed-off ``ModelValidationReport`` (created by the
+``validate_model`` management command) for the candidate. It mirrors the warn|block|off pattern of
 ``fairness_gate_mode`` and ``promotion_gate_mode`` so operators learn one
 mode pattern that applies across all three gates.
 
@@ -17,11 +14,12 @@ Behaviour by mode:
     phase where validation reports haven't been seeded yet — operators get
     visibility without breaking the existing demo flow.
   - ``block``: the dispatcher raises ``ValidationSignoffBlocked`` when no
-    approved/signed-off report exists for the candidate. Callers (tasks.py
-    and ``ModelActivateView``) interpret this depending on their context —
-    tasks.py demotes the freshly-created candidate to ``is_active=False``
-    rather than raising past the activation transaction; the view returns
-    HTTP 409 unless the request carries an audited ``force=true`` flag.
+    approved/signed-off report exists for the candidate. The activation
+    service (``services/activation.py``) is the only caller: it refuses the
+    activation before touching any row, so the training path keeps the
+    candidate inactive while the champion keeps serving, and the activate
+    view returns HTTP 409 unless the request carries an audited
+    ``force=true`` flag.
   - ``off``: the gate is skipped entirely. Use only when validation reports
     are out of band (e.g. a private offline workflow).
 
@@ -34,7 +32,7 @@ See ``docs/superpowers/specs/2026-05-07-codex-adversarial-response-v1-10-7-desig
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from apps.ml_engine.models import ModelValidationReport, ModelVersion
 
@@ -68,14 +66,7 @@ class ValidationDecision:
     signed_off: bool | None
 
     def to_dict(self) -> dict:
-        return {
-            "result": self.result,
-            "reason": self.reason,
-            "candidate_id": self.candidate_id,
-            "report_id": self.report_id,
-            "report_outcome": self.report_outcome,
-            "signed_off": self.signed_off,
-        }
+        return asdict(self)
 
 
 def normalize_mode(mode: str | None) -> str:
@@ -98,9 +89,7 @@ def normalize_mode(mode: str | None) -> str:
 def _check_signoff(candidate: ModelVersion) -> ValidationDecision:
     """Return the raw gate decision for a candidate ModelVersion.
 
-    The candidate must have a saved primary key. Training-path callers that
-    haven't yet persisted the candidate should use ``check_pre_activation``
-    instead, which handles the no-PK case explicitly.
+    The candidate must have a saved primary key.
     """
     candidate_id = str(candidate.pk) if getattr(candidate, "pk", None) else None
     report = (
@@ -144,8 +133,8 @@ def evaluate_validation_signoff_gate(
 
     Args:
         candidate: The ``ModelVersion`` about to be promoted. Must already
-            have a saved primary key (training-path callers persist the row
-            before invoking this dispatcher).
+            have a saved primary key (the training path saves it inactive
+            before calling the activation service).
         mode: One of "warn" | "block" | "off". Unknown values are coerced
             to "warn" via :func:`normalize_mode`.
         bypass: Audited break-glass override (e.g. ``?force=true`` on the
