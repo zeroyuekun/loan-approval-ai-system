@@ -63,7 +63,7 @@ class CustomUser(AbstractUser):
             ),
             last_failed_login_at=now,
         )
-        self.refresh_from_db(fields=["failed_login_attempts", "last_failed_login_at", "locked_until"])
+        self.refresh_from_db(fields=["failed_login_attempts", "last_failed_login_at"])
 
         lock_minutes = next(
             (minutes for failures, minutes in settings.LOGIN_LOCKOUT_TIERS if self.failed_login_attempts >= failures),
