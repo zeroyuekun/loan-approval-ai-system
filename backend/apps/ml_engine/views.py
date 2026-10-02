@@ -11,6 +11,8 @@ from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 from apps.loans.models import AuditLog
 from apps.loans.permissions import check_loan_access
 from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
+from apps.ml_engine.services.model_selector import NoActiveModelError
+from apps.ml_engine.services.scoring.adhoc import AdhocApplicantSerializer, score_applicant
 from apps.ml_engine.tasks import TRAIN_LOCK_KEY, run_prediction_task, train_model_task
 
 
@@ -466,3 +468,40 @@ class DriftReportListView(APIView):
             )
 
         return Response(data)
+
+
+class AdhocScoreThrottle(UserRateThrottle):
+    rate = "30/hour"
+
+
+class AdhocScoreView(APIView):
+    """Score one applicant's facts against the active model.
+
+    Builds nothing durable: no `LoanApplication` row, no referral-audit
+    save, no shadow-scoring `PredictionLog` row (see `ModelPredictor.predict
+    (..., persist=False)`). Staff-only — this is an underwriting tool, not
+    a customer-facing pre-qualification endpoint.
+    """
+
+    permission_classes = [IsAdminOrOfficer]
+    throttle_classes = [AdhocScoreThrottle]
+
+    def post(self, request):
+        serializer = AdhocApplicantSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = score_applicant(serializer.validated_data)
+        except NoActiveModelError:
+            return Response({"detail": "No active model"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="adhoc_score",
+            resource_type="ModelVersion",
+            resource_id=result["model_version"],
+            details={"fields": sorted(serializer.validated_data.keys())},
+            ip_address=request.META.get("REMOTE_ADDR"),
+        )
+
+        return Response(result, status=status.HTTP_200_OK)
