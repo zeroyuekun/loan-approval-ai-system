@@ -483,13 +483,16 @@ docker logs loan-approval-ai-system-celery_beat-1 --tail 20
 
 ## Bias detection escalation
 
-When the bias detection pipeline flags an email:
-1. A junior analyst (Claude Sonnet) classifies each flag.
-2. A senior reviewer (Claude Opus) reviews the flagged email as a whole.
-3. If confidence is below 0.70 or approved=False, the run enters the human review queue.
-4. A human reviewer makes the final decision at `/dashboard/human-review` in the frontend.
-5. Staff submit the review via `POST /api/v1/agents/review/<run_id>/`.
-6. The decision is logged in BiasReport with the reviewer ID.
+Decision emails (approval and denial):
+1. The deterministic pre-screen scores the email. A clean email is sent.
+2. A moderate finding goes to a junior analyst (Claude Sonnet), which classifies each flag.
+3. A score at or above `BIAS_THRESHOLD_REVIEW` (default 60) puts the run in the human review queue.
+4. A flagged score below that threshold replaces the email with the deterministic template, which is bias-checked again. A clean template is sent; otherwise the run enters the human review queue. The flagged text is never sent.
+5. A human reviewer makes the final decision at `/dashboard/human-review` in the frontend. Staff submit the review via `POST /api/v1/agents/review/<run_id>/`.
+6. On resume the email is regenerated and checked again. A moderate finding sends the template unless the template is severe, so an approved run does not loop back into the queue.
+7. Each check is logged in BiasReport; the review is logged with the reviewer ID.
+
+Marketing emails also get a senior review (Claude Opus) on moderate findings. If its confidence is below 0.70 or it does not approve, the run enters the human review queue.
 
 ## Environment variables
 

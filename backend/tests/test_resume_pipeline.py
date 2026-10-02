@@ -258,7 +258,9 @@ def _bias(score):
 @CACHE_OVERRIDE
 @override_settings(BIAS_THRESHOLD_REVIEW=60)
 @pytest.mark.django_db
-def test_resume_sends_a_moderately_flagged_email(escalated_agent_run, resume_mocks):
+def test_resume_does_not_loop_a_moderately_flagged_run(escalated_agent_run, resume_mocks):
+    """A moderate score on resume completes the run (the template replaces the
+    LLM text) instead of sending it back to the review queue it came from."""
     _approved_resume_email(escalated_agent_run, resume_mocks)
     from apps.agents.services.orchestrator import PipelineOrchestrator
 

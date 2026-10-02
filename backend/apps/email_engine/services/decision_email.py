@@ -120,9 +120,24 @@ def generate_decision_email(
         logger.warning("Application %s: email LLM rate limited — issuing the template decision email", application.pk)
         result = generator.generate_template(application, decision)
 
+    return result, _persist(application, decision, result)
+
+
+def generate_template_decision_email(application, decision, *, generator=None):
+    """Generate and persist the deterministic template email. Returns ``(result, generated_email)``.
+
+    Used when the bias check flags an LLM-written email: the template is the
+    replacement that gets a second bias check before anything is sent.
+    """
+    generator = generator or EmailGenerator()
+    result = generator.generate_template(application, decision)
+    return result, _persist(application, decision, result)
+
+
+def _persist(application, decision, result):
     generated_email = EmailPersistenceService.save_generated_email(application, decision, result)
     EmailPersistenceService.save_guardrail_logs(generated_email, result.get("guardrail_results", []))
-    return result, generated_email
+    return generated_email
 
 
 def deliver_decision_email(generated_email):

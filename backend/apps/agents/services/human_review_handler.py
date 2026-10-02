@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from apps.agents.exceptions import LLMServiceError
 from apps.agents.metrics import bias_review_total, bias_review_ttr_seconds
-from apps.agents.models import AgentRun, BiasReport
+from apps.agents.models import AgentRun
 from apps.email_engine.services.decision_email import deliver_decision_email, generate_decision_email
 from apps.loans.models import LoanApplication, LoanDecision
 from apps.ml_engine.services.decision_explanation import ranked_denial_drivers
@@ -17,7 +17,7 @@ from .api_budget import bind_api_call_context
 from .bias.core import BiasDetector
 from .bias.thresholds import is_severe
 from .context_builder import ApplicationContextBuilder
-from .email_pipeline import build_denial_email_context
+from .email_pipeline import bias_context, build_denial_email_context, replace_flagged_email, save_bias_report
 from .marketing_pipeline import MarketingPipelineService
 from .step_tracker import StepTracker
 
@@ -184,28 +184,10 @@ class HumanReviewHandler:
             step_bias = self.tracker.start_step("bias_check_resume")
             try:
                 bias_detector = BiasDetector()
-                bias_result = bias_detector.analyze(
-                    email_result["body"],
-                    {
-                        "loan_amount": float(application.loan_amount),
-                        "purpose": application.get_purpose_display(),
-                        "decision": decision,
-                    },
-                )
+                bias_result = bias_detector.analyze(email_result["body"], bias_context(application, decision))
                 # Persist the report against the email, as the pipeline does,
                 # so a withheld draft is identifiable as bias-held later.
-                BiasReport.objects.create(
-                    agent_run=agent_run,
-                    email=generated_email,
-                    bias_score=bias_result["score"],
-                    deterministic_score=bias_result.get("deterministic_score"),
-                    llm_raw_score=bias_result.get("llm_raw_score"),
-                    score_source=bias_result.get("score_source", "composite"),
-                    categories=bias_result.get("categories", []),
-                    analysis=bias_result.get("analysis", ""),
-                    flagged=bias_result["flagged"],
-                    requires_human_review=bias_result.get("requires_human_review", bias_result["flagged"]),
-                )
+                save_bias_report(agent_run, generated_email, bias_result)
                 step_bias = self.tracker.complete_step(
                     step_bias,
                     result_summary={
@@ -215,16 +197,43 @@ class HumanReviewHandler:
                 )
                 steps.append(step_bias)
 
-                # Same boundary as the pipeline: moderate findings are recorded
-                # on the BiasReport above and the email is sent.
-                if is_severe(bias_result["score"], getattr(settings, "BIAS_THRESHOLD_REVIEW", 60)):
+                # A severe finding re-escalates, as in the pipeline. A moderate
+                # one gets the template as a replacement, which is sent unless
+                # it is severe too: a reviewer has already cleared this run, so
+                # holding it again for a moderate score would loop it through
+                # the review queue for good. The flagged LLM text never ships.
+                held_reason = None
+                review_threshold = getattr(settings, "BIAS_THRESHOLD_REVIEW", 60)
+                if is_severe(bias_result["score"], review_threshold):
+                    held_reason = f"Resumed email re-flagged by bias detector (score={bias_result['score']})"
+                elif bias_result["flagged"]:
+                    try:
+                        replacement = replace_flagged_email(
+                            application,
+                            agent_run,
+                            decision,
+                            email_result,
+                            generated_email,
+                            bias_result,
+                            bias_detector,
+                            self.tracker,
+                            steps,
+                        )
+                    except Exception as exc:
+                        # The flagged original must not ship, whatever BIAS_FAILURE_MODE says.
+                        logger.error("Agent run %s: bias re-check of the replacement failed: %s", agent_run_id, exc)
+                        replacement = None
+                    if replacement is None or is_severe(replacement[2]["score"], review_threshold):
+                        held_reason = (
+                            f"Resumed email flagged by bias detector (score={bias_result['score']}) "
+                            "and no sendable replacement"
+                        )
+                    else:
+                        email_result, generated_email, bias_result = replacement
+
+                if held_reason:
                     logger.warning(
-                        "Agent run %s: resumed %s email re-flagged by bias detector "
-                        "(score=%s) — re-escalating application %s",
-                        agent_run_id,
-                        decision,
-                        bias_result["score"],
-                        application.id,
+                        "Agent run %s: %s — re-escalating application %s", agent_run_id, held_reason, application.id
                     )
                     step_hold = self.tracker.start_step("email_delivery")
                     step_hold = self.tracker.complete_step(
@@ -244,9 +253,7 @@ class HumanReviewHandler:
                             application.status = LoanApplication.Status.REVIEW
                             application.save(update_fields=["status"])
                     agent_run.status = "escalated"
-                    agent_run.error = (
-                        f"Resumed email re-flagged by bias detector (score={bias_result['score']}) — re-escalated"
-                    )
+                    agent_run.error = f"{held_reason} — re-escalated"
                     self.tracker.finalize_run(agent_run, steps, start_time)
                     return agent_run
 
