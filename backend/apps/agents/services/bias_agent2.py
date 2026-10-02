@@ -7,13 +7,20 @@ sent: the bias detector must not flag it, and the senior compliance reviewer
 (a stronger model with a different mandate) must approve it with confidence.
 Anything else hands over to the deterministic template path, so Agent 2 can
 only replace an email with one that passed more checks, never weaken the flow.
+
+The rewrite is persisted only after the detector has scored it, together with
+its bias report, and that report says ``ai_review_approved=False`` until the
+senior reviewer approves the rewrite. The staff send paths hold any unsent
+draft with such a report (``bias_hold_reason``), so a rewrite that was rejected,
+or whose review never finished, can never be sent from outside this step.
 """
 
 import logging
 
 from django.conf import settings
+from django.db import transaction
 
-from apps.email_engine.services.decision_email import regenerate_decision_email
+from apps.email_engine.services.decision_email import persist_decision_email, regenerate_decision_email
 
 from .bias.reviewer import AIEmailReviewer
 from .bias_detector import BiasDetector
@@ -44,27 +51,34 @@ def run_agent2(
         return None
 
     try:
-        result, generated_email = regenerate_decision_email(
+        result = regenerate_decision_email(
             application,
             decision,
             confidence=confidence,
             profile_context=profile_context,
             bias_feedback=_feedback(bias_result),
         )
-        if generated_email is None:
+        if result.get("template_fallback"):
             return hand_over("The LLM was unavailable, so no rewrite was written")
         if not result.get("passed_guardrails"):
             return hand_over("The rewrite failed its guardrails")
 
         context = bias_context(application, decision)
         new_bias = BiasDetector().analyze(result["body"], context)
-        save_bias_report(agent_run, generated_email, new_bias)
+        # Persist the rewrite and its report together, review pending: from
+        # here on the staff send paths hold the rewrite until it is approved.
+        with transaction.atomic():
+            generated_email = persist_decision_email(application, decision, result)
+            report = save_bias_report(agent_run, generated_email, new_bias, ai_review_approved=False)
         if new_bias.get("flagged"):
             return hand_over("The bias check flagged the rewrite", bias_score=new_bias.get("score"))
 
         review = AIEmailReviewer().review(result["body"], new_bias, context)
         min_confidence = getattr(settings, "BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE", 0.70)
         approved = bool(review.get("approved")) and float(review.get("confidence") or 0.0) >= min_confidence
+        report.ai_review_approved = approved
+        report.ai_review_reasoning = str(review.get("reasoning") or "")
+        report.save(update_fields=["ai_review_approved", "ai_review_reasoning"])
         if not approved:
             return hand_over(
                 "The senior reviewer did not approve the rewrite",

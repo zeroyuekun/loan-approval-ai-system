@@ -1,10 +1,12 @@
 """Agent 2: a bias-flagged decision email gets rewritten with reviewer feedback.
 
 ``EmailGenerator.generate`` accepts ``bias_feedback`` and appends it to the
-prompt as a compliance-review note. ``regenerate_decision_email`` wraps the
-rewrite and persists it — unless the generator degraded to the template,
-which is never persisted here because the template-replacement path (see
-``test_bias_moderate_band.py``) persists its own template.
+prompt as a compliance-review note. ``regenerate_decision_email`` returns the
+rewrite without persisting it: ``run_agent2`` persists it only after the bias
+detector has scored it, in one transaction with a bias report whose
+``ai_review_approved`` stays False until the senior reviewer approves it. A
+rewrite therefore never exists in the database without a report that holds it
+from the staff send paths (see ``test_bias_held_email.py``).
 
 The tests below cover ``apps.agents.services.bias_agent2.run_agent2``, the
 orchestration that calls the rewrite, re-checks it with the bias detector and
@@ -55,29 +57,17 @@ def test_bias_feedback_reaches_the_prompt(processing_denied):
 
 
 @pytest.mark.django_db
-def test_regenerate_does_not_persist_a_template_result(processing_denied):
+@pytest.mark.parametrize("template_fallback", [True, False], ids=["template", "llm-rewrite"])
+def test_regenerate_returns_the_result_without_persisting_it(processing_denied, template_fallback):
     from apps.email_engine.services.decision_email import regenerate_decision_email
 
     gen = MagicMock()
-    gen.generate.return_value = {**_llm_email(), "template_fallback": True}
-    result, generated = regenerate_decision_email(
+    gen.generate.return_value = {**_llm_email(), "template_fallback": template_fallback}
+    result = regenerate_decision_email(
         processing_denied, "denied", confidence=0.2, profile_context={}, bias_feedback="x", generator=gen
     )
-    assert generated is None
+    assert result == gen.generate.return_value
     assert not GeneratedEmail.objects.filter(application=processing_denied).exists()
-
-
-@pytest.mark.django_db
-def test_regenerate_persists_a_non_template_result(processing_denied):
-    from apps.email_engine.services.decision_email import regenerate_decision_email
-
-    gen = MagicMock()
-    gen.generate.return_value = _llm_email()
-    result, generated = regenerate_decision_email(
-        processing_denied, "denied", confidence=0.2, profile_context={}, bias_feedback="x", generator=gen
-    )
-    assert generated is not None
-    assert GeneratedEmail.objects.filter(application=processing_denied).exists()
     gen.generate.assert_called_once_with(
         processing_denied, "denied", confidence=0.2, profile_context={}, bias_feedback="x"
     )
@@ -103,15 +93,12 @@ def _review(approved=True, confidence=0.9, reasoning="ok"):
     return {"approved": approved, "confidence": confidence, "reasoning": reasoning}
 
 
-def _generated_email(application, body="New rewritten body"):
-    return GeneratedEmail.objects.create(
-        application=application,
-        decision="denied",
-        subject="Your loan decision (denied)",
-        body=body,
-        prompt_used="p",
-        passed_guardrails=True,
-    )
+def _rewrite(body="New rewritten body", **overrides):
+    return {**_llm_email(), "passed_guardrails": True, "body": body, **overrides}
+
+
+def _persisted_rewrite(application, body="New rewritten body"):
+    return GeneratedEmail.objects.get(application=application, body=body)
 
 
 @pytest.fixture
@@ -128,10 +115,12 @@ def _run(
     regen_return=None,
     regen_side_effect=None,
     new_bias=None,
+    detector_side_effect=None,
     review=None,
+    review_side_effect=None,
     enabled=True,
 ):
-    """Call ``run_agent2`` with the three collaborators patched. Returns
+    """Call ``run_agent2`` with its collaborators patched. Returns
     ``(outcome, steps, regen_mock, detector_cls, reviewer_cls)``."""
     from apps.agents.services.bias_agent2 import run_agent2
 
@@ -148,9 +137,13 @@ def _run(
             regen.side_effect = regen_side_effect
         else:
             regen.return_value = regen_return
-        if new_bias is not None:
+        if detector_side_effect is not None:
+            detector_cls.return_value.analyze.side_effect = detector_side_effect
+        elif new_bias is not None:
             detector_cls.return_value.analyze.return_value = new_bias
-        if review is not None:
+        if review_side_effect is not None:
+            reviewer_cls.return_value.review.side_effect = review_side_effect
+        elif review is not None:
             reviewer_cls.return_value.review.return_value = review
         with override_settings(BIAS_AGENT2_ENABLED=enabled):
             outcome = run_agent2(
@@ -165,6 +158,14 @@ def _run(
                 steps=steps,
             )
     return outcome, steps, regen, detector_cls, reviewer_cls
+
+
+def _context(application):
+    return {
+        "loan_amount": float(application.loan_amount),
+        "purpose": application.get_purpose_display(),
+        "decision": "denied",
+    }
 
 
 @pytest.mark.django_db
@@ -195,7 +196,7 @@ def test_original_template_fallback_returns_none_without_calling_the_generator(p
 
 @pytest.mark.django_db
 def test_regenerated_result_is_a_template_returns_none(processing_denied, agent_run):
-    regen_return = ({**_llm_email(), "template_fallback": True}, None)
+    regen_return = {**_llm_email(), "template_fallback": True}
 
     outcome, steps, regen, detector_cls, reviewer_cls = _run(processing_denied, agent_run, regen_return=regen_return)
 
@@ -206,12 +207,12 @@ def test_regenerated_result_is_a_template_returns_none(processing_denied, agent_
     assert len(steps) == 1
     assert steps[0]["step_name"] == "bias_agent2_regeneration"
     assert steps[0]["result_summary"]["regenerated"] is False
+    assert not GeneratedEmail.objects.filter(application=processing_denied).exists()
 
 
 @pytest.mark.django_db
 def test_regenerated_result_fails_guardrails_returns_none(processing_denied, agent_run):
-    generated = _generated_email(processing_denied)
-    regen_return = ({**_llm_email(), "passed_guardrails": False, "body": "New rewritten body"}, generated)
+    regen_return = _rewrite(passed_guardrails=False)
 
     outcome, steps, regen, detector_cls, reviewer_cls = _run(processing_denied, agent_run, regen_return=regen_return)
 
@@ -220,73 +221,70 @@ def test_regenerated_result_fails_guardrails_returns_none(processing_denied, age
     reviewer_cls.return_value.review.assert_not_called()
     assert len(steps) == 1
     assert steps[0]["result_summary"]["regenerated"] is False
-    assert not BiasReport.objects.filter(email=generated).exists()
+    assert not GeneratedEmail.objects.filter(application=processing_denied).exists()
+    assert not BiasReport.objects.filter(agent_run=agent_run).exists()
 
 
 @pytest.mark.django_db
 def test_detector_flags_the_rewrite_returns_none(processing_denied, agent_run):
-    generated = _generated_email(processing_denied, body="New rewritten body")
-    regen_return = ({**_llm_email(), "passed_guardrails": True, "body": "New rewritten body"}, generated)
     still_flagged = _bias_result(score=45, flagged=True)
 
     outcome, steps, regen, detector_cls, reviewer_cls = _run(
-        processing_denied, agent_run, regen_return=regen_return, new_bias=still_flagged
+        processing_denied, agent_run, regen_return=_rewrite(), new_bias=still_flagged
     )
 
     assert outcome is None
-    detector_cls.return_value.analyze.assert_called_once_with(
-        "New rewritten body",
-        {
-            "loan_amount": float(processing_denied.loan_amount),
-            "purpose": processing_denied.get_purpose_display(),
-            "decision": "denied",
-        },
-    )
+    detector_cls.return_value.analyze.assert_called_once_with("New rewritten body", _context(processing_denied))
     reviewer_cls.return_value.review.assert_not_called()
     assert len(steps) == 1
     assert steps[0]["result_summary"]["regenerated"] is False
     assert steps[0]["result_summary"]["bias_score"] == 45
-    report = BiasReport.objects.get(email=generated)
+    report = BiasReport.objects.get(email=_persisted_rewrite(processing_denied))
     assert report.flagged is True
+    assert report.ai_review_approved is False
+
+
+@pytest.mark.django_db
+def test_detector_crash_persists_no_rewrite(processing_denied, agent_run):
+    """The rewrite is persisted only together with its report, after the detector
+    scored it: a detector failure leaves no unscreened rewrite behind."""
+    outcome, steps, regen, detector_cls, reviewer_cls = _run(
+        processing_denied, agent_run, regen_return=_rewrite(), detector_side_effect=RuntimeError("detector down")
+    )
+
+    assert outcome is None
+    assert not GeneratedEmail.objects.filter(application=processing_denied).exists()
+    assert steps[0]["result_summary"]["regenerated"] is False
 
 
 @pytest.mark.django_db
 def test_reviewer_rejects_the_rewrite_returns_none(processing_denied, agent_run):
-    generated = _generated_email(processing_denied, body="New rewritten body")
-    regen_return = ({**_llm_email(), "passed_guardrails": True, "body": "New rewritten body"}, generated)
     clean = _bias_result(score=5, flagged=False)
-    rejected = _review(approved=False, confidence=0.95)
+    rejected = _review(approved=False, confidence=0.95, reasoning="tone concerns remain")
 
     outcome, steps, regen, detector_cls, reviewer_cls = _run(
-        processing_denied, agent_run, regen_return=regen_return, new_bias=clean, review=rejected
+        processing_denied, agent_run, regen_return=_rewrite(), new_bias=clean, review=rejected
     )
 
     assert outcome is None
-    reviewer_cls.return_value.review.assert_called_once_with(
-        "New rewritten body",
-        clean,
-        {
-            "loan_amount": float(processing_denied.loan_amount),
-            "purpose": processing_denied.get_purpose_display(),
-            "decision": "denied",
-        },
-    )
+    reviewer_cls.return_value.review.assert_called_once_with("New rewritten body", clean, _context(processing_denied))
     assert len(steps) == 1
     summary = steps[0]["result_summary"]
     assert summary["regenerated"] is False
     assert summary["reviewer_approved"] is False
-    assert BiasReport.objects.filter(email=generated).exists()
+    report = BiasReport.objects.get(email=_persisted_rewrite(processing_denied))
+    assert report.flagged is False
+    assert report.ai_review_approved is False
+    assert report.ai_review_reasoning == "tone concerns remain"
 
 
 @pytest.mark.django_db
 def test_reviewer_approves_with_low_confidence_returns_none(processing_denied, agent_run):
-    generated = _generated_email(processing_denied, body="New rewritten body")
-    regen_return = ({**_llm_email(), "passed_guardrails": True, "body": "New rewritten body"}, generated)
     clean = _bias_result(score=5, flagged=False)
     low_confidence = _review(approved=True, confidence=0.5)
 
     outcome, steps, regen, detector_cls, reviewer_cls = _run(
-        processing_denied, agent_run, regen_return=regen_return, new_bias=clean, review=low_confidence
+        processing_denied, agent_run, regen_return=_rewrite(), new_bias=clean, review=low_confidence
     )
 
     assert outcome is None
@@ -295,6 +293,34 @@ def test_reviewer_approves_with_low_confidence_returns_none(processing_denied, a
     assert summary["regenerated"] is False
     assert summary["reviewer_approved"] is True
     assert summary["reviewer_confidence"] == 0.5
+    # Below the confidence floor the gate did not approve, whatever the model said.
+    assert BiasReport.objects.get(email=_persisted_rewrite(processing_denied)).ai_review_approved is False
+
+
+@pytest.mark.django_db
+def test_rewrite_is_held_while_the_senior_review_is_in_flight(processing_denied, agent_run):
+    """If the task dies during the review, the persisted rewrite must already be
+    held from the staff send paths."""
+    from apps.email_engine.services.decision_email import bias_hold_reason
+
+    seen = {}
+
+    def _review_in_flight(body, bias, context):
+        rewrite = _persisted_rewrite(processing_denied)
+        seen["hold"] = bias_hold_reason(processing_denied.pk, rewrite)
+        seen["approved"] = BiasReport.objects.get(email=rewrite).ai_review_approved
+        return _review(approved=True, confidence=0.9)
+
+    _run(
+        processing_denied,
+        agent_run,
+        regen_return=_rewrite(),
+        new_bias=_bias_result(score=5, flagged=False),
+        review_side_effect=_review_in_flight,
+    )
+
+    assert seen["approved"] is False
+    assert seen["hold"]
 
 
 @pytest.mark.django_db
@@ -312,21 +338,22 @@ def test_generator_exception_returns_none(processing_denied, agent_run, exc):
 
 @pytest.mark.django_db
 def test_clean_detector_and_confident_reviewer_returns_the_tuple_to_send(processing_denied, agent_run):
-    generated = _generated_email(processing_denied, body="New rewritten body")
-    result_dict = {**_llm_email(), "passed_guardrails": True, "body": "New rewritten body"}
-    regen_return = (result_dict, generated)
+    from apps.email_engine.services.decision_email import bias_hold_reason
+
+    result_dict = _rewrite()
     clean = _bias_result(score=5, flagged=False)
-    approved = _review(approved=True, confidence=0.9)
+    approved = _review(approved=True, confidence=0.9, reasoning="reads well")
 
     outcome, steps, regen, detector_cls, reviewer_cls = _run(
         processing_denied,
         agent_run,
         email_result={**_llm_email(), "body": "Old flagged body"},
-        regen_return=regen_return,
+        regen_return=result_dict,
         new_bias=clean,
         review=approved,
     )
 
+    generated = _persisted_rewrite(processing_denied)
     assert outcome == (result_dict, generated, clean)
     # The reviewer sees the NEW body, not the original flagged email's body.
     reviewer_cls.return_value.review.assert_called_once()
@@ -337,4 +364,8 @@ def test_clean_detector_and_confident_reviewer_returns_the_tuple_to_send(process
     assert summary["flagged"] is False
     assert summary["reviewer_approved"] is True
     assert summary["reviewer_confidence"] == 0.9
-    assert BiasReport.objects.filter(email=generated, flagged=False).exists()
+    report = BiasReport.objects.get(email=generated)
+    assert report.flagged is False
+    assert report.ai_review_approved is True
+    assert report.ai_review_reasoning == "reads well"
+    assert bias_hold_reason(processing_denied.pk, generated) is None
