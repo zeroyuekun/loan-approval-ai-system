@@ -167,6 +167,13 @@ class ModelDriftView(APIView):
         from apps.ml_engine.services.model_selector import select_model_version
         from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
 
+        try:
+            days = int(request.query_params.get("days", 30))
+        except (ValueError, TypeError):
+            return Response({"error": "days must be an integer"}, status=400)
+        if not 1 <= days <= 365:
+            return Response({"error": "days must be between 1 and 365"}, status=400)
+
         # Resolve the active ModelVersion directly — avoids constructing a full
         # ModelPredictor (which joblib.load-s the model bundle) only to throw
         # the model object away before compute_on_demand_feature_psi builds its
@@ -175,11 +182,6 @@ class ModelDriftView(APIView):
             model_version = select_model_version(segment=SEGMENT_UNIFIED)
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
-
-        try:
-            days = int(request.query_params.get("days", 30))
-        except (ValueError, TypeError):
-            return Response({"error": "days must be an integer"}, status=400)
 
         result = compute_on_demand_feature_psi(model_version, days=days)
 

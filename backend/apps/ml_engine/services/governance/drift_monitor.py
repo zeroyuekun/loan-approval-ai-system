@@ -31,6 +31,19 @@ CSI_STABLE = 0.10
 CSI_INVESTIGATE = 0.20  # Stricter per-feature threshold
 
 
+def open_edge_counts(values, edges) -> np.ndarray:
+    """Histogram counts with the outer bins open-ended.
+
+    The bin edges come from the training (expected) distribution, so its
+    min/max are the outer edges. np.histogram silently drops values outside
+    them; for drift those are exactly the values that matter, so they are
+    counted in the first / last bin instead.
+    """
+    open_edges = np.array(edges, dtype=float).copy()
+    open_edges[0], open_edges[-1] = -np.inf, np.inf
+    return np.histogram(np.asarray(values, dtype=float), bins=open_edges)[0]
+
+
 def compute_psi(expected, actual, bins=10):
     """PSI between two distributions. Returns float."""
     expected = np.array(expected, dtype=float)
@@ -48,8 +61,8 @@ def compute_psi(expected, actual, bins=10):
 
     # Count proportions in each bin (canonical PSI — no re-normalisation)
     eps = 1e-8  # Avoid log(0); small enough not to distort near-identical distributions
-    expected_counts = np.histogram(expected, bins=breakpoints)[0]
-    actual_counts = np.histogram(actual, bins=breakpoints)[0]
+    expected_counts = open_edge_counts(expected, breakpoints)
+    actual_counts = open_edge_counts(actual, breakpoints)
 
     expected_pct = expected_counts / len(expected)
     actual_pct = actual_counts / len(actual)
@@ -87,20 +100,21 @@ _ON_DEMAND_FIELD_MAP = {
 def _psi_from_histogram(hist_counts, hist_edges, actual_vals):
     """Canonical histogram-bin PSI used by the on-demand /drift/ endpoint.
 
-    Uses the same approach as compute_psi: normalise to proportions, then
-    replace ONLY zero bins with eps (1e-8) — no renormalisation after
-    substitution, so the sum of percentages is preserved and PSI stays at
-    0.0 for identical distributions.  The previous implementation added eps
-    to EVERY bin and used a much larger eps (1e-4), causing the on-demand
-    endpoint to report systematically different PSI values than the weekly
-    DriftReport path for the same data.
+    Same scheme as compute_psi: outer bins are open-ended (values outside the
+    training range are counted, not dropped), proportions are taken over the
+    whole actual sample, and ONLY zero bins are replaced with eps (1e-8) — no
+    renormalisation after substitution, so PSI is 0.0 for identical
+    distributions. An empty actual sample has nothing to compare and returns
+    0.0 rather than NaN (which the JSON renderer cannot serialise).
     """
-    bin_edges = np.array(hist_edges)
+    actual_vals = np.asarray(actual_vals, dtype=float)
     expected_counts = np.array(hist_counts, dtype=float)
-    actual_counts = np.histogram(actual_vals, bins=bin_edges)[0].astype(float)
+    if len(actual_vals) == 0 or expected_counts.sum() == 0:
+        return {"psi": 0.0, "status": "stable"}
+    actual_counts = open_edge_counts(actual_vals, hist_edges).astype(float)
     eps = 1e-8  # Match compute_psi — small enough not to distort near-identical distributions
     expected_pct = expected_counts / expected_counts.sum()
-    actual_pct = actual_counts / actual_counts.sum()
+    actual_pct = actual_counts / len(actual_vals)
     # Replace zeros only (avoid log(0)); do NOT re-normalise after substitution
     expected_pct = np.where(expected_pct == 0, eps, expected_pct)
     actual_pct = np.where(actual_pct == 0, eps, actual_pct)

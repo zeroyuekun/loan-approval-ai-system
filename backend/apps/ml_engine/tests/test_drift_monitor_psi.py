@@ -115,3 +115,16 @@ def test_compute_psi_module_function_unchanged_for_arrays():
     """The weekly-report array-based signature is preserved."""
     arr = [1, 2, 3, 4] * 10
     assert drift_monitor.compute_psi(arr, arr) == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("days", ["10000000000", "0", "-3", "366"])
+def test_drift_endpoint_rejects_days_outside_one_to_365(days, django_user_model):
+    """M9: an unbounded ?days= reached timedelta (OverflowError -> 500)."""
+    from rest_framework.test import APIClient
+
+    admin = django_user_model.objects.create_user(username="drift_admin", password="x", role="admin")
+    client = APIClient()
+    client.force_authenticate(admin)
+    response = client.get(f"/api/v1/ml/models/active/drift/?days={days}")
+    assert response.status_code == 400
+    assert "days" in response.json()["error"]
