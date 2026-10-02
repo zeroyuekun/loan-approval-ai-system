@@ -31,12 +31,7 @@ def customer_activity(customer) -> dict:
         .order_by("-created_at")
     )
 
-    runs = (
-        AgentRun.objects.filter(application_id__in=app_ids)
-        .select_related("application__applicant")
-        .prefetch_related("bias_reports", "next_best_offers", "marketing_emails")
-        .order_by("-created_at")[:ACTIVITY_LIMIT]
-    )
+    runs = AgentRun.objects.for_serializer().filter(application_id__in=app_ids).order_by("-created_at")[:ACTIVITY_LIMIT]
 
     return {
         "customer_id": customer.id,

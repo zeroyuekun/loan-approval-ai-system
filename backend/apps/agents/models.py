@@ -1,6 +1,37 @@
 import uuid
 
 from django.db import models
+from django.db.models import OuterRef, Prefetch, Subquery
+
+
+class AgentRunQuerySet(models.QuerySet):
+    def latest_for(self, application_id):
+        """The application's latest run, or None.
+
+        Only the latest run describes the application's current state: its
+        status, steps and artefacts. An older completed run says nothing once
+        a later run has failed (the fail-safe bias hold rewrites the
+        LoanDecision and returns the application to PENDING), so every "is
+        this application done / under review" check reads this run alone.
+        """
+        return self.filter(application_id=application_id).order_by("-created_at").first()
+
+    def latest_status_subquery(self, application_ref=None):
+        """Subquery: the status of the latest run of ``application_ref`` (default: the outer query's pk)."""
+        application_ref = OuterRef("pk") if application_ref is None else application_ref
+        return Subquery(self.filter(application_id=application_ref).order_by("-created_at").values("status")[:1])
+
+    def for_serializer(self):
+        """The joins the AgentRun serializers read, with related records newest first.
+
+        A run can hold several bias reports (a replacement, an Agent 2
+        rewrite, a later reissue); every endpoint lists them in one order.
+        """
+        return self.select_related("application__applicant").prefetch_related(
+            Prefetch("bias_reports", queryset=BiasReport.objects.order_by("-created_at")),
+            Prefetch("next_best_offers", queryset=NextBestOffer.objects.order_by("-created_at")),
+            Prefetch("marketing_emails", queryset=MarketingEmail.objects.order_by("-created_at")),
+        )
 
 
 class AgentRun(models.Model):
@@ -33,6 +64,8 @@ class AgentRun(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = AgentRunQuerySet.as_manager()
 
     class Meta:
         ordering = ["-created_at"]

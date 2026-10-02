@@ -61,7 +61,7 @@ def screen_and_deliver_decision_email(application, decision, email_result, gener
 
     tracker = StepTracker()
     start_time = time.time()
-    agent_run = AgentRun.objects.filter(application=application).order_by("-created_at").first()
+    agent_run = AgentRun.objects.latest_for(application.pk)
     own_run = agent_run is None
     if own_run:
         agent_run = AgentRun.objects.create(application=application, status=AgentRun.Status.RUNNING)

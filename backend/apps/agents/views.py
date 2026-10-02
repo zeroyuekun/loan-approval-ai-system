@@ -1,7 +1,7 @@
 import logging
 
 from django.db import transaction
-from django.db.models import OuterRef, Prefetch, Subquery
+from django.db.models import OuterRef, Subquery
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrOfficer
 from apps.accounts.policy import is_staff_role
-from apps.agents.models import AgentRun, BiasReport, MarketingEmail, NextBestOffer
+from apps.agents.models import AgentRun
 from apps.agents.serializers import agent_run_serializer_class
 from apps.agents.services.human_review_actions import (
     HUMAN_REVIEW_ACTIONS,
@@ -36,12 +36,7 @@ class AgentRunListView(APIView):
         """Return a paginated list of all agent runs the user can access."""
         user = request.user
         queryset = (
-            AgentRun.objects.select_related("application__applicant")
-            .prefetch_related(
-                Prefetch("bias_reports", queryset=BiasReport.objects.order_by("-created_at")),
-                Prefetch("next_best_offers", queryset=NextBestOffer.objects.order_by("-created_at")),
-                Prefetch("marketing_emails", queryset=MarketingEmail.objects.order_by("-created_at")),
-            )
+            AgentRun.objects.for_serializer()
             .filter(application__deleted_at__isnull=True)  # hidden with a soft-deleted application
             .order_by("-created_at")
         )
@@ -146,9 +141,7 @@ class OrchestrateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         else:
-            # Only the latest run counts, as in the task: an older completed
-            # run says nothing once a later run has failed.
-            existing = AgentRun.objects.filter(application_id=loan_id).order_by("-created_at").first()
+            existing = AgentRun.objects.latest_for(loan_id)
             if existing is not None and existing.status == AgentRun.Status.COMPLETED:
                 return Response(
                     {
@@ -207,12 +200,9 @@ class BatchOrchestrateView(APIView):
             # claimed (RUNNING) is being resumed and is left alone.
             # Stuck-PROCESSING recovery is out of scope here; that belongs in a
             # dedicated dead-letter / recovery task.
-            latest_run_status = Subquery(
-                AgentRun.objects.filter(application_id=OuterRef("pk")).order_by("-created_at").values("status")[:1]
-            )
             reviewable_qs = (
                 LoanApplication.objects.filter(status=LoanApplication.Status.REVIEW)
-                .annotate(latest_run_status=latest_run_status)
+                .annotate(latest_run_status=AgentRun.objects.latest_status_subquery())
                 .filter(latest_run_status=AgentRun.Status.ESCALATED)
                 .order_by("created_at")
             )
@@ -223,12 +213,7 @@ class BatchOrchestrateView(APIView):
                 # and re-checked under the locks: a reviewer may have claimed
                 # the run since the query above.
                 with transaction.atomic():
-                    run = (
-                        AgentRun.objects.select_for_update()
-                        .filter(application_id=app_id)
-                        .order_by("-created_at")
-                        .first()
-                    )
+                    run = AgentRun.objects.select_for_update().latest_for(app_id)
                     app = (
                         LoanApplication.objects.select_for_update()
                         .filter(pk=app_id, status=LoanApplication.Status.REVIEW)
@@ -291,22 +276,7 @@ class AgentRunView(APIView):
         """Return the latest AgentRun with all related data for a loan application."""
         check_loan_access(request, loan_id)
 
-        # Always the latest run: its status, steps and artefacts describe the
-        # application's current state. (An older run with marketing emails
-        # used to be swapped in, showing a superseded run as current.)
-        agent_run = (
-            AgentRun.objects.filter(application_id=loan_id)
-            .select_related("application__applicant")
-            .prefetch_related(
-                # Newest first, as in the run list: a run can hold several
-                # reports (a replacement, an Agent 2 rewrite, a later reissue).
-                Prefetch("bias_reports", queryset=BiasReport.objects.order_by("-created_at")),
-                "next_best_offers",
-                "marketing_emails",
-            )
-            .order_by("-created_at")
-            .first()
-        )
+        agent_run = AgentRun.objects.for_serializer().latest_for(loan_id)
 
         if not agent_run:
             return Response(

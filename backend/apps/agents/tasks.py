@@ -96,15 +96,9 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
             if app is None:
                 return  # not stuck, or already moved on
 
-            # Another actor owns the work if the latest run completed. An older
-            # completed run does not: it is what a forced re-run replaced.
-            latest = (
-                AgentRun.objects.filter(application_id=application_id)
-                .order_by("-created_at")
-                .values_list("status", "created_at")
-                .first()
-            )
-            if latest is not None and latest[0] == AgentRun.Status.COMPLETED:
+            # Another actor owns the work if the latest run completed.
+            latest = AgentRun.objects.only("status", "created_at").latest_for(application_id)
+            if latest is not None and latest.status == AgentRun.Status.COMPLETED:
                 logger.info("Application %s: cleanup skipped, a completed run owns it", application_id)
                 return
 
@@ -117,7 +111,7 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
                     GeneratedEmail.objects.filter(
                         application_id=application_id,
                         sent_at__isnull=False,
-                        created_at__gte=latest[1],
+                        created_at__gte=latest.created_at,
                         decision__in=(LoanApplication.Status.APPROVED, LoanApplication.Status.DENIED),
                     )
                     .order_by("-sent_at")
@@ -164,19 +158,10 @@ def orchestrate_pipeline_task(self, application_id, force=False):
     from apps.agents.services.orchestrator import PipelineOrchestrator
     from apps.agents.services.step_tracker import pipeline_deadline
 
-    # Idempotency: skip if the latest run completed (unless force re-run). An
-    # older completed run does not count: a later run that failed may have
-    # overwritten its decision (the fail-safe bias hold rewrites the
-    # LoanDecision and returns the application to PENDING), and restoring
-    # from that would apply a decision no run finished.
+    # Idempotency: skip if the latest run completed (unless force re-run).
     if not force:
-        latest_status = (
-            AgentRun.objects.filter(application_id=application_id)
-            .order_by("-created_at")
-            .values_list("status", flat=True)
-            .first()
-        )
-        if latest_status == AgentRun.Status.COMPLETED:
+        latest = AgentRun.objects.only("status").latest_for(application_id)
+        if latest is not None and latest.status == AgentRun.Status.COMPLETED:
             # A completed run owns this application — delegate the idempotent,
             # audited status restore to the orchestrator service (L16). The
             # task stays a thin dispatcher.
