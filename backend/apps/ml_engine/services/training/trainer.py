@@ -1010,6 +1010,11 @@ class ModelTrainer:
                 overfitting_gap,
             )
 
+        # Overfitting is judged on the validation split, before the test set is
+        # read; the train-vs-test gap below stays as the final independent figure.
+        val_auc = round(float(roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])), 4)
+        overfitting_gap_val = round(train_auc - val_auc, 4)
+
         # Logistic-regression baseline on core credit features. Lets us report
         # the XGBoost lift over a simple scorecard — the credit-risk interview
         # question "how much better is your model than credit_score alone?"
@@ -1036,6 +1041,8 @@ class ModelTrainer:
             "training_time_seconds": training_time,
             "overfitting_gap": overfitting_gap,
             "train_auc": round(train_auc, 4),
+            "val_auc": val_auc,
+            "overfitting_gap_val": overfitting_gap_val,
             "n_features": len(feature_cols),
             "cv_auc_mean": cv_mean,
             "cv_auc_std": cv_std,
