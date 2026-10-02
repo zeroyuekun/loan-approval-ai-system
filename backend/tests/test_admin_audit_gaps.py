@@ -151,3 +151,20 @@ def test_setting_a_users_password_in_the_admin_is_audited_without_the_hash(clien
     officer.refresh_from_db()
     assert officer.password not in str(row.details)
     assert "password" in " ".join(row.details["changed"]).lower()
+
+
+def test_deleting_a_user_with_audit_rows_in_the_admin_is_refused_with_a_message(client, superuser):
+    officer = CustomUser.objects.create_user(username="off_del", email="od@x.com", password="x", role="officer")
+    AuditLog.objects.create(user=officer, action="login_success", resource_type="User", resource_id=str(officer.pk))
+    client.force_login(superuser)
+    url = reverse("admin:accounts_customuser_delete", args=[officer.pk])
+
+    page = client.get(url)
+    resp = client.post(url, {"post": "yes"})
+
+    assert page.status_code == 200
+    assert page.context["protected"]  # Django lists the audit rows that block the delete
+    assert "protected" in page.content.decode().lower()
+    assert resp.status_code == 200
+    assert CustomUser.objects.filter(pk=officer.pk).exists()
+    assert not AuditLog.objects.filter(action="user_deleted", resource_id=str(officer.pk)).exists()

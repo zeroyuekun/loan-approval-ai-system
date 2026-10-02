@@ -22,9 +22,12 @@ class AuditLog(models.Model):
     # default=timezone.now (not auto_now_add) so save() can read the value
     # before INSERT to bind it into hash_self.
     timestamp = models.DateTimeField(default=timezone.now, db_index=True, editable=False)
+    # PROTECT, not SET_NULL: user_id is part of hash_self, and SET_NULL's bulk
+    # UPDATE would rewrite it without rehashing and break the chain. Deactivate
+    # an audited user instead of deleting them.
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="audit_logs",
