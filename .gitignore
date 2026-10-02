@@ -21,7 +21,7 @@ mediafiles/
 # ML Models
 backend/ml_models/*.joblib
 backend/ml_models/*.pkl
-# Per-model local artifact dirs (MRM dossiers etc.); keep tracked files like golden_metrics.json
+# Per-model local artifact dirs (MRM dossiers etc.); .gitkeep keeps the directory itself tracked
 backend/ml_models/*/
 
 # Environment
