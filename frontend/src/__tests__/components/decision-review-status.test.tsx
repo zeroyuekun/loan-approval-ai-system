@@ -11,7 +11,7 @@ vi.mock('@/hooks/useDecisionReview', () => ({
 const baseProps = {
   denialReasons: [{ code: 'R06', reason: 'Credit score below minimum', feature: 'credit_score' }],
   counterfactuals: [],
-  creditScore: 500,
+  creditScore: 'Average (500-699)',
 }
 
 describe('DenialExplanationPanel ADM + review', () => {

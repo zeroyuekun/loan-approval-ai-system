@@ -11,6 +11,10 @@ import { Search, Loader2, FileX } from 'lucide-react'
 import { agentsApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { getStatusLabel } from '@/lib/utils'
+import type { LoanApplication } from '@/types'
+
+const FILTER_STATUSES: LoanApplication['status'][] = ['pending', 'processing', 'approved', 'denied', 'review', 'queue_failed']
 
 export default function ApplicationsPage() {
   const [page, setPage] = useState(1)
@@ -90,11 +94,9 @@ export default function ApplicationsPage() {
             aria-label="Filter by application status"
           >
             <SelectItem value="">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="processing">Processing</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="denied">Denied</SelectItem>
-            <SelectItem value="review">Review</SelectItem>
+            {FILTER_STATUSES.map((status) => (
+              <SelectItem key={status} value={status}>{getStatusLabel(status)}</SelectItem>
+            ))}
           </Select>
           <Select
             value={purposeFilter}

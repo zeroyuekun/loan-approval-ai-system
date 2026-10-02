@@ -3,17 +3,23 @@
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useApplication } from '@/hooks/useApplications'
+import type { CustomerLoanApplication } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
-import { formatCurrency, formatDate, formatPurpose } from '@/lib/utils'
+import { formatDate, formatPurpose, isAssessmentInFlight } from '@/lib/utils'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
 import { DecisionReviewStatus } from '@/components/applications/DecisionReviewStatus'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
 
+const IN_FLIGHT_POLL_MS = 5_000
+// The backend retries a failed dispatch once per 60s beat tick
+const QUEUE_RETRY_POLL_MS = 60_000
+
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,
+  queue_failed: <Clock className="h-8 w-8 text-orange-500" />,
   processing: <Clock className="h-8 w-8 text-blue-500 animate-pulse" />,
   approved: <CheckCircle2 className="h-8 w-8 text-green-500" />,
   denied: <XCircle className="h-8 w-8 text-red-500" />,
@@ -22,6 +28,7 @@ const statusIcons: Record<string, React.ReactNode> = {
 
 const statusMessages: Record<string, string> = {
   pending: 'Your application has been received and is awaiting review.',
+  queue_failed: 'Your application has been received, but processing is delayed. We will keep trying, so there is nothing you need to do.',
   processing: 'Your application is currently being assessed by our AI system.',
   approved: 'Congratulations! Your loan application has been approved.',
   denied: 'Unfortunately, your loan application was not approved at this time.',
@@ -42,10 +49,6 @@ function getPipelineSteps(status: string): PipelineStep[] {
   ]
 
   switch (status) {
-    case 'pending':
-      steps[0].state = 'completed'
-      steps[1].state = 'upcoming'
-      break
     case 'processing':
       steps[0].state = 'completed'
       steps[1].state = 'active'
@@ -67,6 +70,7 @@ function getPipelineSteps(status: string): PipelineStep[] {
       steps[3].state = 'completed'
       break
     default:
+      // Submitted but not yet assessed (pending, queue_failed)
       steps[0].state = 'completed'
   }
 
@@ -184,13 +188,15 @@ function StatusPipeline({ status }: { status: string }) {
 
 export default function CustomerApplicationStatusPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: application, isLoading } = useApplication(id, {
-    // Poll every 5s only while still being processed. Letting TanStack Query
+  const { data: application, isLoading } = useApplication<CustomerLoanApplication>(id, {
+    // Poll while the application is being processed; queue_failed only changes
+    // on a backend retry, so it polls at the retry pace. Letting TanStack Query
     // own the interval avoids the stale closures and interval leaks a
     // useEffect(setInterval) is prone to when the hook remounts quickly.
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status === 'pending' || status === 'processing' ? 5000 : false
+      if (status === 'queue_failed') return QUEUE_RETRY_POLL_MS
+      return status && isAssessmentInFlight(status) ? IN_FLIGHT_POLL_MS : false
     },
   })
 
@@ -243,7 +249,7 @@ export default function CustomerApplicationStatusPage() {
                 {statusMessages[application.status] || 'Status unknown.'}
               </p>
             </div>
-            {(application.status === 'pending' || application.status === 'processing') && (
+            {isAssessmentInFlight(application.status) && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground mt-2">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 Your application is being assessed by our AI system...
@@ -341,7 +347,7 @@ export default function CustomerApplicationStatusPage() {
           <CardContent className="space-y-3">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Loan Amount</span>
-              <span className="font-semibold">{formatCurrency(application.loan_amount)}</span>
+              <span className="font-semibold">{application.loan_amount}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Loan Term</span>
@@ -349,7 +355,7 @@ export default function CustomerApplicationStatusPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Annual Income</span>
-              <span>{formatCurrency(application.annual_income)}</span>
+              <span>{application.annual_income}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Credit Score</span>
