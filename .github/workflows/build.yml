@@ -39,6 +39,18 @@ jobs:
           echo "runtime, appuser, /app/.next owner: $ids"
           test "$ids" = "100:101 100:101 100:101"
 
+      - name: Compose dev stages keep their tools
+        # docker-compose.yml builds the `dev` targets: the frontend service runs
+        # `npm ci && npm run dev`, and the Makefile runs pytest, mypy, bandit and
+        # pip-audit inside the backend container. The shipped (last) stages drop
+        # npm and pip, so check the dev stages still have what compose needs.
+        run: |
+          set -eu
+          docker build --target dev -t loan-backend-dev ./backend
+          docker build --target dev -t loan-frontend-dev ./frontend
+          docker run --rm --entrypoint sh loan-backend-dev -c 'pytest --version && mypy --version && bandit --version && pip-audit --version'
+          docker run --rm loan-frontend-dev npm --version
+
       - name: Trivy scan backend image
         # Pinned to v0.35.0 commit SHA — trivy-action was supply-chain compromised
         # on 2026-03-19 (GHSA-69fq-xp46-6x23). Never use @master or mutable tags.
