@@ -274,6 +274,38 @@ def test_follow_up_failure_after_the_decision_email_keeps_the_decision(sample_ap
 
 @CACHE_OVERRIDE
 @pytest.mark.django_db
+def test_policy_decline_of_a_model_approval_is_not_recorded_as_the_model_s(sample_application, orch_mocks):
+    """The model approved; an enforce-mode credit-policy hard fail declined.
+    The waterfall says so, with the rule's code, instead of MODEL_DENIED."""
+    from apps.loans.models import LoanDecision
+
+    _wire_denied(orch_mocks)
+    orch_mocks["predictor"].return_value.predict.return_value = {
+        **_prediction("denied", 0.82, orch_mocks["model_version_id"]),
+        "policy_decision": {
+            "mode": "enforce",
+            "passed": False,
+            "changed_model_decision": True,
+            "hard_fails": ["P03"],
+            "refers": [],
+            "rationale_by_code": {"P03": "Undischarged bankrupt or within 7-year bankruptcy window"},
+        },
+    }
+
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    PipelineOrchestrator().orchestrate(sample_application.pk)
+
+    waterfall = LoanDecision.objects.get(application=sample_application).decision_waterfall
+    ml_entry = next(e for e in waterfall if e["step"] == "ml_prediction")
+    assert ml_entry["reason_code"] != "MODEL_DENIED", "a policy decline was recorded as the model's decision"
+    assert ml_entry["reason_code"] == "MODEL_APPROVED"
+    policy = [e for e in waterfall if e["reason_code"] == "POLICY_DECLINE_P03"]
+    assert policy and policy[0]["result"] == "fail"
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
 def test_severe_bias_escalation(sample_application, orch_mocks):
     """Bias score > 80 -> immediate escalation to human review."""
     orch_mocks["predictor"].return_value.predict.return_value = _prediction(

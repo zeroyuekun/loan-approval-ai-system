@@ -12,6 +12,7 @@ from apps.agents.models import AgentRun
 from apps.loans.models import AuditLog, FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
+from apps.ml_engine.services.scoring.decision_assembly import PRICING_TIER_DECLINE, decline_overrides
 from apps.ml_engine.services.scoring.predictor import ModelPredictor
 from apps.ml_engine.services.scoring.segmentation import derive_segment
 
@@ -337,19 +338,29 @@ class PipelineOrchestrator:
                 dti_check = ("pass", "DTI_WITHIN_LIMIT", f"Debt-to-income ratio {dti:.2f} within cap of {dti_cap}")
             waterfall.append(self._waterfall_entry("policy_rules", *dti_check))
 
-            # ML prediction waterfall entry
+            # ML prediction waterfall entry: the model's own decision. A pricing
+            # or credit-policy decline of a model approval is its own entry
+            # with the rule's code, which the denial email reads (saved now, so
+            # it is on the decision before the email step).
             prob = prediction_result["probability"]
-            ml_result = "pass" if prediction_result["prediction"] == "approved" else "fail"
+            overrides = decline_overrides(prediction_result)
+            model_label = "approved" if overrides else prediction_result["prediction"]
+            ml_result = "pass" if model_label == "approved" else "fail"
             ml_reason = "MODEL_APPROVED" if ml_result == "pass" else "MODEL_DENIED"
             waterfall.append(
                 self._waterfall_entry(
                     "ml_prediction",
                     ml_result,
                     ml_reason,
-                    f"Model prediction: {prediction_result['prediction']} "
+                    f"Model prediction: {model_label} "
                     f"(confidence={prob:.4f}, model={prediction_result['model_version']})",
                 )
             )
+            for override in overrides:
+                stage = "pricing" if override["code"] == PRICING_TIER_DECLINE else "policy_rules"
+                waterfall.append(self._waterfall_entry(stage, "fail", override["code"], override["detail"]))
+            if overrides:
+                self._save_waterfall(application, waterfall)
 
             step = self._complete_step(
                 step,

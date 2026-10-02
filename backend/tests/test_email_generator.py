@@ -557,3 +557,54 @@ class TestEmailBackendSelection:
         lowered = result["body"].lower()
         for banned in ("sorry", "apologis", "disappoint"):
             assert banned not in lowered
+
+
+class TestDenialReasonsForRuleDeclines:
+    """A denial made by a pricing or credit-policy rule over a model approval
+    names that rule, not the model's attributions (which explain an approval)."""
+
+    _SHAP = {"credit_score": -0.4, "annual_income": 0.2}
+    _IMPORTANCES = {"credit_score": 0.5, "annual_income": 0.3}
+
+    def test_a_pricing_decline_is_the_stated_reason(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        waterfall = [
+            {"step": "ml_prediction", "result": "pass", "reason_code": "MODEL_APPROVED", "detail": ""},
+            {"step": "pricing", "result": "fail", "reason_code": "PRICING_TIER_DECLINE", "detail": "PD 0.15"},
+        ]
+        reasons = EmailGenerator()._format_denial_reasons(
+            self._IMPORTANCES, shap_values=self._SHAP, decision_waterfall=waterfall
+        )
+
+        assert reasons == EmailGenerator.DECLINE_RULE_REASON_MAP["PRICING_TIER_DECLINE"]
+
+    def test_a_policy_hard_fail_is_the_stated_reason(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        waterfall = [{"step": "policy_rules", "result": "fail", "reason_code": "POLICY_DECLINE_P03", "detail": "x"}]
+        reasons = EmailGenerator()._format_denial_reasons(
+            self._IMPORTANCES, shap_values=self._SHAP, decision_waterfall=waterfall
+        )
+
+        assert "bankruptcy" in reasons
+        for banned in ("sorry", "apolog", "disappoint"):
+            assert banned not in reasons.lower()
+
+    def test_a_model_denial_still_uses_the_attributions(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        waterfall = [{"step": "ml_prediction", "result": "fail", "reason_code": "MODEL_DENIED", "detail": ""}]
+        reasons = EmailGenerator()._format_denial_reasons(
+            self._IMPORTANCES, shap_values=self._SHAP, decision_waterfall=waterfall
+        )
+
+        assert reasons == EmailGenerator.DENIAL_REASON_MAP["credit_score"]
+
+    def test_rule_reasons_pass_the_prohibited_language_guardrail(self):
+        from apps.email_engine.services.email_generator import EmailGenerator
+        from apps.email_engine.services.guardrails.engine import GuardrailChecker
+
+        checker = GuardrailChecker()
+        for reason in EmailGenerator.DECLINE_RULE_REASON_MAP.values():
+            assert checker.check_prohibited_language(reason)["passed"], reason
