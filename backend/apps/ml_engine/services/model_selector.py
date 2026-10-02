@@ -33,8 +33,7 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
     Scoped to `segment` so per-segment A/B tests (e.g. two personal-loan
     challengers) don't interfere with mortgage models. When `segment` is
     non-unified and no active model exists in that segment, the call falls
-    back to the unified segment — mirroring
-    `segmentation.select_active_model_for_segment`.
+    back to the unified segment.
 
     Single active model: returns it immediately (fast path).
     Multiple active models (same segment): weighted random selection.
@@ -104,9 +103,9 @@ def monitoring_model_version():
     """The model the metrics and drift dashboards describe.
 
     The unified segment's main champion (highest traffic, then newest); if no
-    unified model is active, the newest active model. A plain
-    ``filter(is_active=True).first()`` would switch the dashboards to whichever
-    segment model was trained last.
+    unified model is active, the newest active model. Taking the first row of
+    every active model would switch the dashboards to whichever segment model
+    or challenger was trained last.
     """
     active = ModelVersion.objects.filter(is_active=True)
     return (
