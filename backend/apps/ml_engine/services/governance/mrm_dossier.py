@@ -101,8 +101,9 @@ _OUT_OF_SCOPE_BY_OVERLAY_MODE = {
     ),
     "enforce": (
         "The policy overlay runs in `enforce` mode in this deployment. Out-of-scope "
-        "predictions are blocked by the overlay and routed to manual underwriter "
-        "review (see §9 P-codes)."
+        "predictions that hit a hard-fail P-code are blocked by the overlay (declined); "
+        "refer P-codes are recorded on the decision as refer reasons and the model "
+        "decision stands, since the human review queue is only for bias flags (see §9 P-codes)."
     ),
 }
 
@@ -112,8 +113,8 @@ def _purpose_section(mv) -> str:
 
     The closing paragraph used to assert that out-of-scope predictions "must be
     treated as advisory only and referred to human underwriter review" — but
-    that referral is only enforced by the policy overlay in `enforce` mode
-    (`credit_policy.py:418-425`). The default deployment mode is `shadow`,
+    the overlay only acts in `enforce` mode, and even there a refer is
+    recorded on the decision rather than routed to review. The default deployment mode is `shadow`,
     which is observational. Read the effective mode at generation time and
     emit the wording that matches actual runtime behaviour.
     """
@@ -436,7 +437,7 @@ def write_dossier(mv, output_dir) -> str:
     # like "../../../etc" from escaping the intended directory tree.
     resolved = Path(output_dir).resolve()
     allowed_root = Path(settings.ML_MODELS_DIR).resolve()
-    if not str(resolved).startswith(str(allowed_root)):
+    if not resolved.is_relative_to(allowed_root):
         raise ValueError(
             f"output_dir {output_dir!r} resolves to {resolved!r} which is outside "
             f"ML_MODELS_DIR ({allowed_root!r}) — path traversal blocked"
