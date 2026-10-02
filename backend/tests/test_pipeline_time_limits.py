@@ -91,6 +91,58 @@ def test_sweep_resets_application_left_processing_by_a_hard_kill(sample_applicat
 
 @LOCMEM
 @pytest.mark.django_db
+def test_sweep_applies_the_decision_when_its_email_already_went_out(sample_application):
+    """Hard-killed in the follow-up after the decision email was sent: the
+    customer has the decision, so it is applied instead of PENDING (a re-run
+    from PENDING would email them a second one)."""
+    from apps.agents.tasks import recover_stuck_processing_applications
+    from apps.email_engine.models import GeneratedEmail
+
+    _stuck(sample_application, minutes_ago=30)
+    GeneratedEmail.objects.create(
+        application=sample_application,
+        decision="denied",
+        subject="s",
+        body="b",
+        prompt_used="p",
+        passed_guardrails=True,
+        sent_at=timezone.now(),
+    )
+    result = recover_stuck_processing_applications()
+
+    sample_application.refresh_from_db()
+    assert sample_application.status == LoanApplication.Status.DENIED
+    assert result["recovered"] == [str(sample_application.pk)]
+    assert AgentRun.objects.get(application=sample_application).status == AgentRun.Status.COMPLETED
+
+
+@LOCMEM
+@pytest.mark.django_db
+def test_sweep_ignores_an_email_sent_by_an_earlier_run(sample_application):
+    """An email from before the dead run started says nothing about this run:
+    the application still goes back to PENDING."""
+    from apps.agents.tasks import recover_stuck_processing_applications
+    from apps.email_engine.models import GeneratedEmail
+
+    email = GeneratedEmail.objects.create(
+        application=sample_application,
+        decision="denied",
+        subject="s",
+        body="b",
+        prompt_used="p",
+        passed_guardrails=True,
+        sent_at=timezone.now(),
+    )
+    GeneratedEmail.objects.filter(pk=email.pk).update(created_at=timezone.now() - timedelta(hours=1))
+    _stuck(sample_application, minutes_ago=30)
+    recover_stuck_processing_applications()
+
+    sample_application.refresh_from_db()
+    assert sample_application.status == LoanApplication.Status.PENDING
+
+
+@LOCMEM
+@pytest.mark.django_db
 def test_sweep_leaves_a_live_run_alone(sample_application):
     from apps.agents.tasks import _lock_key, recover_stuck_processing_applications
 

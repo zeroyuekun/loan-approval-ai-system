@@ -27,6 +27,7 @@ from apps.agents.services.step_tracker import StepTracker, pipeline_deadline
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.exceptions import RateLimited
+from apps.loans.models import LoanApplication
 
 from .test_bias_moderate_band import _llm_email, processing_denied  # noqa: F401 - fixture + helper reuse
 
@@ -316,7 +317,11 @@ def test_rewrite_is_held_while_the_senior_review_is_in_flight(processing_denied,
 
     def _review_in_flight(body, bias, context):
         rewrite = _persisted_rewrite(processing_denied)
+        # As if the task died here and the cleanup reset the application:
+        # out of PROCESSING, only the draft's own report can hold it.
+        LoanApplication.objects.filter(pk=processing_denied.pk).update(status="pending")
         seen["hold"] = bias_hold_reason(processing_denied.pk, rewrite)
+        LoanApplication.objects.filter(pk=processing_denied.pk).update(status="processing")
         seen["approved"] = BiasReport.objects.get(email=rewrite).ai_review_approved
         return _review(approved=True, confidence=0.9)
 
@@ -377,6 +382,8 @@ def test_clean_detector_and_confident_reviewer_returns_the_tuple_to_send(process
     assert report.flagged is False
     assert report.ai_review_approved is True
     assert report.ai_review_reasoning == "reads well"
+    # Once the run has applied the decision, the approved rewrite is not held.
+    LoanApplication.objects.filter(pk=processing_denied.pk).update(status="denied")
     assert bias_hold_reason(processing_denied.pk, generated) is None
 
 
@@ -432,6 +439,9 @@ def test_a_rewrite_cut_off_by_the_time_limit_during_review_stays_held(processing
 
     rewrite = _persisted_rewrite(processing_denied)
     assert BiasReport.objects.get(email=rewrite).ai_review_approved is False
+    # The task's cleanup moves the application out of PROCESSING; from then
+    # on only the draft's own report holds it.
+    LoanApplication.objects.filter(pk=processing_denied.pk).update(status="pending")
     assert bias_hold_reason(processing_denied.pk, rewrite)
 
 

@@ -39,7 +39,7 @@ def test_deny_on_a_stale_run_is_rejected_when_the_application_moved_on(
     application.save(update_fields=["status"])
 
     with (
-        patch("apps.agents.views.resume_pipeline_task.delay") as delay,
+        patch("apps.agents.services.human_review_actions.resume_pipeline_task.delay") as delay,
         patch("apps.agents.views.OrchestrationThrottle.allow_request", return_value=True),
         django_capture_on_commit_callbacks(execute=True),
     ):
@@ -58,7 +58,7 @@ def test_a_second_action_on_a_claimed_run_is_rejected(
     escalated_agent_run, officer_user, django_capture_on_commit_callbacks
 ):
     with (
-        patch("apps.agents.views.resume_pipeline_task.delay") as delay,
+        patch("apps.agents.services.human_review_actions.resume_pipeline_task.delay") as delay,
         patch("apps.agents.views.OrchestrationThrottle.allow_request", return_value=True),
         django_capture_on_commit_callbacks(execute=True),
     ):

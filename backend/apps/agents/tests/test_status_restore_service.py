@@ -98,3 +98,33 @@ def test_restore_noops_when_no_decision(customer):
 
     app.refresh_from_db()
     assert app.status == "pending"  # unchanged
+
+
+def test_non_force_rerun_ignores_a_completed_run_a_later_failed_run_superseded(customer):
+    """An older completed run (approved) and a newer failed run that had already
+    overwritten the decision (denied) before the fail-safe bias hold returned
+    the application to PENDING. A non-force re-run must run the pipeline, not
+    replay the failed run's decision."""
+    from datetime import timedelta
+    from unittest.mock import patch
+
+    from django.utils import timezone
+
+    from apps.agents.tasks import orchestrate_pipeline_task
+    from tests.conftest import use_locmem_cache
+
+    app = _make_app(customer, status="pending")
+    older = _completed_run(app)
+    AgentRun.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(hours=1))
+    failed = AgentRun.objects.create(application=app, status=AgentRun.Status.FAILED, steps=[])
+    LoanDecision.objects.create(application=app, decision="denied", confidence=0.4)
+
+    with (
+        use_locmem_cache,
+        patch.object(PipelineOrchestrator, "orchestrate", return_value=failed) as orchestrate,
+    ):
+        orchestrate_pipeline_task.apply(args=(str(app.id),))
+
+    app.refresh_from_db()
+    assert app.status != "denied", "the failed run's decision was applied without a pipeline run"
+    orchestrate.assert_called_once()

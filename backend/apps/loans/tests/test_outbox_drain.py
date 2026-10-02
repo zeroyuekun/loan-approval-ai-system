@@ -88,6 +88,25 @@ def test_row_deleted_on_successful_transition(monkeypatch, django_user_model):
     assert result["recovered"] == 1
 
 
+@pytest.mark.django_db
+def test_drain_release_is_audited_like_the_orchestrator_retry(monkeypatch, django_user_model):
+    """Both ways out of QUEUE_FAILED leave the same status_transition row."""
+    from apps.agents import tasks as agent_tasks
+    from apps.loans.models import AuditLog, LoanApplication, PipelineDispatchOutbox
+    from apps.loans.tasks import retry_failed_dispatches
+
+    app = _make_application(django_user_model, status=LoanApplication.Status.QUEUE_FAILED, suffix="_audited")
+    PipelineDispatchOutbox.objects.create(application=app, attempts=0)
+    monkeypatch.setattr(agent_tasks.orchestrate_pipeline_task, "delay", MagicMock())
+
+    retry_failed_dispatches()
+
+    row = AuditLog.objects.get(action="status_transition", resource_id=str(app.pk))
+    assert row.details["from_status"] == "queue_failed"
+    assert row.details["to_status"] == "pending"
+    assert row.details["source"] == "outbox_drain"
+
+
 def test_broker_transport_options_fail_fast():
     from config.celery import app
 

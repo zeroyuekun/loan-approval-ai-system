@@ -23,6 +23,9 @@ Guarantees:
   row lock and only while ``sent_at`` is unset, and a successful send stamps
   ``sent_at``. Delivery is at-least-once across a crash between SMTP accept
   and COMMIT.
+* ``generate_email_task`` bias-checks what it generates before sending
+  (``screen_and_deliver_decision_email`` in the agents app), as the
+  orchestrator and the human-review resume do.
 """
 
 import logging
@@ -55,6 +58,7 @@ class HeldForBiasReview(ValueError):
 def bias_hold_reason(application_id, email=None):
     """Why no staff send/generate may run for this application, or None.
 
+    * The application is PROCESSING: the running pipeline issues the email.
     * The application is under human review (status REVIEW or an escalated
       AgentRun): the reviewer's outcome decides the email.
     * ``email`` is an unsent draft with a flagged bias report: the pipeline
@@ -71,8 +75,13 @@ def bias_hold_reason(application_id, email=None):
     from apps.agents.models import AgentRun
     from apps.loans.models import LoanApplication
 
+    status = LoanApplication.objects.filter(pk=application_id).values_list("status", flat=True).first()
+    if status == LoanApplication.Status.PROCESSING:
+        # A run is deciding it right now: its LoanDecision may already be the
+        # new one while its email step (and bias check) has not finished.
+        return "Application is being processed; the pipeline issues the decision email"
     under_review = (
-        LoanApplication.objects.filter(pk=application_id, status=LoanApplication.Status.REVIEW).exists()
+        status == LoanApplication.Status.REVIEW
         or AgentRun.objects.filter(application_id=application_id, status=AgentRun.Status.ESCALATED).exists()
     )
     if under_review:
@@ -211,15 +220,3 @@ def deliver_decision_email(generated_email):
         else:
             outcome["error"] = result.get("error", "Send failed")
     return outcome
-
-
-def issue_decision_email(application, decision, *, confidence=None, profile_context=None):
-    """Generate, persist and (when it passed the guardrails) deliver the email.
-
-    For callers with no step between generation and delivery. Returns
-    ``(result, generated_email, delivery_outcome)``.
-    """
-    result, generated_email = generate_decision_email(
-        application, decision, confidence=confidence, profile_context=profile_context
-    )
-    return result, generated_email, deliver_decision_email(generated_email)

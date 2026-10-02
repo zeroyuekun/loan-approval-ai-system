@@ -1,10 +1,36 @@
 from decimal import Decimal
 
 import pytest
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.loans.models import LoanApplication
+
+# A process-local cache, for tests that take a cache lock or count throttle
+# hits without a Redis server. ``use_locmem_cache`` works as a decorator or a
+# context manager; tests outside tests/ import it from here.
+LOCMEM_CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+use_locmem_cache = override_settings(CACHES=LOCMEM_CACHES)
+
+
+def passing_email_result(decision="approved", **overrides):
+    """An EmailGenerator.generate result that passed its guardrails."""
+    return {
+        "subject": f"Your loan decision ({decision})",
+        "body": "Dear Customer, body text.",
+        "prompt_used": "p",
+        "guardrail_results": [],
+        "passed_guardrails": True,
+        "quality_score": 100,
+        "generation_time_ms": 5,
+        "attempt_number": 1,
+        "template_fallback": False,
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "model_used": "claude-sonnet-4-6",
+        **overrides,
+    }
 
 
 @pytest.fixture
