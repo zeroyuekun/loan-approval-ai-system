@@ -157,8 +157,13 @@ api.interceptors.response.use(
       return api(originalRequest)
     }
 
-    // Show toast for non-401 errors (401s handled by refresh logic)
-    if (error.response?.status && error.response.status !== 401) {
+    // Show toast for non-401 errors (401s handled by refresh logic). A 404 on
+    // a read is expected and handled by its caller: withNotFoundFallback, the
+    // agent-run poll before a run exists, and the pages that render their own
+    // "not found" state. A 404 on a write is still toasted.
+    const status = error.response?.status
+    const isReadNotFound = status === 404 && (originalRequest.method || 'get').toLowerCase() === 'get'
+    if (status && status !== 401 && !isReadNotFound) {
       const message = error.response?.data?.detail
         || error.response?.data?.error
         || error.message
