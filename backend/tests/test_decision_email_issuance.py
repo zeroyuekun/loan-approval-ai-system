@@ -271,6 +271,40 @@ def test_resume_denied_sends_denial_before_marketing(escalated_agent_run):
 
 @LOCMEM
 @pytest.mark.django_db
+def test_resume_follow_up_failure_after_the_denial_email_keeps_the_decision(escalated_agent_run):
+    """The marketing follow-up hits the soft time limit after the denial email
+    was sent: the denial stands and the run is not put back in the review
+    queue, where the next approve would email the customer again."""
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    from apps.agents.tasks import resume_pipeline_task
+
+    decision = escalated_agent_run.application.decision
+    decision.decision = "denied"
+    decision.save()
+    send = MagicMock(return_value={"sent": True})
+    with (
+        patch.object(EmailGenerator, "generate", return_value=_passing("denied")),
+        patch(f"{HUMAN_REVIEW}.BiasDetector") as bias,
+        patch(f"{HUMAN_REVIEW}.MarketingPipelineService") as mkt,
+        patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
+        patch(SENDER, send),
+    ):
+        bias.return_value.analyze.return_value = _clean_bias()
+        mkt.return_value.run.side_effect = SoftTimeLimitExceeded()
+        nbo.return_value.recommend.return_value = {"offers": []}
+        resume_pipeline_task.apply(args=(str(escalated_agent_run.pk),))
+
+    app = escalated_agent_run.application
+    app.refresh_from_db()
+    assert app.status == "denied", "a follow-up failure put the announced denial back in the review queue"
+    escalated_agent_run.refresh_from_db()
+    assert escalated_agent_run.status == "completed"
+    assert send.call_count == 1
+
+
+@LOCMEM
+@pytest.mark.django_db
 def test_resume_approved_stamps_sent_at_so_no_duplicate_send(escalated_agent_run):
     from apps.email_engine.tasks import generate_email_task
 

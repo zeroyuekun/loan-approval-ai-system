@@ -251,6 +251,29 @@ def test_email_generation_failure(sample_application, orch_mocks):
 
 @CACHE_OVERRIDE
 @pytest.mark.django_db
+def test_follow_up_failure_after_the_decision_email_keeps_the_decision(sample_application, orch_mocks):
+    """The NBO step hits the soft time limit after the denial email was sent.
+    The application keeps its decision, and a re-run does not email the
+    customer a second denial."""
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    from apps.agents.tasks import orchestrate_pipeline_task
+
+    _wire_denied(orch_mocks)
+    orch_mocks["nbo"].return_value.generate.side_effect = SoftTimeLimitExceeded()
+
+    orchestrate_pipeline_task.apply(args=(str(sample_application.pk),))
+
+    sample_application.refresh_from_db()
+    assert sample_application.status == "denied", "a follow-up failure undid the decision the customer was sent"
+    assert orch_mocks["send"].call_count == 1
+
+    orchestrate_pipeline_task.apply(args=(str(sample_application.pk),))
+    assert orch_mocks["send"].call_count == 1, "the re-run sent a second decision email"
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
 def test_severe_bias_escalation(sample_application, orch_mocks):
     """Bias score > 80 -> immediate escalation to human review."""
     orch_mocks["predictor"].return_value.predict.return_value = _prediction(

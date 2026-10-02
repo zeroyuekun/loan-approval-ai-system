@@ -478,7 +478,33 @@ class PipelineOrchestrator:
                 )
             return agent_run
 
-        # Step 5: NBO + Marketing pipeline (if denied)
+        # Final decision waterfall entry
+        final_reason = "APPROVED" if decision == "approved" else "DENIED"
+        waterfall.append(
+            self._waterfall_entry(
+                "final_decision",
+                "pass" if decision == "approved" else "fail",
+                final_reason,
+                f"Pipeline completed with decision: {decision}",
+            )
+        )
+
+        # No escalation — apply the ML decision directly. Before the follow-up
+        # below: the customer may already have the decision email, and a
+        # follow-up failure that left the application re-runnable would send
+        # them a second one on the re-run.
+        self._save_waterfall(application, waterfall)
+
+        with transaction.atomic():
+            application.refresh_from_db()
+            application.transition_to(
+                decision,
+                details={"source": "orchestrator_final_decision"},
+            )
+
+        # Step 5: NBO + Marketing pipeline (if denied). Best-effort: the
+        # decision is applied and announced, so a failure here (including the
+        # soft time limit) is recorded and the run still completes.
         if decision == "denied":
             denial_reasons = ""
             shap_vals = prediction_result.get("shap_values")
@@ -494,34 +520,18 @@ class PipelineOrchestrator:
                 )[:3]
                 denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
 
-            steps = self._run_nbo_and_marketing_pipeline(
-                application,
-                agent_run,
-                steps,
-                denial_reasons,
-                profile_context,
-            )
+            try:
+                steps = self._run_nbo_and_marketing_pipeline(
+                    application,
+                    agent_run,
+                    steps,
+                    denial_reasons,
+                    profile_context,
+                )
+            except Exception as e:  # noqa: BLE001 — post-decision follow-up is best-effort
+                logger.error("Application %s: NBO/marketing follow-up failed after the decision: %s", application_id, e)
+                steps.append(StepTracker.post_decision_failure_step("marketing_followup", e))
 
-        # Final decision waterfall entry
-        final_reason = "APPROVED" if decision == "approved" else "DENIED"
-        waterfall.append(
-            self._waterfall_entry(
-                "final_decision",
-                "pass" if decision == "approved" else "fail",
-                final_reason,
-                f"Pipeline completed with decision: {decision}",
-            )
-        )
-
-        # No escalation — apply the ML decision directly.
-        self._save_waterfall(application, waterfall)
-
-        with transaction.atomic():
-            application.refresh_from_db()
-            application.transition_to(
-                decision,
-                details={"source": "orchestrator_final_decision"},
-            )
         agent_run.status = "completed"
         self._finalize_run(agent_run, steps, start_time)
         logger.info(

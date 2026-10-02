@@ -309,6 +309,23 @@ class HumanReviewHandler:
                 step = self.tracker.fail_step(step, str(e), failure_category=None)
             steps.append(step)
 
+        # Apply the reviewer's decision before the follow-up below: the
+        # customer may already have the decision email, and a follow-up failure
+        # that put the run back in the review queue would send them a second
+        # one on the next approve.
+        with transaction.atomic():
+            application.refresh_from_db()
+            application.transition_to(
+                decision,
+                details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
+            )
+            # Record that a human was involved, so the ADM disclosure can
+            # truthfully report "assisted" after status moves off 'review'.
+            loan_decision = application.decision
+            if loan_decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
+                loan_decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+                loan_decision.save(update_fields=["human_involvement"])
+
         if decision == "denied":
             denial_reasons = ""
             try:
@@ -326,28 +343,23 @@ class HumanReviewHandler:
                     },
                 )
 
-            marketing_pipeline = MarketingPipelineService(self.tracker)
-            steps = marketing_pipeline.run(
-                application,
-                agent_run,
-                steps,
-                denial_reasons,
-                profile_context,
-            )
+            # Best-effort, as in the pipeline: the decision is applied and
+            # announced, so a failure here (including the soft time limit) is
+            # recorded and the run still completes.
+            try:
+                marketing_pipeline = MarketingPipelineService(self.tracker)
+                steps = marketing_pipeline.run(
+                    application,
+                    agent_run,
+                    steps,
+                    denial_reasons,
+                    profile_context,
+                )
+            except Exception as exc:  # noqa: BLE001 — post-decision follow-up is best-effort
+                logger.error("Agent run %s: NBO/marketing follow-up failed after the decision: %s", agent_run_id, exc)
+                steps.append(StepTracker.post_decision_failure_step("marketing_followup", exc))
 
         # Finalize — finalize_run sets status to 'completed' internally
-        with transaction.atomic():
-            application.refresh_from_db()
-            application.transition_to(
-                decision,
-                details={"source": "human_review_resume", "officer": reviewer or "", "note": note or ""},
-            )
-            # Record that a human was involved, so the ADM disclosure can
-            # truthfully report "assisted" after status moves off 'review'.
-            loan_decision = application.decision
-            if loan_decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
-                loan_decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
-                loan_decision.save(update_fields=["human_involvement"])
         self.tracker.finalize_run(agent_run, steps, start_time)
 
         # Emit time-to-resolution for the bias review queue (docs/slo.md).

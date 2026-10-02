@@ -51,10 +51,17 @@ _DEDUP_LOCK_TTL = 600
 
 
 _STUCK_RESET_REASON = "Pipeline task died or timed out mid-run; reset to pending so staff can re-run it"
+_STUCK_AFTER_DELIVERY_REASON = (
+    "Pipeline task died or timed out after the decision email was sent; the decision it announced was applied"
+)
 
 
 def _cleanup_stuck_application(application_id, clear_lock=False):
     """Reset a stuck-'processing' application to PENDING under a row lock.
+
+    Unless the latest run already sent the decision email: then the decision
+    that email announced is applied instead and the run is marked completed,
+    because a re-run from PENDING would email the customer a second decision.
 
     PENDING, not REVIEW: the human review queue is only for bias flags, and a
     dead task is not a bias finding. PENDING is re-runnable (the batch
@@ -71,6 +78,7 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
     """
     try:
         from apps.agents.models import AgentRun
+        from apps.email_engine.models import GeneratedEmail
         from apps.loans.models import LoanApplication
 
         with transaction.atomic():
@@ -85,32 +93,51 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
 
             # Another actor owns the work if the latest run completed. An older
             # completed run does not: it is what a forced re-run replaced.
-            latest_status = (
+            latest = (
                 AgentRun.objects.filter(application_id=application_id)
                 .order_by("-created_at")
-                .values_list("status", flat=True)
+                .values_list("status", "created_at")
                 .first()
             )
-            if latest_status == AgentRun.Status.COMPLETED:
+            if latest is not None and latest[0] == AgentRun.Status.COMPLETED:
                 logger.info("Application %s: cleanup skipped, a completed run owns it", application_id)
                 return
+
+            # The run died after it sent the decision email (in the NBO or
+            # marketing follow-up): the customer has the decision, so apply it.
+            # PENDING would let a re-run email them a second decision.
+            delivered = None
+            if latest is not None:
+                delivered = (
+                    GeneratedEmail.objects.filter(
+                        application_id=application_id,
+                        sent_at__isnull=False,
+                        created_at__gte=latest[1],
+                        decision__in=(LoanApplication.Status.APPROVED, LoanApplication.Status.DENIED),
+                    )
+                    .order_by("-sent_at")
+                    .values_list("decision", flat=True)
+                    .first()
+                )
+            if delivered:
+                run_status, target, reason = AgentRun.Status.COMPLETED, delivered, _STUCK_AFTER_DELIVERY_REASON
+            else:
+                run_status, target, reason = AgentRun.Status.FAILED, LoanApplication.Status.PENDING, _STUCK_RESET_REASON
 
             AgentRun.objects.filter(
                 application_id=application_id,
                 status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
-            ).update(status=AgentRun.Status.FAILED, error=_STUCK_RESET_REASON)
+            ).update(status=run_status, error=reason)
 
-            # processing -> pending is in ALLOWED_TRANSITIONS; route through the
-            # state machine so the reset produces a status_transition AuditLog.
-            app.transition_to(
-                LoanApplication.Status.PENDING,
-                details={"source": "stuck_cleanup", "reason": _STUCK_RESET_REASON},
-            )
+            # processing -> pending/approved/denied are in ALLOWED_TRANSITIONS;
+            # route through the state machine so the reset produces a
+            # status_transition AuditLog.
+            app.transition_to(target, details={"source": "stuck_cleanup", "reason": reason})
 
         if clear_lock:
             cache.delete(_lock_key(application_id))
 
-        logger.warning("Application %s: cleaned up stuck processing status", application_id)
+        logger.warning("Application %s: cleaned up stuck processing status (now %s)", application_id, target)
     except Exception as e:
         logger.error("Application %s: cleanup failed: %s", application_id, e)
 
