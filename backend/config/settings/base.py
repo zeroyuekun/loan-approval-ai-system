@@ -188,6 +188,9 @@ REST_FRAMEWORK = {
         "user": "60/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # APIClient posts JSON unless a test asks for another format, as the
+    # frontend does (login and registration accept nothing else).
+    "TEST_REQUEST_DEFAULT_FORMAT": "json",
     # Reverse-proxy hops in front of Django that append to X-Forwarded-For.
     # Throttles key on the client IP DRF derives from this: with None (the DRF
     # default) the whole client-supplied header is the key, so a spoofed

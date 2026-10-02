@@ -82,7 +82,6 @@ class TestCSRFTokenRotation:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
-            format="json",
         )
         assert login_resp.status_code == status.HTTP_200_OK
 
@@ -112,7 +111,6 @@ class TestRefreshTokenBlacklisting:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
-            format="json",
         )
         assert login_resp.status_code == status.HTTP_200_OK
         old_refresh = auth_client.cookies.get("refresh_token")
@@ -146,7 +144,6 @@ class TestHttpOnlyCookies:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
-            format="json",
         )
         assert login_resp.status_code == status.HTTP_200_OK
 
@@ -175,7 +172,6 @@ class TestFailedLoginTracking:
                     "username": login_user.username,
                     "password": "wrong_password",
                 },
-                format="json",
             )
             assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -194,7 +190,6 @@ class TestFailedLoginTracking:
                     "username": login_user.username,
                     "password": "wrong_password",
                 },
-                format="json",
             )
 
         login_user.refresh_from_db()
@@ -207,7 +202,6 @@ class TestFailedLoginTracking:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
-            format="json",
         )
         assert resp.status_code == status.HTTP_200_OK
 
@@ -230,7 +224,6 @@ class TestAccountLockout:
                     "username": login_user.username,
                     "password": "wrong_password",
                 },
-                format="json",
             )
             assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
                 f"Attempt {i + 1}: expected 400, got {resp.status_code}"
@@ -247,7 +240,6 @@ class TestAccountLockout:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
-            format="json",
         )
         assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
             "Login with correct password should fail while account is locked"
@@ -261,7 +253,6 @@ class TestAccountLockout:
             resp = auth_client.post(
                 LOGIN_URL,
                 {"username": login_user.email, "password": "wrong_password"},
-                format="json",
             )
             assert resp.status_code == status.HTTP_400_BAD_REQUEST, f"Attempt {i + 1}"
 
@@ -273,7 +264,6 @@ class TestAccountLockout:
         resp = auth_client.post(
             LOGIN_URL,
             {"username": login_user.email, "password": PASSWORD},
-            format="json",
         )
         assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
             "Correct password via email should fail while the account is locked"
@@ -340,7 +330,7 @@ class TestFailedLoginsExpire:
     account for 24 hours: one request a day kept a staff account locked."""
 
     def _fail_once(self, client, user):
-        resp = client.post(LOGIN_URL, {"username": user.username, "password": "wrong_password"}, format="json")
+        resp = client.post(LOGIN_URL, {"username": user.username, "password": "wrong_password"})
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_failure_long_after_the_last_one_starts_a_new_count(self, auth_client, login_user):
@@ -417,7 +407,7 @@ class TestLoginSpendsOneHash:
     locked account cost none."""
 
     def _post(self, client, username, password):
-        return client.post(LOGIN_URL, {"username": username, "password": password}, format="json")
+        return client.post(LOGIN_URL, {"username": username, "password": password})
 
     def test_unknown_username(self, auth_client, login_user, hash_calls):
         hash_calls.clear()
@@ -498,6 +488,6 @@ class TestAuthEndpointsAcceptJsonOnly:
         assert not CustomUser.objects.filter(username="form_registrant").exists()
 
     def test_json_login_still_works(self, auth_client, login_user):
-        resp = auth_client.post(LOGIN_URL, {"username": login_user.username, "password": PASSWORD}, format="json")
+        resp = auth_client.post(LOGIN_URL, {"username": login_user.username, "password": PASSWORD})
         assert resp.status_code == status.HTTP_200_OK
         assert "access_token" in resp.cookies

@@ -25,7 +25,7 @@ class AuthTestCase(TestCase):
         }
 
     def test_register_success(self):
-        response = self.client.post("/api/v1/auth/register/", self.user_data, format="json")
+        response = self.client.post("/api/v1/auth/register/", self.user_data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIn("user", response.data)
         self.assertEqual(response.data["user"]["username"], "testuser")
@@ -34,8 +34,8 @@ class AuthTestCase(TestCase):
         self.assertTrue(response.cookies["access_token"]["httponly"])
 
     def test_register_duplicate_username(self):
-        self.client.post("/api/v1/auth/register/", self.user_data, format="json")
-        response = self.client.post("/api/v1/auth/register/", self.user_data, format="json")
+        self.client.post("/api/v1/auth/register/", self.user_data)
+        response = self.client.post("/api/v1/auth/register/", self.user_data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_login_success(self):
@@ -46,7 +46,6 @@ class AuthTestCase(TestCase):
                 "username": "testuser",
                 "password": "TestPass123!",
             },
-            format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("user", response.data)
@@ -60,7 +59,6 @@ class AuthTestCase(TestCase):
                 "username": "testuser",
                 "password": "wrongpassword",
             },
-            format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -74,7 +72,6 @@ class AuthTestCase(TestCase):
                     "username": "testuser",
                     "password": "wrong",
                 },
-                format="json",
             )
         user.refresh_from_db()
         self.assertTrue(user.is_locked)
@@ -85,7 +82,6 @@ class AuthTestCase(TestCase):
                 "username": "testuser",
                 "password": "TestPass123!",
             },
-            format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -97,7 +93,6 @@ class AuthTestCase(TestCase):
                 "username": "testuser",
                 "password": "TestPass123!",
             },
-            format="json",
         )
         # Use cookies from login for logout
         response = self.client.post("/api/v1/auth/logout/")
@@ -115,7 +110,6 @@ class AuthTestCase(TestCase):
                 "username": "testuser",
                 "password": "TestPass123!",
             },
-            format="json",
         )
         # Cookies should be set from login, subsequent request uses them
         response = self.client.get("/api/v1/auth/me/")

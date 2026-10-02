@@ -132,7 +132,6 @@ class TestAuthContracts:
                 "password": "TestPass123!abc",
                 "password2": "TestPass123!abc",
             },
-            format="json",
         )
         assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.data}"
         data = response.json()
@@ -159,7 +158,6 @@ class TestAuthContracts:
                 "username": "logintest",
                 "password": "TestPass123!abc",
             },
-            format="json",
         )
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.data}"
         data = response.json()
