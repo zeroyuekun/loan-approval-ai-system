@@ -109,3 +109,40 @@ class TestOrchestrationForceGuard:
         assert body.get("status") == "already_completed"
         assert body.get("existing_run_id") == str(completed_run.id)
         assert mock_delay.call_count == 0
+
+    @patch("apps.agents.views.orchestrate_pipeline_task.delay")
+    def test_customer_cannot_rerun_an_application_under_review(self, mock_delay, customer, loan_app):
+        """A customer re-run would fail the escalated run and replace the
+        decision the reviewer is about to act on."""
+        from apps.agents.models import AgentRun
+
+        loan_app.status = "review"
+        loan_app.save(update_fields=["status"])
+        AgentRun.objects.create(application_id=loan_app.id, status=AgentRun.Status.ESCALATED)
+        client = APIClient()
+        client.force_authenticate(user=customer)
+        resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
+        assert resp.status_code == status.HTTP_409_CONFLICT
+        assert mock_delay.call_count == 0
+
+    @patch("apps.agents.views.orchestrate_pipeline_task.delay")
+    def test_customer_cannot_rerun_a_decided_application_after_a_failed_run(self, mock_delay, customer, loan_app):
+        from apps.agents.models import AgentRun
+
+        loan_app.status = "approved"
+        loan_app.save(update_fields=["status"])
+        AgentRun.objects.create(application_id=loan_app.id, status=AgentRun.Status.FAILED)
+        client = APIClient()
+        client.force_authenticate(user=customer)
+        resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
+        assert resp.status_code == status.HTTP_409_CONFLICT
+        assert mock_delay.call_count == 0
+
+    @patch("apps.agents.views.orchestrate_pipeline_task.delay")
+    def test_customer_can_start_the_pipeline_for_a_pending_application(self, mock_delay, customer, loan_app):
+        mock_delay.return_value.id = "task-1"
+        client = APIClient()
+        client.force_authenticate(user=customer)
+        resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert mock_delay.call_count == 1

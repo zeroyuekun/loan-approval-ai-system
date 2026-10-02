@@ -103,6 +103,9 @@ class AgentRunListView(APIView):
         )
 
 
+_CUSTOMER_DISPATCHABLE = (LoanApplication.Status.PENDING, LoanApplication.Status.QUEUE_FAILED)
+
+
 class OrchestrateView(APIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [OrchestrationThrottle]
@@ -116,7 +119,7 @@ class OrchestrateView(APIView):
         Force path: staff-only, requires `reason` query/body param, writes an
         AuditLog entry before dispatching.
         """
-        check_loan_access(request, loan_id)
+        application = check_loan_access(request, loan_id)
 
         force = request.query_params.get("force", "").lower() == "true"
         reason = (
@@ -152,6 +155,15 @@ class OrchestrateView(APIView):
                         "existing_run_id": str(existing.id),
                     },
                     status=status.HTTP_200_OK,
+                )
+            # A customer may only start the pipeline for an application that
+            # is waiting for it. Anything else (under review, being processed,
+            # decided after a failed run) would replace a decision or fail an
+            # escalated review run: that is a staff action.
+            if not is_staff_role(request.user) and application.status not in _CUSTOMER_DISPATCHABLE:
+                return Response(
+                    {"detail": f"The application cannot be processed in its current status ({application.status})"},
+                    status=status.HTTP_409_CONFLICT,
                 )
 
         task = orchestrate_pipeline_task.delay(str(loan_id), force=force)
