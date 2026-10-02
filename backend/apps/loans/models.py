@@ -461,6 +461,24 @@ class LoanApplication(SoftDeleteModel):
             },
         )
 
+    def release_queue_failed(self, *, source, user=None) -> bool:
+        """Move this application from QUEUE_FAILED back to PENDING and drop its outbox row.
+
+        Guarded: only an application still in QUEUE_FAILED moves, because the
+        outbox drain and a run started by hand can both release it; returns
+        whether this call did. The move is an audited ``transition_to`` and
+        the outbox row goes in the same transaction: left behind, the drain
+        would dispatch the application again.
+        """
+        with transaction.atomic():
+            locked = type(self).objects.select_for_update().filter(pk=self.pk, status=self.Status.QUEUE_FAILED).first()
+            if locked is None:
+                return False
+            locked.transition_to(self.Status.PENDING, user=user, details={"source": source})
+            PipelineDispatchOutbox.objects.filter(application_id=self.pk).delete()
+        self.status, self.updated_at = locked.status, locked.updated_at
+        return True
+
     def __str__(self):
         return f"Loan {self.id} - {self.applicant.username} - ${self.loan_amount}"
 
