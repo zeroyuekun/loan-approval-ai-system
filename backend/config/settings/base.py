@@ -8,6 +8,8 @@ from pathlib import Path
 
 import sentry_sdk
 
+from config.sentry import scrub_event
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application version (synced with CHANGELOG.md)
@@ -531,6 +533,12 @@ if _sentry_dsn:
         traces_sample_rate=0.1,
         profiles_sample_rate=0.1,
         send_default_pii=False,
+        # Request bodies and frame locals hold passwords and applicant PII,
+        # and send_default_pii=False does not stop the SDK sending them.
+        max_request_body_size="never",
+        include_local_variables=False,
+        before_send=scrub_event,
+        before_send_transaction=scrub_event,
         environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
     )
 
