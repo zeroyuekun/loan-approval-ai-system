@@ -156,3 +156,24 @@ class TestLoadBundle:
 
         prediction_cache.clear_model_cache()
         assert len(prediction_cache._model_cache) == 0
+
+
+class TestUnhashedModelsFollowSettingsNotTheEnv:
+    """M7: an empty file_hash was accepted whenever the DJANGO_DEBUG env var
+    said true, even under production settings. It is now a setting that only
+    development turns on."""
+
+    def test_empty_hash_is_refused_when_settings_do_not_allow_it(self, tmp_path, settings, monkeypatch):
+        monkeypatch.setenv("DJANGO_DEBUG", "true")
+        settings.ML_ALLOW_UNHASHED_MODELS = False
+        f = tmp_path / "m.joblib"
+        f.write_bytes(b"contents")
+        with pytest.raises(ValueError, match="no file_hash"):
+            prediction_cache._verify_model_hash(f, "")
+
+    def test_empty_hash_is_allowed_when_settings_allow_it(self, tmp_path, settings, monkeypatch):
+        monkeypatch.setenv("DJANGO_DEBUG", "false")
+        settings.ML_ALLOW_UNHASHED_MODELS = True
+        f = tmp_path / "m.joblib"
+        f.write_bytes(b"contents")
+        prediction_cache._verify_model_hash(f, "")

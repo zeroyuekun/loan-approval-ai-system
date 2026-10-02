@@ -55,6 +55,35 @@ X_FRAME_OPTIONS = "DENY"
 SESSION_COOKIE_HTTPONLY = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
+
+# Governance gates fail closed in production. base.py defaults them to their
+# advisory modes so local training and the demo never get stuck; here each
+# defaults to its blocking mode. An env var may still override a gate (e.g.
+# ML_FAIRNESS_GATE_MODE=warn for a reviewed exception); an empty value means
+# the default, and an unknown value is a start-up error rather than a silent
+# fall back to the advisory mode.
+def _gate_mode(name, default, valid):
+    value = (os.environ.get(name) or default).strip().lower()
+    if value not in valid:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(f"{name}={value!r} is not one of {', '.join(valid)}")
+    return value
+
+
+ML_FAIRNESS_GATE_MODE = _gate_mode("ML_FAIRNESS_GATE_MODE", "block", ("warn", "block", "off"))
+ML_PROMOTION_GATE_MODE = _gate_mode("ML_PROMOTION_GATE_MODE", "block", ("warn", "block", "off"))
+ML_VALIDATION_SIGNOFF_GATE_MODE = _gate_mode("ML_VALIDATION_SIGNOFF_GATE_MODE", "block", ("warn", "block", "off"))
+CREDIT_POLICY_OVERLAY_MODE = _gate_mode("CREDIT_POLICY_OVERLAY_MODE", "enforce", ("off", "shadow", "enforce"))
+# "second_approver" refuses high-value overturns at the API (dual approval is
+# out of band); "2fa" is the weaker alternative an operator may choose.
+DECISION_OVERTURN_GATE_MODE = _gate_mode(
+    "DECISION_OVERTURN_GATE_MODE", "second_approver", ("off", "2fa", "second_approver")
+)
+BIAS_FAILURE_MODE = _gate_mode("BIAS_FAILURE_MODE", "block", ("warn", "block", "off"))
+# Never load a model artefact without a stored SHA-256, whatever DJANGO_DEBUG says.
+ML_ALLOW_UNHASHED_MODELS = False
+
 DATABASES["default"]["CONN_MAX_AGE"] = 600
 DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = "require"
 

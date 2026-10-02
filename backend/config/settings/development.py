@@ -17,6 +17,9 @@ SECURE_HSTS_SECONDS = 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = False
 SECURE_HSTS_PRELOAD = False
 
+# Hand-made model bundles without a stored hash may be loaded (with a warning).
+ML_ALLOW_UNHASHED_MODELS = True
+
 # Use PostgreSQL if POSTGRES_HOST is set (Docker), otherwise SQLite
 if os.environ.get("POSTGRES_HOST"):
     DATABASES = {

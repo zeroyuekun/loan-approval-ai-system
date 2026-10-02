@@ -552,17 +552,22 @@ print(f'Steps: {run.steps}')
 
 ## Pre-activation gate enablement
 
-Three opt-in gates, each driven by an env var, control model and prediction
-safety. Each defaults to a non-blocking mode, so deploying them changes no
-behaviour. Flip a gate to its enforcing mode only after confirming the
-prerequisites below.
+Gates driven by env vars control model and prediction safety. **Production
+settings (`config/settings/production.py`) default every gate to its
+blocking mode**; development settings keep the advisory modes so local
+training never gets stuck. An env var overrides the default (an empty value
+means the default), and an unknown value stops production from starting.
+The checklists below are what to confirm before a deployment runs with the
+blocking defaults, or before overriding one back to advisory.
 
-| Variable | Default | Enforcing value | Effect when enforcing |
+| Variable | Development default | Production default | Effect when enforcing |
 |---|---|---|---|
-| `ML_FAIRNESS_GATE_MODE` | `warn` | `block` | `train_model_task` refuses activation if the EEOC 80% rule fails for any protected attribute, or if `metrics["fairness"]` is empty. Old segment models keep `is_active=True`; no zero-model gap. |
-| `ML_PROMOTION_GATE_MODE` | `warn` | `block` | `train_model_task` refuses activation if `model_selector.promote_if_eligible` reports any of the four champion-challenger gates failed (KS regression, PSI stability, ECE calibration, AUC regression). |
-| `CREDIT_POLICY_OVERLAY_MODE` | `shadow` | `enforce` | `apply_overlay_to_decision` overrides the model verdict on every prediction when policy rules trigger (P-codes in `services/credit_policy.py`). Shadow mode logs the would-be override but returns the model verdict; enforce mode actually applies it. |
-| `DECISION_OVERTURN_GATE_MODE` | `off` | `2fa` / `second_approver` | Maker/checker control on officer overturns of denials at/above `DECISION_OVERTURN_THRESHOLD` (default `$100,000`). `2fa` requires the acting officer to hold a verified TOTP device (returns HTTP 403 otherwise); `second_approver` blocks high-value overturns at the API pending an out-of-band dual-approval process. Below-threshold overturns are never gated. Residual accepted risk in `off` mode: any officer-role account can self-overturn any denial within throttle limits (detective AuditLog only). |
+| `ML_FAIRNESS_GATE_MODE` | `warn` | `block` | The activation service (training, `train_model`, activate and traffic endpoints) refuses activation if the EEOC 80% rule fails for any protected attribute, or if no fairness data was recorded. The current champion keeps serving; no zero-model gap. |
+| `ML_PROMOTION_GATE_MODE` | `warn` | `block` | The activation service refuses activation if `model_selector.promote_if_eligible` reports any of the four champion-challenger gates failed (KS regression, PSI stability, ECE calibration, AUC regression). |
+| `ML_VALIDATION_SIGNOFF_GATE_MODE` | `warn` | `block` | The activation service refuses activation without an approved, signed-off `ModelValidationReport`. A freshly trained candidate stays inactive until sign-off and a manual activation. `?force=true` on the activate endpoint is the audited override. |
+| `CREDIT_POLICY_OVERLAY_MODE` | `shadow` | `enforce` | Hard-fail P-codes in `services/credit_policy.py` decline the application whatever the model says; refer P-codes are recorded on the decision (the human review queue is only for bias flags). If the overlay cannot be evaluated in enforce mode, the prediction step fails and the application returns to pending. |
+| `DECISION_OVERTURN_GATE_MODE` | `off` | `second_approver` | Maker/checker control on officer overturns of denials at/above `DECISION_OVERTURN_THRESHOLD` (default `$100,000`). `second_approver` blocks high-value overturns at the API pending an out-of-band dual-approval process; `2fa` (weaker) requires the acting officer to hold a verified TOTP device. Below-threshold overturns are never gated. |
+| `BIAS_FAILURE_MODE` | `block` | `block` | If bias detection is unavailable, the decision email is withheld and the application rolled back to pending. |
 
 The first two gate `train_model_task`, which runs rarely (on the retraining
 cadence). The third gates **every prediction** that hits the policy overlay,
@@ -633,10 +638,10 @@ and customers see the result.
 ### Enablement procedure
 
 1. Confirm all prerequisites for the gate you're enabling.
-2. Update the deployment env file (or your secrets manager) with the new
-   value. Do **not** edit `backend/config/settings/base.py`. The default
-   stays at the safe value so a misconfigured deployment doesn't silently
-   downgrade.
+2. In production the blocking mode is already the default: remove any env
+   override that relaxes the gate. Elsewhere, set the value in the
+   deployment env file (or your secrets manager). Do **not** edit the
+   settings modules.
 3. Restart the affected services:
    - `ML_FAIRNESS_GATE_MODE` and `ML_PROMOTION_GATE_MODE`: restart `worker_ml`
      (the Celery worker that runs `train_model_task`).
@@ -658,22 +663,19 @@ and customers see the result.
 
 ### Rollback
 
-Set the relevant env var back to its safe default and restart the affected
-services (see step 3 above):
+To relax a gate (a reviewed exception, not a default), set its env var to
+the advisory value and restart the affected services (see step 3 above):
 
-| Variable | Safe default |
+| Variable | Advisory value |
 |---|---|
 | `ML_FAIRNESS_GATE_MODE` | `warn` |
 | `ML_PROMOTION_GATE_MODE` | `warn` |
+| `ML_VALIDATION_SIGNOFF_GATE_MODE` | `warn` |
 | `CREDIT_POLICY_OVERLAY_MODE` | `shadow` |
-| `DECISION_OVERTURN_GATE_MODE` | `off` |
+| `DECISION_OVERTURN_GATE_MODE` | `2fa` or `off` |
 
-Currently active models with failed gates remain active across the flip.
-The rollback path mirrors the enablement path, and there is no
+Currently active models with failed gates remain active across the flip:
+the gates run at activation, not on models already serving. There is no
 data-migration step.
-
-The code paths for the safe defaults are byte-identical to the pre-gate
-behaviour shipped before PRs #163 and #164. Reverting should therefore
-only remove the gate's protection, never introduce new failure modes.
 
 **Prevention:** The circuit breaker recovers on its own after a 10-minute cooldown (`AI_CIRCUIT_BREAKER_COOLDOWN = 600`). Template fallback means decision emails always go out, whether or not the API is available. The daily API budget (500 calls / $50 USD) resets at midnight UTC.

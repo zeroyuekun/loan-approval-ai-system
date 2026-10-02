@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import threading
 from pathlib import Path
 
@@ -78,13 +77,14 @@ def file_sha256(path) -> str:
 def _verify_model_hash(file_path, expected_hash, version_id=None):
     """Verify SHA-256 hash of model file to detect tampering.
 
-    In production (DJANGO_DEBUG != true/1) an empty hash raises ValueError
-    because it means the model was stored without integrity data — a security gap.
-    In development an empty hash is allowed so engineers can iterate without
-    pre-computing hashes.
+    An empty hash raises ValueError — the model was stored without integrity
+    data — unless settings.ML_ALLOW_UNHASHED_MODELS is on (development only;
+    production.py forces it off). The decision follows the settings module,
+    not the DJANGO_DEBUG env var, so a stray DJANGO_DEBUG=true in a
+    production environment cannot switch the check off.
     """
     if not expected_hash:
-        if os.environ.get("DJANGO_DEBUG", "False").lower() not in ("true", "1"):
+        if not getattr(settings, "ML_ALLOW_UNHASHED_MODELS", False):
             raise ValueError(f"Model version {version_id} has no file_hash — hash verification required in production")
         logger.warning("No file_hash stored for model version %s — skipping integrity check (dev mode)", version_id)
         return

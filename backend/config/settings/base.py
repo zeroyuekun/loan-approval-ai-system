@@ -293,21 +293,20 @@ ML_AUTO_SEED_ROWS = _env_int("ML_AUTO_SEED_ROWS", 20000)
 
 # Hard credit policy overlay. Modes: "off" (not applied), "shadow"
 # (evaluated + logged, model verdict stands), "enforce" (hard-fails override
-# the model, refers route to human review). Default is "shadow" so the rule
-# set can be calibrated against production traffic before being promoted
-# to enforce. Unknown values collapse to "shadow" at read time so a
-# misconfigured deployment never silently downgrades responsible-lending
-# safeguards.
+# the model, refers are recorded on the decision; the human review queue is
+# only for bias flags). Default here is "shadow" so the rule set can be
+# calibrated in development; production.py defaults to "enforce". Unknown
+# values collapse to "shadow" at read time, which is weaker than "enforce",
+# so production.py rejects an unknown value at start-up.
 CREDIT_POLICY_OVERLAY_MODE = os.environ.get("CREDIT_POLICY_OVERLAY_MODE", "shadow")
 
 # Pre-activation fairness gate mode for `train_model_task`. Three values:
 # "warn" (default — log + flag failures, leave model active; current
 # behaviour byte-identical), "block" (refuse activation if fairness gate
 # fails or no fairness data was recorded — old segment models keep serving),
-# "off" (skip the check entirely; emergency escape hatch). Default is "warn";
-# flip to "block" only after validating the training pipeline
-# produces compliant fairness metrics for the segments in scope. See
-# docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
+# "off" (skip the check entirely; emergency escape hatch). Default here is
+# "warn" so local training never gets stuck; production.py defaults to
+# "block". See docs/superpowers/specs/2026-05-07-ml-fairness-gate-mode-design.md.
 ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
 
 # Pre-activation champion-challenger promotion gate mode for `train_model_task`.
@@ -315,20 +314,24 @@ ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
 # on training_metadata, model activates regardless), "block" (refuse activation
 # if model_selector.promote_if_eligible reports any of the 4 gates failed —
 # KS regression, PSI stability, ECE calibration, AUC regression), "off" (skip
-# the check entirely). Default "warn"; flip to "block" only after
-# validating the trainer produces compliant promotion metrics for the segments
-# in scope. See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
+# the check entirely). Default here "warn"; production.py defaults to "block".
+# See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
 ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
 
 # Pre-activation validation sign-off gate mode. Mirrors the
 # fairness/promotion gate pattern: "warn" (default — gate runs, decision is
 # recorded, activation proceeds even with no approved ModelValidationReport),
-# "block" (training-path candidates are demoted to is_active=False without
-# an approved sign-off; manual ModelActivateView returns 409 unless ?force=true
-# is provided), "off" (skip the check entirely). Defaults to "warn"; flip to
-# "block" once operators have established a sign-off cadence.
+# "block" (without an approved sign-off a training-path candidate stays
+# inactive while the champion keeps serving; manual ModelActivateView returns
+# 409 unless ?force=true is provided), "off" (skip the check entirely).
+# Default here "warn"; production.py defaults to "block".
 # See docs/superpowers/specs/2026-05-07-codex-adversarial-response-v1-10-7-design.md.
 ML_VALIDATION_SIGNOFF_GATE_MODE = os.environ.get("ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
+
+# Load a model artefact that has no stored SHA-256 (integrity check skipped
+# with a warning). Off here and forced off in production.py; development.py
+# turns it on so engineers can iterate on hand-made bundles.
+ML_ALLOW_UNHASHED_MODELS = False
 
 # MRM dossier auto-generation on ModelVersion post_save.
 # Enabled by default; disable in unit tests that create throwaway models.
@@ -339,9 +342,9 @@ MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").
 # without removing the API surface (returns 503).
 DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lower() in ("true", "1", "yes")
 
-# Maker/checker gate on high-value officer overturns. Default "off"
-# (no behaviour change). "2fa" requires the acting officer to hold a verified
-# TOTP device before overturning a denial >= DECISION_OVERTURN_THRESHOLD;
+# Maker/checker gate on high-value officer overturns. Default here "off";
+# production.py defaults to "second_approver". "2fa" requires the acting
+# officer to hold a verified TOTP device before overturning a denial >= DECISION_OVERTURN_THRESHOLD;
 # "second_approver" blocks such overturns at the API pending dual approval.
 # Unknown values collapse to "off" (see overturn_policy.normalize_overturn_mode).
 DECISION_OVERTURN_GATE_MODE = os.environ.get("DECISION_OVERTURN_GATE_MODE", "off")
