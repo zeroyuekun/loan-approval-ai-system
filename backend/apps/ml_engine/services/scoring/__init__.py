@@ -10,7 +10,6 @@ final scored Decision:
 - ``prediction_cache`` / ``prediction_diagnostics`` / ``prediction_explanations`` / ``prediction_features`` — supporting helpers
 - ``adverse_action`` / ``reason_codes`` — adverse-action / NCCP reason codes
 - ``shap_attribution`` — SHAP feature attribution
-- ``stress_testing`` — APRA stress testing (+3% rate buffer)
 - ``counterfactual_engine`` — DiCE-style counterfactuals
 - ``pricing_engine`` — risk-based pricing
 - ``segmentation`` — product segmentation (home/personal)

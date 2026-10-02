@@ -19,7 +19,7 @@ segment has too few approvals to train on.
 
 This module is pure policy — no Django queries, no model loading. The
 predictor is responsible for turning a resolved segment into an active
-ModelVersion row (`select_active_model_for_segment`).
+ModelVersion row (`model_selector.select_model_version`).
 """
 
 from __future__ import annotations
@@ -80,32 +80,3 @@ def derive_segment(application) -> str:
     if purpose == "personal":
         return SEGMENT_PERSONAL
     return SEGMENT_UNIFIED
-
-
-def select_active_model_for_segment(
-    segment: str,
-    *,
-    ModelVersion=None,
-    algorithm: str = "xgb",
-) -> ModelVersion | None:  # noqa: F821 — class symbol shadowed by injected kwarg; resolved at runtime via the late import below
-    """Pick the most recent active ModelVersion for the given segment.
-
-    Falls back to the unified model when no active segment-specific model
-    exists, and ultimately returns None if neither is available.
-
-    `ModelVersion` is injected for testability — the predictor passes the
-    real model class at call time; unit tests pass a fake.
-    """
-    if ModelVersion is None:
-        from apps.ml_engine.models import ModelVersion as _MV
-
-        ModelVersion = _MV
-
-    base = ModelVersion.objects.filter(is_active=True, algorithm=algorithm)
-
-    if segment != SEGMENT_UNIFIED:
-        specific = base.filter(segment=segment).order_by("-created_at").first()
-        if specific is not None:
-            return specific
-
-    return base.filter(segment=SEGMENT_UNIFIED).order_by("-created_at").first()

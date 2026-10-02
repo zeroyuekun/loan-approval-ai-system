@@ -172,8 +172,7 @@ class ModelDriftView(APIView):
     def get(self, request):
         """Compute PSI for recent applications vs training distribution."""
         from apps.ml_engine.services.governance.drift_monitor import compute_on_demand_feature_psi
-        from apps.ml_engine.services.model_selector import select_model_version
-        from apps.ml_engine.services.scoring.segmentation import SEGMENT_UNIFIED
+        from apps.ml_engine.services.model_selector import monitoring_model_version
 
         try:
             days = int(request.query_params.get("days", 30))
@@ -186,10 +185,11 @@ class ModelDriftView(APIView):
         # ModelPredictor (which joblib.load-s the model bundle) only to throw
         # the model object away before compute_on_demand_feature_psi builds its
         # own ModelPredictor internally.  One joblib.load per drift check.
-        try:
-            model_version = select_model_version(segment=SEGMENT_UNIFIED)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        # Same model as the metrics page (monitoring_model_version), not the
+        # weighted A/B draw, so the report never flips to a challenger.
+        model_version = monitoring_model_version()
+        if model_version is None:
+            return Response({"error": "No active model found"}, status=status.HTTP_404_NOT_FOUND)
 
         result = compute_on_demand_feature_psi(model_version, days=days)
 
@@ -376,8 +376,14 @@ class ModelCompareView(APIView):
     def get(self, request):
         from django.db.models import Avg, Count
 
-        active_models = ModelVersion.objects.filter(is_active=True)
-        if active_models.count() < 2:
+        from apps.ml_engine.services.model_selector import CHAMPION_ORDERING, pick_monitoring_model
+
+        # Champion first, then the rest by traffic and age — a fixed order so
+        # the agreement rate below always compares the champion with its peer.
+        ranked = list(ModelVersion.objects.filter(is_active=True).order_by(*CHAMPION_ORDERING))
+        champion = pick_monitoring_model(ranked)
+        active_models = [champion, *(m for m in ranked if m is not champion)] if champion else []
+        if len(active_models) < 2:
             return Response(
                 {"message": "Need at least 2 active models for comparison"},
                 status=status.HTTP_200_OK,

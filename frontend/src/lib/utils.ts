@@ -25,6 +25,33 @@ const STATUS_COLORS: Record<string, string> = {
   approved: 'bg-green-100 text-green-800',
   denied: 'bg-red-100 text-red-800',
   review: 'bg-amber-100 text-amber-800',
+  queue_failed: 'bg-orange-100 text-orange-800',
+}
+
+// Statuses whose raw value is not a readable label
+const STATUS_LABELS: Record<string, string> = {
+  queue_failed: 'Processing Delayed',
+}
+
+/** Title-case display name for an application status, e.g. for a filter list. */
+export function getStatusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status.charAt(0).toUpperCase() + status.slice(1)
+}
+
+/**
+ * The pipeline has not run yet: the application was just submitted, or its
+ * dispatch failed and the backend is retrying it.
+ */
+export function isAwaitingPipeline(status: string): boolean {
+  return status === 'pending' || status === 'queue_failed'
+}
+
+/**
+ * Assessment is under way or about to start. queue_failed is excluded: it is
+ * stalled until the backend's next dispatch retry, not in progress.
+ */
+export function isAssessmentInFlight(status: string): boolean {
+  return status === 'pending' || status === 'processing'
 }
 
 export function getStatusColor(status: string): string {
@@ -40,7 +67,7 @@ export function getDisplayStatus(status: string, decision?: { decision: string }
   if (status === 'review' && (d === 'approved' || d === 'denied')) {
     return { label: d.toUpperCase(), color: STATUS_COLORS[d] }
   }
-  return { label: status.toUpperCase(), color: getStatusColor(status) }
+  return { label: getStatusLabel(status).toUpperCase(), color: getStatusColor(status) }
 }
 
 /** Display names for the model algorithms the backend can train. */

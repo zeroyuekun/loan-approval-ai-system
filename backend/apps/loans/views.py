@@ -23,7 +23,7 @@ from apps.accounts.policy import is_staff_role
 from apps.agents.models import AgentRun
 from apps.agents.services.api_budget import ApiBudgetGuard
 from apps.common.http import client_ip
-from apps.ml_engine.models import ModelVersion
+from apps.ml_engine.services.model_selector import monitoring_model_version
 
 from .filters import AuditLogFilter, LoanApplicationFilter
 from .models import AuditLog, Complaint, DecisionReview, LoanApplication, LoanDecision
@@ -246,8 +246,9 @@ class DashboardStatsView(APIView):
             llm_spend_today_usd = 0.0
             llm_spend_cap_usd = 5.0
 
-        # Active model
-        active_model = ModelVersion.objects.filter(is_active=True).first()
+        # Active model — the unified champion the metrics pages describe, not
+        # the newest active row (which may be a segment model or challenger).
+        active_model = monitoring_model_version()
 
         # Daily application volume (last 30 days)
         thirty_days_ago = now - timedelta(days=30)

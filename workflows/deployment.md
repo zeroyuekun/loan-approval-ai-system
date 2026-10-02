@@ -68,21 +68,15 @@ Follow the prompts to set username, email, and password.
 ### 6. Generate synthetic data
 
 ```bash
-# Option A: Using the standalone tool (outside Docker)
-python tools/generate_synthetic_data.py --num-records 10000 --output-path .tmp/synthetic_loans.csv
-
-# Option B: Using Django management command (inside Docker)
-docker-compose exec backend python manage.py generate_loan_data --count 10000
+# Writes .tmp/synthetic_loans.csv and seeds 100 demo applications
+docker-compose exec backend python manage.py generate_data --num-records 10000
 ```
 
 ### 7. Train initial model
 
 ```bash
-# Option A: Using the standalone tool (outside Docker)
-python tools/train_model.py --data-path .tmp/synthetic_loans.csv --algorithm both --output-dir backend/ml_models
-
-# Option B: Using Django management command (inside Docker)
-docker-compose exec backend python manage.py train_model --algorithm both
+# One algorithm per run: xgb (default) or rf
+docker-compose exec backend python manage.py train_model --algorithm xgb
 ```
 
 ### 8. Verify

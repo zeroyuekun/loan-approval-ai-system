@@ -1,4 +1,4 @@
-"""Unit tests for segmentation.derive_segment and select_active_model_for_segment.
+"""Unit tests for segmentation.derive_segment.
 
 The filter dict SEGMENT_FILTERS is exercised indirectly via derive_segment
 behaviour tests, and directly via a small coverage test to catch accidental
@@ -18,7 +18,6 @@ from apps.ml_engine.services.scoring.segmentation import (
     SEGMENT_PERSONAL,
     SEGMENT_UNIFIED,
     derive_segment,
-    select_active_model_for_segment,
 )
 
 
@@ -75,74 +74,3 @@ class TestSegmentFilters:
         assert f({"purpose": "personal"})
         assert not f({"purpose": "home"})
         assert not f({"purpose": "investment"})
-
-
-class TestSelectActiveModelForSegment:
-    def _stub_modelversion(self, rows_by_filter):
-        """Build a MagicMock ModelVersion class with chainable .objects.filter
-        returning the row list matched by the current filter kwargs."""
-
-        class Mgr:
-            def __init__(self, rows_by_filter):
-                self._rows_by_filter = rows_by_filter
-                self._current_filter = {}
-
-            def filter(self, **kwargs):
-                new = Mgr(self._rows_by_filter)
-                new._current_filter = {**self._current_filter, **kwargs}
-                return new
-
-            def order_by(self, *_args):
-                return self
-
-            def first(self):
-                for predicate, rows in self._rows_by_filter:
-                    if all(self._current_filter.get(k) == v for k, v in predicate.items()):
-                        return rows[0] if rows else None
-                return None
-
-        MV = MagicMock()
-        MV.objects = Mgr(rows_by_filter)
-        return MV
-
-    def test_returns_specific_when_available(self):
-        specific_model = MagicMock(name="home_owner_occupier_model")
-        MV = self._stub_modelversion(
-            [
-                ({"segment": SEGMENT_HOME_OWNER_OCCUPIER, "is_active": True, "algorithm": "xgb"}, [specific_model]),
-                ({"segment": SEGMENT_UNIFIED, "is_active": True, "algorithm": "xgb"}, [MagicMock(name="unified")]),
-            ]
-        )
-        got = select_active_model_for_segment(SEGMENT_HOME_OWNER_OCCUPIER, ModelVersion=MV)
-        assert got is specific_model
-
-    def test_falls_back_to_unified_when_segment_missing(self):
-        unified_model = MagicMock(name="unified_model")
-        MV = self._stub_modelversion(
-            [
-                ({"segment": SEGMENT_HOME_OWNER_OCCUPIER, "is_active": True, "algorithm": "xgb"}, []),
-                ({"segment": SEGMENT_UNIFIED, "is_active": True, "algorithm": "xgb"}, [unified_model]),
-            ]
-        )
-        got = select_active_model_for_segment(SEGMENT_HOME_OWNER_OCCUPIER, ModelVersion=MV)
-        assert got is unified_model
-
-    def test_returns_none_when_no_active_models(self):
-        MV = self._stub_modelversion(
-            [
-                ({"segment": SEGMENT_HOME_OWNER_OCCUPIER, "is_active": True, "algorithm": "xgb"}, []),
-                ({"segment": SEGMENT_UNIFIED, "is_active": True, "algorithm": "xgb"}, []),
-            ]
-        )
-        got = select_active_model_for_segment(SEGMENT_HOME_OWNER_OCCUPIER, ModelVersion=MV)
-        assert got is None
-
-    def test_unified_request_goes_direct_to_unified(self):
-        unified_model = MagicMock(name="unified_model")
-        MV = self._stub_modelversion(
-            [
-                ({"segment": SEGMENT_UNIFIED, "is_active": True, "algorithm": "xgb"}, [unified_model]),
-            ]
-        )
-        got = select_active_model_for_segment(SEGMENT_UNIFIED, ModelVersion=MV)
-        assert got is unified_model

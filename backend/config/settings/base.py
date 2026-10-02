@@ -8,6 +8,8 @@ from pathlib import Path
 
 import sentry_sdk
 
+from config.sentry import scrub_event
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application version (synced with CHANGELOG.md)
@@ -139,12 +141,22 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    # 12, matching what registration asks of customers; staff passwords set
+    # through the admin or createsuperuser go through this list alone.
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 12}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
 AUTH_USER_MODEL = "accounts.CustomUser"
+
+# Sign-in lockout. Failed sign-ins only add up while they keep coming: a failure
+# more than LOGIN_FAILURE_WINDOW after the previous one starts the count again,
+# so one wrong password now and then cannot keep an account locked.
+LOGIN_FAILURE_WINDOW = timedelta(minutes=15)
+# (failures in a row, minutes locked), highest first. The longest lock is no
+# longer than the window, so once it ends the next failure starts a new count.
+LOGIN_LOCKOUT_TIERS = ((10, 15), (8, 5), (5, 1))
 
 LANGUAGE_CODE = "en-au"
 TIME_ZONE = "UTC"
@@ -176,6 +188,9 @@ REST_FRAMEWORK = {
         "user": "60/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # APIClient posts JSON unless a test asks for another format, as the
+    # frontend does (login and registration accept nothing else).
+    "TEST_REQUEST_DEFAULT_FORMAT": "json",
     # Reverse-proxy hops in front of Django that append to X-Forwarded-For.
     # Throttles key on the client IP DRF derives from this: with None (the DRF
     # default) the whole client-supplied header is the key, so a spoofed
@@ -523,6 +538,12 @@ if _sentry_dsn:
         traces_sample_rate=0.1,
         profiles_sample_rate=0.1,
         send_default_pii=False,
+        # Request bodies and frame locals hold passwords and applicant PII,
+        # and send_default_pii=False does not stop the SDK sending them.
+        max_request_body_size="never",
+        include_local_variables=False,
+        before_send=scrub_event,
+        before_send_transaction=scrub_event,
         environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
     )
 
