@@ -39,7 +39,12 @@ const STATUS_COLORS: Record<string, string> = {
 
 // Statuses whose raw value is not a readable label
 const STATUS_LABELS: Record<string, string> = {
-  queue_failed: 'PROCESSING DELAYED',
+  queue_failed: 'Processing Delayed',
+}
+
+/** Title-case display name for an application status, e.g. for a filter list. */
+export function getStatusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status.charAt(0).toUpperCase() + status.slice(1)
 }
 
 /**
@@ -71,7 +76,7 @@ export function getDisplayStatus(status: string, decision?: { decision: string }
   if (status === 'review' && (d === 'approved' || d === 'denied')) {
     return { label: d.toUpperCase(), color: STATUS_COLORS[d] }
   }
-  return { label: STATUS_LABELS[status] ?? status.toUpperCase(), color: getStatusColor(status) }
+  return { label: getStatusLabel(status).toUpperCase(), color: getStatusColor(status) }
 }
 
 /** Display names for the model algorithms the backend can train. */
