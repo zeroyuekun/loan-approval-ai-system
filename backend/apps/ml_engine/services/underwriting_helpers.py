@@ -62,10 +62,16 @@ def simulate_latent_signals(df, n, rng):
 
 def apply_tenure_shading(base_shade, employment_type, employment_length):
     """STEP 1 tenure overrides on top of the base ``INCOME_SHADING`` factor
-    (Big 4 2025 practice): self-employed 2yr+ 0.82, <1yr 0.65; casual 2yr+
-    1.00, <1yr 0.60. Works element-wise on arrays/Series or on scalars, so
-    the underwriting engine and the recommendation engine shade income with
-    the same rules. No rng draws."""
+    (Big 4 2025 practice; self-employed accepted from 1 year, 2 before 2025):
+
+    - self-employed: <1yr 0.65, 1-2yr base 0.75, 2yr+ 0.82
+    - casual: <1yr 0.60, 1-2yr base 0.80, 2yr+ 1.00
+
+    compute_approval's STEP 2 still denies self-employed under 1 year and
+    casual under 6 months (6-12 months only with credit 700+). Works
+    element-wise on arrays/Series or on scalars, so the underwriting engine
+    and the recommendation engine shade income with the same rules. No rng
+    draws."""
     employment_type = np.asarray(employment_type)
     employment_length = np.asarray(employment_length)
     self_employed = employment_type == "self_employed"

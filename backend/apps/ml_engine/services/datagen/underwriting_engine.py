@@ -91,8 +91,8 @@ class UnderwritingEngine:
     # Income shading by employment type (what % of income banks accept)
     INCOME_SHADING = {
         "payg_permanent": 1.00,
-        "payg_casual": 0.80,  # base; <1yr: hard deny, 1-2yr: 0.80, 2yr+: 1.00
-        "self_employed": 0.75,  # base; 1-2yr: 0.75, 2yr+: 0.82 (applied dynamically)
+        "payg_casual": 0.80,  # base; tenure overrides: underwriting_helpers.apply_tenure_shading
+        "self_employed": 0.75,  # base; tenure overrides: underwriting_helpers.apply_tenure_shading
         "contract": 0.85,
     }
 
@@ -166,14 +166,10 @@ class UnderwritingEngine:
         )
 
         # =========================================================
-        # STEP 1: Income shading by employment type
-        # Refined per Big 4 2025 practice:
-        # - Self-employed 1yr+ accepted (was 2yr pre-2025)
-        #   - 1-2yr: 75%, 2yr+: 82%
-        # - Casual tenure-based: <1yr deny, 1-2yr 80%, 2yr+ 100%
+        # STEP 1: Income shading by employment type and tenure
+        # (factors in underwriting_helpers.apply_tenure_shading, shared
+        # with the recommendation engine)
         # =========================================================
-        # Tenure overrides are shared with the recommendation engine
-        # (casual <1yr is shaded to 0.60 here and hard-denied below).
         income_shade = _helpers.apply_tenure_shading(
             df["employment_type"].map(self.INCOME_SHADING).values,
             df["employment_type"],
