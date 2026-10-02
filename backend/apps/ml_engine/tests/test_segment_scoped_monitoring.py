@@ -15,13 +15,13 @@ from apps.ml_engine.models import DriftReport, ModelVersion, PredictionLog
 pytestmark = pytest.mark.django_db
 
 
-def _mv(settings, version, segment):
+def _mv(settings, version, segment, traffic_percentage=100):
     return ModelVersion.objects.create(
         algorithm="xgb",
         version=version,
         file_path=str(settings.ML_MODELS_DIR / f"{version}.joblib"),
         is_active=True,
-        traffic_percentage=100,
+        traffic_percentage=traffic_percentage,
         segment=segment,
         training_metadata={"reference_probabilities": [0.2, 0.4, 0.6, 0.8]},
     )
@@ -105,9 +105,8 @@ def test_drift_view_monitors_the_champion_not_a_random_challenger(two_segments, 
     unified, _personal = two_segments
     unified.traffic_percentage = 90
     unified.save(update_fields=["traffic_percentage"])
-    challenger = _mv(settings, "unified_challenger_v1", "unified")  # newest, unified
-    challenger.traffic_percentage = 10
-    challenger.save(update_fields=["traffic_percentage"])
+    # Created at 10% directly: the segment's traffic may not exceed 100%.
+    challenger = _mv(settings, "unified_challenger_v1", "unified", traffic_percentage=10)  # newest, unified
 
     seen = []
 
