@@ -78,3 +78,22 @@ def test_state_defaults_to_nsw_when_not_supplied(make_snapshot):
     snap = make_snapshot()
     assert snap.state == "NSW"
     assert snap.hem_expenses == 2875  # single, no dependants, $120k (high 2500) x NSW 1.15
+
+
+@pytest.mark.parametrize("has_hecs", [False, True])
+def test_hecs_is_not_deducted_from_surplus(make_snapshot, has_hecs):
+    # compute_approval leaves HECS/HELP out of the serviceability surplus (Big 4
+    # policy from 30 Sept 2025), so an offer must not shrink for a HECS debt.
+    snap = make_snapshot(
+        annual_income=90000.0,
+        has_hecs=has_hecs,
+        debt_to_income=0.5,
+        loan_amount=40000.0,
+        monthly_expenses=1500.0,
+        existing_credit_card_limit=0.0,
+    )
+    # 7500.00 shaded income (payg_permanent, 90000 / 12)
+    # - 1482.33 tax (4288 + 0.30 x 45000 = 17788 a year)
+    # - 2357.00 HEM (single, mid 2050 x NSW 1.15) over 1500 declared
+    # -   36.00 existing debt (90000 x (0.5 - 40000 / 90000) = 5000, x 0.0072)
+    assert snap.monthly_surplus == pytest.approx(3624.67, abs=0.01)

@@ -85,7 +85,6 @@ class CustomerSnapshot:
     effective_expenses: float = field(init=False)
     existing_debt_monthly: float = field(init=False)
     credit_card_monthly: float = field(init=False)
-    hecs_monthly: float = field(init=False)
     monthly_surplus: float = field(init=False)
     total_deposits: float = field(init=False)
     risk_tier: str = field(init=False)
@@ -113,16 +112,14 @@ class CustomerSnapshot:
 
         self.credit_card_monthly = self.existing_credit_card_limit * CREDIT_CARD_MONTHLY_RATE
 
-        self.hecs_monthly = (self.annual_income * 0.035 / 12) if self.has_hecs else 0.0
-
-        # Monthly surplus BEFORE new loan repayment
+        # Monthly surplus BEFORE new loan repayment. HECS/HELP is left out, as
+        # in UnderwritingEngine.compute_approval (Big 4 policy, 30 Sept 2025).
         self.monthly_surplus = (
             self.shaded_monthly_income
             - self.monthly_tax
             - self.effective_expenses
             - self.existing_debt_monthly
             - self.credit_card_monthly
-            - self.hecs_monthly
         )
 
         self.total_deposits = self.savings_balance + self.checking_balance

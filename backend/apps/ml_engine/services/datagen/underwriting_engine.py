@@ -314,16 +314,10 @@ class UnderwritingEngine:
         # Credit card commitment: 3% of total limit
         credit_card_monthly = df["existing_credit_card_limit"] * self.CREDIT_CARD_MONTHLY_RATE
 
-        # HECS/HELP repayment: ~3.5% of gross income (ATO compulsory).
-        # Policy change 30 Sept 2025: HECS/HELP removed from DTI
-        # calculations by all Big 4 banks. Still deducted from gross
-        # pay (reduces net income), but NOT counted as a debt obligation
-        # in serviceability assessment. Kept as informational feature only.
-        np.where(
-            df["has_hecs"] == 1,
-            df["annual_income"] * 0.035 / 12,
-            0.0,
-        )
+        # HECS/HELP: policy change 30 Sept 2025 removed it from DTI and
+        # serviceability at all Big 4 banks, so no repayment is deducted here
+        # (has_hecs stays an informational feature). The recommendation
+        # engine's CustomerSnapshot follows the same rule.
 
         # Monthly surplus at the assessment rate (APRA 3% buffer).
         # At the actual product rate (~6.5%), most of these loans are
