@@ -7,10 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
-import { formatMaybeMasked, formatDate, formatPurpose, isAssessmentInFlight, isAwaitingPipeline } from '@/lib/utils'
+import { formatMaybeMasked, formatDate, formatPurpose, isAssessmentInFlight } from '@/lib/utils'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
 import { DecisionReviewStatus } from '@/components/applications/DecisionReviewStatus'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
+
+const IN_FLIGHT_POLL_MS = 5_000
+// The backend retries a failed dispatch once per 60s beat tick
+const QUEUE_RETRY_POLL_MS = 60_000
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="h-8 w-8 text-yellow-500" />,
@@ -184,13 +188,14 @@ function StatusPipeline({ status }: { status: string }) {
 export default function CustomerApplicationStatusPage() {
   const { id } = useParams<{ id: string }>()
   const { data: application, isLoading } = useApplication(id, {
-    // Poll every 5s only while still being processed (queue_failed included:
-    // the backend retries the dispatch and moves it back to pending). Letting
-    // TanStack Query own the interval avoids the stale closures and interval
-    // leaks a useEffect(setInterval) is prone to when the hook remounts quickly.
+    // Poll while the application is being processed; queue_failed only changes
+    // on a backend retry, so it polls at the retry pace. Letting TanStack Query
+    // own the interval avoids the stale closures and interval leaks a
+    // useEffect(setInterval) is prone to when the hook remounts quickly.
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status && (isAwaitingPipeline(status) || isAssessmentInFlight(status)) ? 5000 : false
+      if (status === 'queue_failed') return QUEUE_RETRY_POLL_MS
+      return status && isAssessmentInFlight(status) ? IN_FLIGHT_POLL_MS : false
     },
   })
 

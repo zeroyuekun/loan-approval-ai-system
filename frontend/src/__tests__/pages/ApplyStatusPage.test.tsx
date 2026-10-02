@@ -76,13 +76,38 @@ describe('Customer application status page', () => {
       expect(screen.queryByText(/queue_failed/i)).not.toBeInTheDocument()
     })
 
-    it('keeps polling so the page updates once processing resumes', async () => {
+    it('keeps polling at the backend retry pace (60s), not the 5s in-flight pace', async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true })
       let requests = 0
       server.use(
         http.get(`${API_URL}/loans/loan-1/`, () => {
           requests += 1
           return HttpResponse.json({ ...maskedApplication, status: 'queue_failed' })
+        }),
+      )
+      renderWithProviders(<CustomerApplicationStatusPage />)
+
+      await screen.findByText('Loan Amount')
+      expect(requests).toBe(1)
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(requests).toBe(1)
+      await vi.advanceTimersByTimeAsync(55_000)
+      expect(requests).toBe(2)
+    })
+  })
+
+  describe('while the application is in flight (pending)', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('polls every 5s', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      let requests = 0
+      server.use(
+        http.get(`${API_URL}/loans/loan-1/`, () => {
+          requests += 1
+          return HttpResponse.json(maskedApplication)
         }),
       )
       renderWithProviders(<CustomerApplicationStatusPage />)
