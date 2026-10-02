@@ -73,6 +73,7 @@ class LoanCRUDTestCase(TestCase):
                 "username": username,
                 "password": password,
             },
+            format="json",
         )
 
     def test_customer_can_create_loan(self):

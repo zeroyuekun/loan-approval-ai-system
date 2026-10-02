@@ -118,7 +118,11 @@ class TestAccountLockout(TestCase):
     def test_failed_attempts_tracked(self, mock_throttle):
         """Failed login attempts should be tracked."""
         for _i in range(5):
-            self.client.post("/api/v1/auth/login/", {"username": "locktest", "password": "wrong_password"})
+            self.client.post(
+                "/api/v1/auth/login/",
+                {"username": "locktest", "password": "wrong_password"},
+                content_type="application/json",
+            )
 
         self.user.refresh_from_db()
         assert self.user.failed_login_attempts >= 5, (
@@ -129,7 +133,11 @@ class TestAccountLockout(TestCase):
     def test_lockout_after_failures(self, mock_throttle):
         """Account should lock after threshold failures (lockout starts at 5)."""
         for _i in range(5):
-            self.client.post("/api/v1/auth/login/", {"username": "locktest", "password": "wrong_password"})
+            self.client.post(
+                "/api/v1/auth/login/",
+                {"username": "locktest", "password": "wrong_password"},
+                content_type="application/json",
+            )
 
         self.user.refresh_from_db()
         assert self.user.failed_login_attempts >= 5, "Failed attempts not tracked"
@@ -140,10 +148,18 @@ class TestAccountLockout(TestCase):
         """Successful login should reset failed attempt counter."""
         # First, create some failures
         for _i in range(3):
-            self.client.post("/api/v1/auth/login/", {"username": "locktest", "password": "wrong_password"})
+            self.client.post(
+                "/api/v1/auth/login/",
+                {"username": "locktest", "password": "wrong_password"},
+                content_type="application/json",
+            )
 
         # Then login successfully
-        self.client.post("/api/v1/auth/login/", {"username": "locktest", "password": "correct_password"})
+        self.client.post(
+            "/api/v1/auth/login/",
+            {"username": "locktest", "password": "correct_password"},
+            content_type="application/json",
+        )
 
         self.user.refresh_from_db()
         assert self.user.failed_login_attempts == 0, "Counter not reset after successful login"

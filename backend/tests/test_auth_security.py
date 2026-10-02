@@ -6,6 +6,7 @@ Uses pytest + Django test client with cookie-based JWT auth.
 
 from datetime import timedelta
 from unittest.mock import patch
+from urllib.parse import urlencode
 
 import pytest
 from django.utils import timezone
@@ -81,6 +82,7 @@ class TestCSRFTokenRotation:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
+            format="json",
         )
         assert login_resp.status_code == status.HTTP_200_OK
 
@@ -110,6 +112,7 @@ class TestRefreshTokenBlacklisting:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
+            format="json",
         )
         assert login_resp.status_code == status.HTTP_200_OK
         old_refresh = auth_client.cookies.get("refresh_token")
@@ -143,6 +146,7 @@ class TestHttpOnlyCookies:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
+            format="json",
         )
         assert login_resp.status_code == status.HTTP_200_OK
 
@@ -171,6 +175,7 @@ class TestFailedLoginTracking:
                     "username": login_user.username,
                     "password": "wrong_password",
                 },
+                format="json",
             )
             assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -189,6 +194,7 @@ class TestFailedLoginTracking:
                     "username": login_user.username,
                     "password": "wrong_password",
                 },
+                format="json",
             )
 
         login_user.refresh_from_db()
@@ -201,6 +207,7 @@ class TestFailedLoginTracking:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
+            format="json",
         )
         assert resp.status_code == status.HTTP_200_OK
 
@@ -223,6 +230,7 @@ class TestAccountLockout:
                     "username": login_user.username,
                     "password": "wrong_password",
                 },
+                format="json",
             )
             assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
                 f"Attempt {i + 1}: expected 400, got {resp.status_code}"
@@ -239,6 +247,7 @@ class TestAccountLockout:
                 "username": login_user.username,
                 "password": PASSWORD,
             },
+            format="json",
         )
         assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
             "Login with correct password should fail while account is locked"
@@ -252,6 +261,7 @@ class TestAccountLockout:
             resp = auth_client.post(
                 LOGIN_URL,
                 {"username": login_user.email, "password": "wrong_password"},
+                format="json",
             )
             assert resp.status_code == status.HTTP_400_BAD_REQUEST, f"Attempt {i + 1}"
 
@@ -263,6 +273,7 @@ class TestAccountLockout:
         resp = auth_client.post(
             LOGIN_URL,
             {"username": login_user.email, "password": PASSWORD},
+            format="json",
         )
         assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
             "Correct password via email should fail while the account is locked"
@@ -444,3 +455,49 @@ class TestLoginSpendsOneHash:
         resp = self._post(auth_client, login_user.username, PASSWORD)
         assert resp.status_code == status.HTTP_200_OK
         assert len(hash_calls) == 1, hash_calls
+
+
+@pytest.mark.django_db
+@patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
+@patch("apps.accounts.views.RegisterRateThrottle.allow_request", _no_throttle)
+class TestAuthEndpointsAcceptJsonOnly:
+    """Login and registration skip authentication, so nothing checks CSRF on
+    them. A form on another site can post form-encoded or multipart data
+    cross-site without a preflight, which would let it sign a visitor in to
+    an account the attacker controls."""
+
+    def test_form_encoded_login_is_rejected(self, auth_client, login_user):
+        resp = auth_client.post(
+            LOGIN_URL,
+            urlencode({"username": login_user.username, "password": PASSWORD}),
+            content_type="application/x-www-form-urlencoded",
+        )
+        assert resp.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+        assert "access_token" not in resp.cookies
+
+    def test_multipart_login_is_rejected(self, auth_client, login_user):
+        resp = auth_client.post(LOGIN_URL, {"username": login_user.username, "password": PASSWORD}, format="multipart")
+        assert resp.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+        assert "access_token" not in resp.cookies
+
+    def test_form_encoded_register_is_rejected(self, auth_client):
+        resp = auth_client.post(
+            "/api/v1/auth/register/",
+            urlencode(
+                {
+                    "username": "form_registrant",
+                    "email": "form@test.com",
+                    "password": "Long-Enough-Pass-1",
+                    "password2": "Long-Enough-Pass-1",
+                }
+            ),
+            content_type="application/x-www-form-urlencoded",
+        )
+        assert resp.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+        assert "access_token" not in resp.cookies
+        assert not CustomUser.objects.filter(username="form_registrant").exists()
+
+    def test_json_login_still_works(self, auth_client, login_user):
+        resp = auth_client.post(LOGIN_URL, {"username": login_user.username, "password": PASSWORD}, format="json")
+        assert resp.status_code == status.HTTP_200_OK
+        assert "access_token" in resp.cookies

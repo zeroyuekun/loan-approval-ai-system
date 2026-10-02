@@ -51,6 +51,7 @@ class TestFullPipeline(TestCase):
                 "first_name": "Test",
                 "last_name": "User",
             },
+            format="json",
         )
         assert reg_resp.status_code == status.HTTP_201_CREATED, f"Registration failed: {reg_resp.data}"
 
@@ -61,6 +62,7 @@ class TestFullPipeline(TestCase):
                 "username": "e2e_test_user",
                 "password": "TestPass123!",
             },
+            format="json",
         )
         assert login_resp.status_code == status.HTTP_200_OK, f"Login failed: {login_resp.data}"
         assert "access_token" in login_resp.cookies
@@ -206,7 +208,7 @@ class TestFullPipeline(TestCase):
             email=f"{username}@e2e.com",
             role="officer",
         )
-        self.client.post("/api/v1/auth/login/", {"username": username, "password": "TestPass123!"})
+        self.client.post("/api/v1/auth/login/", {"username": username, "password": "TestPass123!"}, format="json")
 
     @staticmethod
     def _record_decision(app_id, decision):
@@ -308,6 +310,7 @@ class TestFullPipeline(TestCase):
                 "username": "officer_e2e",
                 "password": "TestPass123!",
             },
+            format="json",
         )
         resp = self.client.get("/api/v1/loans/")
         assert resp.status_code == status.HTTP_200_OK
@@ -337,6 +340,7 @@ class TestFullPipeline(TestCase):
                 "username": "officer_e2e2",
                 "password": "TestPass123!",
             },
+            format="json",
         )
         self._record_decision(app_id, "approved")
 
@@ -481,6 +485,7 @@ class TestFullPipeline(TestCase):
                 "username": "admin_e2e_ensemble",
                 "password": "TestPass123!",
             },
+            format="json",
         )
         resp = self.client.get("/api/v1/ml/models/")
         # 200 if endpoint exists, 404 if not yet implemented
@@ -504,6 +509,7 @@ class TestFullPipeline(TestCase):
                 "first_name": "Test2",
                 "last_name": "User2",
             },
+            format="json",
         )
         assert reg_resp.status_code == status.HTTP_201_CREATED
 
@@ -513,6 +519,7 @@ class TestFullPipeline(TestCase):
                 "username": "e2e_user_2",
                 "password": "TestPass123!",
             },
+            format="json",
         )
 
         user2 = CustomUser.objects.get(username="e2e_user_2")

@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.html import escape
 from rest_framework import generics, status
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
@@ -188,6 +189,8 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = (AllowAny,)
     authentication_classes = ()  # a stale access cookie must not 401 registration
+    # JSON only (see LoginView).
+    parser_classes = (JSONParser,)
     throttle_classes = (RegisterRateThrottle,)
 
     def create(self, request, *args, **kwargs):
@@ -214,6 +217,11 @@ class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = (AllowAny,)
     authentication_classes = ()  # a stale access cookie must not 401 login
+    # JSON only. With no authentication there is no CSRF check, and a plain
+    # HTML form on another site can post form-encoded data cross-site but not
+    # JSON, so accepting forms would let that site sign a visitor in to an
+    # account of its choosing.
+    parser_classes = (JSONParser,)
     throttle_classes = (LoginRateThrottle,)
 
     # Every branch of post() spends exactly one password hash, so the response
