@@ -9,7 +9,7 @@ from apps.agents.exceptions import (
     MLPredictionError,
 )
 from apps.agents.models import AgentRun
-from apps.loans.models import AuditLog, FraudCheck, LoanApplication, LoanDecision
+from apps.loans.models import AuditLog, FraudCheck, LoanApplication, LoanDecision, PipelineDispatchOutbox
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.scoring.decision_assembly import PRICING_TIER_DECLINE, decline_overrides
@@ -184,6 +184,12 @@ class PipelineOrchestrator:
                     status__in=(AgentRun.Status.PENDING, AgentRun.Status.RUNNING),
                 ).update(status=AgentRun.Status.FAILED, error="Stale pipeline — automatically cleared")
                 application.transition_to("pending", details={"source": "stale_pipeline_reset"})
+            elif application.status == LoanApplication.Status.QUEUE_FAILED:
+                # Started by hand after the first dispatch failed. This run is
+                # the retry, so the outbox row goes: left behind, the drain
+                # would dispatch the application again.
+                application.transition_to("pending", details={"source": "orchestrator_retry"})
+                PipelineDispatchOutbox.objects.filter(application=application).delete()
             application.transition_to("processing", details={"source": "orchestrator_pipeline"})
             # A forced re-run or batch recheck replaces any run still waiting
             # for review; left ESCALATED, it would stay in the queue and a

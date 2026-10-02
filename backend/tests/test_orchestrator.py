@@ -384,6 +384,29 @@ def test_stale_pipeline_resets(sample_application, orch_mocks):
 
 @CACHE_OVERRIDE
 @pytest.mark.django_db
+def test_queue_failed_application_runs_and_leaves_the_outbox(sample_application, orch_mocks):
+    """A run started for an application whose first dispatch failed (staff
+    "Run AI Pipeline", or the customer's own retry) goes ahead instead of
+    raising on queue_failed -> processing, and the outbox row is cleared so
+    the drain does not dispatch it again."""
+    from apps.loans.models import PipelineDispatchOutbox
+
+    _wire_approved(orch_mocks)
+    LoanApplication.objects.filter(pk=sample_application.pk).update(status="queue_failed")
+    PipelineDispatchOutbox.objects.create(application=sample_application)
+
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    run = PipelineOrchestrator().orchestrate(sample_application.pk)
+
+    assert run.status == "completed"
+    sample_application.refresh_from_db()
+    assert sample_application.status == "approved"
+    assert not PipelineDispatchOutbox.objects.filter(application=sample_application).exists()
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
 def test_concurrent_pipeline_rejected(sample_application, orch_mocks):
     """Application currently processing (recent updated_at) raises ValueError."""
     sample_application.status = "processing"
