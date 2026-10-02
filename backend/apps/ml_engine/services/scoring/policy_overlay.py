@@ -41,6 +41,7 @@ def apply_policy_overlay(
     application,
     model_version,
     prediction_label: str,
+    persist_referral: bool = True,
 ) -> tuple[str, dict]:
     """Evaluate the D3 overlay and return the post-overlay decision deltas.
 
@@ -51,6 +52,8 @@ def apply_policy_overlay(
         model_version: `ModelVersion` row — used only for logging metadata
             (the `model_version` extra field on shadow-disagreement warnings).
         prediction_label: The champion model's raw decision before the overlay.
+        persist_referral: When False, skip the D6 audit-trail write entirely —
+            for dry-run scoring of an unsaved/ad-hoc application.
 
     Returns:
         `(final_prediction_label, policy_payload)`. The payload carries the
@@ -86,7 +89,7 @@ def apply_policy_overlay(
             "changed_model_decision": final_prediction != prediction_label,
         }
 
-        if policy_result.has_refer and application is not None:
+        if policy_result.has_refer and application is not None and persist_referral:
             try:
                 application.referral_status = application.ReferralStatus.REFERRED
                 application.referral_codes = list(policy_result.refers)

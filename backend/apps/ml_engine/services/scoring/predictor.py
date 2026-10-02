@@ -277,10 +277,15 @@ class ModelPredictor:
 
         return df
 
-    def predict(self, application):
+    def predict(self, application, *, persist=True):
         """
         Predict approval for a LoanApplication instance.
         Returns dict with prediction, probability, and feature_importances.
+
+        `persist=False` runs a dry-run scoring pass that writes nothing: the
+        D6 referral-audit save on `application` and the shadow-scoring
+        `PredictionLog` rows are both skipped. Used for ad-hoc scoring of an
+        applicant that was never saved as a `LoanApplication`.
         """
         start_time = time.time()
 
@@ -365,6 +370,7 @@ class ModelPredictor:
             application=application,
             model_version=self.model_version,
             prediction_label=prediction_label,
+            persist_referral=persist,
         )
         if policy_payload.get("mode") == "enforce":
             rationale = policy_payload.get("rationale_by_code") or {}
@@ -444,14 +450,15 @@ class ModelPredictor:
             label = "approved" if prob >= (challenger_mv.optimal_threshold or 0.5) else "denied"
             return prob, label
 
-        _score_challengers_shadow_helper(
-            application=application,
-            champion_version=self.model_version,
-            champion_probability=probability,
-            champion_prediction_label=prediction_label,
-            features_df=features_df,
-            score_fn=_score_with_challenger,
-        )
+        if persist:
+            _score_challengers_shadow_helper(
+                application=application,
+                champion_version=self.model_version,
+                champion_probability=probability,
+                champion_prediction_label=prediction_label,
+                features_df=features_df,
+                score_fn=_score_with_challenger,
+            )
 
         return result
 
