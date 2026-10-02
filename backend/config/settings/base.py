@@ -500,6 +500,10 @@ BIAS_FAILURE_MODE = os.environ.get("BIAS_FAILURE_MODE", "block").lower()
 # before handing over to the deterministic template path.
 BIAS_AGENT2_ENABLED = os.environ.get("BIAS_AGENT2_ENABLED", "true").lower() == "true"
 BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE = 0.70
+# Agent 2 is skipped (the template path takes over) when less than this many
+# seconds remain before the pipeline task's soft time limit: a rewrite plus a
+# bias check plus a senior review can take minutes on a slow local LLM.
+BIAS_AGENT2_MIN_SECONDS_LEFT = 240
 
 # API Documentation (drf-spectacular)
 SPECTACULAR_SETTINGS = {

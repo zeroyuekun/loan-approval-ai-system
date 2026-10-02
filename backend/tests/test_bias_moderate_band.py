@@ -109,6 +109,7 @@ def _run_pipeline_agent2(
         patch("apps.agents.services.email_pipeline.BiasDetector") as bias,
         patch(f"{AGENT2}.BiasDetector") as agent2_bias,
         patch(f"{AGENT2}.AIEmailReviewer") as agent2_reviewer,
+        patch(f"{AGENT2}.ApiBudgetGuard"),
         patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
         patch(SENDER, send),
     ):

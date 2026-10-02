@@ -17,14 +17,17 @@ or whose review never finished, can never be sent from outside this step.
 
 import logging
 
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import transaction
 
 from apps.email_engine.services.decision_email import persist_decision_email, regenerate_decision_email
 
+from .api_budget import ApiBudgetGuard, ApiGateClosed
 from .bias.reviewer import AIEmailReviewer
 from .bias_detector import BiasDetector
 from .bias_records import bias_context, save_bias_report
+from .step_tracker import seconds_until_deadline
 
 logger = logging.getLogger("agents.orchestrator")
 
@@ -49,6 +52,15 @@ def run_agent2(
         steps.append(tracker.complete_step(step, result_summary={"regenerated": False, "reason": reason, **extra}))
         logger.info("Application %s: Agent 2 handed over to the template path: %s", application.pk, reason)
         return None
+
+    seconds_left = seconds_until_deadline()
+    if seconds_left is not None and seconds_left < getattr(settings, "BIAS_AGENT2_MIN_SECONDS_LEFT", 240):
+        return hand_over("Not enough time left for a rewrite")
+    try:
+        # Cheap pre-check before paying for a rewrite and a senior review.
+        ApiBudgetGuard().check_budget()
+    except ApiGateClosed:
+        return hand_over("API budget closed")
 
     try:
         result = regenerate_decision_email(
@@ -86,8 +98,11 @@ def run_agent2(
                 reviewer_approved=bool(review.get("approved")),
                 reviewer_confidence=review.get("confidence"),
             )
-    except Exception as exc:  # noqa: BLE001 - every failure hands over to the template path
-        logger.warning("Application %s: Agent 2 failed: %s", application.pk, exc)
+    except SoftTimeLimitExceeded:
+        # The task's time is up: the caller must stop, not go on to the template.
+        raise
+    except Exception as exc:  # noqa: BLE001 - every other failure hands over to the template path
+        logger.warning("Application %s: Agent 2 failed: %s", application.pk, exc, exc_info=True)
         return hand_over(f"Agent 2 failed: {type(exc).__name__}")
 
     steps.append(

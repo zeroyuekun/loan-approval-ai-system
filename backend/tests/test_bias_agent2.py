@@ -18,10 +18,12 @@ from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
 import pytest
+from celery.exceptions import SoftTimeLimitExceeded
 from django.test import override_settings
 
 from apps.agents.models import AgentRun, BiasReport
-from apps.agents.services.step_tracker import StepTracker
+from apps.agents.services.api_budget import BudgetExhausted, CircuitOpen
+from apps.agents.services.step_tracker import StepTracker, pipeline_deadline
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.email_generator import EmailGenerator
 from apps.email_engine.services.exceptions import RateLimited
@@ -118,6 +120,7 @@ def _run(
     detector_side_effect=None,
     review=None,
     review_side_effect=None,
+    budget_side_effect=None,
     enabled=True,
 ):
     """Call ``run_agent2`` with its collaborators patched. Returns
@@ -133,6 +136,8 @@ def _run(
         regen = stack.enter_context(patch(f"{AGENT2}.regenerate_decision_email"))
         detector_cls = stack.enter_context(patch(f"{AGENT2}.BiasDetector"))
         reviewer_cls = stack.enter_context(patch(f"{AGENT2}.AIEmailReviewer"))
+        budget_cls = stack.enter_context(patch(f"{AGENT2}.ApiBudgetGuard"))
+        budget_cls.return_value.check_budget.side_effect = budget_side_effect
         if regen_side_effect is not None:
             regen.side_effect = regen_side_effect
         else:
@@ -369,3 +374,92 @@ def test_clean_detector_and_confident_reviewer_returns_the_tuple_to_send(process
     assert report.ai_review_approved is True
     assert report.ai_review_reasoning == "reads well"
     assert bias_hold_reason(processing_denied.pk, generated) is None
+
+
+# ---------------------------------------------------------------------------
+# Time limit and API budget
+# ---------------------------------------------------------------------------
+
+
+def test_seconds_until_deadline_is_none_outside_a_deadline_scope():
+    from apps.agents.services.step_tracker import seconds_until_deadline
+
+    assert seconds_until_deadline() is None
+
+
+def test_seconds_until_deadline_counts_down_inside_the_scope():
+    from apps.agents.services.step_tracker import seconds_until_deadline
+
+    with pipeline_deadline(100):
+        left = seconds_until_deadline()
+    assert 99 < left <= 100
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("stage", ["generation", "detector", "review"])
+def test_a_soft_time_limit_propagates_out_of_agent2(processing_denied, agent_run, stage):
+    """A soft limit swallowed here would let the pipeline go on to the template
+    path and escalate, leaving the application PENDING with no escalated run."""
+    limit = SoftTimeLimitExceeded("soft limit")
+    kwargs = {"regen_return": _rewrite(), "new_bias": _bias_result(score=5, flagged=False)}
+    if stage == "generation":
+        kwargs = {"regen_side_effect": limit}
+    elif stage == "detector":
+        kwargs["detector_side_effect"] = limit
+    else:
+        kwargs["review_side_effect"] = limit
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        _run(processing_denied, agent_run, **kwargs)
+
+
+@pytest.mark.django_db
+def test_a_rewrite_cut_off_by_the_time_limit_during_review_stays_held(processing_denied, agent_run):
+    from apps.email_engine.services.decision_email import bias_hold_reason
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        _run(
+            processing_denied,
+            agent_run,
+            regen_return=_rewrite(),
+            new_bias=_bias_result(score=5, flagged=False),
+            review_side_effect=SoftTimeLimitExceeded("soft limit"),
+        )
+
+    rewrite = _persisted_rewrite(processing_denied)
+    assert BiasReport.objects.get(email=rewrite).ai_review_approved is False
+    assert bias_hold_reason(processing_denied.pk, rewrite)
+
+
+@pytest.mark.django_db
+@override_settings(BIAS_AGENT2_MIN_SECONDS_LEFT=240)
+def test_too_little_time_left_hands_over_without_calling_the_generator(processing_denied, agent_run):
+    with pipeline_deadline(100):
+        outcome, steps, regen, detector_cls, reviewer_cls = _run(processing_denied, agent_run, regen_return=_rewrite())
+
+    assert outcome is None
+    regen.assert_not_called()
+    assert len(steps) == 1
+    assert steps[0]["result_summary"] == {"regenerated": False, "reason": "Not enough time left for a rewrite"}
+
+
+@pytest.mark.django_db
+@override_settings(BIAS_AGENT2_MIN_SECONDS_LEFT=240)
+def test_enough_time_left_runs_the_rewrite(processing_denied, agent_run):
+    with pipeline_deadline(500):
+        _, _, regen, _, _ = _run(processing_denied, agent_run, regen_return={**_llm_email(), "template_fallback": True})
+
+    regen.assert_called_once()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("gate", [BudgetExhausted("daily cap"), CircuitOpen("breaker open")])
+def test_a_closed_api_budget_hands_over_without_calling_the_generator(processing_denied, agent_run, gate):
+    outcome, steps, regen, detector_cls, reviewer_cls = _run(
+        processing_denied, agent_run, regen_return=_rewrite(), budget_side_effect=gate
+    )
+
+    assert outcome is None
+    regen.assert_not_called()
+    assert len(steps) == 1
+    assert steps[0]["result_summary"] == {"regenerated": False, "reason": "API budget closed"}

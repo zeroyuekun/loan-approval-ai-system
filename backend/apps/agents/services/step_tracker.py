@@ -70,6 +70,14 @@ def pipeline_deadline(seconds):
         _PIPELINE_DEADLINE.reset(token)
 
 
+def seconds_until_deadline():
+    """Seconds left before the pipeline's soft deadline, or None outside a deadline scope."""
+    deadline = _PIPELINE_DEADLINE.get()
+    if deadline is None:
+        return None
+    return deadline - time.monotonic()
+
+
 def raise_if_past_deadline():
     deadline = _PIPELINE_DEADLINE.get()
     if deadline is not None and time.monotonic() >= deadline:
