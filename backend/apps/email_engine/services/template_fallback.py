@@ -421,7 +421,7 @@ _IMPROVEMENT_STEPS = {
     ),
     "Your deposit size and income stability together don't meet our lending requirements right now": (
         "Building a larger deposit over time while establishing a stable, "
-        "consistent income history \u2013 both will strengthen a future application."
+        "consistent income history. Both will strengthen a future application."
     ),
     "Your existing debt level means repayments could become difficult if interest rates were to rise": (
         "Reducing your existing debts so that your repayments remain "
@@ -490,7 +490,7 @@ Loan Details:
 
 Please review the attached loan agreement, which outlines all terms and conditions:
 
-  1. Sign and return your documents by {sign_by} \u2013 you can sign electronically via our secure portal, or return them by email or in person.
+  1. Sign and return your documents by {sign_by}. You can sign electronically through our secure portal, or return them by email or in person.
   2. Arrange settlement with your solicitor or conveyancer.
   3. Ensure your building and contents insurance is in place before settlement."""
     else:
@@ -498,19 +498,14 @@ Please review the attached loan agreement, which outlines all terms and conditio
 
 Please review the attached loan agreement, which outlines all terms and conditions:
 
-  1. Sign and return your documents by {sign_by} \u2013 you can sign electronically via our secure portal, or return them by email or in person.
+  1. Sign and return your documents by {sign_by}. You can sign electronically through our secure portal, or return them by email or in person.
   2. Confirm your nominated bank account (BSB and account number) for the funds to be deposited into.
-  3. Once received, funds are typically in your account within 1\u20132 business days."""
+  3. Once we receive your documents, the funds are usually in your account within 1\u20132 business days."""
 
-    opening = (
-        f"We are pleased to advise that your application for a "
-        f"{loan_label} with AussieLoanAI has been approved. Congratulations!"
-    )
+    opening = f"Your application for a {loan_label} with AussieLoanAI has been approved. Congratulations!"
     if conditions:
         opening = (
-            f"We are pleased to advise that your application for a "
-            f"{loan_label} with AussieLoanAI has been conditionally approved. "
-            f"Congratulations!"
+            f"Your application for a {loan_label} with AussieLoanAI has been conditionally approved. Congratulations!"
         )
 
     body = f"""Dear {first},
@@ -521,16 +516,16 @@ Please review the attached loan agreement, which outlines all terms and conditio
 
 Before You Sign:
 
-We want to make sure this loan is right for you. Please take the time to read the full terms carefully, including fees and what happens if a repayment is missed.
-If your circumstances have changed since you applied, please let us know. You are also welcome to seek independent financial or legal advice before proceeding.
-You will have access to a cooling-off period after signing, allowing you to withdraw without penalty. Details are in your loan agreement.
+We want to make sure this loan is right for you. Please take the time to read the full terms, including the fees and what happens if a repayment is missed.
+If your circumstances have changed since you applied, let us know. You can also get independent financial or legal advice before you go ahead.
+After you sign, there is a cooling-off period in which you can withdraw without penalty. The details are in your loan agreement.
 
 We're Here For You:
 
-If at any point during your loan you experience financial difficulty, please contact us early. Our Financial Hardship team is here to help and can be reached on 1300 000 001 or at aussieloanai@gmail.com.
+If you run into financial difficulty at any point during your loan, please contact us early. Our Financial Hardship team can work through options with you on 1300 000 001 or at aussieloanai@gmail.com.
 
-If you have any questions about your loan or the next steps, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-Congratulations again, {first}. Thanks for choosing us at AussieLoanAI.
+If you have questions about your loan or the next steps, call me on 1300 000 000 (Mon\u2013Fri, 8:30am\u20135:30pm AEST) or reply to this email.
+Thanks for choosing AussieLoanAI, {first}.
 
 Kind regards,
 Sarah Mitchell
@@ -615,23 +610,21 @@ def generate_denial_template(
 
     body = f"""Dear {first},
 
-Thank you for giving us the opportunity to review your application for a ${loan_amount:,.2f} {loan_label} with AussieLoanAI.
+Thank you for applying for a ${loan_amount:,.2f} {loan_label} with AussieLoanAI.
 
-We have carefully reviewed your application and are unable to approve it at this time. Here is what we looked at and what you can do from here.
+We have assessed your application against our lending criteria and responsible lending obligations, and we are unable to offer you credit at this time. Those obligations require any credit we offer to be suitable and manageable for you.
 
-This decision was based on a thorough review of your financial profile, specifically:
+The main factors in our decision:
 
 {factors_text}
 
-This assessment was conducted in line with our responsible lending obligations, which exist to ensure any credit we provide is suitable and manageable for our customers.
-
 What You Can Do:
 
-This decision is based on your circumstances at the time of your application \u2013 it does not prevent you from applying with us in the future. The following steps may strengthen a future application:
+This decision reflects your circumstances when you applied. It does not stop you from applying with us again, and the following steps may strengthen a future application:
 
 {steps_text}
 
-You are entitled to obtain a free copy of your credit report within 90 days of this notice to verify the information used in our assessment. You can request one from any of Australia's credit reporting bodies:
+You are entitled to a free copy of your credit report within 90 days of this notice, so you can check the information we used in our assessment. You can request one from any of Australia's credit reporting bodies:
 
   \u2022  Equifax \u2013 equifax.com.au
   \u2022  Illion \u2013 illion.com.au
@@ -639,10 +632,10 @@ You are entitled to obtain a free copy of your credit report within 90 days of t
 
 We'd Still Like to Help:
 
-If you'd like to explore whether a different loan product or a revised amount could be a better fit, I'd be happy to talk through your options.
+If a different loan product or a smaller amount might suit you better, I'd be happy to talk through your options.
 
-If you have any questions about this decision, please don't hesitate to contact me directly at 1300 000 000 (Mon\u2013Fri, 8:30am \u2013 5:30pm AEST) or simply reply to this email.
-Thanks for coming to us, {first}. We'd love to help you find the right option when you're ready.
+If you have questions about this decision, call me on 1300 000 000 (Mon\u2013Fri, 8:30am\u20135:30pm AEST) or reply to this email.
+Thanks for coming to us, {first}. When you're ready, we'd like to help you find the right option.
 
 Kind regards,
 Sarah Mitchell
