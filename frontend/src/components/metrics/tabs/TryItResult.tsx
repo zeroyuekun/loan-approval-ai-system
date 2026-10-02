@@ -14,6 +14,8 @@ interface TryItResultProps {
  * honesty note the backend returns verbatim (see adhoc.py ADHOC_SCORE_NOTE). */
 export function TryItResult({ result }: TryItResultProps) {
   const approved = result.decision === 'approved'
+  const policyHardFails = result.policy_hard_fails ?? []
+  const policyRefers = result.policy_refers ?? []
 
   return (
     <Card>
@@ -23,8 +25,13 @@ export function TryItResult({ result }: TryItResultProps) {
       <CardContent className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <p className="text-sm text-muted-foreground">Probability of default</p>
+            {/* `probability` is the model's APPROVAL probability: approved when it
+                is at or above the threshold; default probability is 1 - p. */}
+            <p className="text-sm text-muted-foreground">Approval probability</p>
             <p className="text-2xl font-semibold tabular-nums">{formatPercent(result.probability)}</p>
+            <p className="text-xs text-muted-foreground">
+              Estimated default probability: {formatPercent(1 - result.probability)}
+            </p>
           </div>
           <div>
             <p className="text-sm text-muted-foreground">Decision</p>
@@ -45,6 +52,20 @@ export function TryItResult({ result }: TryItResultProps) {
             <span className="font-medium">{result.model_version}</span>
           </div>
         </div>
+
+        {(policyHardFails.length > 0 || policyRefers.length > 0) && (
+          <div className="text-sm">
+            <span className="text-muted-foreground">Policy rules: </span>
+            {policyHardFails.length > 0 && (
+              <span className="font-medium">decline {policyHardFails.join(', ')}</span>
+            )}
+            {policyHardFails.length > 0 && policyRefers.length > 0 && '; '}
+            {policyRefers.length > 0 && <span className="font-medium">refer {policyRefers.join(', ')}</span>}
+            {result.policy_mode !== 'enforce' && (
+              <span className="text-muted-foreground"> (not enforced in {result.policy_mode || 'this'} mode)</span>
+            )}
+          </div>
+        )}
 
         {result.top_factors.length > 0 && (
           <div>

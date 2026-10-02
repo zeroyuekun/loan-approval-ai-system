@@ -31,6 +31,11 @@ const SAMPLE_APPLICANT: Record<string, string> = {
   debt_to_income: '3.2',
   employment_length: '4',
   number_of_dependants: '0',
+  // A home loan needs a property value (LVR); these keep the sample
+  // consistent: LVR 75%, deposit below the property value.
+  property_value: '600000',
+  deposit_amount: '150000',
+  monthly_expenses: '3000',
   purpose: 'home',
   home_ownership: 'mortgage',
   employment_type: 'payg_permanent',
@@ -38,14 +43,22 @@ const SAMPLE_APPLICANT: Record<string, string> = {
   state: 'NSW',
 }
 
-const NUMBER_FIELDS: Array<{ key: string; label: string; step?: string }> = [
+// `homeOnly` fields are shown and sent only when the purpose is a home loan.
+const NUMBER_FIELDS: Array<{ key: string; label: string; step?: string; homeOnly?: boolean }> = [
   { key: 'annual_income', label: 'Annual Income (A$)' },
   { key: 'credit_score', label: 'Credit Score (0-1200)' },
   { key: 'loan_amount', label: 'Loan Amount (A$)' },
   { key: 'debt_to_income', label: 'Debt-to-Income (x income)', step: '0.1' },
   { key: 'employment_length', label: 'Employment Length (years)' },
   { key: 'number_of_dependants', label: 'Number of Dependants' },
+  { key: 'monthly_expenses', label: 'Monthly Expenses (A$)' },
+  { key: 'property_value', label: 'Property Value (A$)', homeOnly: true },
+  { key: 'deposit_amount', label: 'Deposit (A$)', homeOnly: true },
 ]
+
+function visibleNumberFields(purpose: string) {
+  return NUMBER_FIELDS.filter((f) => !f.homeOnly || purpose === 'home')
+}
 
 const SELECT_FIELDS: Array<{ key: string; label: string; options: FieldOption[] }> = [
   { key: 'purpose', label: 'Loan Purpose', options: PURPOSE_OPTIONS },
@@ -58,33 +71,46 @@ const SELECT_FIELDS: Array<{ key: string; label: string; options: FieldOption[] 
 
 const KNOWN_FIELD_KEYS = new Set([...NUMBER_FIELDS, ...SELECT_FIELDS].map((f) => f.key))
 
+/** Build the request body. An empty number input is left out (the backend
+ * then reports it as required, or treats it as not supplied) rather than
+ * sent as `Number('') === 0`, which would be scored as a real zero. */
 function toPayload(form: Record<string, string>): AdhocScoreFields {
-  return {
-    annual_income: Number(form.annual_income),
-    credit_score: Number(form.credit_score),
-    loan_amount: Number(form.loan_amount),
-    loan_term_months: Number(form.loan_term_months),
-    debt_to_income: Number(form.debt_to_income),
-    employment_length: Number(form.employment_length),
-    number_of_dependants: Number(form.number_of_dependants),
+  const payload: Record<string, string | number> = {
     purpose: form.purpose,
     home_ownership: form.home_ownership,
     employment_type: form.employment_type,
     applicant_type: form.applicant_type,
     state: form.state,
+    loan_term_months: Number(form.loan_term_months),
   }
+  for (const f of visibleNumberFields(form.purpose)) {
+    const raw = (form[f.key] ?? '').trim()
+    if (raw !== '') payload[f.key] = Number(raw)
+  }
+  return payload as unknown as AdhocScoreFields
+}
+
+function badRequestData(error: unknown): Record<string, unknown> | null {
+  const response = (error as { response?: { status?: number; data?: unknown } } | undefined)?.response
+  if (response?.status !== 400 || typeof response.data !== 'object' || response.data === null) return null
+  return response.data as Record<string, unknown>
 }
 
 /** DRF validation errors keyed by field name, e.g. `{"credit_score": [".."]}`. */
 function fieldErrorsFrom(error: unknown): Record<string, string> | null {
-  const response = (error as { response?: { status?: number; data?: unknown } } | undefined)?.response
-  if (response?.status !== 400 || typeof response.data !== 'object' || response.data === null) return null
+  const data = badRequestData(error)
+  if (!data) return null
   return Object.fromEntries(
-    Object.entries(response.data as Record<string, unknown>).map(([key, value]) => [
-      key,
-      Array.isArray(value) ? value.join(' ') : String(value),
-    ]),
+    Object.entries(data)
+      .filter(([key]) => key !== 'detail')
+      .map(([key, value]) => [key, Array.isArray(value) ? value.join(' ') : String(value)]),
   )
+}
+
+/** A 400 `{"detail": "..."}`: the applicant's figures were rejected as a whole. */
+function detailErrorFrom(error: unknown): string | null {
+  const detail = badRequestData(error)?.detail
+  return typeof detail === 'string' ? detail : null
 }
 
 /** The 503 "no active model" case, or any other unexpected failure. */
@@ -104,7 +130,7 @@ export function TryItTab() {
   })
 
   const fieldErrors = fieldErrorsFrom(mutation.error)
-  const serviceError = serviceErrorFrom(mutation.error)
+  const serviceError = serviceErrorFrom(mutation.error) ?? detailErrorFrom(mutation.error)
   const otherFieldErrors = fieldErrors
     ? Object.entries(fieldErrors).filter(([key]) => !KNOWN_FIELD_KEYS.has(key))
     : []
@@ -146,7 +172,7 @@ export function TryItTab() {
             )}
 
             <div className="grid gap-4 md:grid-cols-3">
-              {NUMBER_FIELDS.map((f) => (
+              {visibleNumberFields(form.purpose).map((f) => (
                 <div key={f.key}>
                   <Label htmlFor={f.key}>{f.label}</Label>
                   <Input id={f.key} type="number" step={f.step} value={form[f.key]} onChange={handleChange(f.key)} />
