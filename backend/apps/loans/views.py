@@ -22,6 +22,7 @@ from apps.accounts.permissions import IsAdmin, IsAdminOrOfficer
 from apps.accounts.policy import is_staff_role
 from apps.agents.models import AgentRun
 from apps.agents.services.api_budget import ApiBudgetGuard
+from apps.common.http import client_ip
 from apps.ml_engine.models import ModelVersion
 
 from .filters import AuditLogFilter, LoanApplicationFilter
@@ -114,7 +115,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 resource_type="LoanApplication",
                 resource_id=str(instance.id),
                 details={"loan_amount": str(instance.loan_amount), "purpose": instance.purpose},
-                ip_address=self.request.META.get("REMOTE_ADDR"),
+                ip_address=client_ip(self.request),
             )
 
             # Durable dispatch: on_commit so the row is visible to the worker,
@@ -136,7 +137,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 resource_type="LoanApplication",
                 resource_id=str(instance.id),
                 details=details,
-                ip_address=self.request.META.get("REMOTE_ADDR"),
+                ip_address=client_ip(self.request),
             )
 
     def perform_destroy(self, instance):
@@ -161,7 +162,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 "decision_id": str(decision.pk) if decision else None,
                 "decision": decision.decision if decision else None,
             },
-            ip_address=self.request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(self.request),
         )
         super().perform_destroy(instance)
 
@@ -358,7 +359,7 @@ class ComplaintViewSet(viewsets.ModelViewSet):
                 resource_type="Complaint",
                 resource_id=str(updated.pk),
                 details=details,
-                ip_address=self.request.META.get("REMOTE_ADDR"),
+                ip_address=client_ip(self.request),
             )
 
 

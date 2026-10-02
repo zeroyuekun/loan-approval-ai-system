@@ -5,6 +5,7 @@ import time
 import anthropic
 import httpx
 
+from apps.ml_engine.services.scoring.decision_assembly import POLICY_DECLINE_PREFIX, PRICING_TIER_DECLINE
 from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
@@ -237,14 +238,14 @@ class EmailGenerator:
     # decision waterfall records them by these codes (decision_assembly), and
     # they, not the model's feature attributions, are why the loan was declined.
     DECLINE_RULE_REASON_MAP = {
-        "PRICING_TIER_DECLINE": "The assessed risk for this loan is above the level we can offer a rate for",
-        "POLICY_DECLINE_P01": "Your residency status doesn't meet the eligibility requirements for this loan",
-        "POLICY_DECLINE_P02": "The loan term doesn't meet our age eligibility requirements",
-        "POLICY_DECLINE_P03": "There's a current or recent bankruptcy on your credit file",
-        "POLICY_DECLINE_P04": "There's an outstanding tax debt default recorded against you",
-        "POLICY_DECLINE_P05": "Your credit score is below the minimum we lend at",
-        "POLICY_DECLINE_P06": "The loan amount is too high relative to the property value",
-        "POLICY_DECLINE_P07": "Your total debt is too high relative to your income",
+        PRICING_TIER_DECLINE: "The assessed risk for this loan is above the level we can offer a rate for",
+        f"{POLICY_DECLINE_PREFIX}P01": "Your residency status doesn't meet the eligibility requirements for this loan",
+        f"{POLICY_DECLINE_PREFIX}P02": "The loan term doesn't meet our age eligibility requirements",
+        f"{POLICY_DECLINE_PREFIX}P03": "There's a current or recent bankruptcy on your credit file",
+        f"{POLICY_DECLINE_PREFIX}P04": "There's an outstanding tax debt default recorded against you",
+        f"{POLICY_DECLINE_PREFIX}P05": "Your credit score is below the minimum we lend at",
+        f"{POLICY_DECLINE_PREFIX}P06": "The loan amount is too high relative to the property value",
+        f"{POLICY_DECLINE_PREFIX}P07": "Your total debt is too high relative to your income",
     }
 
     def _decline_rule_reasons(self, decision_waterfall):
@@ -252,7 +253,7 @@ class EmailGenerator:
         reasons = []
         for entry in decision_waterfall or []:
             code = entry.get("reason_code") if isinstance(entry, dict) else None
-            if code == "PRICING_TIER_DECLINE" or (code or "").startswith("POLICY_DECLINE_"):
+            if code == PRICING_TIER_DECLINE or (code or "").startswith(POLICY_DECLINE_PREFIX):
                 reason = self.DECLINE_RULE_REASON_MAP.get(code, "Your application didn't meet our lending policy")
                 if reason not in reasons:
                     reasons.append(reason)

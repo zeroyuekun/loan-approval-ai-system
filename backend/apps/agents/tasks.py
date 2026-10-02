@@ -5,6 +5,8 @@ from celery import Task, shared_task
 from django.core.cache import cache
 from django.db import transaction
 
+from apps.common.tasks import task_dedup_lock
+
 logger = logging.getLogger("agents.tasks")
 
 
@@ -48,6 +50,9 @@ class _OrchestrateTask(Task):
 
 # Redis dedup lock TTL — slightly longer than the task soft time limit
 _DEDUP_LOCK_TTL = 600
+# Infrastructure errors Celery retries (ConnectionError and TimeoutError are
+# OSErrors). The orchestrate dedup lock is kept across them (M22).
+_AUTORETRY = (OSError,)
 
 
 _STUCK_RESET_REASON = "Pipeline task died or timed out mid-run; reset to pending so staff can re-run it"
@@ -91,15 +96,9 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
             if app is None:
                 return  # not stuck, or already moved on
 
-            # Another actor owns the work if the latest run completed. An older
-            # completed run does not: it is what a forced re-run replaced.
-            latest = (
-                AgentRun.objects.filter(application_id=application_id)
-                .order_by("-created_at")
-                .values_list("status", "created_at")
-                .first()
-            )
-            if latest is not None and latest[0] == AgentRun.Status.COMPLETED:
+            # Another actor owns the work if the latest run completed.
+            latest = AgentRun.objects.only("status", "created_at").latest_for(application_id)
+            if latest is not None and latest.status == AgentRun.Status.COMPLETED:
                 logger.info("Application %s: cleanup skipped, a completed run owns it", application_id)
                 return
 
@@ -112,7 +111,7 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
                     GeneratedEmail.objects.filter(
                         application_id=application_id,
                         sent_at__isnull=False,
-                        created_at__gte=latest[1],
+                        created_at__gte=latest.created_at,
                         decision__in=(LoanApplication.Status.APPROVED, LoanApplication.Status.DENIED),
                     )
                     .order_by("-sent_at")
@@ -149,7 +148,7 @@ def _cleanup_stuck_application(application_id, clear_lock=False):
     acks_late=True,
     time_limit=600,
     soft_time_limit=540,
-    autoretry_for=(ConnectionError, TimeoutError, OSError),
+    autoretry_for=_AUTORETRY,
     retry_backoff=True,
     max_retries=3,
 )
@@ -159,19 +158,10 @@ def orchestrate_pipeline_task(self, application_id, force=False):
     from apps.agents.services.orchestrator import PipelineOrchestrator
     from apps.agents.services.step_tracker import pipeline_deadline
 
-    # Idempotency: skip if the latest run completed (unless force re-run). An
-    # older completed run does not count: a later run that failed may have
-    # overwritten its decision (the fail-safe bias hold rewrites the
-    # LoanDecision and returns the application to PENDING), and restoring
-    # from that would apply a decision no run finished.
+    # Idempotency: skip if the latest run completed (unless force re-run).
     if not force:
-        latest_status = (
-            AgentRun.objects.filter(application_id=application_id)
-            .order_by("-created_at")
-            .values_list("status", flat=True)
-            .first()
-        )
-        if latest_status == AgentRun.Status.COMPLETED:
+        latest = AgentRun.objects.only("status").latest_for(application_id)
+        if latest is not None and latest.status == AgentRun.Status.COMPLETED:
             # A completed run owns this application — delegate the idempotent,
             # audited status restore to the orchestrator service (L16). The
             # task stays a thin dispatcher.
@@ -181,48 +171,36 @@ def orchestrate_pipeline_task(self, application_id, force=False):
                 logger.warning("Application %s: failed to restore status: %s", application_id, e)
             return {"status": "already_completed", "application_id": str(application_id)}
 
-    # Redis dedup lock: prevent concurrent runs for the same application.
-    # The lock is kept alive across infrastructure-error retries (M22), and a
-    # Celery autoretry re-runs this body with the SAME task id, so a lock we
-    # already hold means our own retry is re-entering and should proceed.
-    lock_key = _lock_key(application_id)
-    if not cache.add(lock_key, self.request.id, _DEDUP_LOCK_TTL):
-        if cache.get(lock_key) != self.request.id:
+    # Redis dedup lock: prevent concurrent runs for the same application. It is
+    # kept across infrastructure-error retries, so a duplicate orchestration
+    # cannot start before the retry fires (M22); a terminal failure after the
+    # last retry releases it in _OrchestrateTask.on_failure.
+    with task_dedup_lock(_lock_key(application_id), self.request.id, _DEDUP_LOCK_TTL, keep_on=_AUTORETRY) as held:
+        if not held:
             logger.info("Application %s: dedup lock already held, skipping", application_id)
             return {"skipped": True, "reason": "dedup_lock_held"}
-        cache.set(lock_key, self.request.id, _DEDUP_LOCK_TTL)  # refresh TTL for the retry
-
-    try:
-        orchestrator = PipelineOrchestrator()
-        with pipeline_deadline(self.soft_time_limit or _DEDUP_LOCK_TTL):
-            agent_run = orchestrator.orchestrate(application_id)
-    except (ConnectionError, TimeoutError, OSError):
-        # Infrastructure error — Celery autoretry will re-queue this task.
-        # Do NOT release the dedup lock here: releasing it before the retry
-        # fires opens a window where a duplicate orchestration can start for
-        # the same application (M22).  The lock will be released either when
-        # the retry eventually succeeds, exhausts all retries, or the TTL
-        # expires (whichever comes first).
-        raise
-    except Exception as e:
-        # Non-retriable failure — release the lock so future attempts can run.
-        cache.delete(lock_key)
-        _cleanup_stuck_application(application_id)
         try:
-            from apps.loans.models import AuditLog
+            orchestrator = PipelineOrchestrator()
+            with pipeline_deadline(self.soft_time_limit or _DEDUP_LOCK_TTL):
+                agent_run = orchestrator.orchestrate(application_id)
+        except _AUTORETRY:
+            raise
+        except Exception as e:
+            # Non-retriable failure: reset the application; the lock is
+            # released on the way out so future attempts can run.
+            _cleanup_stuck_application(application_id)
+            try:
+                from apps.loans.models import AuditLog
 
-            AuditLog.objects.create(
-                action="pipeline_failed",
-                resource_type="LoanApplication",
-                resource_id=str(application_id),
-                details={"error": str(e)},
-            )
-        except Exception:
-            logger.warning("Failed to create audit log for pipeline failure on %s", application_id)
-        raise
-
-    # Success path: release the dedup lock now that the run is complete (M22).
-    cache.delete(lock_key)
+                AuditLog.objects.create(
+                    action="pipeline_failed",
+                    resource_type="LoanApplication",
+                    resource_id=str(application_id),
+                    details={"error": str(e)},
+                )
+            except Exception:
+                logger.warning("Failed to create audit log for pipeline failure on %s", application_id)
+            raise
 
     try:
         from apps.loans.models import AuditLog
@@ -250,15 +228,16 @@ def orchestrate_pipeline_task(self, application_id, force=False):
     acks_late=True,
     time_limit=600,
     soft_time_limit=540,
-    autoretry_for=(ConnectionError, TimeoutError, OSError),
+    autoretry_for=_AUTORETRY,
     retry_backoff=True,
     max_retries=3,
 )
-def resume_pipeline_task(self, agent_run_id, reviewer="", note="", action="approve"):
+def resume_pipeline_task(self, agent_run_id, reviewer="", note="", action="approve", reviewer_id=None):
     """Resume an escalated pipeline after a human-review approve or deny.
 
     ``action="deny"``: the view has already recorded the denial on the
     LoanDecision; the resume issues the bias-checked denial email.
+    ``reviewer_id`` is recorded as the user on the decision's status transition.
     """
     from apps.agents.services.orchestrator import PipelineOrchestrator
     from apps.agents.services.step_tracker import pipeline_deadline
@@ -266,8 +245,10 @@ def resume_pipeline_task(self, agent_run_id, reviewer="", note="", action="appro
     try:
         orchestrator = PipelineOrchestrator()
         with pipeline_deadline(self.soft_time_limit or _DEDUP_LOCK_TTL):
-            agent_run = orchestrator.resume_after_review(agent_run_id, reviewer=reviewer, note=note, action=action)
-    except (ConnectionError, TimeoutError, OSError):
+            agent_run = orchestrator.resume_after_review(
+                agent_run_id, reviewer=reviewer, note=note, action=action, reviewer_id=reviewer_id
+            )
+    except _AUTORETRY:
         raise  # autoretried; the resume accepts the claimed run again
     except Exception as exc:
         _return_claimed_run_to_review(agent_run_id, f"Resume failed: {exc}")

@@ -9,7 +9,7 @@ from apps.agents.exceptions import (
     MLPredictionError,
 )
 from apps.agents.models import AgentRun
-from apps.loans.models import AuditLog, FraudCheck, LoanApplication, LoanDecision, PipelineDispatchOutbox
+from apps.loans.models import AuditLog, FraudCheck, LoanApplication, LoanDecision
 from apps.loans.services.fraud_detection import FraudDetectionService
 from apps.ml_engine.models import PredictionLog
 from apps.ml_engine.services.scoring.decision_assembly import PRICING_TIER_DECLINE, decline_overrides
@@ -72,7 +72,7 @@ class PipelineOrchestrator:
         return self._step_tracker.finalize_run(agent_run, steps, start_time, error)
 
     def _run_nbo_and_marketing_pipeline(self, application, agent_run, steps, denial_reasons, profile_context):
-        return self._marketing_pipeline.run(application, agent_run, steps, denial_reasons, profile_context)
+        return self._marketing_pipeline.run_best_effort(application, agent_run, steps, denial_reasons, profile_context)
 
     # ------------------------------------------------------------------
     # Counterfactual generation (denied applications only)
@@ -185,11 +185,8 @@ class PipelineOrchestrator:
                 ).update(status=AgentRun.Status.FAILED, error="Stale pipeline — automatically cleared")
                 application.transition_to("pending", details={"source": "stale_pipeline_reset"})
             elif application.status == LoanApplication.Status.QUEUE_FAILED:
-                # Started by hand after the first dispatch failed. This run is
-                # the retry, so the outbox row goes: left behind, the drain
-                # would dispatch the application again.
-                application.transition_to("pending", details={"source": "orchestrator_retry"})
-                PipelineDispatchOutbox.objects.filter(application=application).delete()
+                # Started by hand after the first dispatch failed: this run is the retry.
+                application.release_queue_failed(source="orchestrator_retry")
             application.transition_to("processing", details={"source": "orchestrator_pipeline"})
             # A forced re-run or batch recheck replaces any run still waiting
             # for review; left ESCALATED, it would stay in the queue and a
@@ -519,9 +516,8 @@ class PipelineOrchestrator:
                 details={"source": "orchestrator_final_decision"},
             )
 
-        # Step 5: NBO + Marketing pipeline (if denied). Best-effort: the
-        # decision is applied and announced, so a failure here (including the
-        # soft time limit) is recorded and the run still completes.
+        # Step 5: NBO + Marketing pipeline (if denied), best-effort: the
+        # decision is applied and announced.
         if decision == "denied":
             denial_reasons = ""
             shap_vals = prediction_result.get("shap_values")
@@ -537,17 +533,7 @@ class PipelineOrchestrator:
                 )[:3]
                 denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
 
-            try:
-                steps = self._run_nbo_and_marketing_pipeline(
-                    application,
-                    agent_run,
-                    steps,
-                    denial_reasons,
-                    profile_context,
-                )
-            except Exception as e:  # noqa: BLE001 — post-decision follow-up is best-effort
-                logger.error("Application %s: NBO/marketing follow-up failed after the decision: %s", application_id, e)
-                steps.append(StepTracker.post_decision_failure_step("marketing_followup", e))
+            steps = self._run_nbo_and_marketing_pipeline(application, agent_run, steps, denial_reasons, profile_context)
 
         agent_run.status = "completed"
         self._finalize_run(agent_run, steps, start_time)
@@ -559,6 +545,8 @@ class PipelineOrchestrator:
 
         return agent_run
 
-    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve"):
+    def resume_after_review(self, agent_run_id, reviewer="", note="", action="approve", reviewer_id=None):
         with api_call_context(agent_run_id=agent_run_id):
-            return self._human_review_handler.resume_after_review(agent_run_id, reviewer, note, action=action)
+            return self._human_review_handler.resume_after_review(
+                agent_run_id, reviewer, note, action=action, reviewer_id=reviewer_id
+            )

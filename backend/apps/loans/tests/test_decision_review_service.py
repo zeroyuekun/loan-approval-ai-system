@@ -47,10 +47,7 @@ def test_uphold_stamps_human_involvement_assisted(django_user_model):
     assert decision.human_involvement == LoanDecision.HumanInvolvement.ASSISTED
 
 
-def test_overturn_approves_and_audits(django_user_model, monkeypatch):
-    import apps.loans.services.decision_review as svc
-
-    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
+def test_overturn_approves_and_audits(django_user_model):
     app, officer, review = _denied_with_review(django_user_model)
     apply_review_outcome(review, officer=officer, outcome="overturned", note="manual approve")
     review.refresh_from_db()
@@ -103,3 +100,52 @@ def test_withdraw_already_resolved_raises(django_user_model):
     apply_review_outcome(review, officer=officer, outcome="upheld", note="stands")
     with pytest.raises(ValueError):
         withdraw_review(review, user=review.requested_by)
+
+
+def _make_officer_a_party(party, app, officer, review):
+    if party == "applicant":  # staff can also be borrowers
+        app.applicant = officer
+        app.save(update_fields=["applicant"])
+    elif party == "filer":  # filed the review on someone's behalf
+        review.requested_by = officer
+        review.save(update_fields=["requested_by"])
+    elif party == "decider":  # denied it by hand, recorded on the transition
+        AuditLog.objects.create(
+            user=officer,
+            action="status_transition",
+            resource_type="LoanApplication",
+            resource_id=str(app.id),
+            details={"from_status": "review", "to_status": "denied"},
+        )
+    else:  # a human-review deny from before the transition recorded the reviewer
+        AuditLog.objects.create(
+            user=officer,
+            action="human_review_deny",
+            resource_type="AgentRun",
+            resource_id="00000000-0000-0000-0000-000000000001",
+            details={"note": "n", "application_id": str(app.id), "original_decision": "approved"},
+        )
+        AuditLog.objects.create(
+            user=None,
+            action="status_transition",
+            resource_type="LoanApplication",
+            resource_id=str(app.id),
+            details={"from_status": "review", "to_status": "denied"},
+        )
+
+
+@pytest.mark.parametrize("outcome", ["upheld", "overturned"])
+@pytest.mark.parametrize("party", ["applicant", "filer", "decider", "historical_human_review_decider"])
+def test_an_officer_who_is_a_party_cannot_resolve_the_review(django_user_model, party, outcome):
+    from django.core.exceptions import PermissionDenied
+
+    app, officer, review = _denied_with_review(django_user_model)
+    _make_officer_a_party(party, app, officer, review)
+
+    with pytest.raises(PermissionDenied):
+        apply_review_outcome(review, officer=officer, outcome=outcome, note="x")
+    review.refresh_from_db()
+    app.refresh_from_db()
+    assert review.status == DecisionReview.Status.UNDER_REVIEW
+    assert app.status == "denied"
+    assert app.decision.decision == "denied"

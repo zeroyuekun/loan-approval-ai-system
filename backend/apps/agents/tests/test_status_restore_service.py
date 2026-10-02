@@ -108,10 +108,10 @@ def test_non_force_rerun_ignores_a_completed_run_a_later_failed_run_superseded(c
     from datetime import timedelta
     from unittest.mock import patch
 
-    from django.test import override_settings
     from django.utils import timezone
 
     from apps.agents.tasks import orchestrate_pipeline_task
+    from tests.conftest import use_locmem_cache
 
     app = _make_app(customer, status="pending")
     older = _completed_run(app)
@@ -120,7 +120,7 @@ def test_non_force_rerun_ignores_a_completed_run_a_later_failed_run_superseded(c
     LoanDecision.objects.create(application=app, decision="denied", confidence=0.4)
 
     with (
-        override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}),
+        use_locmem_cache,
         patch.object(PipelineOrchestrator, "orchestrate", return_value=failed) as orchestrate,
     ):
         orchestrate_pipeline_task.apply(args=(str(app.id),))

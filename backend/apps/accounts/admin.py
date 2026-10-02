@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
+from apps.common.http import client_ip
 from apps.loans.models import AuditLog
 
 from .models import CustomUser
@@ -37,7 +38,7 @@ class CustomUserAdmin(UserAdmin):
             resource_type="CustomUser",
             resource_id=str(obj.pk),
             details={"source": "django_admin", "changed": _changed_fields(message)},
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request),
         )
 
     def log_addition(self, request, obj, message):

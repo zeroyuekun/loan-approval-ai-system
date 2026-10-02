@@ -27,7 +27,6 @@ application with no run at all gets one, completed when the screening ends.
 import logging
 import time
 
-from django.conf import settings
 from django.db import transaction
 
 from apps.agents.models import AgentRun
@@ -35,20 +34,13 @@ from apps.email_engine.services.decision_email import deliver_decision_email
 from apps.loans.models import AuditLog
 
 from .bias.core import BiasDetector
-from .bias.thresholds import is_severe
-from .bias_records import bias_context, save_bias_report
-from .email_pipeline import replace_flagged_email
+from .email_pipeline import screen_bias
 from .step_tracker import StepTracker
 
 logger = logging.getLogger("agents.decision_email_screening")
 
 
 REISSUE_STEP = "decision_email_reissue"
-
-
-def _bias_failure_mode():
-    mode = getattr(settings, "BIAS_FAILURE_MODE", "block").lower()
-    return mode if mode in ("block", "warn", "off") else "block"
 
 
 def screen_and_deliver_decision_email(application, decision, email_result, generated_email, *, profile_context=None):
@@ -69,7 +61,7 @@ def screen_and_deliver_decision_email(application, decision, email_result, gener
 
     tracker = StepTracker()
     start_time = time.time()
-    agent_run = AgentRun.objects.filter(application=application).order_by("-created_at").first()
+    agent_run = AgentRun.objects.latest_for(application.pk)
     own_run = agent_run is None
     if own_run:
         agent_run = AgentRun.objects.create(application=application, status=AgentRun.Status.RUNNING)
@@ -77,56 +69,23 @@ def screen_and_deliver_decision_email(application, decision, email_result, gener
     reissue = tracker.start_step(REISSUE_STEP)
     steps = []
     try:
-        held_reason = None
-        step = tracker.start_step("bias_check")
-        detector = BiasDetector()
-        try:
-            bias_result = detector.analyze(email_result["body"], bias_context(application, decision))
-            save_bias_report(agent_run, generated_email, bias_result)
-        except Exception as exc:
-            steps.append(tracker.fail_step(step, str(exc), failure_category="transient"))
-            mode = _bias_failure_mode()
-            logger.error("Application %s: bias check failed (%s): %s", application.pk, mode, exc)
-            if mode == "block":
-                held_reason = f"Bias check unavailable ({exc})"
-        else:
-            steps.append(
-                tracker.complete_step(
-                    step, result_summary={"bias_score": bias_result["score"], "flagged": bias_result["flagged"]}
-                )
-            )
-            review_threshold = getattr(settings, "BIAS_THRESHOLD_REVIEW", 60)
-            if is_severe(bias_result["score"], review_threshold):
-                held_reason = f"Severe bias detected (score {bias_result['score']} >= {review_threshold})"
-            elif bias_result["flagged"]:
-                # The flagged LLM text never ships: the template replaces it
-                # and is sent only if its own bias check is clean.
-                try:
-                    replacement = replace_flagged_email(
-                        application,
-                        agent_run,
-                        decision,
-                        email_result,
-                        generated_email,
-                        bias_result,
-                        detector,
-                        tracker,
-                        steps,
-                        profile_context=profile_context,
-                    )
-                except Exception as exc:
-                    logger.error("Application %s: bias re-check of the replacement failed: %s", application.pk, exc)
-                    replacement = None
-                if replacement is None or replacement[2].get("flagged"):
-                    held_reason = f"Bias flagged (score {bias_result['score']}) and no clean replacement email"
-                else:
-                    generated_email = replacement[1]
-                    outcome["generated_email"] = generated_email
+        screening = screen_bias(
+            application,
+            agent_run,
+            decision,
+            email_result,
+            generated_email,
+            detector_class=BiasDetector,
+            tracker=tracker,
+            steps=steps,
+            profile_context=profile_context,
+        )
+        generated_email = outcome["generated_email"] = screening.generated_email
+        held_reason = outcome["held_reason"] = screening.held_reason
 
         step = tracker.start_step("email_delivery")
         if held_reason:
             steps.append(tracker.complete_step(step, result_summary={"sent": False, "reason": held_reason}))
-            outcome["held_reason"] = held_reason
             logger.warning("Application %s: %s decision email held: %s", application.pk, decision, held_reason)
             AuditLog.objects.create(
                 action="decision_email_held",
@@ -137,34 +96,22 @@ def screen_and_deliver_decision_email(application, decision, email_result, gener
         else:
             delivery = deliver_decision_email(generated_email)
             outcome["sent"] = delivery["sent"] or delivery["already_sent"]
-            if outcome["sent"]:
-                steps.append(
-                    tracker.complete_step(step, result_summary={"sent": True, "recipient": delivery["recipient"]})
-                )
-            elif delivery["recipient"] is None:
-                steps.append(
-                    tracker.complete_step(step, result_summary={"sent": False, "reason": "No recipient email"})
-                )
-            else:
-                steps.append(tracker.fail_step(step, delivery["error"] or "Send failed"))
+            steps.append(tracker.record_delivery(step, delivery))
     except BaseException as exc:
         if own_run:
-            agent_run.status = AgentRun.Status.FAILED
-            agent_run.error = f"Decision email screening failed: {exc}"
-            agent_run.steps = steps
-            agent_run.total_time_ms = int((time.time() - start_time) * 1000)
-            agent_run.save()
+            _close_own_run(
+                agent_run, steps, start_time, AgentRun.Status.FAILED, f"Decision email screening failed: {exc}"
+            )
         else:
             _append_step(agent_run, StepTracker.post_decision_failure_step(REISSUE_STEP, exc))
         raise
 
     if own_run:
         # Completed either way; a hold is recorded on the run like a guardrail withhold.
-        agent_run.status = AgentRun.Status.COMPLETED
-        agent_run.error = f"Decision email held: {outcome['held_reason']}" if outcome["held_reason"] else ""
-        agent_run.steps = steps
-        agent_run.total_time_ms = int((time.time() - start_time) * 1000)
-        agent_run.save()
+        held = outcome["held_reason"]
+        _close_own_run(
+            agent_run, steps, start_time, AgentRun.Status.COMPLETED, f"Decision email held: {held}" if held else ""
+        )
     else:
         _append_step(
             agent_run,
@@ -180,6 +127,15 @@ def screen_and_deliver_decision_email(application, decision, email_result, gener
             ),
         )
     return outcome
+
+
+def _close_own_run(agent_run, steps, start_time, status, error):
+    """Finish the run the screening created for an application that had none."""
+    agent_run.status = status
+    agent_run.error = error
+    agent_run.steps = steps
+    agent_run.total_time_ms = int((time.time() - start_time) * 1000)
+    agent_run.save()
 
 
 def _append_step(agent_run, step):

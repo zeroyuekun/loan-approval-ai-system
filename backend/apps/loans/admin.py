@@ -12,6 +12,8 @@ from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 
+from apps.common.http import client_ip
+
 from .models import AuditLog, Complaint, DecisionReview, LoanApplication, LoanDecision, PipelineDispatchOutbox
 from .services.audit_diff import field_change_details, snapshot
 from .services.decision_review import apply_review_outcome
@@ -27,7 +29,7 @@ def _audit_admin_change(request, action, instance, before, **kwargs):
         resource_type=type(instance).__name__,
         resource_id=str(instance.pk),
         details=details,
-        ip_address=request.META.get("REMOTE_ADDR"),
+        ip_address=client_ip(request),
     )
 
 
@@ -38,7 +40,7 @@ def _audit_admin_delete(request, instance):
         resource_type=type(instance).__name__,
         resource_id=str(instance.pk),
         details={"source": "django_admin", "status": instance.status},
-        ip_address=request.META.get("REMOTE_ADDR"),
+        ip_address=client_ip(request),
     )
 
 

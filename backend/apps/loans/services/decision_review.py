@@ -16,6 +16,7 @@ from django.utils import timezone
 from apps.loans.models import AuditLog, DecisionReview, LoanApplication, LoanDecision
 
 from .overturn_policy import evaluate_overturn_gate, normalize_overturn_mode
+from .reviewer_independence import assert_independent_reviewer
 
 logger = logging.getLogger(__name__)
 
@@ -73,26 +74,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
         if locked.status in _TERMINAL:
             raise ValueError(f"DecisionReview already resolved ({locked.status})")
 
-        # Four-eyes / maker-checker: the officer who made the original loan
-        # decision (i.e. who last manually transitioned this application to
-        # 'denied') must not be the same person who resolves the review.
-        # Automated ML decisions have user=None and are therefore exempt.
-        original_decider_id = (
-            AuditLog.objects.filter(
-                resource_type="LoanApplication",
-                resource_id=str(locked.application_id),
-                action="status_transition",
-                details__to_status="denied",
-                user__isnull=False,
-            )
-            .order_by("-timestamp")
-            .values_list("user_id", flat=True)
-            .first()
-        )
-        if original_decider_id is not None and original_decider_id == officer.pk:
-            raise PermissionDenied(
-                "An officer cannot resolve their own decision — four-eyes policy requires a second approver."
-            )
+        assert_independent_reviewer(officer, locked.application, review=locked)
 
         locked.assigned_officer = officer
         locked.resolution_note = note
@@ -110,8 +92,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
                 decision = LoanDecision.objects.select_for_update().get(application_id=locked.application_id)
             except LoanDecision.DoesNotExist:
                 decision = None
-            if decision is not None and decision.human_involvement == LoanDecision.HumanInvolvement.NONE:
-                decision.human_involvement = LoanDecision.HumanInvolvement.ASSISTED
+            if decision is not None and decision.mark_human(LoanDecision.HumanInvolvement.ASSISTED):
                 decision.save(update_fields=["human_involvement"])
         else:
             try:
@@ -149,7 +130,7 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
                 raise ValueError("No decision record exists for this application") from exc
             decision.decision = "approved"
             decision.reasoning = f"Officer override via decision review {locked.id}: {note}".strip()
-            decision.human_involvement = LoanDecision.HumanInvolvement.OVERRIDDEN
+            decision.mark_human(LoanDecision.HumanInvolvement.OVERRIDDEN)
             decision.save(update_fields=["decision", "reasoning", "human_involvement"])
             try:
                 # denied -> processing -> approved (validated transitions, each audited)

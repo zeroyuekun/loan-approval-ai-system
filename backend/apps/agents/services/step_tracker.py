@@ -136,6 +136,14 @@ class StepTracker:
         step["failure_category"] = failure_category or self.categorize_error(error)
         return step
 
+    def record_delivery(self, step, outcome):
+        """Close an ``email_delivery`` step from a ``deliver_decision_email`` outcome."""
+        if outcome["sent"] or outcome["already_sent"]:
+            return self.complete_step(step, result_summary={"sent": True, "recipient": outcome["recipient"]})
+        if outcome["recipient"] is None:
+            return self.complete_step(step, result_summary={"sent": False, "reason": "No recipient email"})
+        return self.fail_step(step, outcome["error"] or "Send failed")
+
     @staticmethod
     def post_decision_failure_step(step_name, error):
         """A failed-step record for best-effort work after the decision is applied.
