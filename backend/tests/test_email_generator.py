@@ -608,3 +608,66 @@ class TestDenialReasonsForRuleDeclines:
         checker = GuardrailChecker()
         for reason in EmailGenerator.DECLINE_RULE_REASON_MAP.values():
             assert checker.check_prohibited_language(reason)["passed"], reason
+
+
+class TestQuotedRateFollowsTheRiskTier:
+    """The quoted rate stays inside the band of the model's risk tier
+    (PD = 1 - decision confidence), whatever the bureau score says."""
+
+    @staticmethod
+    def _application(purpose="personal", credit_score=800, confidence=0.78):
+        from types import SimpleNamespace
+
+        decision = SimpleNamespace(confidence=confidence) if confidence is not None else None
+        return SimpleNamespace(
+            purpose=purpose,
+            credit_score=credit_score,
+            loan_amount=Decimal("20000"),
+            loan_term_months=36,
+            employment_type="payg_permanent",
+            decision=decision,
+        )
+
+    def test_high_pd_personal_loan_is_not_quoted_a_prime_rate(self):
+        from apps.email_engine.services.pricing import calculate_loan_pricing
+
+        # PD 0.22 is personal tier D (19.0-24.0%); the 800 bureau score alone
+        # quoted 8.74%.
+        pricing = calculate_loan_pricing(self._application(confidence=0.78))
+
+        assert pricing["interest_rate_number"] >= 19.0
+        assert pricing["risk_tier"] == "D"
+
+    def test_repayment_and_comparison_rate_use_the_held_rate(self):
+        from apps.email_engine.services.pricing import _comparison_rate_irr, _monthly_repayment, calculate_loan_pricing
+
+        pricing = calculate_loan_pricing(self._application(confidence=0.78))
+        rate = pricing["interest_rate_number"]
+
+        assert pricing["monthly_payment_number"] == _monthly_repayment(20000.0, rate, 36)
+        assert pricing["comparison_rate_number"] == _comparison_rate_irr(30_000.0, rate, 60, 250.0)
+
+    def test_a_low_pd_keeps_the_credit_band_rate_inside_the_tier(self):
+        from apps.email_engine.services.pricing import calculate_loan_pricing
+
+        # PD 0.02 is tier A (7.0-9.5%); the 800-score personal rate is 8.74%.
+        pricing = calculate_loan_pricing(self._application(confidence=0.98))
+
+        assert pricing["interest_rate_number"] == 8.74
+        assert pricing["risk_tier"] == "A"
+
+    def test_an_overturned_approval_beyond_every_tier_gets_the_top_band(self):
+        from apps.email_engine.services.pricing import calculate_loan_pricing
+
+        pricing = calculate_loan_pricing(self._application(confidence=0.4))
+
+        assert pricing["interest_rate_number"] >= 19.0
+        assert pricing["risk_tier"] == "D"
+
+    def test_no_decision_on_record_leaves_the_credit_band_rate(self):
+        from apps.email_engine.services.pricing import calculate_loan_pricing
+
+        pricing = calculate_loan_pricing(self._application(confidence=None))
+
+        assert pricing["interest_rate_number"] == 8.74
+        assert pricing["risk_tier"] is None
