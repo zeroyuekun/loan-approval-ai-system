@@ -280,21 +280,10 @@ class HumanReviewHandler:
                     },
                 )
 
-            # Best-effort, as in the pipeline: the decision is applied and
-            # announced, so a failure here (including the soft time limit) is
-            # recorded and the run still completes.
-            try:
-                marketing_pipeline = MarketingPipelineService(self.tracker)
-                steps = marketing_pipeline.run(
-                    application,
-                    agent_run,
-                    steps,
-                    denial_reasons,
-                    profile_context,
-                )
-            except Exception as exc:  # noqa: BLE001 — post-decision follow-up is best-effort
-                logger.error("Agent run %s: NBO/marketing follow-up failed after the decision: %s", agent_run_id, exc)
-                steps.append(StepTracker.post_decision_failure_step("marketing_followup", exc))
+            # Best-effort, as in the pipeline: the decision is applied and announced.
+            steps = MarketingPipelineService(self.tracker).run_best_effort(
+                application, agent_run, steps, denial_reasons, profile_context
+            )
 
         # Finalize — finalize_run sets status to 'completed' internally
         self.tracker.finalize_run(agent_run, steps, start_time)

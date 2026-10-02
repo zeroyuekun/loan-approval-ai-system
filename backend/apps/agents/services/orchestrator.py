@@ -72,7 +72,7 @@ class PipelineOrchestrator:
         return self._step_tracker.finalize_run(agent_run, steps, start_time, error)
 
     def _run_nbo_and_marketing_pipeline(self, application, agent_run, steps, denial_reasons, profile_context):
-        return self._marketing_pipeline.run(application, agent_run, steps, denial_reasons, profile_context)
+        return self._marketing_pipeline.run_best_effort(application, agent_run, steps, denial_reasons, profile_context)
 
     # ------------------------------------------------------------------
     # Counterfactual generation (denied applications only)
@@ -519,9 +519,8 @@ class PipelineOrchestrator:
                 details={"source": "orchestrator_final_decision"},
             )
 
-        # Step 5: NBO + Marketing pipeline (if denied). Best-effort: the
-        # decision is applied and announced, so a failure here (including the
-        # soft time limit) is recorded and the run still completes.
+        # Step 5: NBO + Marketing pipeline (if denied), best-effort: the
+        # decision is applied and announced.
         if decision == "denied":
             denial_reasons = ""
             shap_vals = prediction_result.get("shap_values")
@@ -537,17 +536,7 @@ class PipelineOrchestrator:
                 )[:3]
                 denial_reasons = ", ".join(f"{k}: {v:.3f}" for k, v in top_factors)
 
-            try:
-                steps = self._run_nbo_and_marketing_pipeline(
-                    application,
-                    agent_run,
-                    steps,
-                    denial_reasons,
-                    profile_context,
-                )
-            except Exception as e:  # noqa: BLE001 — post-decision follow-up is best-effort
-                logger.error("Application %s: NBO/marketing follow-up failed after the decision: %s", application_id, e)
-                steps.append(StepTracker.post_decision_failure_step("marketing_followup", e))
+            steps = self._run_nbo_and_marketing_pipeline(application, agent_run, steps, denial_reasons, profile_context)
 
         agent_run.status = "completed"
         self._finalize_run(agent_run, steps, start_time)

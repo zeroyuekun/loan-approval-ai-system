@@ -179,7 +179,7 @@ def _deny(run, officer_user, *, bias_result, send):
         patch(SENDER, send),
     ):
         bias.return_value.analyze.return_value = bias_result
-        mkt.return_value.run.side_effect = lambda application, agent_run, steps, *a, **kw: steps
+        mkt.return_value.run_best_effort.side_effect = lambda application, agent_run, steps, *a, **kw: steps
         nbo.return_value.recommend.return_value = {"offers": []}
         resp = client.post(f"/api/v1/agents/review/{run.id}/", {"action": "deny", "note": "n"}, format="json")
     return resp, bias
@@ -260,7 +260,7 @@ def test_resume_denied_sends_denial_before_marketing(escalated_agent_run):
         patch(SENDER, send),
     ):
         bias.return_value.analyze.return_value = _clean_bias()
-        mkt.return_value.run.side_effect = _marketing
+        mkt.return_value.run_best_effort.side_effect = _marketing
         nbo.return_value.recommend.return_value = {"offers": []}
         run = _resume(escalated_agent_run.pk)
 
@@ -286,12 +286,11 @@ def test_resume_follow_up_failure_after_the_denial_email_keeps_the_decision(esca
     with (
         patch.object(EmailGenerator, "generate", return_value=_passing("denied")),
         patch(f"{HUMAN_REVIEW}.BiasDetector") as bias,
-        patch(f"{HUMAN_REVIEW}.MarketingPipelineService") as mkt,
+        patch(f"{HUMAN_REVIEW}.MarketingPipelineService.run", side_effect=SoftTimeLimitExceeded()),
         patch("apps.agents.services.email_pipeline.RecommendationEngine") as nbo,
         patch(SENDER, send),
     ):
         bias.return_value.analyze.return_value = _clean_bias()
-        mkt.return_value.run.side_effect = SoftTimeLimitExceeded()
         nbo.return_value.recommend.return_value = {"offers": []}
         resume_pipeline_task.apply(args=(str(escalated_agent_run.pk),))
 
