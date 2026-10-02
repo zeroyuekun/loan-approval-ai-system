@@ -128,6 +128,38 @@ def test_task_converts_rate_limited_to_retry(monkeypatch, sample_application, de
 
 
 @pytest.mark.django_db
+def test_the_dedup_lock_outlives_the_longest_retry_countdown(monkeypatch, sample_application, denied_decision):
+    """A provider's long Retry-After must not let the lock expire before the
+    retry re-enters it, or a second run can start and send in between."""
+    from unittest.mock import MagicMock
+
+    from celery.exceptions import Retry
+    from django.core.cache import cache
+    from django.test import override_settings
+
+    from apps.email_engine import tasks as email_tasks
+    from apps.email_engine.services.exceptions import RateLimited
+
+    def _raise_rate_limited(self, application, decision, *a, **kw):
+        raise RateLimited(retry_after=10_000)
+
+    monkeypatch.setattr("apps.email_engine.services.email_generator.EmailGenerator.generate", _raise_rate_limited)
+    retry_mock = MagicMock(side_effect=Retry)
+    monkeypatch.setattr(email_tasks.generate_email_task, "retry", retry_mock)
+
+    with override_settings(CACHES=_LOCMEM):
+        with pytest.raises(Retry):
+            email_tasks.generate_email_task(str(sample_application.id), "denied")
+        lock_held = cache.has_key(email_tasks._email_lock_key(str(sample_application.id), "denied"))
+
+    task = email_tasks.generate_email_task
+    # The Retry-After retry and the autoretry backoff (Celery caps it at 600 s by default).
+    countdowns = [retry_mock.call_args.kwargs["countdown"], getattr(task, "retry_backoff_max", 600)]
+    assert email_tasks._EMAIL_LOCK_TTL >= task.time_limit + max(countdowns)
+    assert lock_held, "the lock was released before the retry"
+
+
+@pytest.mark.django_db
 def test_send_is_idempotent_on_redelivery(monkeypatch, sample_application, denied_decision):
     """Already-sent email (sent_at set) must NOT be re-sent on redelivery.
 

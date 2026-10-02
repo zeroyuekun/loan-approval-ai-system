@@ -3,10 +3,10 @@ from datetime import timedelta
 
 from celery import shared_task
 from celery.exceptions import Retry, SoftTimeLimitExceeded
-from django.core.cache import cache
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from apps.common.tasks import task_dedup_lock
 from apps.email_engine.models import GeneratedEmail, GuardrailAnalytics, GuardrailLog
 from apps.email_engine.services.decision_email import (
     HeldForBiasReview,
@@ -31,11 +31,17 @@ def _email_context(application, decision):
     return build_denial_email_context(application, None)
 
 
-# Held for one run of the task (hard limit 120 s) and across its autoretries.
-_EMAIL_LOCK_TTL = 180
-# Exceptions after which Celery runs the task again: the lock stays held for
-# the retry, as the orchestrate task keeps its lock (M22).
-_RETRIED = (ConnectionError, TimeoutError, OSError, Retry)
+# Infrastructure errors Celery retries (ConnectionError and TimeoutError are
+# OSErrors). The dedup lock is kept across them and across the RateLimited
+# retry, as the orchestrate task keeps its lock (M22).
+_AUTORETRY = (OSError,)
+_EMAIL_TIME_LIMIT = 120
+# The longest wait before a retry: a provider's Retry-After is capped here, and
+# the autoretry backoff (1, 2, 4 s) stays far below it.
+_MAX_RETRY_COUNTDOWN = 300
+# A retry refreshes the lock when it starts, so the lock has to outlive one run
+# plus the longest countdown before the retry, with a minute for queueing.
+_EMAIL_LOCK_TTL = _EMAIL_TIME_LIMIT + _MAX_RETRY_COUNTDOWN + 60
 
 
 def _email_lock_key(application_id, decision):
@@ -45,10 +51,11 @@ def _email_lock_key(application_id, decision):
 @shared_task(
     bind=True,
     name="apps.email_engine.tasks.generate_email_task",
-    time_limit=120,
+    time_limit=_EMAIL_TIME_LIMIT,
     soft_time_limit=100,
-    autoretry_for=(ConnectionError, TimeoutError, OSError),
+    autoretry_for=_AUTORETRY,
     retry_backoff=True,
+    retry_backoff_max=_MAX_RETRY_COUNTDOWN,
     max_retries=3,
 )
 def generate_email_task(self, application_id, decision, regenerate=False):
@@ -74,22 +81,14 @@ def generate_email_task(self, application_id, decision, regenerate=False):
     would each generate and send one. A run that finds the lock held by
     another task skips.
     """
-    lock_key = _email_lock_key(application_id, decision)
-    if not cache.add(lock_key, self.request.id, _EMAIL_LOCK_TTL):
-        if cache.get(lock_key) != self.request.id:
+    lock = task_dedup_lock(
+        _email_lock_key(application_id, decision), self.request.id, _EMAIL_LOCK_TTL, keep_on=(*_AUTORETRY, Retry)
+    )
+    with lock as held:
+        if not held:
             logger.info("Application %s (%s): email task already running, skipping", application_id, decision)
             return {"skipped": True, "reason": "dedup_lock_held"}
-        cache.set(lock_key, self.request.id, _EMAIL_LOCK_TTL)  # our own retry re-entering
-
-    keep_lock = False
-    try:
         return _generate_and_send(self, application_id, decision, regenerate)
-    except _RETRIED:
-        keep_lock = True
-        raise
-    finally:
-        if not keep_lock:
-            cache.delete(lock_key)
 
 
 def _generate_and_send(task, application_id, decision, regenerate):
@@ -183,12 +182,12 @@ def _generate_and_send(task, application_id, decision, regenerate):
         result, email = generate_decision_email(
             application, decision, profile_context=profile_context, on_rate_limit="raise"
         )
-    except (ConnectionError, TimeoutError, OSError):
+    except _AUTORETRY:
         raise  # let Celery autoretry handle infrastructure errors
     except RateLimited as exc:
         # The generator raises RateLimited on a 429 instead of sleeping; free the
         # worker by scheduling a Celery retry instead of holding it inside time_limit.
-        raise task.retry(countdown=exc.retry_after, exc=exc) from exc
+        raise task.retry(countdown=min(exc.retry_after, _MAX_RETRY_COUNTDOWN), exc=exc) from exc
     except SoftTimeLimitExceeded:
         AuditLog.objects.create(
             action="email_generation_timeout",
