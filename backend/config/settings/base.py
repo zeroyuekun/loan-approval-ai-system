@@ -328,6 +328,12 @@ ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
 # See docs/superpowers/specs/2026-05-07-codex-adversarial-response-v1-10-7-design.md.
 ML_VALIDATION_SIGNOFF_GATE_MODE = os.environ.get("ML_VALIDATION_SIGNOFF_GATE_MODE", "warn")
 
+# Promotion gate 5 ceiling for the train-vs-validation AUC gap
+# (training_metadata["overfitting_gap_val"]). A challenger whose gap exceeds
+# this is judged overfit to the training split before the test set is ever
+# read. Mirrors model_selector.MAX_OVERFIT_GAP; env-overridable per deployment.
+ML_OVERFIT_MAX_GAP = float(os.environ.get("ML_OVERFIT_MAX_GAP", "0.05"))
+
 # Load a model artefact that has no stored SHA-256 (integrity check skipped
 # with a warning). Off here and forced off in production.py; development.py
 # turns it on so engineers can iterate on hand-made bundles.
