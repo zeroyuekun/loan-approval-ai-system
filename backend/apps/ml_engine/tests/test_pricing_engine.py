@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from apps.loans.models import LoanApplication
 from apps.ml_engine.services.scoring.pricing_engine import (
     get_tier,
 )
@@ -107,6 +108,21 @@ def test_home_tier_assignment(pd_score, expected_tier, expected_band):
 def test_segment_normalisation(input_segment, resolved_segment):
     tier = get_tier(0.02, input_segment)
     assert tier.segment == resolved_segment
+
+
+@pytest.mark.parametrize("purpose", LoanApplication.Purpose.values)
+def test_every_loan_purpose_prices(purpose):
+    """I6: decision assembly passes the application purpose as the pricing
+    segment. "business" raised ValueError, so every business loan lost its
+    PD-decline gate and (before the review queue became bias-only) went to
+    review. Every purpose an application can carry must price."""
+    tier = get_tier(0.02, purpose)
+    assert tier.segment in ("home", "personal")
+
+
+def test_business_loans_price_on_the_unsecured_personal_band():
+    assert get_tier(0.02, "business").segment == "personal"
+    assert get_tier(0.30, "business").tier == "Decline"
 
 
 def test_unknown_segment_raises():

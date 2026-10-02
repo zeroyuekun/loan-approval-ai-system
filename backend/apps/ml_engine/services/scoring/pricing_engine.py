@@ -112,7 +112,8 @@ def _resolve_segment(segment: str) -> str:
     """Normalise a segment string to either 'personal' or 'home'.
 
     Accepts the D2 constants (home_owner_occupier / home_investor / personal),
-    the raw LoanApplication.purpose values ("home", "investment", "personal"),
+    every LoanApplication.purpose value (home, auto, education, personal,
+    business) plus "investment",
     and the unified fallback (routes to personal for pricing purposes, since
     unified-model approvals default to the widest risk tolerance band).
     """
@@ -127,7 +128,10 @@ def _resolve_segment(segment: str) -> str:
         # granularity. A later revision may split into a dedicated investor
         # table; see spec §D4 follow-up.
         return SEGMENT_HOME
-    if s in ("personal", "education", "auto", "unified"):
+    if s in ("personal", "education", "auto", "business", "unified"):
+        # Business loans here are unsecured small-business lending: they price
+        # on the unsecured (personal) band, whose PD decline cutoff (0.25) is
+        # the one that applies to them.
         return SEGMENT_PERSONAL
     raise ValueError(f"Unknown segment for pricing: {segment!r}")
 
