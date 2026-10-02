@@ -52,8 +52,9 @@ def apply_policy_overlay(
         model_version: `ModelVersion` row — used only for logging metadata
             (the `model_version` extra field on shadow-disagreement warnings).
         prediction_label: The champion model's raw decision before the overlay.
-        persist_referral: When False, skip the D6 audit-trail write entirely —
-            for dry-run scoring of an unsaved/ad-hoc application.
+        persist_referral: When False (a dry run of an unsaved/ad-hoc
+            application), skip the D6 audit-trail write and the shadow-mode
+            disagreement warning, so a what-if never reaches the decision logs.
 
     Returns:
         `(final_prediction_label, policy_payload)`. The payload carries the
@@ -67,7 +68,7 @@ def apply_policy_overlay(
         policy_result = _policy.evaluate(application)
         final_prediction = _policy.apply_overlay_to_decision(prediction_label, policy_result, policy_mode)
 
-        if policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
+        if persist_referral and policy_mode == _policy.OVERLAY_MODE_SHADOW and not policy_result.passed:
             hypothetical = _policy.apply_overlay_to_decision(
                 prediction_label, policy_result, _policy.OVERLAY_MODE_ENFORCE
             )

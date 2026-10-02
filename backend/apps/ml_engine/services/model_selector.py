@@ -78,6 +78,28 @@ def select_model_version(segment: str = SEGMENT_UNIFIED):
     return selected
 
 
+def champion_model_version(segment: str = SEGMENT_UNIFIED):
+    """The segment's champion: the serving model with the most traffic, then the newest.
+
+    Deterministic counterpart of `select_model_version` (same serving pool,
+    same unified fallback) for callers that must not be routed at random:
+    ad-hoc what-if scoring needs identical submissions to hit the same model
+    during an A/B test. Raises NoActiveModelError when neither pool serves.
+    """
+    for pool_segment in dict.fromkeys((segment, SEGMENT_UNIFIED)):
+        champion = (
+            ModelVersion.objects.filter(is_active=True, traffic_percentage__gt=0, segment=pool_segment)
+            .order_by("-traffic_percentage", "-created_at")
+            .first()
+        )
+        if champion is not None:
+            return champion
+    raise NoActiveModelError(
+        f"No active model version found for segment '{segment}' (and no "
+        "unified fallback available). Train a model first."
+    )
+
+
 def monitoring_model_version():
     """The model the metrics and drift dashboards describe.
 

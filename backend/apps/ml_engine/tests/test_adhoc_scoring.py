@@ -105,12 +105,31 @@ def _fake_predict_result():
     }
 
 
+class _AdhocPredictorPatch:
+    """Patch the champion lookup and `adhoc.ModelPredictor` together."""
+
+    def __init__(self, predictor):
+        self._patches = [
+            patch("apps.ml_engine.services.scoring.adhoc.champion_model_version", return_value=MagicMock()),
+            patch("apps.ml_engine.services.scoring.adhoc.ModelPredictor", return_value=predictor),
+        ]
+
+    def __enter__(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+        return False
+
+
 def _mock_adhoc_predictor():
     """Patch `adhoc.ModelPredictor` to return a concrete dict (no MagicMock leaves)."""
     mock_predictor = MagicMock()
     mock_predictor.predict.return_value = _fake_predict_result()
-    patcher = patch("apps.ml_engine.services.scoring.adhoc.ModelPredictor", return_value=mock_predictor)
-    return patcher, mock_predictor
+    return _AdhocPredictorPatch(mock_predictor), mock_predictor
 
 
 class TestAdhocScoreView:
@@ -155,6 +174,10 @@ class TestAdhocScoreView:
             "model_version",
             "note",
             "defaulted_features",
+            "policy_mode",
+            "policy_hard_fails",
+            "policy_refers",
+            "refer_reasons",
         }
         assert data["decision"] == "approved"
         assert data["probability"] == 0.82
@@ -188,7 +211,7 @@ class TestAdhocScoreView:
         client.force_authenticate(officer)
 
         with patch(
-            "apps.ml_engine.services.scoring.adhoc.ModelPredictor",
+            "apps.ml_engine.services.scoring.adhoc.champion_model_version",
             side_effect=NoActiveModelError("no model"),
         ):
             response = client.post(ADHOC_SCORE_URL, VALID_ADHOC_PAYLOAD, format="json")
@@ -210,7 +233,305 @@ class TestAdhocScoreView:
         assert PredictionLog.objects.count() == 0
 
         log = AuditLog.objects.get(action="adhoc_score")
+        assert set(log.details) == {"fields"}
         assert log.details["fields"] == sorted(VALID_ADHOC_PAYLOAD.keys())
-        submitted_values = set(VALID_ADHOC_PAYLOAD.values())
-        for field_name in log.details["fields"]:
-            assert field_name not in submitted_values
+
+
+# ---------------------------------------------------------------------------
+# Final-review fixes
+# ---------------------------------------------------------------------------
+
+# Mirrors toPayload(SAMPLE_APPLICANT) in frontend TryItTab.tsx; keep in sync.
+FRONTEND_SAMPLE_PAYLOAD = {
+    "annual_income": 95000,
+    "credit_score": 780,
+    "loan_amount": 450000,
+    "loan_term_months": 360,
+    "debt_to_income": 3.2,
+    "employment_length": 4,
+    "number_of_dependants": 0,
+    "property_value": 600000,
+    "deposit_amount": 150000,
+    "monthly_expenses": 3000,
+    "purpose": "home",
+    "home_ownership": "mortgage",
+    "employment_type": "payg_permanent",
+    "applicant_type": "single",
+    "state": "NSW",
+}
+
+
+def _stub_with_real_input_checks(monkeypatch, **kwargs):
+    """A stub predictor that keeps the REAL feature building, input-bounds
+    validation and consistency checker, so view tests exercise the paths that
+    reject an inconsistent applicant."""
+    from apps.ml_engine.services.scoring import prediction_features as pf
+    from apps.ml_engine.services.scoring.consistency import DataConsistencyChecker
+    from apps.ml_engine.services.training.feature_engineering import DEFAULT_IMPUTATION_VALUES
+
+    predictor = build_stub_predictor(monkeypatch, features={}, probability=0.8, threshold=0.5, **kwargs)
+    monkeypatch.setattr(predictor_mod, "_build_prediction_features_helper", pf.build_prediction_features)
+    monkeypatch.setattr(predictor_mod, "_derive_underwriter_features_helper", pf.derive_underwriter_features)
+    predictor.consistency_checker = DataConsistencyChecker()
+    predictor.imputation_values = dict(DEFAULT_IMPUTATION_VALUES)
+    return predictor
+
+
+@pytest.fixture
+def officer_client(django_user_model):
+    officer = django_user_model.objects.create_user(username="adhoc_off_fix", password="x", role="officer")
+    client = APIClient()
+    client.force_authenticate(officer)
+    return client
+
+
+class TestAdhocInputErrors:
+    def test_frontend_sample_scores_200_through_the_real_consistency_checker(self, monkeypatch, officer_client):
+        predictor = _stub_with_real_input_checks(monkeypatch)
+
+        with _AdhocPredictorPatch(predictor):
+            response = officer_client.post(ADHOC_SCORE_URL, FRONTEND_SAMPLE_PAYLOAD, format="json")
+
+        assert response.status_code == 200, response.json()
+        assert response.json()["decision"] == "approved"
+
+    def test_home_loan_without_property_value_is_400_with_value_free_detail(self, monkeypatch, officer_client, caplog):
+        predictor = _stub_with_real_input_checks(monkeypatch)
+        payload = {k: v for k, v in FRONTEND_SAMPLE_PAYLOAD.items() if k != "property_value"}
+
+        with _AdhocPredictorPatch(predictor), caplog.at_level("WARNING"):
+            response = officer_client.post(ADHOC_SCORE_URL, payload, format="json")
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "property value" in detail.lower()
+        assert not any(ch.isdigit() for ch in detail), detail
+        logged = " ".join(r.getMessage() for r in caplog.records)
+        assert "ConsistencyError" in logged
+        for value in ("450000", "450,000", "95000", "95,000", "150000", "150,000"):
+            assert value not in logged
+
+    def test_loan_above_property_value_is_400_without_echoing_figures(self, monkeypatch, officer_client):
+        predictor = _stub_with_real_input_checks(monkeypatch)
+        payload = {**FRONTEND_SAMPLE_PAYLOAD, "property_value": 400000, "deposit_amount": 50000}
+
+        with _AdhocPredictorPatch(predictor):
+            response = officer_client.post(ADHOC_SCORE_URL, payload, format="json")
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "loan cannot exceed the property purchase price" in detail.lower()
+        assert not any(ch.isdigit() for ch in detail), detail
+
+    def test_out_of_bounds_value_is_400_naming_the_field_only(self, officer_client):
+        from apps.ml_engine.services.training.feature_prep import ApplicationValidationError
+
+        mock_predictor = MagicMock()
+        mock_predictor.predict.side_effect = ApplicationValidationError(
+            "Input validation failed: loan_amount: 0.0 is outside valid range [1000, 5000000]",
+            fields=["loan_amount"],
+        )
+
+        with _AdhocPredictorPatch(mock_predictor):
+            response = officer_client.post(ADHOC_SCORE_URL, FRONTEND_SAMPLE_PAYLOAD, format="json")
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "loan_amount" in detail
+        assert not any(ch.isdigit() for ch in detail), detail
+
+    def test_policy_overlay_unavailable_is_503_generic(self, officer_client, caplog):
+        from apps.ml_engine.services.scoring.policy_overlay import PolicyOverlayUnavailable
+
+        mock_predictor = MagicMock()
+        mock_predictor.predict.side_effect = PolicyOverlayUnavailable(
+            "Credit policy overlay could not be evaluated: 450000"
+        )
+
+        with _AdhocPredictorPatch(mock_predictor), caplog.at_level("WARNING"):
+            response = officer_client.post(ADHOC_SCORE_URL, FRONTEND_SAMPLE_PAYLOAD, format="json")
+
+        assert response.status_code == 503
+        detail = response.json()["detail"]
+        assert "450000" not in detail
+        assert "credit policy" in detail.lower()
+        assert "450000" not in " ".join(r.getMessage() for r in caplog.records)
+        assert not AuditLog.objects.filter(action="adhoc_score").exists()
+
+
+class TestAdhocPolicyReasons:
+    def test_response_names_the_policy_codes_and_refer_reasons(self, monkeypatch, officer_client):
+        predictor = _stub_with_real_input_checks(monkeypatch)
+        monkeypatch.setattr(
+            predictor_mod,
+            "_apply_policy_overlay_helper",
+            lambda **k: (
+                "denied",
+                {
+                    "passed": False,
+                    "mode": "enforce",
+                    "hard_fails": ["P01"],
+                    "refers": ["P11"],
+                    "rationale_by_code": {"P01": "x", "P11": "y"},
+                    "changed_model_decision": True,
+                },
+            ),
+        )
+
+        with _AdhocPredictorPatch(predictor):
+            response = officer_client.post(ADHOC_SCORE_URL, FRONTEND_SAMPLE_PAYLOAD, format="json")
+
+        assert response.status_code == 200, response.json()
+        data = response.json()
+        assert data["decision"] == "denied"
+        assert data["policy_mode"] == "enforce"
+        assert data["policy_hard_fails"] == ["P01"]
+        assert data["policy_refers"] == ["P11"]
+        assert "POLICY_REFER_P11" in data["refer_reasons"]
+        assert all(isinstance(code, str) for code in data["refer_reasons"])
+
+
+_PROMETHEUS_METRICS = (
+    "ml_predictions_total",
+    "ml_prediction_latency_seconds",
+    "ml_prediction_confidence",
+    "ml_drift_warnings_total",
+)
+
+
+def _personal_app():
+    return LoanApplication(
+        annual_income=60000,
+        credit_score=680,
+        loan_amount=20000,
+        debt_to_income=3,
+        employment_length=4,
+        purpose="personal",
+        home_ownership="rent",
+    )
+
+
+def _personal_stub(monkeypatch):
+    return build_stub_predictor(
+        monkeypatch,
+        features={"purpose": "personal", "employment_type": "payg_permanent", "loan_amount": 20000},
+        probability=0.7,
+        threshold=0.5,
+    )
+
+
+class TestDryRunSideEffects:
+    @pytest.mark.parametrize("persist", [False, True])
+    def test_prometheus_metrics_only_for_persisted_predictions(self, monkeypatch, persist):
+        predictor = _personal_stub(monkeypatch)
+        spies = {name: MagicMock() for name in _PROMETHEUS_METRICS}
+        for name, spy in spies.items():
+            monkeypatch.setattr(predictor_mod, name, spy)
+
+        predictor.predict(_personal_app(), persist=persist)
+
+        touched = {name for name, spy in spies.items() if spy.mock_calls}
+        if persist:
+            assert touched >= {"ml_predictions_total", "ml_prediction_latency_seconds", "ml_prediction_confidence"}
+        else:
+            assert touched == set()
+
+    @pytest.mark.parametrize("persist", [False, True])
+    def test_shadow_scoring_only_for_persisted_predictions(self, monkeypatch, persist):
+        predictor = _personal_stub(monkeypatch)
+        shadow_spy = MagicMock()
+        monkeypatch.setattr(predictor_mod, "_score_challengers_shadow_helper", shadow_spy)
+
+        predictor.predict(_personal_app(), persist=persist)
+
+        assert shadow_spy.call_count == (1 if persist else 0)
+
+    @pytest.mark.parametrize("persist", [False, True])
+    def test_shadow_disagreement_log_only_for_persisted_predictions(self, monkeypatch, caplog, persist):
+        from types import SimpleNamespace
+
+        from apps.ml_engine.services.scoring import policy_overlay
+
+        failing = SimpleNamespace(
+            passed=False,
+            has_hard_fail=True,
+            has_refer=False,
+            hard_fails=["P01"],
+            refers=[],
+            rationale_by_code={},
+            to_dict=lambda: {"passed": False, "hard_fails": ["P01"], "refers": []},
+        )
+        monkeypatch.setattr(policy_overlay._policy, "current_mode", lambda: policy_overlay._policy.OVERLAY_MODE_SHADOW)
+        monkeypatch.setattr(policy_overlay._policy, "evaluate", lambda application: failing)
+
+        with caplog.at_level("WARNING", logger=policy_overlay.logger.name):
+            label, _payload = apply_policy_overlay(
+                application=None,
+                model_version=None,
+                prediction_label="approved",
+                persist_referral=persist,
+            )
+
+        assert label == "approved"
+        emitted = any(r.getMessage() == "credit_policy_shadow_disagreement" for r in caplog.records)
+        assert emitted is persist
+
+
+class TestThrottleScopes:
+    def test_ml_throttles_do_not_share_the_global_user_bucket(self):
+        from apps.ml_engine.views import AdhocScoreThrottle, PredictionThrottle
+
+        request = MagicMock()
+        request.user.is_authenticated = True
+        request.user.pk = 7
+
+        adhoc_key = AdhocScoreThrottle().get_cache_key(request, None)
+        predict_key = PredictionThrottle().get_cache_key(request, None)
+
+        assert not adhoc_key.startswith("throttle_user_")
+        assert not predict_key.startswith("throttle_user_")
+        assert adhoc_key != predict_key
+
+
+class TestChampionPinning:
+    def _mv(self, settings, version, traffic, segment="unified"):
+        from apps.ml_engine.models import ModelVersion
+
+        return ModelVersion.objects.create(
+            algorithm="xgb",
+            version=version,
+            file_path=str(settings.ML_MODELS_DIR / f"{version}.joblib"),
+            is_active=True,
+            traffic_percentage=traffic,
+            segment=segment,
+        )
+
+    def test_champion_is_the_highest_traffic_model_every_time(self, settings):
+        from apps.ml_engine.services.model_selector import champion_model_version
+
+        champion = self._mv(settings, "champ", 70)
+        self._mv(settings, "challenger", 30)
+
+        assert {champion_model_version("unified").pk for _ in range(25)} == {champion.pk}
+
+    def test_champion_falls_back_to_unified_and_raises_when_none(self, settings):
+        from apps.ml_engine.services.model_selector import champion_model_version
+
+        with pytest.raises(NoActiveModelError):
+            champion_model_version("personal")
+        champion = self._mv(settings, "champ", 100)
+        assert champion_model_version("personal").pk == champion.pk
+
+    def test_score_applicant_scores_against_the_pinned_champion(self, settings):
+        from apps.ml_engine.services.scoring.adhoc import score_applicant
+
+        champion = self._mv(settings, "champ", 70)
+        self._mv(settings, "challenger", 30)
+        mock_predictor = MagicMock()
+        mock_predictor.predict.return_value = _fake_predict_result()
+
+        with patch("apps.ml_engine.services.scoring.adhoc.ModelPredictor", return_value=mock_predictor) as ctor:
+            for _ in range(5):
+                score_applicant(dict(VALID_ADHOC_PAYLOAD))
+
+        assert {c.kwargs["model_version"].pk for c in ctor.call_args_list} == {champion.pk}

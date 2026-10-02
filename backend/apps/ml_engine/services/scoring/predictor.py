@@ -16,7 +16,7 @@ from prometheus_client import Counter, Histogram
 from apps.ml_engine.services.governance.shadow_scoring import (
     score_challengers_shadow as _score_challengers_shadow_helper,
 )
-from apps.ml_engine.services.scoring.consistency import DataConsistencyChecker
+from apps.ml_engine.services.scoring.consistency import ConsistencyError, DataConsistencyChecker
 from apps.ml_engine.services.scoring.decision_assembly import (
     assemble_decision as _assemble_decision_helper,
 )
@@ -284,7 +284,8 @@ class ModelPredictor:
 
         `persist=False` runs a dry-run scoring pass that writes nothing: the
         D6 referral-audit save on `application` and the shadow-scoring
-        `PredictionLog` rows are both skipped. Used for ad-hoc scoring of an
+        `PredictionLog` rows are both skipped, and so are the production
+        Prometheus metrics and the policy shadow-disagreement log. Used for ad-hoc scoring of an
         applicant that was never saved as a `LoanApplication`.
         """
         start_time = time.time()
@@ -302,8 +303,7 @@ class ModelPredictor:
         # Cross-validate data consistency
         consistency = self.consistency_checker.check_all(features)
         if not consistency["consistent"]:
-            error_msgs = "; ".join(e["message"] for e in consistency["errors"])
-            raise ValueError(f"Data consistency check failed: {error_msgs}")
+            raise ConsistencyError(consistency["errors"])
 
         # Per-application drift flags on the applicant's actual values (APRA
         # CPG 235 ongoing monitoring), taken before any clipping for the model.
@@ -425,18 +425,20 @@ class ModelPredictor:
         # this below so the histogram reflects real SLA-relevant wall time.
         result["processing_time_ms"] = int((time.time() - start_time) * 1000)
 
-        # Emit Prometheus metrics for ML observability
+        # Emit Prometheus metrics for ML observability. A dry run is not a real
+        # decision, so it stays out of the production series Grafana reads.
         try:
-            ml_predictions_total.labels(
-                decision=result["prediction"],
-                model_version=str(self.model_version.id)[:8],
-            ).inc()
-            ml_prediction_latency_seconds.labels(
-                algorithm=getattr(self.model_version, "algorithm", "unknown") or "unknown",
-            ).observe(result["processing_time_ms"] / 1000.0)
-            ml_prediction_confidence.observe(result["probability"])
-            if result.get("drift_warnings"):
-                ml_drift_warnings_total.inc()
+            if persist:
+                ml_predictions_total.labels(
+                    decision=result["prediction"],
+                    model_version=str(self.model_version.id)[:8],
+                ).inc()
+                ml_prediction_latency_seconds.labels(
+                    algorithm=getattr(self.model_version, "algorithm", "unknown") or "unknown",
+                ).observe(result["processing_time_ms"] / 1000.0)
+                ml_prediction_confidence.observe(result["probability"])
+                if result.get("drift_warnings"):
+                    ml_drift_warnings_total.inc()
         except Exception as e:
             logger.debug("Prometheus metrics emission failed (non-blocking): %s", e)
 

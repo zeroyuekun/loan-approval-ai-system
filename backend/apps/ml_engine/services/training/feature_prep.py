@@ -107,7 +107,15 @@ FEATURE_BOUNDS = {
 
 
 class ApplicationValidationError(ValueError):
-    """Raised when an application's feature values fail basic sanity checks."""
+    """Raised when an application's feature values fail basic sanity checks.
+
+    `fields` names the offending columns so a caller can report them without
+    echoing the submitted values that the message text contains.
+    """
+
+    def __init__(self, message: str, *, fields=()):
+        super().__init__(message)
+        self.fields = list(fields)
 
 
 def safe_get_state(application) -> str:
@@ -173,7 +181,10 @@ def validate_input(
             errors.append(f"{col}: {val} is outside valid range [{lo}, {hi}]")
 
     if errors:
-        raise ApplicationValidationError("Input validation failed: " + "; ".join(errors))
+        raise ApplicationValidationError(
+            "Input validation failed: " + "; ".join(errors),
+            fields=[e.split(":", 1)[0] for e in errors],  # each entry starts "<col>: "
+        )
 
 
 def clip_to_training_range(features: dict, reference_distribution: dict | None, *, hard_bounds: dict) -> list[dict]:

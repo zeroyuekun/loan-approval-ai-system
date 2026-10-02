@@ -18,14 +18,19 @@ trust the score.
 
 from __future__ import annotations
 
+import re
+
 from rest_framework import serializers
 
 from apps.loans.models import LoanApplication
+from apps.ml_engine.services.model_selector import champion_model_version
+from apps.ml_engine.services.scoring.consistency import ConsistencyError
 from apps.ml_engine.services.scoring.prediction_features import build_prediction_features
 from apps.ml_engine.services.scoring.predictor import ModelPredictor
 from apps.ml_engine.services.scoring.segmentation import derive_segment
+from apps.ml_engine.services.training.feature_prep import ApplicationValidationError
 
-__all__ = ["AdhocApplicantSerializer", "score_applicant"]
+__all__ = ["AdhocApplicantSerializer", "input_error_detail", "score_applicant"]
 
 TOP_FACTORS_COUNT = 5
 
@@ -79,11 +84,37 @@ def _defaulted_feature_names(application) -> list[str]:
     return sorted(set(features) - set(LoanApplication.DECISION_INPUT_FIELDS))
 
 
+def input_error_detail(exc: ValueError) -> str:
+    """A 400 `detail` for an applicant the predictor rejected.
+
+    Names the problem without echoing any submitted figure: consistency
+    messages quote the amounts, so only their sentences that carry no digits
+    are kept (falling back to the field names), and a bounds failure is
+    reported by field name only.
+    """
+    if isinstance(exc, ConsistencyError):
+        parts = []
+        for finding in exc.errors:
+            sentences = re.split(r"(?<=\.)\s+", str(finding.get("message", "")).strip())
+            value_free = [s for s in sentences if s and not re.search(r"\d", s)]
+            parts.append(" ".join(value_free) or f"Check {', '.join(finding.get('fields') or [])}.")
+        return "These figures are inconsistent: " + " ".join(parts)
+    if isinstance(exc, ApplicationValidationError) and exc.fields:
+        return "These values are outside the accepted range: " + ", ".join(exc.fields) + "."
+    return "The applicant's figures could not be scored. Check the values and try again."
+
+
 def score_applicant(validated_data: dict) -> dict:
-    """Score one applicant's facts against the active model. Persists nothing."""
+    """Score one applicant's facts against the segment champion. Persists nothing.
+
+    Pinned to the champion (`champion_model_version`), not the weighted A/B
+    draw `ModelPredictor(segment=...)` makes, so the same what-if submitted
+    twice is scored by the same model.
+    """
     application = LoanApplication(**validated_data)
-    predictor = ModelPredictor(segment=derive_segment(application))
+    predictor = ModelPredictor(model_version=champion_model_version(derive_segment(application)))
     result = predictor.predict(application, persist=False)
+    policy = result.get("policy_decision") or {}
 
     shap_values = result.get("shap_values") or {}
     top_factors = [
@@ -100,4 +131,11 @@ def score_applicant(validated_data: dict) -> dict:
         "model_version": result["model_version"],
         "note": ADHOC_SCORE_NOTE,
         "defaulted_features": _defaulted_feature_names(application),
+        # Why the credit-policy overlay may have changed the decision: the
+        # P-codes it evaluated as hard fails / refers, the overlay mode (only
+        # "enforce" applies them), and the refer-reason codes on the decision.
+        "policy_mode": policy.get("mode"),
+        "policy_hard_fails": list(policy.get("hard_fails") or []),
+        "policy_refers": list(policy.get("refers") or []),
+        "refer_reasons": [r["code"] for r in result.get("refer_reasons") or [] if r.get("code")],
     }
