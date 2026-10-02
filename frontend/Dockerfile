@@ -26,7 +26,10 @@ ENV NODE_ENV=production
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 COPY --from=builder /app/package*.json ./
-RUN npm ci --omit=dev
+# npm is only needed to install; removing it drops its bundled dependencies
+# (pacote, sigstore, ...) from the runtime image and its scan.
+RUN npm ci --omit=dev && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY --from=builder --chown=appuser:appgroup /app/.next ./.next
 COPY --from=builder --chown=appuser:appgroup /app/public ./public
@@ -39,4 +42,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=45s \
   CMD wget -q --spider http://localhost:3000 || exit 1
 
-CMD ["npm", "run", "start"]
+CMD ["node_modules/.bin/next", "start"]
