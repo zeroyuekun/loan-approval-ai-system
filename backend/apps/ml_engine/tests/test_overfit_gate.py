@@ -118,3 +118,21 @@ def test_overfit_gap_setting_override_relaxes_limit(no_champion, settings):
     result = ms.promote_if_eligible(candidate)
     assert result.promoted, result.reasons
     assert result.gates["overfitting"]["passed"] is True
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("", 0.05), ("not-a-number", 0.05), ("0.08", 0.08)])
+def test_overfit_max_gap_setting_tolerates_empty_or_malformed_env(monkeypatch, raw, expected):
+    """An empty or malformed ML_OVERFIT_MAX_GAP falls back to 0.05 instead of
+    crashing settings import (the same tolerance as the other _env_float knobs)."""
+    import runpy
+    import warnings
+    from pathlib import Path
+
+    from django.conf import settings as dj_settings
+
+    monkeypatch.setenv("ML_OVERFIT_MAX_GAP", raw)
+    base = Path(dj_settings.BASE_DIR) / "config" / "settings" / "base.py"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        namespace = runpy.run_path(str(base))
+    assert namespace["ML_OVERFIT_MAX_GAP"] == pytest.approx(expected)

@@ -312,9 +312,10 @@ ML_FAIRNESS_GATE_MODE = os.environ.get("ML_FAIRNESS_GATE_MODE", "warn")
 # Pre-activation champion-challenger promotion gate mode for `train_model_task`.
 # Mirrors ML_FAIRNESS_GATE_MODE: "warn" (default — gates run, decision recorded
 # on training_metadata, model activates regardless), "block" (refuse activation
-# if model_selector.promote_if_eligible reports any of the 4 gates failed —
-# KS regression, PSI stability, ECE calibration, AUC regression), "off" (skip
-# the check entirely). Default here "warn"; production.py defaults to "block".
+# if model_selector.promote_if_eligible reports any of the 5 gates failed —
+# KS regression, PSI stability, ECE calibration, AUC regression, overfitting
+# (train-vs-validation AUC gap above ML_OVERFIT_MAX_GAP)), "off" (skip the
+# check entirely). Default here "warn"; production.py defaults to "block".
 # See docs/superpowers/specs/2026-05-07-ml-promotion-gate-mode-design.md.
 ML_PROMOTION_GATE_MODE = os.environ.get("ML_PROMOTION_GATE_MODE", "warn")
 
@@ -332,7 +333,7 @@ ML_VALIDATION_SIGNOFF_GATE_MODE = os.environ.get("ML_VALIDATION_SIGNOFF_GATE_MOD
 # (training_metadata["overfitting_gap_val"]). A challenger whose gap exceeds
 # this is judged overfit to the training split before the test set is ever
 # read. Mirrors model_selector.MAX_OVERFIT_GAP; env-overridable per deployment.
-ML_OVERFIT_MAX_GAP = float(os.environ.get("ML_OVERFIT_MAX_GAP", "0.05"))
+ML_OVERFIT_MAX_GAP = _env_float("ML_OVERFIT_MAX_GAP", 0.05)
 
 # Load a model artefact that has no stored SHA-256 (integrity check skipped
 # with a warning). Off here and forced off in production.py; development.py

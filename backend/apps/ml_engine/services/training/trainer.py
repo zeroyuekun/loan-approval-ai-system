@@ -1010,9 +1010,10 @@ class ModelTrainer:
                 overfitting_gap,
             )
 
-        # Overfitting is judged on the validation split, before the test set is
-        # read; the train-vs-test gap below stays as the final independent figure.
-        val_auc = round(float(roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])), 4)
+        # The overfitting gate uses no test data: it judges the train-vs-validation
+        # gap. The train-vs-test gap above stays as the final independent figure.
+        # y_val_prob is the calibrated model's validation output computed above.
+        val_auc = round(float(roc_auc_score(y_val, y_val_prob)), 4)
         overfitting_gap_val = round(train_auc - val_auc, 4)
 
         # Logistic-regression baseline on core credit features. Lets us report
