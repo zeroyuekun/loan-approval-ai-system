@@ -201,25 +201,49 @@ class BatchOrchestrateView(APIView):
         recheck = request.query_params.get("recheck", "").lower() == "true"
 
         if recheck:
-            # Query applications in REVIEW status that are eligible for re-processing.
+            # Re-run applications waiting in the review queue: REVIEW with an
+            # ESCALATED latest run. A REVIEW application whose run a reviewer has
+            # claimed (RUNNING) is being resumed and is left alone.
             # Stuck-PROCESSING recovery is out of scope here; that belongs in a
             # dedicated dead-letter / recovery task.
-            reviewable_qs = LoanApplication.objects.filter(
-                status=LoanApplication.Status.REVIEW,
-            ).order_by("created_at")
+            latest_run_status = Subquery(
+                AgentRun.objects.filter(application_id=OuterRef("pk")).order_by("-created_at").values("status")[:1]
+            )
+            reviewable_qs = (
+                LoanApplication.objects.filter(status=LoanApplication.Status.REVIEW)
+                .annotate(latest_run_status=latest_run_status)
+                .filter(latest_run_status=AgentRun.Status.ESCALATED)
+                .order_by("created_at")
+            )
             total_eligible = reviewable_qs.count()
-            candidates = reviewable_qs[:BATCH_ORCHESTRATE_MAX]
             pending_ids = []
-            for app in candidates:
-                try:
-                    app.transition_to(
-                        "pending",
-                        user=request.user,
-                        details={"reason": "batch_recheck"},
+            for app_id in reviewable_qs.values_list("id", flat=True)[:BATCH_ORCHESTRATE_MAX]:
+                # Same lock order as the review action (run, then application),
+                # and re-checked under the locks: a reviewer may have claimed
+                # the run since the query above.
+                with transaction.atomic():
+                    run = (
+                        AgentRun.objects.select_for_update()
+                        .filter(application_id=app_id)
+                        .order_by("-created_at")
+                        .first()
                     )
-                    pending_ids.append(app.id)
-                except LoanApplication.InvalidStateTransition:
-                    continue
+                    app = (
+                        LoanApplication.objects.select_for_update()
+                        .filter(pk=app_id, status=LoanApplication.Status.REVIEW)
+                        .first()
+                    )
+                    if run is None or run.status != AgentRun.Status.ESCALATED or app is None:
+                        continue
+                    try:
+                        app.transition_to(
+                            "pending",
+                            user=request.user,
+                            details={"reason": "batch_recheck"},
+                        )
+                    except LoanApplication.InvalidStateTransition:
+                        continue
+                pending_ids.append(app_id)
         else:
             pending_qs = LoanApplication.objects.filter(status=LoanApplication.Status.PENDING).order_by("created_at")
             total_eligible = pending_qs.count()
