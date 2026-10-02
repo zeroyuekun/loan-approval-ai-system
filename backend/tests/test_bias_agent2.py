@@ -121,6 +121,7 @@ def _run(
     review=None,
     review_side_effect=None,
     budget_side_effect=None,
+    profile_context=None,
     enabled=True,
 ):
     """Call ``run_agent2`` with its collaborators patched. Returns
@@ -158,7 +159,7 @@ def _run(
                 email_result,
                 bias_result,
                 confidence=0.2,
-                profile_context={},
+                profile_context={} if profile_context is None else profile_context,
                 tracker=tracker,
                 steps=steps,
             )
@@ -566,3 +567,18 @@ def test_low_time_hand_over_is_counted(processing_denied, agent_run):
         _run(processing_denied, agent_run, regen_return=_rewrite())
 
     assert _outcome_count("handed_over_low_time") == before + 1
+
+
+@pytest.mark.django_db
+def test_the_rewrite_request_carries_the_next_best_offer(processing_denied, agent_run):
+    """A denial rewrite must keep the offer the first draft was given."""
+    offer = {"type": "reduced_loan", "name": "Reduced Amount Loan", "amount": 15000}
+
+    _, _, regen, _, _ = _run(
+        processing_denied,
+        agent_run,
+        regen_return={**_llm_email(), "template_fallback": True},
+        profile_context={"nbo_offer": offer},
+    )
+
+    assert regen.call_args.kwargs["profile_context"]["nbo_offer"] == offer
