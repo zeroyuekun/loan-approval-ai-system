@@ -42,6 +42,22 @@ const STATUS_LABELS: Record<string, string> = {
   queue_failed: 'PROCESSING DELAYED',
 }
 
+/**
+ * The pipeline has not run yet: the application was just submitted, or its
+ * dispatch failed and the backend is retrying it.
+ */
+export function isAwaitingPipeline(status: string): boolean {
+  return status === 'pending' || status === 'queue_failed'
+}
+
+/**
+ * Assessment is under way or about to start. queue_failed is excluded: it is
+ * stalled until the backend's next dispatch retry, not in progress.
+ */
+export function isAssessmentInFlight(status: string): boolean {
+  return status === 'pending' || status === 'processing'
+}
+
 export function getStatusColor(status: string): string {
   return STATUS_COLORS[status] || 'bg-gray-100 text-gray-800'
 }

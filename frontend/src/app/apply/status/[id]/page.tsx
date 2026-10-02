@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CheckCircle2, XCircle, Clock, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
-import { formatMaybeMasked, formatDate, formatPurpose } from '@/lib/utils'
+import { formatMaybeMasked, formatDate, formatPurpose, isAssessmentInFlight, isAwaitingPipeline } from '@/lib/utils'
 import { DenialExplanationPanel } from '@/components/applications/DenialExplanationPanel'
 import { DecisionReviewStatus } from '@/components/applications/DecisionReviewStatus'
 import { ApplicationStatusBadge } from '@/components/applications/ApplicationStatusBadge'
@@ -44,11 +44,6 @@ function getPipelineSteps(status: string): PipelineStep[] {
   ]
 
   switch (status) {
-    case 'pending':
-    case 'queue_failed':
-      steps[0].state = 'completed'
-      steps[1].state = 'upcoming'
-      break
     case 'processing':
       steps[0].state = 'completed'
       steps[1].state = 'active'
@@ -70,6 +65,7 @@ function getPipelineSteps(status: string): PipelineStep[] {
       steps[3].state = 'completed'
       break
     default:
+      // Submitted but not yet assessed (pending, queue_failed)
       steps[0].state = 'completed'
   }
 
@@ -194,7 +190,7 @@ export default function CustomerApplicationStatusPage() {
     // leaks a useEffect(setInterval) is prone to when the hook remounts quickly.
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status === 'pending' || status === 'processing' || status === 'queue_failed' ? 5000 : false
+      return status && (isAwaitingPipeline(status) || isAssessmentInFlight(status)) ? 5000 : false
     },
   })
 
@@ -247,7 +243,7 @@ export default function CustomerApplicationStatusPage() {
                 {statusMessages[application.status] || 'Status unknown.'}
               </p>
             </div>
-            {(application.status === 'pending' || application.status === 'processing') && (
+            {isAssessmentInFlight(application.status) && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground mt-2">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 Your application is being assessed by our AI system...
