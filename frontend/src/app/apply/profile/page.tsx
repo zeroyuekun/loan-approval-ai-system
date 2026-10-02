@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { authApi } from '@/lib/api'
@@ -16,6 +16,7 @@ import { PersonalDetailsCard } from '@/components/profile/PersonalDetailsCard'
 import { Save, Shield, Briefcase, Landmark, Home, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CUSTOMER_PROFILE_KEY, useCustomerProfile } from '@/hooks/useCustomerProfile'
+import { useSeededForm } from '@/hooks/useSeededForm'
 
 export default function CustomerProfilePage() {
   const { user } = useAuth()
@@ -25,54 +26,57 @@ export default function CustomerProfilePage() {
 
   const { data: profile, isLoading } = useCustomerProfile()
 
-  const [form, setForm] = useState<Partial<CustomerProfile>>({})
-
-  useEffect(() => {
-    if (profile) {
-      setForm({
-        date_of_birth: profile.date_of_birth || '',
-        phone: profile.phone || '',
-        address_line_1: profile.address_line_1 || '',
-        address_line_2: profile.address_line_2 || '',
-        suburb: profile.suburb || '',
-        state: profile.state || '',
-        postcode: profile.postcode || '',
-        marital_status: profile.marital_status || '',
-        residency_status: profile.residency_status || '',
-        primary_id_type: profile.primary_id_type || '',
-        primary_id_number: profile.primary_id_number || '',
-        secondary_id_type: profile.secondary_id_type || '',
-        secondary_id_number: profile.secondary_id_number || '',
-        tax_file_number_provided: profile.tax_file_number_provided || false,
-        is_politically_exposed: profile.is_politically_exposed || false,
-        employer_name: profile.employer_name || '',
-        occupation: profile.occupation || '',
-        industry: profile.industry || '',
-        employment_status: profile.employment_status || '',
-        years_in_current_role: profile.years_in_current_role ?? undefined,
-        previous_employer: profile.previous_employer || '',
-        gross_annual_income: profile.gross_annual_income ?? undefined,
-        other_income: profile.other_income ?? undefined,
-        other_income_source: profile.other_income_source || '',
-        partner_annual_income: profile.partner_annual_income ?? undefined,
-        estimated_property_value: profile.estimated_property_value ?? undefined,
-        vehicle_value: profile.vehicle_value ?? undefined,
-        savings_other_institutions: profile.savings_other_institutions ?? undefined,
-        investment_value: profile.investment_value ?? undefined,
-        superannuation_balance: profile.superannuation_balance ?? undefined,
-        other_loan_repayments_monthly: profile.other_loan_repayments_monthly ?? undefined,
-        other_credit_card_limits: profile.other_credit_card_limits ?? undefined,
-        rent_or_board_monthly: profile.rent_or_board_monthly ?? undefined,
-        housing_situation: profile.housing_situation || '',
-        time_at_current_address_years: profile.time_at_current_address_years ?? undefined,
-        number_of_dependants: profile.number_of_dependants ?? undefined,
-        previous_suburb: profile.previous_suburb || '',
-        previous_state: profile.previous_state || '',
-        previous_postcode: profile.previous_postcode || '',
-        preferred_contact_method: profile.preferred_contact_method || '',
-      })
-    }
-  }, [profile])
+  // Seeded from the server profile; the user's edits are layered on top so a
+  // refetch never overwrites a field that is being edited.
+  const seed = useMemo<Partial<CustomerProfile> | undefined>(
+    () =>
+      profile
+        ? {
+            date_of_birth: profile.date_of_birth || '',
+            phone: profile.phone || '',
+            address_line_1: profile.address_line_1 || '',
+            address_line_2: profile.address_line_2 || '',
+            suburb: profile.suburb || '',
+            state: profile.state || '',
+            postcode: profile.postcode || '',
+            marital_status: profile.marital_status || '',
+            residency_status: profile.residency_status || '',
+            primary_id_type: profile.primary_id_type || '',
+            primary_id_number: profile.primary_id_number || '',
+            secondary_id_type: profile.secondary_id_type || '',
+            secondary_id_number: profile.secondary_id_number || '',
+            tax_file_number_provided: profile.tax_file_number_provided || false,
+            is_politically_exposed: profile.is_politically_exposed || false,
+            employer_name: profile.employer_name || '',
+            occupation: profile.occupation || '',
+            industry: profile.industry || '',
+            employment_status: profile.employment_status || '',
+            years_in_current_role: profile.years_in_current_role ?? undefined,
+            previous_employer: profile.previous_employer || '',
+            gross_annual_income: profile.gross_annual_income ?? undefined,
+            other_income: profile.other_income ?? undefined,
+            other_income_source: profile.other_income_source || '',
+            partner_annual_income: profile.partner_annual_income ?? undefined,
+            estimated_property_value: profile.estimated_property_value ?? undefined,
+            vehicle_value: profile.vehicle_value ?? undefined,
+            savings_other_institutions: profile.savings_other_institutions ?? undefined,
+            investment_value: profile.investment_value ?? undefined,
+            superannuation_balance: profile.superannuation_balance ?? undefined,
+            other_loan_repayments_monthly: profile.other_loan_repayments_monthly ?? undefined,
+            other_credit_card_limits: profile.other_credit_card_limits ?? undefined,
+            rent_or_board_monthly: profile.rent_or_board_monthly ?? undefined,
+            housing_situation: profile.housing_situation || '',
+            time_at_current_address_years: profile.time_at_current_address_years ?? undefined,
+            number_of_dependants: profile.number_of_dependants ?? undefined,
+            previous_suburb: profile.previous_suburb || '',
+            previous_state: profile.previous_state || '',
+            previous_postcode: profile.previous_postcode || '',
+            preferred_contact_method: profile.preferred_contact_method || '',
+          }
+        : undefined,
+    [profile],
+  )
+  const { form, updateField, resetEdits } = useSeededForm(seed)
 
   const updateProfile = useMutation({
     mutationFn: async (data: Partial<CustomerProfile>) => {
@@ -81,6 +85,8 @@ export default function CustomerProfilePage() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: CUSTOMER_PROFILE_KEY })
+      // Saved: drop local edits so the form shows the refetched server values
+      resetEdits()
       setSaved(true)
       toast.success('Profile saved successfully')
       setTimeout(() => {
@@ -92,7 +98,7 @@ export default function CustomerProfilePage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
     const checked = (e.target as HTMLInputElement).checked
-    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
+    updateField(name, type === 'checkbox' ? checked : value)
   }
 
   const handleSave = () => {

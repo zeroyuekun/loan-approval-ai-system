@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
-import { EmailPreview, HtmlEmailBody } from '@/components/emails/EmailPreview'
+import { renderToString } from 'react-dom/server'
+import { EmailPreview, HtmlEmailBody, formatEmailTime } from '@/components/emails/EmailPreview'
 import { GeneratedEmail } from '@/types'
 
 vi.mock('@/components/emails/GuardrailLogDisplay', () => ({
@@ -109,3 +110,32 @@ describe('HtmlEmailBody', () => {
     expect(preview?.textContent).toContain('Safe')
   })
 })
+
+describe('email preview timestamp and server rendering', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('shows when the email was created, not the current time', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-01T23:59:00Z'))
+    render(<EmailPreview email={baseEmail} />)
+    expect(screen.getByText(formatEmailTime(baseEmail.created_at))).toBeInTheDocument()
+    expect(formatEmailTime(baseEmail.created_at)).not.toBe(formatEmailTime(new Date().toISOString()))
+  })
+
+  it('formatEmailTime renders the local date and time of an ISO timestamp', () => {
+    const d = new Date('2026-03-30T10:05:00Z')
+    const out = formatEmailTime('2026-03-30T10:05:00Z')
+    const h = d.getHours() % 12 || 12
+    expect(out).toContain(`${h}:05 ${d.getHours() >= 12 ? 'PM' : 'AM'}`)
+    expect(out).toContain(String(d.getDate()))
+  })
+
+  it('emits no email HTML during server rendering (sanitiser needs a DOM)', () => {
+    const html = renderToString(<HtmlEmailBody html='<p>Body text</p><img src=x onerror="alert(1)">' />)
+    expect(html).not.toContain('Body text')
+    expect(html).not.toContain('onerror')
+  })
+})
+

@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { useCreateApplication } from '@/hooks/useApplications'
 import { useCustomerProfile } from '@/hooks/useCustomerProfile'
 import { useAuth } from '@/lib/auth'
+import { DRAFT_STORAGE_KEY } from '@/lib/clientState'
 
 export const STEP_LABELS = ['Personal', 'Employment & Income', 'Expenses & Debts', 'Loan Details', 'Review & Submit']
 
@@ -42,12 +43,14 @@ const formSchema = z.object({
 
 export type FormData = z.infer<typeof formSchema>
 
-const DRAFT_KEY = 'loan_application_draft'
+const DRAFT_KEY = DRAFT_STORAGE_KEY
 /** Drafts expire after 24 hours — mirrors TTL pattern used in useMetrics.ts (15 min for training tasks). */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000
 
 interface DraftEnvelope {
   savedAt: number
+  /** Username that saved the draft; login drops drafts owned by anyone else. */
+  owner?: string | null
   data: Partial<FormData>
 }
 
@@ -110,6 +113,11 @@ export function useApplicationForm(onSuccessPath?: string) {
 
   const { register, handleSubmit, trigger, watch, formState: { errors } } = form
 
+  const draftOwnerRef = useRef<string | null>(user?.username ?? null)
+  useEffect(() => {
+    draftOwnerRef.current = user?.username ?? null
+  }, [user?.username])
+
   // Persist form state to localStorage on every change
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -117,7 +125,11 @@ export function useApplicationForm(onSuccessPath?: string) {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         try {
-          const envelope: DraftEnvelope = { savedAt: Date.now(), data: values as Partial<FormData> }
+          const envelope: DraftEnvelope = {
+            savedAt: Date.now(),
+            owner: draftOwnerRef.current,
+            data: values as Partial<FormData>,
+          }
           localStorage.setItem(DRAFT_KEY, JSON.stringify(envelope))
         } catch (e) { console.warn('[useApplicationForm] Failed to save draft to localStorage:', e) }
       }, 500)

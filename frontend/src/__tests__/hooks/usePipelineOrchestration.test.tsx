@@ -164,10 +164,10 @@ describe('usePipelineOrchestration', () => {
     expect(result.current.pipelineDisabled).toBe(true)
   })
 
-  it('escalates to force-rerun when backend returns already_completed', async () => {
-    // Backend short-circuits when a completed AgentRun exists for the
-    // application. The button must auto-escalate to force-rerun so the
-    // click triggers a real pipeline + new email, not a silent no-op.
+  it('asks for confirmation and a reason instead of force re-running when backend returns already_completed', async () => {
+    // A forced re-run regenerates the decision and the customer email and is
+    // audited with the reason, so it must never fire on a single click with a
+    // made-up reason.
     mockMutateAsync.mockResolvedValue({
       status: 'already_completed',
       existing_run_id: 'run-old',
@@ -182,12 +182,54 @@ describe('usePipelineOrchestration', () => {
       await result.current.handleOrchestrate()
     })
 
+    expect(mockForceRerunMutateAsync).not.toHaveBeenCalled()
+    expect(result.current.forceRerunPrompt).toBe(true)
+    expect(result.current.pipelineQueued).toBe(false)
+    expect(result.current.orchestrating).toBe(false)
+  })
+
+  it('force re-runs with the typed reason once confirmed', async () => {
+    mockMutateAsync.mockResolvedValue({ status: 'already_completed', existing_run_id: 'run-old' })
+    const onRefresh = vi.fn()
+
+    const { result } = renderHook(
+      () => usePipelineOrchestration('loan-123', null, onRefresh),
+      { wrapper: createWrapper() },
+    )
+    await act(async () => {
+      await result.current.handleOrchestrate()
+    })
+    await act(async () => {
+      await result.current.confirmForceRerun('  Model retrained after drift alert  ')
+    })
+
     expect(mockForceRerunMutateAsync).toHaveBeenCalledWith({
       loanId: 'loan-123',
-      reason: expect.any(String),
+      reason: 'Model retrained after drift alert',
     })
+    expect(result.current.forceRerunPrompt).toBe(false)
     expect(result.current.pipelineQueued).toBe(true)
-    expect(result.current.pipelineError).toBeNull()
+    expect(onRefresh).toHaveBeenCalled()
+  })
+
+  it('cancelling the confirmation does not re-run', async () => {
+    mockMutateAsync.mockResolvedValue({ status: 'already_completed', existing_run_id: 'run-old' })
+
+    const { result } = renderHook(
+      () => usePipelineOrchestration('loan-123', null),
+      { wrapper: createWrapper() },
+    )
+    await act(async () => {
+      await result.current.handleOrchestrate()
+    })
+    act(() => {
+      result.current.cancelForceRerun()
+    })
+
+    expect(result.current.forceRerunPrompt).toBe(false)
+    expect(mockForceRerunMutateAsync).not.toHaveBeenCalled()
+    expect(result.current.pipelineQueued).toBe(false)
+    expect(result.current.pipelineDisabled).toBe(false)
   })
 
   it('does NOT escalate to force-rerun on a normal successful orchestration', async () => {
@@ -206,25 +248,25 @@ describe('usePipelineOrchestration', () => {
     expect(result.current.pipelineQueued).toBe(true)
   })
 
-  it('surfaces pipelineError when force-rerun escalation fails', async () => {
-    mockMutateAsync.mockResolvedValue({
-      status: 'already_completed',
-      existing_run_id: 'run-old',
-    })
-    mockForceRerunMutateAsync.mockRejectedValue(new Error('Force rerun forbidden'))
+  it('keeps the confirmation open with the error when the force rerun fails', async () => {
+    mockMutateAsync.mockResolvedValue({ status: 'already_completed', existing_run_id: 'run-old' })
+    mockForceRerunMutateAsync.mockRejectedValue(new Error('Force rerun requires staff role.'))
 
     const { result } = renderHook(
       () => usePipelineOrchestration('loan-123', null),
       { wrapper: createWrapper() },
     )
-
     await act(async () => {
       await result.current.handleOrchestrate()
     })
+    await act(async () => {
+      await result.current.confirmForceRerun('bias flag resolved')
+    })
 
     expect(mockForceRerunMutateAsync).toHaveBeenCalledTimes(1)
-    expect(result.current.pipelineError).toBe('Force rerun forbidden')
+    expect(result.current.forceRerunPrompt).toBe(true)
+    expect(result.current.forceRerunError).toBe('Force rerun requires staff role.')
     expect(result.current.pipelineQueued).toBe(false)
-    expect(result.current.orchestrating).toBe(false)
+    expect(result.current.forceRerunPending).toBe(false)
   })
 })

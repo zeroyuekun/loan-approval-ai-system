@@ -2,15 +2,18 @@
 
 import { useState, useEffect, useCallback, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { AuthContext } from '@/lib/auth'
+import { useQueryClient } from '@tanstack/react-query'
+import { AuthContext, type LoginResult } from '@/lib/auth'
 import api, { authApi, type RegisterPayload } from '@/lib/api'
 import { clearSession, readSessionUser, setRoleCookie, storeSessionUser } from '@/lib/session'
+import { clearForeignDraft, resetClientState } from '@/lib/clientState'
 import { User } from '@/types'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
+  const queryClient = useQueryClient()
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -43,16 +46,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchProfile().finally(() => setIsLoading(false))
   }, [fetchProfile])
 
-  const login = useCallback(async (username: string, password: string) => {
+  const login = useCallback(async (username: string, password: string, otpToken?: string): Promise<LoginResult> => {
     // Ensure we have a CSRF token before the login POST
     await authApi.getCsrfToken()
-    const { data } = await authApi.login({ username, password })
+    const { data } = await authApi.login(otpToken ? { username, password, otp_token: otpToken } : { username, password })
+
+    // Step 1 of two-step login for TOTP-enrolled accounts: password accepted,
+    // no session issued yet. The caller prompts for the code and calls again.
+    if (data?.requires_2fa) {
+      return { status: 'otp_required', detail: data.detail }
+    }
+    if (!data?.user?.role || !data.user.username) {
+      throw new Error('Unexpected login response from the server.')
+    }
+
+    // A new session starts with an empty cache: React Query keys are not
+    // user-scoped, so anything cached before this point belongs to whoever
+    // used this browser last.
+    queryClient.clear()
+    clearForeignDraft(data.user.username)
     // Server sets HttpOnly cookies; we keep only the non-PII render hints
     storeSessionUser(data.user)
     setUser(data.user)
     setIsLoading(false)
-    router.replace(data.user.role === 'customer' ? '/apply' : '/dashboard')
-  }, [router])
+    if (data.requires_2fa_setup) {
+      // Staff account without an authenticator: the backend still issues the
+      // session, but sends the user to enrol.
+      router.replace('/dashboard/two-factor')
+    } else {
+      router.replace(data.user.role === 'customer' ? '/apply' : '/dashboard')
+    }
+    return { status: 'ok' }
+  }, [router, queryClient])
 
   const register = useCallback(async (formData: RegisterPayload) => {
     await authApi.getCsrfToken()
@@ -67,10 +92,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Logout even if the API call fails
     }
-    clearSession()
+    // Session hints, the query cache and per-user local storage (drafts)
+    resetClientState(queryClient)
     setUser(null)
     router.replace('/login')
-  }, [router])
+  }, [router, queryClient])
 
   return (
     <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>

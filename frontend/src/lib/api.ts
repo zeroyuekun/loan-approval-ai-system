@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { toast } from 'sonner'
-import { clearSession } from '@/lib/session'
+import { resetClientState } from '@/lib/clientState'
+import { resolveApiUrl } from '@/lib/csp'
 
 // API parameter and payload types
 interface PaginationParams {
@@ -58,7 +59,9 @@ export interface LoanPayload {
   [key: string]: string | number | boolean | null | undefined
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+// Production builds without NEXT_PUBLIC_API_URL use the same-origin /api/v1
+// path rather than baking in localhost (see lib/csp.ts).
+const API_URL = resolveApiUrl(process.env.NEXT_PUBLIC_API_URL, process.env.NODE_ENV)
 
 const api = axios.create({
   baseURL: API_URL,
@@ -68,12 +71,13 @@ const api = axios.create({
 })
 
 /**
- * Clear the client session hints and redirect to login. Called from the
+ * Clear per-user client state and redirect to login. Called from the
  * response interceptor when a token refresh fails (interceptors run outside
- * React, so this cannot go through useAuth.logout()).
+ * React, so this cannot go through useAuth.logout()). The hard navigation
+ * drops the in-memory React Query cache; resetClientState clears the rest.
  */
 function clearAuthAndRedirect(): void {
-  clearSession()
+  resetClientState()
   if (typeof window !== 'undefined') {
     window.location.assign('/login')
   }
@@ -101,7 +105,11 @@ api.interceptors.request.use((config) => {
 // Response interceptor for token refresh via cookies
 let refreshPromise: Promise<void> | null = null
 
-// Paths where a 401 is expected and should NOT trigger a refresh/redirect cycle
+// Session-bootstrap paths (profile fetch on mount). A 401 here still gets one
+// refresh attempt, so a reload after the access cookie expires is rescued by
+// the refresh cookie. If that refresh fails the 401 propagates WITHOUT a hard
+// redirect: useAuth sets user=null and the layout routes to /login, which
+// avoids a reload loop on the login page itself.
 const AUTH_CHECK_PATHS = ['/auth/me/', '/auth/me/profile/']
 
 api.interceptors.response.use(
@@ -110,12 +118,6 @@ api.interceptors.response.use(
     const originalRequest = error.config
     const isRefreshRequest = originalRequest.url?.includes('/auth/refresh/')
     const isAuthCheck = AUTH_CHECK_PATHS.some((p) => originalRequest.url?.includes(p))
-
-    // For auth-check requests (profile fetch on mount), just let the 401 propagate
-    // so useAuth can set user=null and redirect via React Router, not a hard reload
-    if (error.response?.status === 401 && isAuthCheck) {
-      return Promise.reject(error)
-    }
 
     if (error.response?.status === 401 && !originalRequest._retry && !isRefreshRequest) {
       originalRequest._retry = true
@@ -129,15 +131,20 @@ api.interceptors.response.use(
           refreshPromise = axios.post(`${API_URL}/auth/refresh/`, {}, { withCredentials: true }).then(() => undefined)
         }
         await refreshPromise
-        return api(originalRequest)
       } catch {
-        // Refresh failed — clear auth state and redirect to login so the user
-        // is not left on a blank/stuck page.
-        clearAuthAndRedirect()
+        // Refresh failed. For normal requests, clear auth state and redirect
+        // to login so the user is not left on a blank/stuck page.
+        if (!isAuthCheck) clearAuthAndRedirect()
         return Promise.reject(error)
       } finally {
         refreshPromise = null
       }
+      // Replay outside the try: an error from the replayed request (a 404, a
+      // second 401) is that request's own failure, not a failed refresh.
+      return api(originalRequest)
+    }
+    if (error.response?.status === 401 && isAuthCheck) {
+      return Promise.reject(error)
     }
     // Retry transient failures (429 Too Many Requests, 503 Service Unavailable)
     const retryableStatus = [429, 503]
@@ -180,7 +187,7 @@ export async function withNotFoundFallback<T, F>(request: () => Promise<T>, fall
 
 // Auth
 export const authApi = {
-  login: (data: { username: string; password: string }) => api.post('/auth/login/', data),
+  login: (data: { username: string; password: string; otp_token?: string }) => api.post('/auth/login/', data),
   register: (data: RegisterPayload) => api.post('/auth/register/', data),
   getProfile: () => api.get('/auth/me/'),
   getCustomerProfile: () => api.get('/auth/me/profile/'),
@@ -190,6 +197,11 @@ export const authApi = {
   listCustomers: (params?: PaginationParams) => api.get('/auth/customers/', { params }),
   getCustomerActivity: (userId: number) => api.get(`/auth/customers/${userId}/activity/`),
   getCsrfToken: () => api.get('/auth/csrf/'),
+  // TOTP enrolment for staff (backend: accounts/views_2fa.py)
+  twoFactorStatus: () => api.get<{ enabled: boolean; required: boolean }>('/auth/2fa/status/'),
+  twoFactorSetup: () =>
+    api.post<{ provisioning_uri: string; qr_code_base64: string | null; detail: string }>('/auth/2fa/setup/'),
+  twoFactorVerify: (token: string) => api.post<{ detail: string; confirmed: boolean }>('/auth/2fa/verify/', { token }),
 }
 
 // Loans

@@ -5,8 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mlApi, tasksApi, withNotFoundFallback } from '@/lib/api'
 import { nextPollInterval } from '@/lib/polling'
 import { ModelMetrics } from '@/types'
-
-const TRAINING_STORAGE_KEY = 'aussieloanai_training_task'
+import { TRAINING_STORAGE_KEY } from '@/lib/clientState'
 
 function saveTrainingTask(taskId: string, algorithm: string) {
   localStorage.setItem(TRAINING_STORAGE_KEY, JSON.stringify({ taskId, algorithm, startedAt: Date.now() }))

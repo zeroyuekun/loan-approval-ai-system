@@ -13,6 +13,12 @@ interface UsePipelineOrchestrationReturn {
   pipelineDisabled: boolean
   // Promise<void> so callers can await and react to orchestration failures
   handleOrchestrate: () => Promise<void>
+  /** True while the user is asked to confirm a forced re-run and give a reason. */
+  forceRerunPrompt: boolean
+  forceRerunPending: boolean
+  forceRerunError: string | null
+  confirmForceRerun: (reason: string) => Promise<void>
+  cancelForceRerun: () => void
 }
 
 export function usePipelineOrchestration(
@@ -27,6 +33,9 @@ export function usePipelineOrchestration(
   const [preRunAgentId, setPreRunAgentId] = useState<string | null>(null)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
   const [pipelineSuccess, setPipelineSuccess] = useState<string | null>(null)
+  const [forceRerunPrompt, setForceRerunPrompt] = useState(false)
+  const [forceRerunPending, setForceRerunPending] = useState(false)
+  const [forceRerunError, setForceRerunError] = useState<string | null>(null)
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Fetch agent run with polling awareness — keeps polling while pipeline is queued
@@ -82,15 +91,14 @@ export function usePipelineOrchestration(
     try {
       const result = await orchestrate.mutateAsync(String(applicationId))
       // Backend short-circuits with {status:"already_completed"} when a
-      // completed AgentRun exists. Staff clicking "Re-run AI Pipeline"
-      // expect a fresh run (+ new email) — escalate to force-rerun so the
-      // click isn't silently swallowed. The dashboard is staff-only, so
-      // this path is never reached by customers.
+      // completed AgentRun exists. A fresh run means a forced re-run, which
+      // regenerates the decision and the customer email and is audited with
+      // a reason, so ask the staff member to confirm and type that reason
+      // instead of escalating on a single click.
       if (result?.status === 'already_completed') {
-        await forceRerun.mutateAsync({
-          loanId: String(applicationId),
-          reason: 'Staff re-run from application detail page',
-        })
+        setForceRerunError(null)
+        setForceRerunPrompt(true)
+        return
       }
       setPipelineQueued(true)
       onRefresh?.()
@@ -103,6 +111,29 @@ export function usePipelineOrchestration(
     }
   }
 
+  const confirmForceRerun = async (reason: string) => {
+    const trimmed = reason.trim()
+    if (!trimmed) return
+    setForceRerunPending(true)
+    setForceRerunError(null)
+    try {
+      await forceRerun.mutateAsync({ loanId: String(applicationId), reason: trimmed })
+      setForceRerunPrompt(false)
+      setPipelineQueued(true)
+      onRefresh?.()
+    } catch (error: any) {
+      setForceRerunError(error?.message || 'Force rerun failed. Please try again.')
+    } finally {
+      setForceRerunPending(false)
+    }
+  }
+
+  const cancelForceRerun = () => {
+    setForceRerunPrompt(false)
+    setForceRerunError(null)
+    setPreRunAgentId(null)
+  }
+
   const pipelineDisabled = orchestrating || pipelineQueued
 
   return {
@@ -113,5 +144,10 @@ export function usePipelineOrchestration(
     pipelineSuccess,
     pipelineDisabled,
     handleOrchestrate,
+    forceRerunPrompt,
+    forceRerunPending,
+    forceRerunError,
+    confirmForceRerun,
+    cancelForceRerun,
   }
 }

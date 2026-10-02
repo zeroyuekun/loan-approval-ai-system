@@ -5,17 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { MarketingEmail } from '@/types'
 import { ShieldCheck, ShieldAlert, Clock, Star, Reply, Forward, MoreVertical, RefreshCw } from 'lucide-react'
 import { GuardrailLogDisplay } from '@/components/emails/GuardrailLogDisplay'
-import { HtmlEmailBody } from '@/components/emails/EmailPreview'
+import { HtmlEmailBody, formatEmailTime } from '@/components/emails/EmailPreview'
 import { renderEmailHtml } from '@/lib/emailHtmlRenderer'
-
-function formatTime() {
-  const now = new Date()
-  const hours = now.getHours()
-  const minutes = now.getMinutes().toString().padStart(2, '0')
-  const ampm = hours >= 12 ? 'PM' : 'AM'
-  const h = hours % 12 || 12
-  return `${h}:${minutes} ${ampm}`
-}
 
 interface MarketingEmailCardProps {
   email: MarketingEmail
@@ -84,7 +75,7 @@ export function MarketingEmailCard({ email }: MarketingEmailCardProps) {
                       {email.attempt_number}
                     </span>
                   )}
-                  <span>{formatTime()}</span>
+                  <span>{formatEmailTime(email.created_at)}</span>
                   <Star className="h-4 w-4 text-gray-300 hover:text-yellow-400 cursor-pointer" />
                 </div>
               </div>
