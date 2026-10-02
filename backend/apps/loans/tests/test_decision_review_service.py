@@ -160,3 +160,34 @@ def test_officer_who_filed_the_review_cannot_resolve_it(django_user_model, monke
         apply_review_outcome(review, officer=officer, outcome="overturned", note="x")
     app.refresh_from_db()
     assert app.status == "denied"
+
+
+@pytest.mark.parametrize("outcome", ["upheld", "overturned"])
+def test_reviewer_who_denied_through_human_review_cannot_resolve_the_review(django_user_model, monkeypatch, outcome):
+    """A human-review deny is recorded against the AgentRun, and the pipeline
+    then moves the application to denied with no user on the transition. The
+    four-eyes check must still recognise the reviewer as the decider."""
+    from django.core.exceptions import PermissionDenied
+
+    import apps.loans.services.decision_review as svc
+
+    monkeypatch.setattr(svc, "_send_approval_email", lambda application: None)
+    app, officer, review = _denied_with_review(django_user_model)
+    AuditLog.objects.create(
+        user=officer,
+        action="human_review_deny",
+        resource_type="AgentRun",
+        resource_id="00000000-0000-0000-0000-000000000001",
+        details={"note": "n", "application_id": str(app.id), "original_decision": "approved"},
+    )
+    AuditLog.objects.create(
+        user=None,
+        action="status_transition",
+        resource_type="LoanApplication",
+        resource_id=str(app.id),
+        details={"from_status": "review", "to_status": "denied"},
+    )
+    with pytest.raises(PermissionDenied):
+        apply_review_outcome(review, officer=officer, outcome=outcome, note="x")
+    review.refresh_from_db()
+    assert review.status == DecisionReview.Status.UNDER_REVIEW

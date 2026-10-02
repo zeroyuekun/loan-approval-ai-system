@@ -95,7 +95,17 @@ def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note:
             .values_list("user_id", flat=True)
             .first()
         )
-        if original_decider_id is not None and original_decider_id == officer.pk:
+        # A human-review deny is audited against the AgentRun; the pipeline
+        # then moves the application to denied with no user on the
+        # transition, so the reviewer has to be found on that row instead.
+        human_review_denier_ids = set(
+            AuditLog.objects.filter(
+                action="human_review_deny",
+                details__application_id=str(locked.application_id),
+                user__isnull=False,
+            ).values_list("user_id", flat=True)
+        )
+        if officer.pk == original_decider_id or officer.pk in human_review_denier_ids:
             raise PermissionDenied(
                 "An officer cannot resolve their own decision — four-eyes policy requires a second approver."
             )
