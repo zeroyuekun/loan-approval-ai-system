@@ -48,10 +48,11 @@ export function usePipelineOrchestration(
   // This prevents the old completed run from immediately clearing the
   // queued state before Celery creates the new AgentRun.
   useEffect(() => {
-    // Only react when we're actively waiting for a pipeline result
-    // (preRunAgentId is set only when the user clicks "Run Pipeline")
-    if (!agentRun || !preRunAgentId) return
-    const isNewRun = agentRun.id !== preRunAgentId
+    // Only react while waiting for a queued pipeline. pipelineQueued is the
+    // waiting flag, not preRunAgentId: that is null when the application had
+    // no run before the click, and then any run that appears is the new one.
+    if (!agentRun || !pipelineQueued) return
+    const isNewRun = preRunAgentId === null || agentRun.id !== preRunAgentId
     const isTerminal = ['completed', 'failed', 'escalated'].includes(agentRun.status)
     if (isNewRun && isTerminal) {
       setPipelineQueued(false)

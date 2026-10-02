@@ -6,6 +6,8 @@ import { AgentRun } from '@/types'
 // Mock the underlying hooks
 const mockMutateAsync = vi.fn()
 const mockForceRerunMutateAsync = vi.fn()
+// What the polled GET /agents/runs/:loanId/ currently returns (undefined = 404, no run yet)
+let mockFetchedRun: AgentRun | undefined
 vi.mock('@/hooks/useAgentStatus', () => ({
   useOrchestrate: () => ({
     mutateAsync: mockMutateAsync,
@@ -14,7 +16,7 @@ vi.mock('@/hooks/useAgentStatus', () => ({
     mutateAsync: mockForceRerunMutateAsync,
   }),
   useAgentRun: () => ({
-    data: undefined,
+    data: mockFetchedRun,
   }),
 }))
 
@@ -47,6 +49,7 @@ describe('usePipelineOrchestration', () => {
     mockMutateAsync.mockReset()
     mockForceRerunMutateAsync.mockReset()
     mockForceRerunMutateAsync.mockResolvedValue({ task_id: 'force-task-1' })
+    mockFetchedRun = undefined
   })
 
   it('returns initial state correctly', () => {
@@ -268,5 +271,43 @@ describe('usePipelineOrchestration', () => {
     expect(result.current.forceRerunError).toBe('Force rerun requires staff role.')
     expect(result.current.pipelineQueued).toBe(false)
     expect(result.current.forceRerunPending).toBe(false)
+  })
+
+  it('finishes when the first ever run completes (no prior run to compare against)', async () => {
+    mockMutateAsync.mockResolvedValue({ task_id: 'task-1' })
+
+    const { result, rerender } = renderHook(
+      () => usePipelineOrchestration('loan-123', null),
+      { wrapper: createWrapper() },
+    )
+    // The run endpoint 404s: this application has never been through the pipeline.
+    await act(async () => {
+      await result.current.handleOrchestrate()
+    })
+    expect(result.current.pipelineQueued).toBe(true)
+
+    // The poll now returns the new run, already completed.
+    mockFetchedRun = { ...mockAgentRun, id: 'run-new', status: 'completed' }
+    rerender()
+
+    await waitFor(() => expect(result.current.pipelineQueued).toBe(false))
+    expect(result.current.pipelineSuccess).toBe('Pipeline completed successfully.')
+  })
+
+  it('stays queued while only the previous run is visible', async () => {
+    mockFetchedRun = { ...mockAgentRun, id: 'run-old', status: 'completed' }
+    mockMutateAsync.mockResolvedValue({ task_id: 'task-1' })
+
+    const { result, rerender } = renderHook(
+      () => usePipelineOrchestration('loan-123', null),
+      { wrapper: createWrapper() },
+    )
+    await act(async () => {
+      await result.current.handleOrchestrate()
+    })
+    rerender()
+
+    expect(result.current.pipelineQueued).toBe(true)
+    expect(result.current.pipelineSuccess).toBeNull()
   })
 })
