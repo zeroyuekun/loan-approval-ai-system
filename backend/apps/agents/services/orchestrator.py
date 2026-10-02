@@ -184,6 +184,12 @@ class PipelineOrchestrator:
                 ).update(status=AgentRun.Status.FAILED, error="Stale pipeline — automatically cleared")
                 application.transition_to("pending", details={"source": "stale_pipeline_reset"})
             application.transition_to("processing", details={"source": "orchestrator_pipeline"})
+            # A forced re-run or batch recheck replaces any run still waiting
+            # for review; left ESCALATED, it would stay in the queue and a
+            # reviewer could act on a decision this run is about to replace.
+            AgentRun.objects.filter(application=application, status=AgentRun.Status.ESCALATED).update(
+                status=AgentRun.Status.FAILED, error="Superseded by a newer pipeline run"
+            )
 
         # Refetch with profile (nullable) outside the lock — select_for_update
         # cannot be combined with outer joins on nullable relations in PostgreSQL.

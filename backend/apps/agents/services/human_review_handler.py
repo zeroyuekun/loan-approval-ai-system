@@ -1,6 +1,7 @@
 import logging
 import time
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -14,6 +15,7 @@ from apps.ml_engine.services.scoring.reason_codes import generate_adverse_action
 
 from .api_budget import bind_api_call_context
 from .bias.core import BiasDetector
+from .bias.thresholds import is_severe
 from .context_builder import ApplicationContextBuilder
 from .email_pipeline import build_denial_email_context
 from .marketing_pipeline import MarketingPipelineService
@@ -63,8 +65,12 @@ class HumanReviewHandler:
                 AgentRun.objects.select_for_update().select_related("application__applicant").get(pk=agent_run_id)
             )
 
-            if agent_run.status != "escalated":
-                raise ValueError(f'Cannot resume agent run with status {agent_run.status!r} (expected "escalated")')
+            # The review view claims the run (RUNNING) when it dispatches this
+            # resume; ESCALATED is still accepted for direct callers.
+            if agent_run.status not in ("escalated", "running"):
+                raise ValueError(
+                    f'Cannot resume agent run with status {agent_run.status!r} (expected "escalated" or "running")'
+                )
 
             # Capture the escalation timestamp BEFORE we flip status, since
             # the save below will bump updated_at. Used for the bias-review
@@ -147,11 +153,13 @@ class HumanReviewHandler:
             email_result = None
         steps.append(step)
 
-        # Guardrail failure on resume (the template failed too) -> re-escalate
+        # Guardrail failure on resume (the template failed too): withhold the
+        # email and still apply the reviewer's decision, as the pipeline does.
+        # Only bias findings go to the review queue.
         if email_result and not email_result.get("passed_guardrails"):
             failed_checks = [r["check_name"] for r in email_result.get("guardrail_results", []) if not r["passed"]]
             logger.warning(
-                "Agent run %s: %s email guardrails failed on resume — re-escalating. Failed checks: %s",
+                "Agent run %s: %s email guardrails failed on resume — email withheld. Failed checks: %s",
                 agent_run_id,
                 decision,
                 ", ".join(failed_checks),
@@ -161,15 +169,12 @@ class HumanReviewHandler:
                 step,
                 result_summary={
                     "sent": False,
-                    "reason": "Guardrails failed on resume — re-escalated to human review",
+                    "reason": "Guardrails failed on resume — email withheld",
                     "failed_guardrails": failed_checks,
                 },
             )
             steps.append(step)
-            agent_run.status = "escalated"
-            agent_run.error = f"Email guardrails failed on resume: {', '.join(failed_checks)}"
-            self.tracker.finalize_run(agent_run, steps, start_time)
-            return agent_run
+            email_result = None  # nothing to bias-check or deliver
 
         # Re-run bias detection on the regenerated email. The original pipeline
         # ran bias detection before sending; the resume path must mirror this
@@ -210,7 +215,9 @@ class HumanReviewHandler:
                 )
                 steps.append(step_bias)
 
-                if bias_result.get("flagged"):
+                # Same boundary as the pipeline: moderate findings are recorded
+                # on the BiasReport above and the email is sent.
+                if is_severe(bias_result["score"], getattr(settings, "BIAS_THRESHOLD_REVIEW", 60)):
                     logger.warning(
                         "Agent run %s: resumed %s email re-flagged by bias detector "
                         "(score=%s) — re-escalating application %s",
@@ -244,18 +251,24 @@ class HumanReviewHandler:
                     return agent_run
 
             except Exception as exc:
-                # Bias check failure on resume — fail-safe: withhold and re-escalate.
-                logger.error(
-                    "Agent run %s: bias check failed on resume — re-escalating: %s",
-                    agent_run_id,
-                    exc,
-                )
                 step_bias = self.tracker.fail_step(step_bias, str(exc), failure_category="transient")
                 steps.append(step_bias)
-                agent_run.status = "escalated"
-                agent_run.error = f"Bias check failed on resume — withheld for safety: {exc}"
-                self.tracker.finalize_run(agent_run, steps, start_time)
-                return agent_run
+                # BIAS_FAILURE_MODE as in the pipeline: warn/off fail open and
+                # send. In block mode the email is withheld; the run goes back
+                # to ESCALATED rather than to PENDING (the pipeline's hold) so
+                # the reviewer's decision, already on record for a deny, stays
+                # actionable from the queue it came from.
+                mode = getattr(settings, "BIAS_FAILURE_MODE", "block").lower()
+                if mode in ("warn", "off"):
+                    logger.error(
+                        "Agent run %s: bias check failed on resume — failing open (%s): %s", agent_run_id, mode, exc
+                    )
+                else:
+                    logger.error("Agent run %s: bias check failed on resume — re-escalating: %s", agent_run_id, exc)
+                    agent_run.status = "escalated"
+                    agent_run.error = f"Bias check failed on resume — withheld for safety: {exc}"
+                    self.tracker.finalize_run(agent_run, steps, start_time)
+                    return agent_run
 
         # Send the decision email (once; stamps sent_at so a later standalone
         # generate/send for the same decision does not email the customer again).

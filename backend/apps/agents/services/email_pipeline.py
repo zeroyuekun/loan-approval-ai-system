@@ -9,6 +9,7 @@ from apps.agents.models import BiasReport
 from apps.email_engine.services.decision_email import deliver_decision_email, generate_decision_email
 from apps.loans.models import LoanApplication
 
+from .bias.thresholds import is_severe
 from .bias_detector import BiasDetector
 from .recommendation_engine import RecommendationEngine
 from .step_tracker import StepTracker
@@ -183,7 +184,7 @@ class EmailPipelineService:
 
         # Bias score at/above review threshold — escalate to human review.
         # Inclusive bound: a score equal to the threshold must escalate.
-        if bias_score >= bias_threshold_review:
+        if is_severe(bias_score, bias_threshold_review):
             waterfall.append(
                 StepTracker.waterfall_entry(
                     "final_decision",

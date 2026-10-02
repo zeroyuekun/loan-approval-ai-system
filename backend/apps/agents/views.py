@@ -317,6 +317,19 @@ class HumanReviewView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
 
+            # A run left escalated by an older pipeline must not act on an
+            # application a later run has already decided.
+            application_status = (
+                LoanApplication.objects.select_for_update()
+                .values_list("status", flat=True)
+                .get(pk=agent_run.application_id)
+            )
+            if application_status != LoanApplication.Status.REVIEW:
+                return Response(
+                    {"error": f"Application is no longer in review (current status: {application_status})"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
             review_step = {
                 "step_name": "human_review_decision",
                 "status": "completed",
@@ -328,9 +341,11 @@ class HumanReviewView(APIView):
             }
 
             if action == "approve":
-                # Mark as in-progress so the resume task sees consistent state
+                # Claim the run under the lock: it leaves the queue, and a second
+                # action on it gets the 409 above instead of racing this one.
                 agent_run.steps = agent_run.steps + [review_step]
-                agent_run.save(update_fields=["steps", "updated_at"])
+                agent_run.status = AgentRun.Status.RUNNING
+                agent_run.save(update_fields=["steps", "status", "updated_at"])
 
                 # Audit log inside the transaction
                 AuditLog.objects.create(
@@ -398,7 +413,8 @@ class HumanReviewView(APIView):
                 decision.save(update_fields=update_fields)
 
                 agent_run.steps = agent_run.steps + [review_step]
-                agent_run.save(update_fields=["steps", "updated_at"])
+                agent_run.status = AgentRun.Status.RUNNING  # claimed, as for approve
+                agent_run.save(update_fields=["steps", "status", "updated_at"])
 
                 AuditLog.objects.create(
                     user=request.user,
