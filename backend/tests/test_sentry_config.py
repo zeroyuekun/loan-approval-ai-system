@@ -1,9 +1,4 @@
-"""Sentry must not receive request bodies or stack-frame locals.
-
-Login, registration and loan application bodies carry passwords and applicant
-PII. sentry-sdk attaches request bodies whatever send_default_pii says, and
-includes frame locals by default.
-"""
+"""Sentry must not receive credentials or applicant PII (see config/sentry.py)."""
 
 import importlib
 from unittest.mock import patch
@@ -67,3 +62,48 @@ def test_scrub_event_tolerates_events_without_request_or_frames():
         "message": "plain log message",
         "exception": {"values": [{"type": "KeyError"}]},
     }
+
+
+def test_scrub_event_drops_cookies_query_string_and_credential_headers():
+    event = {
+        "request": {
+            "url": "https://api.example/api/v1/loans/",
+            "query_string": "email=jane%40example.com",
+            "cookies": {"access_token": "eyJ-secret"},
+            "headers": {
+                "Authorization": "Bearer eyJ-secret",
+                "Cookie": "access_token=eyJ-secret",
+                "X-CSRFToken": "csrf-secret",
+                "User-Agent": "pytest",
+            },
+        },
+    }
+
+    request = scrub_event(event, hint={})["request"]
+
+    assert "query_string" not in request
+    assert "cookies" not in request
+    assert request["headers"] == {"User-Agent": "pytest"}
+    assert "secret" not in repr(event)
+
+
+def test_scrub_event_reduces_user_to_its_id():
+    event = {"user": {"id": 42, "email": "jane@example.com", "ip_address": "203.0.113.9"}}
+    assert scrub_event(event, hint={})["user"] == {"id": 42}
+
+
+def test_scrub_event_redacts_pii_in_log_and_breadcrumb_messages():
+    event = {
+        "logentry": {
+            "message": "login failed for %s",
+            "params": ["jane@example.com", 3],
+            "formatted": "login failed for jane@example.com",
+        },
+        "breadcrumbs": {"values": [{"category": "log", "message": "called 0412 345 678 about jane@example.com"}]},
+    }
+
+    result = scrub_event(event, hint={})
+
+    assert result["logentry"]["params"] == ["[EMAIL_REDACTED]", 3]
+    assert result["logentry"]["formatted"] == "login failed for [EMAIL_REDACTED]"
+    assert result["breadcrumbs"]["values"][0]["message"] == "called [PHONE_REDACTED] about [EMAIL_REDACTED]"
