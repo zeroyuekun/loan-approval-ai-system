@@ -113,8 +113,8 @@ class OrchestrateView(APIView):
     def post(self, request, loan_id):
         """Trigger pipeline orchestration for a loan application.
 
-        Non-force path (default): idempotent. If a completed AgentRun exists, return
-        it without dispatching. Otherwise dispatch a new run.
+        Non-force path (default): idempotent. If the latest AgentRun completed,
+        return it without dispatching. Otherwise dispatch a new run.
 
         Force path: staff-only, requires `reason` query/body param, writes an
         AuditLog entry before dispatching.
@@ -140,15 +140,10 @@ class OrchestrateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         else:
-            existing = (
-                AgentRun.objects.filter(
-                    application_id=loan_id,
-                    status=AgentRun.Status.COMPLETED,
-                )
-                .order_by("-created_at")
-                .first()
-            )
-            if existing is not None:
+            # Only the latest run counts, as in the task: an older completed
+            # run says nothing once a later run has failed.
+            existing = AgentRun.objects.filter(application_id=loan_id).order_by("-created_at").first()
+            if existing is not None and existing.status == AgentRun.Status.COMPLETED:
                 return Response(
                     {
                         "status": "already_completed",

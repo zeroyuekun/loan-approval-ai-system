@@ -146,3 +146,21 @@ class TestOrchestrationForceGuard:
         resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
         assert resp.status_code == status.HTTP_202_ACCEPTED
         assert mock_delay.call_count == 1
+
+    @patch("apps.agents.views.orchestrate_pipeline_task.delay")
+    def test_non_force_ignores_a_completed_run_superseded_by_a_failed_one(self, mock_delay, customer, loan_app):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.agents.models import AgentRun
+
+        older = AgentRun.objects.create(application_id=loan_app.id, status=AgentRun.Status.COMPLETED)
+        AgentRun.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(hours=1))
+        AgentRun.objects.create(application_id=loan_app.id, status=AgentRun.Status.FAILED)
+        mock_delay.return_value.id = "task-2"
+        client = APIClient()
+        client.force_authenticate(user=customer)
+        resp = client.post(f"/api/v1/agents/orchestrate/{loan_app.id}/")
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert mock_delay.call_count == 1

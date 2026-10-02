@@ -159,13 +159,19 @@ def orchestrate_pipeline_task(self, application_id, force=False):
     from apps.agents.services.orchestrator import PipelineOrchestrator
     from apps.agents.services.step_tracker import pipeline_deadline
 
-    # Idempotency: skip if already completed (unless force re-run)
+    # Idempotency: skip if the latest run completed (unless force re-run). An
+    # older completed run does not count: a later run that failed may have
+    # overwritten its decision (the fail-safe bias hold rewrites the
+    # LoanDecision and returns the application to PENDING), and restoring
+    # from that would apply a decision no run finished.
     if not force:
-        existing = AgentRun.objects.filter(
-            application_id=application_id,
-            status=AgentRun.Status.COMPLETED,
-        ).exists()
-        if existing:
+        latest_status = (
+            AgentRun.objects.filter(application_id=application_id)
+            .order_by("-created_at")
+            .values_list("status", flat=True)
+            .first()
+        )
+        if latest_status == AgentRun.Status.COMPLETED:
             # A completed run owns this application — delegate the idempotent,
             # audited status restore to the orchestrator service (L16). The
             # task stays a thin dispatcher.
