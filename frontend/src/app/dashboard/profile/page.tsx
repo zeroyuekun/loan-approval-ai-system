@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import { tierColors, AU_STATES } from '@/lib/customerLabels'
 import { CUSTOMER_PROFILE_KEY, useCustomerProfile } from '@/hooks/useCustomerProfile'
 import { useSeededForm } from '@/hooks/useSeededForm'
+import { buildProfilePatch } from '@/lib/profilePatch'
 
 export default function ProfilePage() {
   const { user } = useAuth()
@@ -32,7 +33,7 @@ export default function ProfilePage() {
     () =>
       profile
         ? {
-            date_of_birth: profile.date_of_birth || '',
+            date_of_birth: profile.date_of_birth ?? undefined,
             phone: profile.phone || '',
             address_line_1: profile.address_line_1 || '',
             address_line_2: profile.address_line_2 || '',
@@ -42,9 +43,7 @@ export default function ProfilePage() {
             marital_status: profile.marital_status || '',
             residency_status: profile.residency_status || '',
             primary_id_type: profile.primary_id_type || '',
-            primary_id_number: profile.primary_id_number || '',
             secondary_id_type: profile.secondary_id_type || '',
-            secondary_id_number: profile.secondary_id_number || '',
             tax_file_number_provided: profile.tax_file_number_provided || false,
             is_politically_exposed: profile.is_politically_exposed || false,
             // Employment
@@ -105,7 +104,7 @@ export default function ProfilePage() {
   }
 
   const handleSave = () => {
-    updateProfile.mutate(form)
+    updateProfile.mutate(buildProfilePatch(seed, form))
   }
 
   if (isLoading) {
@@ -460,7 +459,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <Label htmlFor="primary_id_number">Document Number</Label>
-              <Input id="primary_id_number" name="primary_id_number" value={(form.primary_id_number as string) || ''} onChange={handleChange} placeholder="e.g. 12345678" />
+              <Input id="primary_id_number" name="primary_id_number" value={(form.primary_id_number as string) || ''} onChange={handleChange} placeholder={profile?.primary_id_number_masked || 'e.g. 12345678'} />
             </div>
           </div>
 
@@ -480,7 +479,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <Label htmlFor="secondary_id_number">Document Number</Label>
-              <Input id="secondary_id_number" name="secondary_id_number" value={(form.secondary_id_number as string) || ''} onChange={handleChange} placeholder="e.g. 2345 67890 1" />
+              <Input id="secondary_id_number" name="secondary_id_number" value={(form.secondary_id_number as string) || ''} onChange={handleChange} placeholder={profile?.secondary_id_number_masked || 'e.g. 2345 67890 1'} />
             </div>
           </div>
 

@@ -22,9 +22,12 @@ export interface CustomerProfile {
   marital_status: string;
   residency_status: string;
   primary_id_type: string;
-  primary_id_number: string;
+  // ID numbers are write-only: GET returns only the masked copies.
+  primary_id_number?: string;
+  primary_id_number_masked?: string;
   secondary_id_type: string;
-  secondary_id_number: string;
+  secondary_id_number?: string;
+  secondary_id_number_masked?: string;
   tax_file_number_provided: boolean;
   is_politically_exposed: boolean;
   account_tenure_years: number;

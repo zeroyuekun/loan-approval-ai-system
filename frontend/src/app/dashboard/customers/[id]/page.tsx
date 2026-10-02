@@ -49,6 +49,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCustomerActivity } from '@/hooks/useCustomerActivity'
+import { buildProfilePatch } from '@/lib/profilePatch'
 
 function BoolIndicator({ value, label }: { value: boolean; label: string }) {
   return (
@@ -66,7 +67,7 @@ function BoolIndicator({ value, label }: { value: boolean; label: string }) {
 
 type EditableFields = {
   // Personal details
-  date_of_birth?: string
+  date_of_birth?: string | null
   phone?: string
   address_line_1?: string
   address_line_2?: string
@@ -98,13 +99,13 @@ type EditableFields = {
   occupation?: string
   industry?: string
   employment_status?: string
-  years_in_current_role?: number
+  years_in_current_role?: number | null
   previous_employer?: string
   // Income
-  gross_annual_income?: number
-  other_income?: number
+  gross_annual_income?: number | null
+  other_income?: number | null
   other_income_source?: string
-  partner_annual_income?: number
+  partner_annual_income?: number | null
   // Assets
   estimated_property_value?: number
   vehicle_value?: number
@@ -117,7 +118,7 @@ type EditableFields = {
   rent_or_board_monthly?: number
   // Living Situation
   housing_situation?: string
-  time_at_current_address_years?: number
+  time_at_current_address_years?: number | null
   number_of_dependants?: number
   previous_suburb?: string
   previous_state?: string
@@ -156,8 +157,13 @@ function EditableField({
       <span className="text-muted-foreground shrink-0">{label}</span>
       <Input
         type={type}
-        value={editData[field] as string ?? ''}
-        onChange={(e) => onChange(field, type === 'number' ? Number(e.target.value) : e.target.value)}
+        value={(editData[field] as string | number | null | undefined) ?? ''}
+        onChange={(e) => {
+          const raw = e.target.value
+          // A cleared number or date is "no value" (null), never 0 or ''.
+          if (type !== 'text' && raw === '') return onChange(field, null)
+          onChange(field, type === 'number' ? Number(raw) : raw)
+        }}
         className="max-w-[200px] h-8 text-sm"
       />
     </div>
@@ -248,6 +254,8 @@ export default function CustomerProfilePage() {
   const [expandedRun, setExpandedRun] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [editData, setEditData] = useState<EditableFields>({})
+  // What the form was seeded with, so a save sends only the fields that changed
+  const [initialEditData, setInitialEditData] = useState<EditableFields>({})
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const isAdmin = currentUser?.role === 'admin'
@@ -290,8 +298,8 @@ export default function CustomerProfilePage() {
 
   const startEditing = () => {
     if (!profile) return
-    setEditData({
-      date_of_birth: profile.date_of_birth || '',
+    const seed: EditableFields = {
+      date_of_birth: profile.date_of_birth ?? null,
       phone: profile.phone || '',
       address_line_1: profile.address_line_1 || '',
       address_line_2: profile.address_line_2 || '',
@@ -319,13 +327,13 @@ export default function CustomerProfilePage() {
       occupation: profile.occupation || '',
       industry: profile.industry || '',
       employment_status: profile.employment_status || '',
-      years_in_current_role: profile.years_in_current_role ?? 0,
+      years_in_current_role: profile.years_in_current_role ?? null,
       previous_employer: profile.previous_employer || '',
       // Income
-      gross_annual_income: Number(profile.gross_annual_income) || 0,
-      other_income: Number(profile.other_income) || 0,
+      gross_annual_income: profile.gross_annual_income ?? null,
+      other_income: profile.other_income ?? null,
       other_income_source: profile.other_income_source || '',
-      partner_annual_income: Number(profile.partner_annual_income) || 0,
+      partner_annual_income: profile.partner_annual_income ?? null,
       // Assets
       estimated_property_value: Number(profile.estimated_property_value) || 0,
       vehicle_value: Number(profile.vehicle_value) || 0,
@@ -338,14 +346,16 @@ export default function CustomerProfilePage() {
       rent_or_board_monthly: Number(profile.rent_or_board_monthly) || 0,
       // Living Situation
       housing_situation: profile.housing_situation || '',
-      time_at_current_address_years: profile.time_at_current_address_years ?? 0,
+      time_at_current_address_years: profile.time_at_current_address_years ?? null,
       number_of_dependants: profile.number_of_dependants ?? 0,
       previous_suburb: profile.previous_suburb || '',
       previous_state: profile.previous_state || '',
       previous_postcode: profile.previous_postcode || '',
       // Contact
       preferred_contact_method: profile.preferred_contact_method || '',
-    })
+    }
+    setInitialEditData(seed)
+    setEditData(seed)
     setSaveError(null)
     setEditing(true)
   }
@@ -357,7 +367,7 @@ export default function CustomerProfilePage() {
   }
 
   const saveChanges = () => {
-    updateMutation.mutate(editData)
+    updateMutation.mutate(buildProfilePatch(initialEditData, editData))
   }
 
   if (profileLoading) {
