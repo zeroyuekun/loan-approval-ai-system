@@ -12,6 +12,7 @@ from django.utils.html import escape
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -215,16 +216,19 @@ class LoginView(generics.GenericAPIView):
     authentication_classes = ()  # a stale access cookie must not 401 login
     throttle_classes = (LoginRateThrottle,)
 
-    # Dummy password used to burn CPU time when the username doesn't exist,
-    # so that the response timing is indistinguishable from a real lookup.
+    # Every branch of post() spends exactly one password hash, so the response
+    # time does not tell a caller whether the account exists or is locked.
+    # Branches that never reach a real password check verify against this.
     _DUMMY_HASH = make_password("dummy-timing-equalizer")
 
-    def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        generic_error = {"detail": "Invalid username or password."}
+    def _burn_hash(self, password):
+        check_password(str(password), self._DUMMY_HASH)
 
-        # Check if account is locked before attempting authentication
+    def post(self, request, *args, **kwargs):
+        generic_error = {"detail": "Invalid username or password."}
         username = request.data.get("username", "")
+        password = request.data.get("password", "")
+
         user_obj = None
         if username:
             # Resolve the acting user the SAME way LoginSerializer does (it
@@ -235,21 +239,23 @@ class LoginView(generics.GenericAPIView):
                 user_obj = CustomUser.objects.filter(email=username).first()
             else:
                 user_obj = CustomUser.objects.filter(username=username).first()
-            if user_obj is None:
-                # Perform a dummy password check to equalise timing
-                check_password(request.data.get("password", ""), self._DUMMY_HASH)
 
-        if user_obj and user_obj.is_locked:
-            _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
+        if user_obj is None or user_obj.is_locked:
+            # Neither case checks a real password. Unknown names never reach
+            # authenticate(), whose own dummy hash for a missing user would
+            # make this branch cost two hashes.
+            self._burn_hash(password)
+            if user_obj is not None:
+                _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
+        serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            # Record failed login attempt
-            if user_obj:
-                user_obj.record_failed_login()
-                _audit_user_event(
-                    request, user_obj, "login_failed", {"failed_attempts": user_obj.failed_login_attempts}
-                )
+            if api_settings.NON_FIELD_ERRORS_KEY not in serializer.errors:
+                # A missing or blank field fails before authenticate() runs.
+                self._burn_hash(password)
+            user_obj.record_failed_login()
+            _audit_user_event(request, user_obj, "login_failed", {"failed_attempts": user_obj.failed_login_attempts})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
         user = serializer.validated_data["user"]

@@ -4,9 +4,11 @@ failed login tracking, and account lockout.
 Uses pytest + Django test client with cookie-based JWT auth.
 """
 
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -317,3 +319,128 @@ class TestCookieAuthCSRFEnforcement:
             HTTP_AUTHORIZATION=f"Bearer {token}",
         )
         assert not (resp.status_code == 403 and "CSRF" in (resp.json().get("detail") or ""))
+
+
+@pytest.mark.django_db
+@patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
+class TestFailedLoginsExpire:
+    """Failures only add up while they keep coming. The count used to grow until
+    a successful sign-in, and from 15 failures each wrong password locked the
+    account for 24 hours: one request a day kept a staff account locked."""
+
+    def _fail_once(self, client, user):
+        resp = client.post(LOGIN_URL, {"username": user.username, "password": "wrong_password"}, format="json")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_failure_long_after_the_last_one_starts_a_new_count(self, auth_client, login_user):
+        now = timezone.now()
+        CustomUser.objects.filter(pk=login_user.pk).update(
+            failed_login_attempts=15,
+            locked_until=now - timedelta(minutes=1),
+            last_failed_login_at=now - timedelta(hours=25),
+        )
+
+        self._fail_once(auth_client, login_user)
+
+        login_user.refresh_from_db()
+        assert login_user.failed_login_attempts == 1
+        assert not login_user.is_locked
+
+    def test_count_left_over_from_before_the_window_existed_starts_again(self, auth_client, login_user):
+        # Rows from before the migration have a count but no failure time.
+        CustomUser.objects.filter(pk=login_user.pk).update(
+            failed_login_attempts=15, locked_until=timezone.now() - timedelta(minutes=1)
+        )
+
+        self._fail_once(auth_client, login_user)
+
+        login_user.refresh_from_db()
+        assert login_user.failed_login_attempts == 1
+        assert not login_user.is_locked
+
+    def test_failures_inside_the_window_still_add_up(self, auth_client, login_user):
+        CustomUser.objects.filter(pk=login_user.pk).update(
+            failed_login_attempts=4, last_failed_login_at=timezone.now() - timedelta(minutes=5)
+        )
+
+        self._fail_once(auth_client, login_user)
+
+        login_user.refresh_from_db()
+        assert login_user.failed_login_attempts == 5
+        assert login_user.is_locked
+
+    def test_lock_lasts_minutes_not_a_day(self, login_user):
+        for _ in range(20):
+            login_user.record_failed_login()
+
+        login_user.refresh_from_db()
+        assert login_user.is_locked
+        assert login_user.locked_until <= timezone.now() + timedelta(minutes=15)
+
+
+@pytest.fixture
+def hash_calls(monkeypatch):
+    """Record every password hash computed or verified. All hashes in these
+    tests use Argon2, the first configured hasher, and its verify() does not
+    call encode(), so each entry is one hash."""
+    from django.contrib.auth.hashers import Argon2PasswordHasher
+
+    calls = []
+    for name in ("encode", "verify"):
+        original = getattr(Argon2PasswordHasher, name)
+
+        def counted(self, *args, _original=original, _name=name, **kwargs):
+            calls.append(_name)
+            return _original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Argon2PasswordHasher, name, counted)
+    return calls
+
+
+@pytest.mark.django_db
+@patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
+class TestLoginSpendsOneHash:
+    """Each sign-in branch spends exactly one password hash, so response time
+    does not reveal whether an account exists or is locked. Before: an unknown
+    username cost two (the view's dummy check plus ModelBackend's own) and a
+    locked account cost none."""
+
+    def _post(self, client, username, password):
+        return client.post(LOGIN_URL, {"username": username, "password": password}, format="json")
+
+    def test_unknown_username(self, auth_client, login_user, hash_calls):
+        hash_calls.clear()
+        resp = self._post(auth_client, "no_such_user", "wrong_password")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert len(hash_calls) == 1, hash_calls
+
+    def test_unknown_email(self, auth_client, login_user, hash_calls):
+        hash_calls.clear()
+        resp = self._post(auth_client, "nobody@test.com", "wrong_password")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert len(hash_calls) == 1, hash_calls
+
+    def test_locked_account(self, auth_client, login_user, hash_calls):
+        CustomUser.objects.filter(pk=login_user.pk).update(locked_until=timezone.now() + timedelta(minutes=5))
+        hash_calls.clear()
+        resp = self._post(auth_client, login_user.username, PASSWORD)
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert len(hash_calls) == 1, hash_calls
+
+    def test_wrong_password(self, auth_client, login_user, hash_calls):
+        hash_calls.clear()
+        resp = self._post(auth_client, login_user.username, "wrong_password")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert len(hash_calls) == 1, hash_calls
+
+    def test_blank_password_for_a_real_account(self, auth_client, login_user, hash_calls):
+        hash_calls.clear()
+        resp = self._post(auth_client, login_user.username, "")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert len(hash_calls) == 1, hash_calls
+
+    def test_success(self, auth_client, login_user, hash_calls):
+        hash_calls.clear()
+        resp = self._post(auth_client, login_user.username, PASSWORD)
+        assert resp.status_code == status.HTTP_200_OK
+        assert len(hash_calls) == 1, hash_calls

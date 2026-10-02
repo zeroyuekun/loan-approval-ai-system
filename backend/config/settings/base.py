@@ -146,6 +146,14 @@ AUTH_PASSWORD_VALIDATORS = [
 
 AUTH_USER_MODEL = "accounts.CustomUser"
 
+# Sign-in lockout. Failed sign-ins only add up while they keep coming: a failure
+# more than LOGIN_FAILURE_WINDOW after the previous one starts the count again,
+# so one wrong password now and then cannot keep an account locked.
+LOGIN_FAILURE_WINDOW = timedelta(minutes=15)
+# (failures in a row, minutes locked), highest first. The longest lock is no
+# longer than the window, so once it ends the next failure starts a new count.
+LOGIN_LOCKOUT_TIERS = ((10, 15), (8, 5), (5, 1))
+
 LANGUAGE_CODE = "en-au"
 TIME_ZONE = "UTC"
 USE_I18N = True
