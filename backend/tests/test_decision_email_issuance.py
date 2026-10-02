@@ -294,19 +294,181 @@ def test_resume_approved_stamps_sent_at_so_no_duplicate_send(escalated_agent_run
         assert send.call_count == 1
 
 
+# ---------------------------------------------------------------------------
+# Standalone issuance (generate_email_task, decision review overturn): the
+# email is bias-checked before it is sent, and the overturn queues it.
+# ---------------------------------------------------------------------------
+
+BIAS_ANALYZE = "apps.agents.services.bias.core.BiasDetector.analyze"
+
+
+def _severe_bias():
+    return {
+        "score": 85,
+        "flagged": True,
+        "requires_human_review": True,
+        "categories": ["gender"],
+        "analysis": "severe",
+        "score_source": "deterministic",
+    }
+
+
+def _moderate_bias():
+    return {**_severe_bias(), "score": 45, "requires_human_review": False, "analysis": "moderate"}
+
+
+def _template(decision="approved"):
+    return {**_passing(decision), "subject": "Template subject", "body": "Template body.", "template_fallback": True}
+
+
+@pytest.fixture
+def overturnable(sample_application, officer_user):
+    from apps.loans.models import DecisionReview
+
+    sample_application.status = "denied"
+    sample_application.save(update_fields=["status"])
+    LoanDecision.objects.create(application=sample_application, decision="denied", confidence=0.4)
+    review = DecisionReview.objects.create(
+        application=sample_application,
+        requested_by=sample_application.applicant,
+        reason="disagree",
+        status=DecisionReview.Status.UNDER_REVIEW,
+    )
+    return review, officer_user
+
+
+@pytest.fixture
+def decided_approved(sample_application):
+    sample_application.status = "approved"
+    sample_application.save(update_fields=["status"])
+    LoanDecision.objects.create(application=sample_application, decision="approved", confidence=0.8)
+    return sample_application
+
+
+@LOCMEM
 @pytest.mark.django_db
-def test_decision_review_overturn_email_stamps_sent_at(sample_application):
-    """The overturn path sends through the shared service, so sent_at is set."""
-    from apps.loans.services import decision_review as svc
+def test_generate_email_task_holds_a_severely_biased_email(decided_approved):
+    from apps.agents.models import BiasReport
+    from apps.email_engine.tasks import generate_email_task
+    from apps.loans.models import AuditLog
 
-    LoanDecision.objects.create(application=sample_application, decision="approved", confidence=0.7)
     send = MagicMock(return_value={"sent": True})
-    with patch.object(EmailGenerator, "generate", return_value=_passing("approved")), patch(SENDER, send):
-        svc._send_approval_email(sample_application)
+    with (
+        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch(BIAS_ANALYZE, return_value=_severe_bias()) as analyze,
+        patch(SENDER, send),
+    ):
+        result = generate_email_task.apply(
+            args=(str(decided_approved.pk), "approved"), kwargs={"regenerate": True}
+        ).get()
 
-    email = GeneratedEmail.objects.get(application=sample_application, decision="approved")
-    assert email.sent_at is not None
+    assert analyze.call_count == 1, "the email was sent without a bias check"
+    assert send.call_count == 0
+    assert result["email_sent"] is False
+    assert result["held_reason"]
+    email = GeneratedEmail.objects.get(pk=result["email_id"])
+    assert email.sent_at is None
+    # The flagged report is what keeps the staff send paths from releasing it.
+    assert BiasReport.objects.filter(email=email, flagged=True).exists()
+    assert AuditLog.objects.filter(action="decision_email_held", resource_id=str(email.pk)).exists()
+
+
+@LOCMEM
+@pytest.mark.django_db
+def test_generate_email_task_replaces_a_flagged_email_with_the_template(decided_approved):
+    from apps.email_engine.tasks import generate_email_task
+
+    send = MagicMock(return_value={"sent": True})
+    with (
+        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch.object(EmailGenerator, "generate_template", return_value=_template("approved")),
+        patch(BIAS_ANALYZE, side_effect=[_moderate_bias(), _clean_bias()]) as analyze,
+        patch(SENDER, send),
+    ):
+        result = generate_email_task.apply(
+            args=(str(decided_approved.pk), "approved"), kwargs={"regenerate": True}
+        ).get()
+
+    assert analyze.call_count == 2, "the flagged email was not replaced and re-checked"
     assert send.call_count == 1
+    assert send.call_args.args[2] == "Template body."  # never the flagged LLM text
+    assert result["email_sent"] is True
+    assert GeneratedEmail.objects.get(pk=result["email_id"]).template_fallback is True
+
+
+@LOCMEM
+@pytest.mark.django_db
+def test_redelivery_bias_checks_a_draft_that_was_never_screened(decided_approved):
+    """A stored draft with no bias report (the check was down, or the worker
+    died before it ran) is screened before the redelivery path sends it."""
+    from apps.email_engine.tasks import generate_email_task
+
+    GeneratedEmail.objects.create(
+        application=decided_approved,
+        decision="approved",
+        subject="s",
+        body="Dear Customer, body text.",
+        prompt_used="p",
+        passed_guardrails=True,
+    )
+    send = MagicMock(return_value={"sent": True})
+    with patch(BIAS_ANALYZE, return_value=_severe_bias()) as analyze, patch(SENDER, send):
+        result = generate_email_task.apply(args=(str(decided_approved.pk), "approved")).get()
+
+    assert analyze.call_count == 1, "an unscreened draft was redelivered without a bias check"
+    assert send.call_count == 0
+    assert result["email_sent"] is False
+
+
+@LOCMEM
+@pytest.mark.django_db
+def test_overturn_approval_email_is_bias_checked(overturnable, django_capture_on_commit_callbacks):
+    """The overturn issues its approval email through the bias-checked path:
+    a severely flagged LLM email is held, not sent."""
+    from apps.email_engine.tasks import generate_email_task
+    from apps.loans.services.decision_review import apply_review_outcome
+
+    review, officer = overturnable
+    send = MagicMock(return_value={"sent": True})
+
+    def _run_now(*args, **kwargs):
+        return generate_email_task.apply(args=args, kwargs=kwargs).get()
+
+    with (
+        patch.object(EmailGenerator, "generate", return_value=_passing("approved")),
+        patch(BIAS_ANALYZE, return_value=_severe_bias()) as analyze,
+        patch(SENDER, send),
+        patch("apps.email_engine.tasks.generate_email_task.delay", side_effect=_run_now),
+        django_capture_on_commit_callbacks(execute=True),
+    ):
+        apply_review_outcome(review, officer=officer, outcome="overturned", note="manual approve")
+
+    assert analyze.call_count == 1, "the overturn approval email skipped the bias check"
+    assert send.call_count == 0
+    email = GeneratedEmail.objects.get(application=review.application, decision="approved")
+    assert email.sent_at is None
+
+
+@pytest.mark.django_db
+def test_overturn_queues_the_approval_email_after_commit(overturnable, django_capture_on_commit_callbacks):
+    """No LLM call or SMTP send inside the request: the overturn queues the
+    email task once the transaction commits."""
+    from apps.loans.services.decision_review import apply_review_outcome
+
+    review, officer = overturnable
+    with (
+        patch.object(EmailGenerator, "generate", return_value=_passing("approved")) as generate,
+        patch(SENDER, MagicMock(return_value={"sent": True})),
+        patch("apps.email_engine.tasks.generate_email_task.delay") as delay,
+    ):
+        with django_capture_on_commit_callbacks(execute=False) as callbacks:
+            apply_review_outcome(review, officer=officer, outcome="overturned", note="manual approve")
+        assert delay.call_count == 0  # nothing dispatched before COMMIT
+        for callback in callbacks:
+            callback()
+
+    delay.assert_called_once_with(str(review.application_id), "approved", regenerate=True)
+    assert generate.call_count == 0, "the approval email was generated inside the request"
 
 
 @pytest.mark.django_db

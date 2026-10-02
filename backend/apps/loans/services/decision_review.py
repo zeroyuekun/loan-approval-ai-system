@@ -43,17 +43,25 @@ _TERMINAL = {DecisionReview.Status.UPHELD, DecisionReview.Status.OVERTURNED, Dec
 
 
 def _send_approval_email(application) -> None:
-    """Re-generate + send the approval email after an overturn. Best-effort:
-    a delivery failure must not roll back the approved decision."""
-    try:
-        # Shared issuance service: template fallback on provider trouble, and a
-        # row-locked send that stamps sent_at so a later generate/send does not
-        # email the customer a second approval.
-        from apps.email_engine.services.decision_email import issue_decision_email
+    """Queue the approval email for after the overturn commits. Best-effort:
+    a dispatch failure must not roll back the approved decision.
 
-        issue_decision_email(application, "approved", confidence=application.decision.confidence)
-    except Exception:  # noqa: BLE001 — email is best-effort post-override
-        logger.exception("Approval email after overturn failed for application %s", application.id)
+    The email task generates, bias-checks and sends it (template fallback on
+    provider trouble, a row-locked send that stamps sent_at). Running that
+    here would hold the HTTP request or the admin action open for an LLM call
+    and an SMTP round trip.
+    """
+    application_id = str(application.pk)
+
+    def _dispatch():
+        try:
+            from apps.email_engine.tasks import generate_email_task
+
+            generate_email_task.delay(application_id, "approved", regenerate=True)
+        except Exception:  # noqa: BLE001 — email is best-effort post-override
+            logger.exception("Approval email after overturn could not be queued for application %s", application_id)
+
+    transaction.on_commit(_dispatch)
 
 
 def apply_review_outcome(review: DecisionReview, *, officer, outcome: str, note: str) -> DecisionReview:

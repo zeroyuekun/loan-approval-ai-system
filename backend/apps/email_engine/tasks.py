@@ -11,6 +11,7 @@ from apps.email_engine.services.decision_email import (
     HeldForBiasReview,
     bias_hold_reason,
     deliver_decision_email,
+    deliver_screened_decision_email,
     generate_decision_email,
     require_decision_on_record,
 )
@@ -18,6 +19,16 @@ from apps.email_engine.services.exceptions import RateLimited
 from apps.loans.models import AuditLog, LoanApplication
 
 logger = logging.getLogger("email_engine.tasks")
+
+
+def _email_context(application, decision):
+    """Same next-best offer the orchestrator gives a denial (no API call, best-effort)."""
+    if decision != "denied":
+        return None
+    # Imported here: email_engine does not import the agents app at module level.
+    from apps.agents.services.email_pipeline import build_denial_email_context
+
+    return build_denial_email_context(application, None)
 
 
 @shared_task(
@@ -41,6 +52,10 @@ def generate_email_task(self, application_id, decision, regenerate=False):
     Refuses (HeldForBiasReview, not retried) while the application is under
     human review, and never re-delivers a draft the bias check held back:
     only the human-review paths, which re-run the bias check, release those.
+
+    Every email it sends is bias-checked first, as in the pipeline: a flagged
+    email is replaced by the template, and a severe finding (or a flagged
+    template) holds the email unsent (``held_reason`` in the result).
     """
     require_decision_on_record(application_id, decision)
 
@@ -64,8 +79,26 @@ def generate_email_task(self, application_id, decision, regenerate=False):
             # killed after persist-before-send). Attempt delivery now using the
             # stored subject/body instead of returning 'done' — the row-locked
             # send is idempotent, so this cannot double-send under a redelivery race.
-            outcome = deliver_decision_email(existing)
-            delivered = outcome["sent"] or outcome["already_sent"]
+            if existing.bias_reports.exists():
+                outcome = deliver_decision_email(existing)
+                delivered = outcome["sent"] or outcome["already_sent"]
+            else:
+                # Never bias-checked (the bias check was down, or the worker died
+                # before it ran): screen it like a freshly generated email.
+                application = existing.application
+                outcome = deliver_screened_decision_email(
+                    application,
+                    decision,
+                    {
+                        "body": existing.body,
+                        "passed_guardrails": existing.passed_guardrails,
+                        "template_fallback": existing.template_fallback,
+                    },
+                    existing,
+                    profile_context=_email_context(application, decision),
+                )
+                delivered = outcome["sent"]
+                existing = outcome["generated_email"]
             logger.info(
                 "Redelivery for application %s (%s): generated-but-unsent email send attempted (delivered=%s)",
                 application_id,
@@ -102,15 +135,7 @@ def generate_email_task(self, application_id, decision, regenerate=False):
         }
 
     application = LoanApplication.objects.select_related("applicant", "decision").get(pk=application_id)
-
-    profile_context = None
-    if decision == "denied":
-        # Same next-best offer the orchestrator gives a denial (no API call,
-        # best-effort). Imported here: email_engine does not import the agents
-        # app at module level.
-        from apps.agents.services.email_pipeline import build_denial_email_context
-
-        profile_context = build_denial_email_context(application, None)
+    profile_context = _email_context(application, decision)
 
     try:
         # on_rate_limit="raise": this task can reschedule itself, so a 429
@@ -142,11 +167,12 @@ def generate_email_task(self, application_id, decision, regenerate=False):
         )
         raise
 
-    # Send to the customer if guardrails passed: once, under a row lock, with
-    # sent_at stamped on success (see deliver_decision_email).
-    email_sent = False
-    if result["passed_guardrails"]:
-        email_sent = deliver_decision_email(email)["sent"]
+    # Bias-check it as the pipeline does, then send it (or the template that
+    # replaced a flagged email) once, under a row lock, with sent_at stamped.
+    # A held email stays unsent with its flagged bias report.
+    outcome = deliver_screened_decision_email(application, decision, result, email, profile_context=profile_context)
+    email_sent = outcome["sent"]
+    email = outcome["generated_email"]
 
     # Audit trail: log email generation/delivery
     AuditLog.objects.create(
@@ -155,19 +181,21 @@ def generate_email_task(self, application_id, decision, regenerate=False):
         resource_id=str(email.id),
         details={
             "decision": decision,
-            "passed_guardrails": result["passed_guardrails"],
-            "attempt_number": result["attempt_number"],
+            "passed_guardrails": email.passed_guardrails,
+            "attempt_number": email.attempt_number,
             "email_sent": email_sent,
-            "template_fallback": result.get("template_fallback", False),
+            "template_fallback": email.template_fallback,
+            "held_reason": outcome["held_reason"],
         },
     )
 
     return {
         "email_id": str(email.id),
-        "subject": result["subject"],
-        "passed_guardrails": result["passed_guardrails"],
-        "attempt_number": result["attempt_number"],
+        "subject": email.subject,
+        "passed_guardrails": email.passed_guardrails,
+        "attempt_number": email.attempt_number,
         "email_sent": email_sent,
+        "held_reason": outcome["held_reason"],
     }
 
 

@@ -23,6 +23,9 @@ Guarantees:
   row lock and only while ``sent_at`` is unset, and a successful send stamps
   ``sent_at``. Delivery is at-least-once across a crash between SMTP accept
   and COMMIT.
+* ``issue_decision_email`` and ``generate_email_task`` bias-check what they
+  generate before sending (``deliver_screened_decision_email``), as the
+  orchestrator and the human-review resume do.
 """
 
 import logging
@@ -213,13 +216,33 @@ def deliver_decision_email(generated_email):
     return outcome
 
 
-def issue_decision_email(application, decision, *, confidence=None, profile_context=None):
-    """Generate, persist and (when it passed the guardrails) deliver the email.
+def deliver_screened_decision_email(application, decision, result, generated_email, *, profile_context=None):
+    """Bias-check a generated email, then send it, its template replacement, or nothing.
+
+    For paths outside the orchestrator and the human-review resume, which run
+    their own bias check. See ``screen_and_deliver_decision_email``; returns
+    its outcome dict.
+    """
+    # Imported here: email_engine does not import the agents app at module level.
+    from apps.agents.services.decision_email_screening import screen_and_deliver_decision_email
+
+    return screen_and_deliver_decision_email(
+        application, decision, result, generated_email, profile_context=profile_context
+    )
+
+
+def issue_decision_email(application, decision, *, confidence=None, profile_context=None, on_rate_limit="template"):
+    """Generate, persist, bias-check and (when nothing holds it) deliver the email.
 
     For callers with no step between generation and delivery. Returns
-    ``(result, generated_email, delivery_outcome)``.
+    ``(result, generated_email, screening_outcome)``; ``generated_email`` is
+    the email that was sent or held (the template when it replaced a flagged
+    email).
     """
     result, generated_email = generate_decision_email(
-        application, decision, confidence=confidence, profile_context=profile_context
+        application, decision, confidence=confidence, profile_context=profile_context, on_rate_limit=on_rate_limit
     )
-    return result, generated_email, deliver_decision_email(generated_email)
+    outcome = deliver_screened_decision_email(
+        application, decision, result, generated_email, profile_context=profile_context
+    )
+    return result, outcome["generated_email"], outcome
