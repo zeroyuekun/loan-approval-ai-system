@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 from django.conf import settings as django_settings
 from django.contrib.auth.hashers import check_password, make_password
@@ -6,6 +7,7 @@ from django.db.models import Prefetch, Q
 from django.middleware.csrf import get_token as get_csrf_token
 from django.middleware.csrf import rotate_token
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.html import escape
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -95,6 +97,19 @@ class RefreshRateThrottle(AnonRateThrottle):
     rate = "30/min"
 
 
+def _record_activity(user_id):
+    """Stamp last_login at most once a day per user.
+
+    The API never goes through django.contrib.auth.login(), so nothing else
+    sets last_login, and the 7-year de-identification job reads it to tell a
+    customer who still signs in from a closed account.
+    """
+    now = timezone.now()
+    CustomUser.objects.filter(pk=user_id).filter(
+        Q(last_login__isnull=True) | Q(last_login__lt=now - timedelta(days=1))
+    ).update(last_login=now)
+
+
 class CookieTokenRefreshView(generics.GenericAPIView):
     """Refresh JWT tokens using the HttpOnly refresh cookie."""
 
@@ -126,6 +141,7 @@ class CookieTokenRefreshView(generics.GenericAPIView):
                 refresh = RefreshToken.for_user(self._get_user_from_token(refresh))
                 new_access = refresh.access_token
 
+            _record_activity(refresh["user_id"])
             response = Response({"detail": "Token refreshed."})
             _set_jwt_cookies(response, new_access, refresh)
             return response
@@ -280,6 +296,7 @@ class LoginView(generics.GenericAPIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        _record_activity(user.pk)
         refresh = RefreshToken.for_user(user)
 
         # Pick the audit action: success, success-via-bypass, or

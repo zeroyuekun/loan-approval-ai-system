@@ -69,3 +69,40 @@ def test_a_new_value_replaces_the_undecryptable_one(profile, foreign_ciphertext)
 def test_legacy_plaintext_is_still_read_as_is(profile):
     _set_raw(profile, "0400123456")
     assert CustomerProfile.objects.get(pk=profile.pk).phone == "0400123456"
+
+
+@pytest.mark.django_db
+def test_a_full_form_patch_keeps_the_undecryptable_ciphertext(profile, foreign_ciphertext, customer_user):
+    """The profile form sends every field back, and an unreadable one reads as "".
+
+    That "" must not overwrite the stored token: restoring the right key has to
+    recover it. A real new value still replaces it (test above).
+    """
+    from rest_framework.test import APIClient
+
+    _set_raw(profile, foreign_ciphertext)
+    client = APIClient()
+    client.force_authenticate(user=customer_user)
+
+    current = client.get("/api/v1/auth/me/profile/").data
+    assert current["phone"] == ""
+    resp = client.patch("/api/v1/auth/me/profile/", {"phone": current["phone"], "state": "VIC"}, format="json")
+
+    assert resp.status_code == 200, resp.data
+    assert _raw(profile) == foreign_ciphertext
+    assert _raw(profile, "state") == "VIC"
+
+
+@pytest.mark.django_db
+def test_a_staff_full_form_patch_keeps_the_undecryptable_ciphertext(profile, foreign_ciphertext, admin_user):
+    from rest_framework.test import APIClient
+
+    _set_raw(profile, foreign_ciphertext)
+    client = APIClient()
+    client.force_authenticate(user=admin_user)
+
+    url = f"/api/v1/auth/customers/{profile.user_id}/profile/"
+    resp = client.patch(url, {"phone": "", "state": "QLD"}, format="json")
+
+    assert resp.status_code == 200, resp.data
+    assert _raw(profile) == foreign_ciphertext

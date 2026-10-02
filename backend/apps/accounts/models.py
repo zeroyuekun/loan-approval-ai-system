@@ -31,6 +31,9 @@ class CustomUser(AbstractUser):
     phone = models.CharField(max_length=20, blank=True)
     failed_login_attempts = models.IntegerField(default=0)
     locked_until = models.DateTimeField(null=True, blank=True)
+    # Set by data_retention_cleanup; the job's idempotency marker. Not the
+    # email domain, which the user can set themselves.
+    deidentified_at = models.DateTimeField(null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
