@@ -219,7 +219,12 @@ def _do_train(task, algorithm, data_path, lock, *, segment=None):
         mv.save(update_fields=["training_metadata"])
 
     release_train_lock(lock)
-    return {"model_version_id": str(mv.id), "metrics": metrics, "activated": not blocked_gates}
+    return {
+        "model_version_id": str(mv.id),
+        "metrics": metrics,
+        "activated": not blocked_gates,
+        "activation_blocked": blocked_gates,
+    }
 
 
 def _gate_metadata(mv, gates: dict, blocked_gates: list[str]) -> dict:

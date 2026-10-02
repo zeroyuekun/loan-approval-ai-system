@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Cpu, Loader2, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { ModelHeader, ElapsedTimer } from '@/components/metrics/ModelHeader'
+import { ModelHeader, ElapsedTimer, TrainingBlockedNotice } from '@/components/metrics/ModelHeader'
 import { TrainControl } from '@/components/metrics/TrainControl'
 import { KpiStrip } from '@/components/metrics/KpiStrip'
 import { PerformanceTab } from '@/components/metrics/tabs/PerformanceTab'
@@ -23,7 +23,7 @@ export default function ModelMetricsPage() {
   const { data: metrics, isLoading, isError } = useModelMetrics()
   const { data: driftReports } = useDriftReports(6)
   const { user } = useAuth()
-  const { trainingStatus, trainingAlgorithm, errorMessage: trainErrorMessage, ...trainModel } = useTrainModel()
+  const { trainingStatus, trainingAlgorithm, blockedGates, errorMessage: trainErrorMessage, ...trainModel } = useTrainModel()
   const [selectedAlgorithm, setSelectedAlgorithm] = useState('xgb')
   const isTraining = trainModel.isPending || trainingStatus === 'training'
   const isAdmin = user?.role === 'admin'
@@ -77,6 +77,7 @@ export default function ModelMetricsPage() {
               <TrainControl selectedAlgorithm={selectedAlgorithm} onSelect={setSelectedAlgorithm} onTrain={handleTrain} isTraining={isTraining} label="Train Model" />
             </div>
           )}
+          {trainingStatus === 'blocked' && !isTraining && <TrainingBlockedNotice gates={blockedGates} />}
           {isTraining && (
             <Card className="mt-4 border-blue-200 bg-blue-50/50">
               <CardContent className="flex items-center gap-4 py-6">
@@ -109,6 +110,7 @@ export default function ModelMetricsPage() {
         isTraining={isTraining}
         activeTrainingLabel={activeTrainingLabel}
         trainingStatus={trainingStatus}
+        blockedGates={blockedGates}
         trainErrorMessage={trainErrorMessage}
       />
 

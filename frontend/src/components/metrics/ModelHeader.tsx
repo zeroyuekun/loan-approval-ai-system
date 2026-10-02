@@ -3,10 +3,33 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, CheckCircle, XCircle } from 'lucide-react'
+import { Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
 import { TrainControl } from './TrainControl'
 import { ModelMetrics } from '@/types'
 import { ALGORITHM_LABELS } from '@/lib/utils'
+import type { TrainingStatus } from '@/hooks/useMetrics'
+
+// Pre-activation gates the training task can report in `activation_blocked`.
+const GATE_LABELS: Record<string, string> = {
+  fairness: 'fairness',
+  promotion: 'promotion (champion-challenger and overfitting checks)',
+  validation: 'validation sign-off',
+}
+
+/** Warning shown when a training run finished but a gate kept the new model inactive. */
+export function TrainingBlockedNotice({ gates }: { gates: string[] }) {
+  const named = gates.map((g) => GATE_LABELS[g] || g).join(', ')
+  return (
+    <Card className="border-amber-200 bg-gradient-to-r from-amber-50 to-yellow-50">
+      <CardContent className="flex items-center gap-3 py-4">
+        <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+        <p role="status" className="text-sm font-medium text-amber-800">
+          The new model was trained but not activated{named ? `: blocked by the ${named} gate${gates.length > 1 ? 's' : ''}` : ''}. The current model keeps serving.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
 
 export function ElapsedTimer() {
   const [seconds, setSeconds] = useState(0)
@@ -27,12 +50,13 @@ interface ModelHeaderProps {
   onTrain: () => void
   isTraining: boolean
   activeTrainingLabel: string
-  trainingStatus: 'idle' | 'training' | 'success' | 'failure' | 'skipped'
+  trainingStatus: TrainingStatus
+  blockedGates?: string[]
   trainErrorMessage: string | null
 }
 
 export function ModelHeader(props: ModelHeaderProps) {
-  const { metrics, isAdmin, selectedAlgorithm, onSelect, onTrain, isTraining, activeTrainingLabel, trainingStatus, trainErrorMessage } = props
+  const { metrics, isAdmin, selectedAlgorithm, onSelect, onTrain, isTraining, activeTrainingLabel, trainingStatus, blockedGates = [], trainErrorMessage } = props
   const algorithmLabel = ALGORITHM_LABELS[metrics.algorithm] || metrics.algorithm
 
   return (
@@ -74,6 +98,8 @@ export function ModelHeader(props: ModelHeaderProps) {
           </CardContent>
         </Card>
       )}
+
+      {trainingStatus === 'blocked' && !isTraining && <TrainingBlockedNotice gates={blockedGates} />}
 
       {trainingStatus === 'skipped' && !isTraining && (
         <Card className="border-amber-200 bg-gradient-to-r from-amber-50 to-yellow-50">

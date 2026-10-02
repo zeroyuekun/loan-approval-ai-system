@@ -355,8 +355,12 @@ def test_block_mode_training_keeps_the_champion_serving(models_dir, fake_trainin
 
     champion = make_mv(models_dir, "champ", active=True, traffic=100)
 
-    _do_train(MagicMock(), "xgb", fake_training, MagicMock())
+    result = _do_train(MagicMock(), "xgb", fake_training, MagicMock())
 
+    # The task result names the blocking gates so the Train Model UI can say
+    # why the new model is not serving, instead of reporting plain success.
+    assert result["activated"] is False
+    assert result["activation_blocked"] == ["validation"]
     champion.refresh_from_db()
     assert champion.is_active and champion.traffic_percentage == 100
     candidate = ModelVersion.objects.exclude(pk=champion.pk).get()
@@ -370,8 +374,10 @@ def test_warn_mode_training_activates_and_records_the_gates(models_dir, fake_tra
 
     champion = make_mv(models_dir, "champ", active=True, traffic=100)
 
-    _do_train(MagicMock(), "xgb", fake_training, MagicMock())
+    result = _do_train(MagicMock(), "xgb", fake_training, MagicMock())
 
+    assert result["activated"] is True
+    assert result["activation_blocked"] == []
     champion.refresh_from_db()
     candidate = ModelVersion.objects.exclude(pk=champion.pk).get()
     assert (candidate.is_active, candidate.traffic_percentage) == (True, 100)
