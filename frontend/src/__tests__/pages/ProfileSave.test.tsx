@@ -28,6 +28,7 @@ vi.mock('sonner', () => ({
 
 import DashboardProfilePage from '@/app/dashboard/profile/page'
 import ApplyProfilePage from '@/app/apply/profile/page'
+import EditProfilePage from '@/app/apply/profile/edit/page'
 
 // The real API: ID numbers are write-only, so GET returns only the masked form.
 const serverProfile = {
@@ -134,6 +135,35 @@ describe.each([
     await screen.findByDisplayValue('0412345678')
     await user.clear(screen.getByLabelText(/gross annual income/i))
     await user.click(screen.getByRole('button', { name: saveLabel }))
+
+    await waitFor(() => expect(captured.body).not.toBeNull())
+    expect(captured.body).toEqual({ gross_annual_income: null })
+  })
+})
+
+describe('apply profile edit page', () => {
+  it('sends only the changed field', async () => {
+    const captured = capturePatch()
+    const user = userEvent.setup()
+    renderPage(EditProfilePage)
+
+    const phone = await screen.findByDisplayValue('0412345678')
+    await user.clear(phone)
+    await user.type(phone, '0499999999')
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => expect(captured.body).not.toBeNull())
+    expect(captured.body).toEqual({ phone: '0499999999' })
+  })
+
+  it('sends null, not an empty string, for a cleared number field', async () => {
+    const captured = capturePatch()
+    const user = userEvent.setup()
+    renderPage(EditProfilePage)
+
+    await screen.findByDisplayValue('0412345678')
+    await user.clear(screen.getByLabelText(/gross annual income/i))
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
 
     await waitFor(() => expect(captured.body).not.toBeNull())
     expect(captured.body).toEqual({ gross_annual_income: null })

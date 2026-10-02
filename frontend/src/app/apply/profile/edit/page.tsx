@@ -17,6 +17,7 @@ import { Save, UserCircle, Briefcase, Landmark, Home, CheckCircle2, Lock, ArrowL
 import Link from 'next/link'
 import { CUSTOMER_PROFILE_KEY, useCustomerProfile } from '@/hooks/useCustomerProfile'
 import { useSeededForm } from '@/hooks/useSeededForm'
+import { buildProfilePatch } from '@/lib/profilePatch'
 
 export default function EditProfilePage() {
   const { user } = useAuth()
@@ -92,7 +93,7 @@ export default function EditProfilePage() {
   }
 
   const handleSave = () => {
-    updateProfile.mutate(form)
+    updateProfile.mutate(buildProfilePatch(seed, form))
   }
 
   if (isLoading) {
