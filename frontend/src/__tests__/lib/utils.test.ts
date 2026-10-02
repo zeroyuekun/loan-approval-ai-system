@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cn, formatCurrency, formatPercent, formatDate, formatPurpose, getStatusColor, getDisplayStatus } from '@/lib/utils'
+import { cn, formatCurrency, formatPercent, formatDate, formatPurpose, getStatusColor, getDisplayStatus, getStatusLabel } from '@/lib/utils'
 
 describe('cn', () => {
   it('merges class names', () => {
@@ -136,6 +136,17 @@ describe('getDisplayStatus', () => {
   it('ignores decision for non-review statuses', () => {
     const result = getDisplayStatus('pending', { decision: 'approved' })
     expect(result.label).toBe('PENDING')
+  })
+
+  it('shows queue_failed as a readable label', () => {
+    expect(getDisplayStatus('queue_failed').label).toBe('PROCESSING DELAYED')
+  })
+})
+
+describe('getStatusLabel', () => {
+  it('title-cases plain statuses and uses the readable label for queue_failed', () => {
+    expect(getStatusLabel('pending')).toBe('Pending')
+    expect(getStatusLabel('queue_failed')).toBe('Processing Delayed')
   })
 })
 

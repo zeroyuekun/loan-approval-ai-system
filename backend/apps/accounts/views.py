@@ -1,3 +1,4 @@
+import functools
 import logging
 from datetime import timedelta
 
@@ -8,23 +9,23 @@ from django.middleware.csrf import get_token as get_csrf_token
 from django.middleware.csrf import rotate_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.utils.html import escape
 from rest_framework import generics, status
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.agents.models import AgentRun, MarketingEmail
+from apps.common.http import client_ip
 from apps.email_engine.models import GeneratedEmail
-from apps.email_engine.services.html_renderer import render_html
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 
 from .authentication import CookieJWTAuthentication
 from .models import CustomerProfile, CustomUser
 from .permissions import IsAdminOrOfficer
-from .policy import is_staff_role
 from .serializers import (
     AdminCustomerProfileUpdateSerializer,
     CustomerProfileSerializer,
@@ -33,6 +34,7 @@ from .serializers import (
     StaffCustomerDetailSerializer,
     UserSerializer,
 )
+from .services.customer_activity import customer_activity
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,7 @@ def _audit_user_event(request, user, action, details=None):
         resource_type="CustomUser",
         resource_id=str(user.id),
         details=details or {},
-        ip_address=request.META.get("REMOTE_ADDR"),
+        ip_address=client_ip(request),
     )
 
 
@@ -188,6 +190,8 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = (AllowAny,)
     authentication_classes = ()  # a stale access cookie must not 401 registration
+    # JSON only (see LoginView).
+    parser_classes = (JSONParser,)
     throttle_classes = (RegisterRateThrottle,)
 
     def create(self, request, *args, **kwargs):
@@ -210,22 +214,35 @@ class RegisterView(generics.CreateAPIView):
         return response
 
 
+@functools.cache
+def _dummy_password_hash():
+    # On first use rather than at import, so processes that never serve a
+    # login (Celery workers, management commands) skip an Argon2 hash.
+    return make_password("dummy-timing-equalizer")
+
+
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = (AllowAny,)
     authentication_classes = ()  # a stale access cookie must not 401 login
+    # JSON only. With no authentication there is no CSRF check, and a plain
+    # HTML form on another site can post form-encoded data cross-site but not
+    # JSON, so accepting forms would let that site sign a visitor in to an
+    # account of its choosing.
+    parser_classes = (JSONParser,)
     throttle_classes = (LoginRateThrottle,)
 
-    # Dummy password used to burn CPU time when the username doesn't exist,
-    # so that the response timing is indistinguishable from a real lookup.
-    _DUMMY_HASH = make_password("dummy-timing-equalizer")
+    # Every branch of post() spends exactly one password hash, so the response
+    # time does not tell a caller whether the account exists or is locked.
+    # Branches that never reach a real password check verify against a dummy.
+    def _burn_hash(self, password):
+        check_password(str(password), _dummy_password_hash())
 
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
         generic_error = {"detail": "Invalid username or password."}
-
-        # Check if account is locked before attempting authentication
         username = request.data.get("username", "")
+        password = request.data.get("password", "")
+
         user_obj = None
         if username:
             # Resolve the acting user the SAME way LoginSerializer does (it
@@ -236,87 +253,31 @@ class LoginView(generics.GenericAPIView):
                 user_obj = CustomUser.objects.filter(email=username).first()
             else:
                 user_obj = CustomUser.objects.filter(username=username).first()
-            if user_obj is None:
-                # Perform a dummy password check to equalise timing
-                check_password(request.data.get("password", ""), self._DUMMY_HASH)
 
-        if user_obj and user_obj.is_locked:
-            _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
+        if user_obj is None or user_obj.is_locked:
+            # Not authenticate(): it hashes for a missing user too, which would make two.
+            self._burn_hash(password)
+            if user_obj is not None:
+                _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
+        serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            # Record failed login attempt
-            if user_obj:
-                user_obj.record_failed_login()
-                _audit_user_event(
-                    request, user_obj, "login_failed", {"failed_attempts": user_obj.failed_login_attempts}
-                )
+            if api_settings.NON_FIELD_ERRORS_KEY not in serializer.errors:
+                # A missing or blank field fails before authenticate() runs.
+                self._burn_hash(password)
+            user_obj.record_failed_login()
+            _audit_user_event(request, user_obj, "login_failed", {"failed_attempts": user_obj.failed_login_attempts})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
         user = serializer.validated_data["user"]
         user.reset_failed_logins()
 
-        # ------------------------------------------------------------------
-        # 2FA gate.
-        #
-        # - User has a confirmed TOTP device → require otp_token in the
-        #   request body. Missing → 200 with {"requires_2fa": True} so the
-        #   frontend can prompt for the code. Invalid → 400.
-        # - User is admin/officer without a confirmed TOTP device →
-        #   issue the JWT but flag requires_2fa_setup so the frontend
-        #   can nudge enrolment via /2fa/setup/.
-        # - Customer → no gate.
-        # - ALLOW_2FA_BYPASS env var skips the OTP check (break-glass).
-        #   Audit-logged whenever invoked.
-        # ------------------------------------------------------------------
-        bypass = getattr(django_settings, "ALLOW_2FA_BYPASS", False)
-        has_totp = user.has_confirmed_totp()
-
-        if has_totp and not bypass:
-            otp_token = (request.data.get("otp_token") or "").strip()
-            if not otp_token:
-                # Step 1 of two-step login: signal frontend to prompt
-                # for the OTP and resubmit. NO JWT issued yet.
-                _audit_user_event(request, user, "login_2fa_required")
-                return Response(
-                    {
-                        "requires_2fa": True,
-                        "detail": "Two-factor authentication code required.",
-                    }
-                )
-
-            from django_otp.plugins.otp_totp.models import TOTPDevice
-
-            device = TOTPDevice.objects.filter(user=user, confirmed=True).first()
-            if not device or not device.verify_token(otp_token):
-                user.record_failed_login()
-                _audit_user_event(request, user, "login_2fa_invalid", {"failed_attempts": user.failed_login_attempts})
-                return Response(
-                    {"detail": "Invalid two-factor authentication code."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
         _record_activity(user.pk)
         refresh = RefreshToken.for_user(user)
+        _audit_user_event(request, user, "login_success")
 
-        # Pick the audit action: success, success-via-bypass, or
-        # success-without-2fa-setup. Helps incident response trace
-        # which login flow each token came from.
-        if has_totp and bypass:
-            audit_action = "login_2fa_bypassed"
-        elif is_staff_role(user) and not has_totp:
-            audit_action = "login_success_no_2fa_setup"
-        else:
-            audit_action = "login_success"
-
-        _audit_user_event(request, user, audit_action)
-
-        body = {"user": UserSerializer(user).data}
-        if is_staff_role(user) and not has_totp:
-            # Frontend uses this flag to redirect to /2fa/setup/.
-            body["requires_2fa_setup"] = True
-
-        response = Response(body)
+        response = Response({"user": UserSerializer(user).data})
         _set_jwt_cookies(response, refresh.access_token, refresh)
         rotate_token(request)
         get_csrf_token(request)
@@ -326,7 +287,6 @@ class LoginView(generics.GenericAPIView):
 class UserProfileView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     permission_classes = (IsAuthenticated,)
-    allow_unenrolled_staff = True  # the frontend bootstraps the session (and the enrolment redirect) from it
 
     def get_object(self):
         return self.request.user
@@ -398,7 +358,7 @@ class StaffCustomerProfileView(generics.RetrieveUpdateAPIView):
                 "customer_username": profile.user.username,
                 "updated_fields": list(serializer.validated_data.keys()),
             },
-            ip_address=self.request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(self.request),
         )
 
 
@@ -416,123 +376,7 @@ class StaffCustomerActivityView(generics.GenericAPIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        app_ids = list(customer.loan_applications.values_list("id", flat=True))
-
-        # Emails (bounded to 50 most recent)
-        # Fetch the 50 most-recent IDs first so prefetch_related operates on a
-        # non-sliced queryset (Django drops prefetches on sliced querysets,
-        # causing an N+1 on guardrail_checks).
-        top_email_ids = list(
-            GeneratedEmail.objects.filter(application_id__in=app_ids)
-            .order_by("-created_at")
-            .values_list("id", flat=True)[:50]
-        )
-        emails_qs = (
-            GeneratedEmail.objects.filter(id__in=top_email_ids)
-            .prefetch_related("guardrail_checks")
-            .order_by("-created_at")
-        )
-
-        emails = []
-        for email in emails_qs:
-            guardrail_checks = [
-                {"check_name": log.check_name, "passed": log.passed, "details": log.details}
-                for log in email.guardrail_checks.all()
-            ]
-            emails.append(
-                {
-                    "id": str(email.id),
-                    "application_id": str(email.application_id),
-                    "decision": email.decision,
-                    "subject": escape(email.subject),
-                    "body": escape(email.body),
-                    "html_body": render_html(
-                        email.body,
-                        email_type="approval" if email.decision == "approved" else "denial",
-                    ),
-                    "model_used": email.model_used,
-                    "generation_time_ms": email.generation_time_ms,
-                    "attempt_number": email.attempt_number,
-                    "passed_guardrails": email.passed_guardrails,
-                    "guardrail_checks": guardrail_checks,
-                    "created_at": email.created_at.isoformat(),
-                }
-            )
-
-        # Agent runs (bounded to 50 most recent)
-        runs_qs = (
-            AgentRun.objects.filter(application_id__in=app_ids)
-            .prefetch_related("bias_reports", "next_best_offers", "marketing_emails")
-            .order_by("-created_at")[:50]
-        )
-
-        agent_runs = []
-        for run in runs_qs:
-            bias_reports = [
-                {
-                    "id": str(br.id),
-                    "bias_score": br.bias_score,
-                    "categories": br.categories,
-                    "analysis": br.analysis,
-                    "flagged": br.flagged,
-                    "requires_human_review": br.requires_human_review,
-                    "ai_review_approved": br.ai_review_approved,
-                    "ai_review_reasoning": br.ai_review_reasoning,
-                    "created_at": br.created_at.isoformat(),
-                }
-                for br in run.bias_reports.all()
-            ]
-            next_best_offers = [
-                {
-                    "id": str(nbo.id),
-                    "offers": nbo.offers,
-                    "analysis": nbo.analysis,
-                    "customer_retention_score": nbo.customer_retention_score,
-                    "loyalty_factors": nbo.loyalty_factors,
-                    "personalized_message": nbo.personalized_message,
-                    "marketing_message": nbo.marketing_message,
-                    "created_at": nbo.created_at.isoformat(),
-                }
-                for nbo in run.next_best_offers.all()
-            ]
-            marketing_emails = [
-                {
-                    "id": str(me.id),
-                    "subject": escape(me.subject),
-                    "body": escape(me.body),
-                    "html_body": render_html(me.body, email_type="marketing"),
-                    "passed_guardrails": me.passed_guardrails,
-                    "guardrail_results": me.guardrail_results,
-                    "generation_time_ms": me.generation_time_ms,
-                    "attempt_number": me.attempt_number,
-                    "created_at": me.created_at.isoformat(),
-                }
-                for me in run.marketing_emails.all()
-            ]
-            agent_runs.append(
-                {
-                    "id": str(run.id),
-                    "application_id": str(run.application_id),
-                    "status": run.status,
-                    "steps": run.steps,
-                    "total_time_ms": run.total_time_ms,
-                    "error": run.error,
-                    "bias_reports": bias_reports,
-                    "next_best_offers": next_best_offers,
-                    "marketing_emails": marketing_emails,
-                    "created_at": run.created_at.isoformat(),
-                    "updated_at": run.updated_at.isoformat(),
-                }
-            )
-
-        return Response(
-            {
-                "customer_id": customer.id,
-                "customer_name": f"{customer.first_name} {customer.last_name}".strip() or customer.username,
-                "emails": emails,
-                "agent_runs": agent_runs,
-            }
-        )
+        return Response(customer_activity(customer))
 
 
 class DataExportThrottle(UserRateThrottle):
@@ -707,7 +551,6 @@ class LogoutView(generics.GenericAPIView):
 
     permission_classes = (AllowAny,)
     authentication_classes = ()
-    allow_unenrolled_staff = True
 
     def post(self, request, *args, **kwargs):
         # Try cookie first, then request body (backwards compat)

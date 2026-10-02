@@ -19,6 +19,8 @@ vi.mock('next/navigation', () => ({
   }),
   usePathname: () => '/',
   useSearchParams: () => new URLSearchParams(),
+  // A dynamic-route test sets its params with vi.mocked(useParams).mockReturnValue(...)
+  useParams: vi.fn(() => ({})),
 }))
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))

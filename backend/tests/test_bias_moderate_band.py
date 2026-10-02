@@ -4,10 +4,10 @@ A bias score above BIAS_THRESHOLD_PASS but below BIAS_THRESHOLD_REVIEW marks
 the email ``flagged`` and ``requires_human_review``. A flagged email must never
 reach the customer as written. The pipeline (and the human-review resume path)
 replaces it once with the deterministic template and runs the bias check on the
-replacement. In the pipeline only a clean replacement is sent; a replacement
-that is still flagged, or a flagged email that already was the template, is
-held for the human-review queue. On the human-review resume path the reviewer
-has already cleared the run, so the template is sent unless it is severe.
+replacement. Only a clean replacement is sent; a replacement that is still
+flagged, or a flagged email that already was the template, is held for the
+human-review queue. The resume path applies the same rule: a reviewer clearing
+the run does not clear an email written after the review.
 """
 
 from unittest.mock import MagicMock, patch
@@ -336,17 +336,20 @@ def test_resume_replaces_a_moderate_email_with_a_clean_template(escalated_agent_
 
 @LOCMEM
 @pytest.mark.django_db
-def test_resume_sends_the_template_when_the_replacement_is_still_moderately_flagged(escalated_agent_run):
-    """A reviewer has already cleared this run; holding it again for a moderate
-    score would loop it through the queue. The template goes out, never the
-    flagged LLM text."""
+def test_resume_holds_a_replacement_that_is_still_moderately_flagged(escalated_agent_run):
+    """The resume sends a replacement only if it checks clean, as the pipeline
+    and the standalone screening do: a moderately flagged template is held and
+    the run goes back to the review queue."""
     send = MagicMock(return_value={"sent": True})
 
-    run, _ = _resume(escalated_agent_run, bias_results=[MODERATE, MODERATE], send=send)
+    run, bias = _resume(escalated_agent_run, bias_results=[MODERATE, MODERATE], send=send)
 
-    assert run.status == "completed"
-    assert send.call_count == 1
-    assert "LLM-written body" not in send.call_args.args[2]
+    assert bias.return_value.analyze.call_count == 2  # the replacement was checked
+    send.assert_not_called()
+    assert run.status == "escalated"
+    app = escalated_agent_run.application
+    app.refresh_from_db()
+    assert app.status == "review"
 
 
 @LOCMEM

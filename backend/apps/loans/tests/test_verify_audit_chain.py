@@ -118,3 +118,23 @@ def test_verify_detects_corrupted_genesis():
         call_command("verify_audit_chain", stdout=out, stderr=err)
     combined = out.getvalue() + err.getvalue()
     assert str(log.id) in combined
+
+
+@pytest.mark.django_db
+def test_deleting_a_user_with_audit_rows_is_refused_and_the_chain_stays_intact(django_user_model):
+    """The user id is part of each row's hash. Nulling it on user delete
+    (SET_NULL runs a bulk UPDATE that skips the hash) would break the chain,
+    so a user who appears in the audit trail cannot be deleted."""
+    from django.db.models import ProtectedError
+
+    officer = django_user_model.objects.create_user(username="audited", password="x", role="officer")
+    row = AuditLog.objects.create(user=officer, action="login_success", resource_type="User", resource_id="audited")
+
+    with pytest.raises(ProtectedError):
+        officer.delete()
+
+    row.refresh_from_db()
+    assert row.user_id == officer.pk
+    out = io.StringIO()
+    call_command("verify_audit_chain", stdout=out)
+    assert "OK" in out.getvalue() or "verified" in out.getvalue().lower()

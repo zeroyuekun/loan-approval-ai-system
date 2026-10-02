@@ -238,8 +238,8 @@ describe('useAuth', () => {
     })
     expect(screen.getByTestId('user')).toHaveTextContent(mockUser.username)
   })
-  describe('two-factor login', () => {
-    function LoginProbe({ otp }: { otp?: string }) {
+  describe('login', () => {
+    function LoginProbe() {
       const { user, login } = useAuth()
       const [result, setResult] = React.useState('')
       return (
@@ -248,8 +248,8 @@ describe('useAuth', () => {
           <span data-testid="result">{result}</span>
           <button
             onClick={() =>
-              login('officer1', 'pw', otp).then(
-                (r) => setResult(JSON.stringify(r)),
+              login('officer1', 'pw').then(
+                () => setResult('ok'),
                 (e: Error) => setResult(`error:${e.message}`),
               )
             }
@@ -260,12 +260,12 @@ describe('useAuth', () => {
       )
     }
 
-    function renderProbe(otp?: string) {
+    function renderProbe() {
       const client = new QueryClient()
       return render(
         <QueryClientProvider client={client}>
           <AuthProvider>
-            <LoginProbe otp={otp} />
+            <LoginProbe />
           </AuthProvider>
         </QueryClientProvider>,
       )
@@ -279,7 +279,28 @@ describe('useAuth', () => {
       )
     })
 
-    it('reports otp_required (not an error) and stores no user when the backend asks for a code', async () => {
+    it('sends only the username and password, then takes staff to the dashboard', async () => {
+      let body: Record<string, unknown> = {}
+      server.use(
+        http.post(`${API_URL}/auth/login/`, async ({ request }) => {
+          body = (await request.json()) as Record<string, unknown>
+          // A stale enrolment flag from an old backend must not redirect anywhere else.
+          return HttpResponse.json({ user: { ...mockUser, username: 'officer1', role: 'officer' }, requires_2fa_setup: true })
+        }),
+      )
+      const user = userEvent.setup()
+      renderProbe()
+      await user.click(screen.getByText('Go'))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('user')).toHaveTextContent('officer1')
+      })
+      expect(body).toEqual({ username: 'officer1', password: 'pw' })
+      expect(mockReplace).toHaveBeenCalledWith('/dashboard')
+      expect(mockReplace).not.toHaveBeenCalledWith('/dashboard/two-factor')
+    })
+
+    it('treats the old code-required response as an unexpected response', async () => {
       server.use(
         http.post(`${API_URL}/auth/login/`, () =>
           HttpResponse.json({ requires_2fa: true, detail: 'Two-factor authentication code required.' }),
@@ -290,45 +311,9 @@ describe('useAuth', () => {
       await user.click(screen.getByText('Go'))
 
       await waitFor(() => {
-        expect(screen.getByTestId('result')).toHaveTextContent('otp_required')
+        expect(screen.getByTestId('result')).toHaveTextContent('error:Unexpected login response')
       })
       expect(screen.getByTestId('user')).toHaveTextContent('null')
-      expect(sessionStorage.getItem('user')).toBeNull()
-      expect(mockReplace).not.toHaveBeenCalled()
-    })
-
-    it('sends the code as otp_token on the second step', async () => {
-      let body: Record<string, unknown> = {}
-      server.use(
-        http.post(`${API_URL}/auth/login/`, async ({ request }) => {
-          body = (await request.json()) as Record<string, unknown>
-          return HttpResponse.json({ user: { ...mockUser, username: 'officer1', role: 'officer' } })
-        }),
-      )
-      const user = userEvent.setup()
-      renderProbe('123456')
-      await user.click(screen.getByText('Go'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('user')).toHaveTextContent('officer1')
-      })
-      expect(body).toEqual({ username: 'officer1', password: 'pw', otp_token: '123456' })
-      expect(mockReplace).toHaveBeenCalledWith('/dashboard')
-    })
-
-    it('sends staff without an enrolled authenticator to the 2FA setup page', async () => {
-      server.use(
-        http.post(`${API_URL}/auth/login/`, () =>
-          HttpResponse.json({ user: { ...mockUser, username: 'officer1', role: 'officer' }, requires_2fa_setup: true }),
-        ),
-      )
-      const user = userEvent.setup()
-      renderProbe()
-      await user.click(screen.getByText('Go'))
-
-      await waitFor(() => {
-        expect(mockReplace).toHaveBeenCalledWith('/dashboard/two-factor')
-      })
     })
 
     it('rejects an unexpected login response instead of crashing on a missing user', async () => {

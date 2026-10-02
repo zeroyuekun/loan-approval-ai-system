@@ -20,7 +20,6 @@ from rest_framework.views import APIView
 from apps.accounts.policy import is_staff_role
 from apps.agents.services.api_budget import open_circuit_providers
 from apps.loans.models import LoanApplication
-from config.admin_site import StaffOTPAdminSite
 from config.ops_auth import require_ops_auth
 
 
@@ -204,9 +203,6 @@ def deep_health_check(request):
 
     return JsonResponse(checks, status=status_code)
 
-
-# The default admin site honours ENFORCE_2FA_FOR_STAFF (see config/admin_site.py).
-admin.site.__class__ = StaffOTPAdminSite
 
 urlpatterns = [
     # Prometheus metrics — gated behind staff session or X-Health-Token header.

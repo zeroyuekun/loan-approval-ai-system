@@ -91,8 +91,8 @@ class UnderwritingEngine:
     # Income shading by employment type (what % of income banks accept)
     INCOME_SHADING = {
         "payg_permanent": 1.00,
-        "payg_casual": 0.80,  # base; <1yr: hard deny, 1-2yr: 0.80, 2yr+: 1.00
-        "self_employed": 0.75,  # base; 1-2yr: 0.75, 2yr+: 0.82 (applied dynamically)
+        "payg_casual": 0.80,  # base; tenure overrides: underwriting_helpers.apply_tenure_shading
+        "self_employed": 0.75,  # base; tenure overrides: underwriting_helpers.apply_tenure_shading
         "contract": 0.85,
     }
 
@@ -166,26 +166,15 @@ class UnderwritingEngine:
         )
 
         # =========================================================
-        # STEP 1: Income shading by employment type
-        # Refined per Big 4 2025 practice:
-        # - Self-employed 1yr+ accepted (was 2yr pre-2025)
-        #   - 1-2yr: 75%, 2yr+: 82%
-        # - Casual tenure-based: <1yr deny, 1-2yr 80%, 2yr+ 100%
+        # STEP 1: Income shading by employment type and tenure
+        # (factors in underwriting_helpers.apply_tenure_shading, shared
+        # with the recommendation engine)
         # =========================================================
-        income_shade = df["employment_type"].map(self.INCOME_SHADING).values
-        # Self-employed with 2+ years: higher acceptance
-        se_experienced = (df["employment_type"] == "self_employed") & (df["employment_length"] >= 2)
-        income_shade = np.where(se_experienced, 0.82, income_shade)
-        # Self-employed with 1-2 years: base rate (0.75 from INCOME_SHADING)
-        # Self-employed with <1 year: lower acceptance
-        se_new = (df["employment_type"] == "self_employed") & (df["employment_length"] < 1)
-        income_shade = np.where(se_new, 0.65, income_shade)
-        # Casual with 2+ years same employer: full income accepted
-        casual_experienced = (df["employment_type"] == "payg_casual") & (df["employment_length"] >= 2)
-        income_shade = np.where(casual_experienced, 1.00, income_shade)
-        # Casual with <1 year: significantly lower (hard deny below)
-        casual_new = (df["employment_type"] == "payg_casual") & (df["employment_length"] < 1)
-        income_shade = np.where(casual_new, 0.60, income_shade)
+        income_shade = _helpers.apply_tenure_shading(
+            df["employment_type"].map(self.INCOME_SHADING).values,
+            df["employment_type"],
+            df["employment_length"],
+        )
         shaded_monthly_income = gross_monthly_income * income_shade
 
         # =========================================================
@@ -312,42 +301,19 @@ class UnderwritingEngine:
             / ((1 + monthly_rate) ** term_months - 1)
         )
 
-        # Australian marginal tax rates (Stage 3 tax cuts, effective 1 July 2024)
-        annual_inc = df["annual_income"]
-        annual_tax = np.where(
-            annual_inc <= 18200,
-            0,
-            np.where(
-                annual_inc <= 45000,
-                (annual_inc - 18200) * 0.16,
-                np.where(
-                    annual_inc <= 135000,
-                    4288 + (annual_inc - 45000) * 0.30,
-                    np.where(
-                        annual_inc <= 190000, 31288 + (annual_inc - 135000) * 0.37, 51638 + (annual_inc - 190000) * 0.45
-                    ),
-                ),
-            ),
-        )
-        monthly_tax = annual_tax / 12
+        monthly_tax = _helpers.marginal_tax(df["annual_income"]) / 12
 
-        # Existing debt servicing: existing_dti * income, serviced at ~6% over 20yr
+        # Existing debt servicing: existing_dti * income
         total_existing_debt = df["annual_income"] * existing_dti
-        existing_debt_monthly = total_existing_debt * 0.0072
+        existing_debt_monthly = total_existing_debt * _helpers.EXISTING_DEBT_MONTHLY_RATE
 
         # Credit card commitment: 3% of total limit
         credit_card_monthly = df["existing_credit_card_limit"] * self.CREDIT_CARD_MONTHLY_RATE
 
-        # HECS/HELP repayment: ~3.5% of gross income (ATO compulsory).
-        # Policy change 30 Sept 2025: HECS/HELP removed from DTI
-        # calculations by all Big 4 banks. Still deducted from gross
-        # pay (reduces net income), but NOT counted as a debt obligation
-        # in serviceability assessment. Kept as informational feature only.
-        np.where(
-            df["has_hecs"] == 1,
-            df["annual_income"] * 0.035 / 12,
-            0.0,
-        )
+        # HECS/HELP: policy change 30 Sept 2025 removed it from DTI and
+        # serviceability at all Big 4 banks, so no repayment is deducted here
+        # (has_hecs stays an informational feature). The recommendation
+        # engine's CustomerSnapshot follows the same rule.
 
         # Monthly surplus at the assessment rate (APRA 3% buffer).
         # At the actual product rate (~6.5%), most of these loans are
