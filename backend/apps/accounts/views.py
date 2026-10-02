@@ -255,9 +255,7 @@ class LoginView(generics.GenericAPIView):
                 user_obj = CustomUser.objects.filter(username=username).first()
 
         if user_obj is None or user_obj.is_locked:
-            # Neither case checks a real password. Unknown names never reach
-            # authenticate(), whose own dummy hash for a missing user would
-            # make this branch cost two hashes.
+            # Not authenticate(): it hashes for a missing user too, which would make two.
             self._burn_hash(password)
             if user_obj is not None:
                 _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})

@@ -271,9 +271,7 @@ class TestCookieAuthCSRFEnforcement:
 @pytest.mark.django_db
 @patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
 class TestFailedLoginsExpire:
-    """Failures only add up while they keep coming. The count used to grow until
-    a successful sign-in, and from 15 failures each wrong password locked the
-    account for 24 hours: one request a day kept a staff account locked."""
+    """Failures stop adding up after LOGIN_FAILURE_WINDOW (see settings)."""
 
     def _fail_once(self, client, user):
         resp = _post_login(client, user.username, "wrong_password")
@@ -346,10 +344,7 @@ def hash_calls(monkeypatch):
 @pytest.mark.django_db
 @patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
 class TestLoginSpendsOneHash:
-    """Each sign-in branch spends exactly one password hash, so response time
-    does not reveal whether an account exists or is locked. Before: an unknown
-    username cost two (the view's dummy check plus ModelBackend's own) and a
-    locked account cost none."""
+    """Every sign-in branch spends exactly one password hash (see LoginView)."""
 
     @pytest.mark.parametrize(
         ("username", "password", "expected_status"),
@@ -386,10 +381,7 @@ _NON_JSON_BODIES = {
 @patch("apps.accounts.views.LoginRateThrottle.allow_request", _no_throttle)
 @patch("apps.accounts.views.RegisterRateThrottle.allow_request", _no_throttle)
 class TestAuthEndpointsAcceptJsonOnly:
-    """Login and registration skip authentication, so nothing checks CSRF on
-    them. A form on another site can post form-encoded or multipart data
-    cross-site without a preflight, which would let it sign a visitor in to
-    an account the attacker controls."""
+    """Login and registration accept JSON only (see LoginView.parser_classes)."""
 
     @pytest.mark.parametrize("encoding", _NON_JSON_BODIES)
     def test_non_json_login_is_rejected(self, auth_client, login_user, encoding):

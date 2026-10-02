@@ -32,8 +32,7 @@ class CustomUser(AbstractUser):
     phone = models.CharField(max_length=20, blank=True)
     failed_login_attempts = models.IntegerField(default=0)
     locked_until = models.DateTimeField(null=True, blank=True)
-    # When the latest failure in the current count happened; record_failed_login
-    # starts a new count once it is older than LOGIN_FAILURE_WINDOW.
+    # Latest failure in the current count (see LOGIN_FAILURE_WINDOW).
     last_failed_login_at = models.DateTimeField(null=True, blank=True)
     # Set by data_retention_cleanup; the job's idempotency marker. Not the
     # email domain, which the user can set themselves.
@@ -50,9 +49,7 @@ class CustomUser(AbstractUser):
 
     def record_failed_login(self):
         now = timezone.now()
-        # One UPDATE, so concurrent failures cannot lose a count. A failure
-        # more than LOGIN_FAILURE_WINDOW after the previous one starts a new
-        # count instead of adding to an old one.
+        # One UPDATE, so concurrent failures cannot lose a count.
         CustomUser.objects.filter(pk=self.pk).update(
             failed_login_attempts=models.Case(
                 models.When(
