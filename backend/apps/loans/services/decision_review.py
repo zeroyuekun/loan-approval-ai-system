@@ -34,7 +34,6 @@ def _enforce_overturn_gate(application, officer) -> None:
         amount=float(application.loan_amount or 0),
         threshold=getattr(settings, "DECISION_OVERTURN_THRESHOLD", 100000.0),
         mode=normalize_overturn_mode(getattr(settings, "DECISION_OVERTURN_GATE_MODE", "off")),
-        officer_has_2fa=officer.has_confirmed_totp(),
     )
     if not gate["allowed"]:
         raise OverturnGateBlocked(gate["reason"])

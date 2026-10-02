@@ -350,10 +350,10 @@ MRM_DOSSIER_AUTO_GENERATE = os.environ.get("MRM_DOSSIER_AUTO_GENERATE", "true").
 DECISION_REVIEW_ENABLED = os.environ.get("DECISION_REVIEW_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # Maker/checker gate on high-value officer overturns. Default here "off";
-# production.py defaults to "second_approver". "2fa" requires the acting
-# officer to hold a verified TOTP device before overturning a denial >= DECISION_OVERTURN_THRESHOLD;
-# "second_approver" blocks such overturns at the API pending dual approval.
-# Unknown values collapse to "off" (see overturn_policy.normalize_overturn_mode).
+# production.py defaults to "second_approver", which blocks overturning a
+# denial >= DECISION_OVERTURN_THRESHOLD at the API pending dual approval. The
+# legacy value "2fa" maps to "second_approver". Unknown values collapse to
+# "off" (see overturn_policy.normalize_overturn_mode).
 DECISION_OVERTURN_GATE_MODE = os.environ.get("DECISION_OVERTURN_GATE_MODE", "off")
 DECISION_OVERTURN_THRESHOLD = _env_float("DECISION_OVERTURN_THRESHOLD", 100000)
 
