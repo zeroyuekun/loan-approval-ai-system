@@ -14,24 +14,16 @@ ACTIVITY_LIMIT = 50
 
 
 def customer_activity(customer) -> dict:
-    app_ids = list(customer.loan_applications.values_list("id", flat=True))
-
-    # Fetch the most-recent IDs first so prefetch_related operates on a
-    # non-sliced queryset (Django drops prefetches on sliced querysets,
-    # causing an N+1 on guardrail_checks).
-    top_email_ids = list(
-        GeneratedEmail.objects.filter(application_id__in=app_ids)
-        .order_by("-created_at")
-        .values_list("id", flat=True)[:ACTIVITY_LIMIT]
-    )
+    # A soft-deleted application's emails and runs stay hidden, as its
+    # related manager hides the application itself.
+    of_customer = {"application__applicant": customer, "application__deleted_at__isnull": True}
     emails = (
-        GeneratedEmail.objects.filter(id__in=top_email_ids)
+        GeneratedEmail.objects.filter(**of_customer)
         .select_related("application__applicant")
         .prefetch_related("guardrail_checks")
-        .order_by("-created_at")
+        .order_by("-created_at")[:ACTIVITY_LIMIT]
     )
-
-    runs = AgentRun.objects.for_serializer().filter(application_id__in=app_ids).order_by("-created_at")[:ACTIVITY_LIMIT]
+    runs = AgentRun.objects.for_serializer().filter(**of_customer).order_by("-created_at")[:ACTIVITY_LIMIT]
 
     return {
         "customer_id": customer.id,
