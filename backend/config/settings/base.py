@@ -468,6 +468,16 @@ OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "ollama")  # dummy; Ollama ign
 # models lives in guarded_api_call.
 BIAS_REVIEWER_MODEL = os.environ.get("BIAS_REVIEWER_MODEL", "") or "claude-opus-4-8"
 
+# Demo mode: when set, every outbound email goes to this inbox instead of the
+# applicant's address.
+EMAIL_REDIRECT_ALL_TO = os.environ.get("EMAIL_REDIRECT_ALL_TO", "").strip()
+
+# Backend for the bias verdicts: "anthropic" (default) or "ollama", which runs
+# every bias agent on the local Ollama server. A 3B model passed blatantly
+# discriminatory text as a false positive in testing; 7B is the floor.
+BIAS_LLM_BACKEND = os.environ.get("BIAS_LLM_BACKEND", "anthropic").lower()
+BIAS_OLLAMA_MODEL = os.environ.get("BIAS_OLLAMA_MODEL", "") or "qwen2.5:7b"
+
 # Bias detection thresholds (used by orchestrator pipeline)
 BIAS_THRESHOLD_PASS = 30  # 0-30: compliant, email can be sent
 BIAS_THRESHOLD_REVIEW = 60  # 31-60: moderate bias, LLM reviews for false positives

@@ -2,10 +2,9 @@ import json
 import logging
 
 import anthropic
+import httpx
 
-from utils.anthropic_client import (
-    make_anthropic_client as _make_anthropic_client,  # noqa: F401 - re-exported to bias modules
-)
+from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..api_budget import ApiGateClosed, guarded_api_call
@@ -45,6 +44,40 @@ def _reviewer_model():
     from django.conf import settings as django_settings
 
     return getattr(django_settings, "BIAS_REVIEWER_MODEL", "") or DEFAULT_REVIEWER_MODEL
+
+
+def _make_bias_llm_client():
+    """Client for the bias verdicts.
+
+    BIAS_LLM_BACKEND=ollama runs every verdict on the local Ollama server at $0.
+    Otherwise Anthropic, which is None without an API key; the callers then
+    treat the bias check as unavailable.
+    """
+    from django.conf import settings as django_settings
+
+    if getattr(django_settings, "BIAS_LLM_BACKEND", "anthropic") != "ollama":
+        return make_anthropic_client()
+
+    from apps.email_engine.services.llm_client import OpenAICompatibleLLMClient
+
+    return OpenAICompatibleLLMClient(
+        api_key=django_settings.OLLAMA_API_KEY,
+        base_url=django_settings.OLLAMA_BASE_URL,
+        model=django_settings.BIAS_OLLAMA_MODEL,
+        # CPU inference on a ~1.5k-token verdict prompt takes ~30s warm; a cold
+        # start also pays the model load.
+        timeout=httpx.Timeout(300.0, connect=10.0),
+        provider="ollama",
+    )
+
+
+def bias_model(client, default):
+    """The model a bias call names: the local model on Ollama, else ``default``."""
+    if getattr(client, "provider", None) == "ollama":
+        from django.conf import settings as django_settings
+
+        return django_settings.BIAS_OLLAMA_MODEL
+    return default
 
 
 def _format_flag_detail(prescreen):

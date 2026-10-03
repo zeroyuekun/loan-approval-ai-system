@@ -250,7 +250,7 @@ class MarketingPipelineService:
                                         step,
                                         result_summary={
                                             "sent": True,
-                                            "recipient": recipient,
+                                            "recipient": send_result.get("recipient", recipient),
                                         },
                                     )
                                 else:
