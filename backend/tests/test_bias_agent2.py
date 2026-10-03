@@ -494,7 +494,7 @@ def _review_once(monkeypatch):
         raise RuntimeError("stop after the call is built")
 
     monkeypatch.setattr("apps.agents.services.bias.helpers.guarded_api_call", _fake_guarded_call)
-    monkeypatch.setattr("apps.agents.services.bias.reviewer._make_anthropic_client", lambda: MagicMock())
+    monkeypatch.setattr("apps.agents.services.bias.reviewer._make_bias_llm_client", lambda: MagicMock())
     AIEmailReviewer().review(
         "BODY",
         {"score": 5, "analysis": "x", "categories": []},

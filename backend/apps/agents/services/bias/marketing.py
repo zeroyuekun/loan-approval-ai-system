@@ -5,7 +5,7 @@ from django.conf import settings as django_settings
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..deterministic_prescreen import DeterministicBiasPreScreen
-from .helpers import _call_with_fallback, _format_flag_detail, _make_anthropic_client, _reviewer_model
+from .helpers import _call_with_fallback, _format_flag_detail, _make_bias_llm_client, _reviewer_model, bias_model
 from .thresholds import is_severe
 from .tools import MARKETING_BIAS_TOOL, MARKETING_REVIEW_TOOL
 
@@ -43,7 +43,7 @@ class MarketingBiasDetector:
     ]
 
     def __init__(self):
-        self.client = _make_anthropic_client()
+        self.client = _make_bias_llm_client()
         self.prescreener = DeterministicBiasPreScreen()
 
     def analyze(self, email_text, application_context):
@@ -159,7 +159,7 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
             # The marketing email under review carries the name and offer amounts.
             _service="marketing_bias_detection",
             _pii_categories=["name", "loan_amount"],
-            model="claude-sonnet-4-6",
+            model=bias_model(self.client, "claude-sonnet-4-6"),
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
             messages=[{"role": "user", "content": prompt}],
@@ -228,8 +228,8 @@ class MarketingEmailReviewer:
     """
 
     def __init__(self):
-        self.client = _make_anthropic_client()
-        self.model = _reviewer_model()
+        self.client = _make_bias_llm_client()
+        self.model = bias_model(self.client, _reviewer_model())
 
     def review(self, email_text, bias_result, application_context):
         """Senior review of a flagged marketing email.

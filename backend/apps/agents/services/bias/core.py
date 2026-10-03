@@ -5,7 +5,7 @@ from django.conf import settings as django_settings
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..deterministic_prescreen import DeterministicBiasPreScreen
-from .helpers import _call_with_fallback, _format_flag_detail, _make_anthropic_client
+from .helpers import _call_with_fallback, _format_flag_detail, _make_bias_llm_client, bias_model
 from .thresholds import is_severe
 from .tools import BIAS_ANALYSIS_TOOL
 
@@ -31,7 +31,7 @@ class BiasDetector:
     BIAS_CATEGORIES = ["gender", "race", "age", "religion", "disability", "marital_status"]
 
     def __init__(self):
-        self.client = _make_anthropic_client()
+        self.client = _make_bias_llm_client()
         self.prescreener = DeterministicBiasPreScreen()
 
     def analyze(self, email_text, application_context):
@@ -174,7 +174,7 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             # the loan amount and the decision rationale / pricing.
             _service="bias_detection",
             _pii_categories=["name", "loan_amount", "credit_assessment"],
-            model="claude-sonnet-4-6",
+            model=bias_model(self.client, "claude-sonnet-4-6"),
             max_tokens=1024,
             temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
             messages=[{"role": "user", "content": prompt}],

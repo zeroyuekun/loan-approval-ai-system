@@ -110,6 +110,10 @@ class EmailGenerator:
         produce a compliant, sendable email. Clients are memoized in
         ``_CLIENT_CACHE`` (see its comment).
         """
+        if backend == "template":
+            # No LLM writes emails: every email is the deterministic template.
+            return None, "template", ""
+
         if backend == "groq":
             from .llm_client import DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, GroqLLMClient
 

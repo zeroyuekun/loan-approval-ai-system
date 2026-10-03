@@ -213,6 +213,7 @@ def deliver_decision_email(generated_email):
             email_type=email_type_for(locked.decision),
         )
         if result.get("sent"):
+            outcome["recipient"] = result.get("recipient", recipient)
             locked.sent_at = timezone.now()
             locked.save(update_fields=["sent_at"])
             generated_email.sent_at = locked.sent_at
