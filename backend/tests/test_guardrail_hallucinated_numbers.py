@@ -216,6 +216,38 @@ def test_offers_without_amount_or_rate_ignored(checker):
     assert result["passed"], f"Valid offer should still apply: {result['details']}"
 
 
+_GOAL_SAVER = {
+    "amount": None,
+    "estimated_rate": 5.20,
+    "benefit": (
+        "Goal Saver account at 5.20% p.a. bonus rate – save $100/month to strengthen "
+        "your next application (~$62 interest in 12 months)"
+    ),
+}
+
+
+def test_figures_stated_in_offer_benefit_pass(checker):
+    """The recommendation engine writes figures into an offer's benefit text
+    (Goal Saver has no principal), so the email quoting them is not inventing them."""
+    text = "Goal Saver account at 5.20% p.a. - save $100/month (~$62 interest in 12 months)."
+    context = {
+        "loan_amount": 50000,
+        "nbo_amounts": [85000],
+        "nbo_offers": [{"amount": 85000, "estimated_rate": 5.00}, _GOAL_SAVER],
+    }
+    result = checker.check_hallucinated_numbers(text, context)
+    assert result["passed"], result["details"]
+
+
+def test_fabricated_amount_flagged_despite_offer_benefit(checker):
+    """Only the figures in the benefit text are accepted, not any small amount."""
+    text = "Goal Saver account - save $100/month and earn a $450 bonus."
+    context = {"loan_amount": 50000, "nbo_amounts": [], "nbo_offers": [_GOAL_SAVER]}
+    result = checker.check_hallucinated_numbers(text, context)
+    assert not result["passed"]
+    assert "$450" in result["details"], result["details"]
+
+
 # ---------------------------------------------------------------------------
 # I7 — rate validation: no whole-line keyword skips; denial / NBO rates checked
 # ---------------------------------------------------------------------------
