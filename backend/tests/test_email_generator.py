@@ -150,7 +150,7 @@ def _make_mock_application(decision="approved", loan_amount=25000, purpose_displ
 
 
 class TestEmailGenerator:
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key-123"})
     @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
     @patch("apps.agents.services.api_budget.ApiBudgetGuard")
     def test_generate_approval_email(self, mock_budget_cls, mock_anthropic_cls):
@@ -200,7 +200,7 @@ class TestEmailGenerator:
         assert len(result["guardrail_results"]) == 18
         assert result["template_fallback"] is False
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key-123"})
     @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
     @patch("apps.agents.services.api_budget.ApiBudgetGuard")
     def test_generate_denial_email(self, mock_budget_cls, mock_anthropic_cls):
@@ -225,7 +225,7 @@ class TestEmailGenerator:
         assert "guardrail_results" in result
         assert result["template_fallback"] is False
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key-123"})
     @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
     @patch("apps.agents.services.api_budget.ApiBudgetGuard")
     def test_retry_on_guardrail_failure(self, mock_budget_cls, mock_anthropic_cls):
@@ -259,7 +259,7 @@ class TestEmailGenerator:
         # Should have retried — attempt_number > 1 or the good email was returned
         assert result["attempt_number"] >= 1
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key-123"})
     @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
     @patch("apps.agents.services.api_budget.ApiBudgetGuard")
     def test_template_fallback_on_api_failure(self, mock_budget_cls, mock_anthropic_cls):
@@ -341,7 +341,7 @@ class TestDenialNboTeaser:
         assert gen._render_nbo_block(None) == ""
         assert gen._render_nbo_block({}) == ""
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"})
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key-123"})
     @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
     @patch("apps.agents.services.api_budget.ApiBudgetGuard")
     def test_denial_prompt_includes_offer_and_whitelists_amount(self, mock_budget_cls, mock_anthropic_cls):
@@ -375,8 +375,17 @@ class TestEmailBackendSelection:
     backend must both keep the budget guard, guardrails, and template fallback
     intact, and a missing key must degrade to the deterministic template."""
 
-    @patch.dict(os.environ, {}, clear=True)
-    def test_default_backend_is_anthropic(self):
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"}, clear=True)
+    def test_default_backend_is_template(self):
+        """No LLM writes emails unless one is chosen, even with a Claude key present."""
+        from apps.email_engine.services.email_generator import EmailGenerator
+
+        gen = EmailGenerator()
+        assert gen.provider == "template"
+        assert gen.client is None
+
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic"}, clear=True)
+    def test_anthropic_backend_without_key_uses_template(self):
         from apps.email_engine.services.email_generator import EmailGenerator
 
         gen = EmailGenerator()
@@ -467,11 +476,11 @@ class TestEmailBackendSelection:
         assert result["passed_guardrails"] is True
         assert result["body"]
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-123"}, clear=True)
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key-123"}, clear=True)
     @patch("apps.email_engine.services.email_generator.anthropic.Anthropic")
     @patch("apps.agents.services.api_budget.ApiBudgetGuard")
     def test_anthropic_api_error_falls_back_to_template(self, mock_budget_cls, mock_anthropic_cls):
-        """The same graceful degradation applies to the default Claude backend:
+        """The same graceful degradation applies to the opt-in Claude backend:
         a connection/5xx error falls back to the template instead of propagating."""
         import anthropic
         import httpx
