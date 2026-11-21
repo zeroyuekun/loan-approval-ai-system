@@ -227,6 +227,7 @@ services:
     command: >
       celery -A config beat -l info
         --pidfile /tmp/celerybeat.pid
+        --schedule /tmp/celerybeat-schedule
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/celerybeat.pid && kill -0 $(cat /tmp/celerybeat.pid) 2>/dev/null || exit 1"]
       interval: 60s
