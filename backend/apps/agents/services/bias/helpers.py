@@ -72,18 +72,25 @@ def _make_bias_llm_client():
     if getattr(django_settings, "BIAS_LLM_BACKEND", "anthropic") != "ollama":
         return make_anthropic_client()
 
+    from apps.email_engine.services.email_generator import _cached_client
     from apps.email_engine.services.llm_client import OpenAICompatibleLLMClient
 
-    return OpenAICompatibleLLMClient(
-        api_key=django_settings.OLLAMA_API_KEY,
-        base_url=django_settings.OLLAMA_BASE_URL,
-        model=django_settings.BIAS_OLLAMA_MODEL,
-        # CPU inference on a ~1.5k-token verdict prompt takes ~30-60s warm; a
-        # cold start also pays the model load. BIAS_LLM_TIMEOUT stays below the
-        # email task's soft time limit, so a slow verdict falls back to the
-        # deterministic score instead of the task being killed mid-call.
-        timeout=httpx.Timeout(float(django_settings.BIAS_LLM_TIMEOUT), connect=10.0),
-        provider="ollama",
+    base_url = django_settings.OLLAMA_BASE_URL
+    model = django_settings.BIAS_OLLAMA_MODEL
+    timeout = float(django_settings.BIAS_LLM_TIMEOUT)
+    # One connection pool per worker process, shared by every bias agent
+    # (several are built per pipeline run), as the email clients are.
+    return _cached_client(
+        ("bias-ollama", base_url, model, timeout),
+        lambda: OpenAICompatibleLLMClient(
+            api_key=django_settings.OLLAMA_API_KEY,
+            base_url=base_url,
+            model=model,
+            # CPU inference on a ~1.5k-token verdict prompt takes ~30-60s warm,
+            # plus the model load when cold.
+            timeout=httpx.Timeout(timeout, connect=10.0),
+            provider="ollama",
+        ),
     )
 
 
@@ -108,6 +115,10 @@ def _format_flag_detail(prescreen):
     return "\n".join(lines)
 
 
+# Provider failures a caller turns into its deterministic fallback.
+LLM_CALL_ERRORS = (anthropic.APIError, EmailBackendError, RateLimited)
+
+
 def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **api_kwargs):
     """Call the bias LLM once, returning ``fallback`` on terminal failure.
 
@@ -126,7 +137,7 @@ def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **
         raise  # let callers invoke _handle_bias_unavailable
     except SoftTimeLimitExceeded:
         raise  # the task's time limit must stop the task, not become a fallback
-    except (anthropic.APIError, EmailBackendError, RateLimited) as e:
+    except LLM_CALL_ERRORS as e:
         logger.error("%s failed (%s: %s) — %s", service_name, type(e).__name__, e, final_failure_suffix)
         return fallback
     except Exception as e:

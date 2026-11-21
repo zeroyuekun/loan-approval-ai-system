@@ -60,21 +60,10 @@ class LoanCreateThrottle(UserRateThrottle):
     rate = "10/hour"
 
 
-# Statuses that still have pipeline work pending or under way.
-OPEN_APPLICATION_STATUSES = (
-    LoanApplication.Status.PENDING,
-    LoanApplication.Status.PROCESSING,
-    LoanApplication.Status.REVIEW,
-    LoanApplication.Status.QUEUE_FAILED,
-)
-
-
 def _refuse_if_too_many_open(user):
     """A customer may hold only a few undecided applications at once."""
     cap = getattr(settings, "MAX_OPEN_APPLICATIONS_PER_CUSTOMER", 5)
-    open_count = LoanApplication.objects.filter(
-        applicant=user, status__in=OPEN_APPLICATION_STATUSES, deleted_at__isnull=True
-    ).count()
+    open_count = LoanApplication.objects.filter(applicant=user, status__in=LoanApplication.OPEN_STATUSES).count()
     if open_count >= cap:
         raise drf_serializers.ValidationError(
             {

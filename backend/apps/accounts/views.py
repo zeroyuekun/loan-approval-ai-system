@@ -119,10 +119,8 @@ class CookieTokenRefreshView(generics.GenericAPIView):
     # client uses to recover from it (the refresh cookie is checked below).
     authentication_classes = ()
     throttle_classes = (RefreshRateThrottle,)
-    # JSON only. With no authentication there is no CSRF check, so a form
-    # parser would let a cross-site HTML form post an attacker's refresh token
-    # and plant the attacker's session in the victim's browser (login CSRF).
-    # A cross-site form cannot send application/json.
+    # JSON only (also the project default): with no authentication there is no
+    # CSRF check, and a cross-site HTML form cannot send application/json.
     parser_classes = (JSONParser,)
 
     def post(self, request, *args, **kwargs):

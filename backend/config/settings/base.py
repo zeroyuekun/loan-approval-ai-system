@@ -179,6 +179,9 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ),
+    # JSON only, project-wide: no view accepts forms or uploads, and a form
+    # parser on an unauthenticated view (no CSRF check) allows login CSRF.
+    "DEFAULT_PARSER_CLASSES": ("rest_framework.parsers.JSONParser",),
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
@@ -466,7 +469,6 @@ EMAIL_LLM_SEED = _env_int("EMAIL_LLM_SEED", 0)  # reproducibility (best-effort; 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434/v1")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")  # blank -> backend default (loan-email)
 OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "ollama")  # dummy; Ollama ignores auth
 
 # Model for the senior bias reviewer (Head of Compliance — holistic email review).
@@ -484,8 +486,8 @@ EMAIL_REDIRECT_ALL_TO = os.environ.get("EMAIL_REDIRECT_ALL_TO", "").strip()
 # positive in testing, so never go below 7-8B for the verdict model.
 BIAS_LLM_BACKEND = (os.environ.get("BIAS_LLM_BACKEND", "") or "ollama").lower()
 BIAS_OLLAMA_MODEL = os.environ.get("BIAS_OLLAMA_MODEL", "") or "llama3.1:8b"
-# Seconds one local bias verdict may take. Must stay below the email task's
-# soft time limit (300s), so a slow verdict falls back instead of being killed.
+# Seconds one local bias verdict may take; must stay below the email task's
+# soft time limit (see apps/email_engine/tasks.py).
 BIAS_LLM_TIMEOUT = _env_int("BIAS_LLM_TIMEOUT", 240)
 
 # Bias detection thresholds (used by orchestrator pipeline)

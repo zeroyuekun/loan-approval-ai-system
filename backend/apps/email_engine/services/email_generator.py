@@ -85,7 +85,7 @@ class EmailGenerator:
         # Email LLM backend is selectable so the (low-stakes) email writer can
         # run on a free, OpenAI-compatible provider instead of the paid Claude
         # API. The lending DECISION is deterministic ML and never uses this.
-        # Default "anthropic" keeps existing behaviour unchanged.
+        # Default "template": no LLM writes emails unless one is chosen.
         backend = email_llm_backend()
         configured_model = os.environ.get("EMAIL_LLM_MODEL", "") or ""
         self.client, self.provider, self._model = self._build_client(backend, configured_model)

@@ -124,6 +124,8 @@ class LoanApplication(SoftDeleteModel):
     # Waiting for the pipeline: the decision inputs are still editable and a
     # customer may start the pipeline themselves.
     AWAITING_PIPELINE_STATUSES = ("pending", "queue_failed")
+    # Not yet decided: waiting for, or inside, the pipeline or a review.
+    OPEN_STATUSES = (*AWAITING_PIPELINE_STATUSES, "processing", "review")
 
     def decision_inputs_frozen(self) -> bool:
         return self.status not in self.AWAITING_PIPELINE_STATUSES

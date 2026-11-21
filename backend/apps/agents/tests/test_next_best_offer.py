@@ -173,7 +173,7 @@ class TestNextBestOfferGeneratorInit:
 
     # Claude is opt-in: the copy follows EMAIL_LLM_BACKEND (default template).
     @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     def test_with_api_key_creates_client(self, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
         gen = NextBestOfferGenerator()
@@ -412,7 +412,7 @@ class TestKeyBoundReasoningMerge:
 
 class TestGenerateMessaging:
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_success_returns_tool_result(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
@@ -430,7 +430,7 @@ class TestGenerateMessaging:
         assert result["personalized_message"] == "m"
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_auth_error_returns_benefit_fallback(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
@@ -449,7 +449,7 @@ class TestGenerateMessaging:
         assert "Thank you" in result["personalized_message"]
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_rate_limit_error_returns_fallback(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
@@ -464,7 +464,7 @@ class TestGenerateMessaging:
         assert len(result["offer_reasoning"]) == 2
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_timeout_error_returns_fallback(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
@@ -474,7 +474,7 @@ class TestGenerateMessaging:
         assert "offer_reasoning" in result
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_unexpected_exception_also_returns_fallback(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
@@ -487,7 +487,7 @@ class TestGenerateMessaging:
         ]
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_tool_result_none_raises_internally_and_falls_back(self, mock_call, mock_anthropic_cls):
         """When _extract_tool_result returns None, internal ValueError triggers fallback."""
@@ -502,7 +502,7 @@ class TestGenerateMessaging:
         assert len(result["offer_reasoning"]) == 2
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_prompt_includes_customer_numbers(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
@@ -526,7 +526,7 @@ class TestGenerateMessaging:
 
 class TestGenerateMarketingMessage:
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_success_returns_trimmed_message(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()
@@ -557,7 +557,7 @@ class TestGenerateMarketingMessage:
         assert "generation_time_ms" in result
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
+    @patch("utils.anthropic_client.anthropic.Anthropic")
     @patch("apps.agents.services.next_best_offer.guarded_api_call")
     def test_api_exception_returns_template_fallback(self, mock_call, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()

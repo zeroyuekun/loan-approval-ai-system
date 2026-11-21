@@ -1,13 +1,11 @@
 import logging
 
-import anthropic
 from celery.exceptions import SoftTimeLimitExceeded
 
 from apps.email_engine.services.content_llm import make_content_llm_client
-from apps.email_engine.services.exceptions import EmailBackendError, RateLimited
 
 from .api_budget import ApiGateClosed, guarded_api_call
-from .bias.helpers import _extract_tool_result
+from .bias.helpers import LLM_CALL_ERRORS, _extract_tool_result
 from .recommendation_engine import RecommendationEngine
 
 logger = logging.getLogger("agents.next_best_offer")
@@ -203,15 +201,7 @@ RULES:
             return _fallback_messaging(offers)
         except SoftTimeLimitExceeded:
             raise  # the task's time limit must stop the task, not become a fallback
-        except (
-            anthropic.AuthenticationError,
-            anthropic.RateLimitError,
-            anthropic.APITimeoutError,
-            anthropic.APIConnectionError,
-            anthropic.APIStatusError,
-            EmailBackendError,
-            RateLimited,
-        ) as e:
+        except LLM_CALL_ERRORS as e:
             logger.warning("NBO messaging LLM call failed: %s", e)
             return _fallback_messaging(offers)
         except Exception as e:
@@ -308,11 +298,11 @@ Respond with the marketing message text only, no JSON wrapping."""
                 "marketing_message": response.content[0].text.strip(),
                 "generation_time_ms": generation_time_ms,
             }
-        except SoftTimeLimitExceeded:
-            raise  # the task's time limit must stop the task, not become a fallback
         except ApiGateClosed as e:
             # Template backend, no key, budget spent or circuit open: by design.
             logger.info("Marketing message uses the deterministic template: %s", e)
+        except SoftTimeLimitExceeded:
+            raise  # the task's time limit must stop the task, not become a fallback
         except Exception as e:
             logger.warning("Marketing message LLM call failed: %s — using template fallback", e)
         return {

@@ -185,6 +185,11 @@ class CustomerMarketingEmailDetailSerializer(CustomerMarketingEmailListSerialize
 _CUSTOMER_STEP_KEYS = ("step_name", "status", "started_at", "completed_at")
 
 
+def customer_steps(run):
+    """A run's steps as a customer may see them: name, status and timing only."""
+    return [{k: step.get(k) for k in _CUSTOMER_STEP_KEYS} for step in (run.steps or []) if isinstance(step, dict)]
+
+
 class CustomerAgentRunSerializer(AgentRunSerializer):
     error = serializers.SerializerMethodField()
     steps = serializers.SerializerMethodField()
@@ -193,11 +198,7 @@ class CustomerAgentRunSerializer(AgentRunSerializer):
         return None
 
     def get_steps(self, obj):
-        return [
-            {**{k: step.get(k) for k in _CUSTOMER_STEP_KEYS}, "result_summary": None, "error": None}
-            for step in (obj.steps or [])
-            if isinstance(step, dict)
-        ]
+        return [{**step, "result_summary": None, "error": None} for step in customer_steps(obj)]
 
     def get_bias_reports(self, obj):
         return []

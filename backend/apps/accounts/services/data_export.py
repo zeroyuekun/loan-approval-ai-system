@@ -11,7 +11,7 @@ exist to stop.
 from django.db.models import Prefetch
 
 from apps.agents.models import AgentRun, MarketingEmail
-from apps.agents.serializers import _CUSTOMER_STEP_KEYS
+from apps.agents.serializers import customer_steps
 from apps.email_engine.models import GeneratedEmail
 from apps.loans.models import AuditLog, LoanApplication, LoanDecision
 
@@ -67,10 +67,6 @@ def _decision_section(app):
     }
 
 
-def _customer_steps(run):
-    return [{k: step.get(k) for k in _CUSTOMER_STEP_KEYS} for step in (run.steps or []) if isinstance(step, dict)]
-
-
 def _application_section(app):
     return {
         "id": str(app.id),
@@ -101,7 +97,7 @@ def _application_section(app):
         "agent_runs": [
             {
                 "status": run.status,
-                "steps": _customer_steps(run),
+                "steps": customer_steps(run),
                 "created_at": run.created_at.isoformat(),
             }
             for run in app._agent_runs_cached

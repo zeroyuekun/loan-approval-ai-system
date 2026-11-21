@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mlApi, tasksApi, withNotFoundFallback } from '@/lib/api'
-import { isTerminalTaskStatus, MAX_TASK_POLL_MS, nextPollInterval, taskPollingExpired } from '@/lib/polling'
+import { isTerminalTaskStatus, nextPollInterval, taskPollingExpired } from '@/lib/polling'
 import { ModelMetrics } from '@/types'
 import { TRAINING_STORAGE_KEY } from '@/lib/clientState'
 
@@ -16,8 +16,7 @@ function loadTrainingTask(): { taskId: string; algorithm: string; startedAt: num
     const raw = localStorage.getItem(TRAINING_STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw)
-    // Expire with the polling cap
-    if (Date.now() - parsed.startedAt > MAX_TASK_POLL_MS) {
+    if (taskPollingExpired(parsed.startedAt)) {
       localStorage.removeItem(TRAINING_STORAGE_KEY)
       return null
     }
@@ -132,7 +131,7 @@ export function useTrainModel() {
         return interval
       }
       const taskResult = parseTaskResult(query.state.data?.result)
-      if (status === 'FAILURE' || status === 'REVOKED' || !isTerminalTaskStatus(status)) {
+      if (status !== 'SUCCESS') {
         // A revoked task, or one still not finished after the polling cap
         // (an unknown task id stays PENDING forever), is reported as failed.
         setTrainingStatus('failure')

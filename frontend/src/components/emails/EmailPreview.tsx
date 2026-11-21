@@ -60,7 +60,8 @@ function useIsClient(): boolean {
 
 export function HtmlEmailBody({ html }: { html: string }) {
   const isClient = useIsClient()
-  const safeHtml = isClient ? sanitizeEmailHtml(html) : ''
+  // Sanitising parses and rewrites the whole email; do it once per html.
+  const safeHtml = useMemo(() => (isClient ? sanitizeEmailHtml(html) : ''), [html, isClient])
 
   return (
     <div
