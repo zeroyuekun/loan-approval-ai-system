@@ -8,12 +8,12 @@
 #
 # Built once by the compose `ollama-init` service:
 #   ollama create loan-email -f /models/Modelfile
-# and selected via EMAIL_LLM_BACKEND=ollama (OLLAMA_MODEL defaults to loan-email).
+# and selected via EMAIL_LLM_BACKEND=ollama (a blank EMAIL_LLM_MODEL means loan-email).
 #
 # Swap the base model for a lighter one on a low-RAM host, e.g. `FROM llama3.2:3b`
 # (~2GB, faster, slightly less reliable at the structured tool call — the
 # guardrail + template fallback covers that). Keep num_ctx >= 12288 to fit the
 # ~9k input + ~4k output.
-FROM qwen2.5:7b
+FROM llama3.1:8b
 PARAMETER num_ctx 16384
 PARAMETER temperature 0

@@ -604,7 +604,7 @@ def guarded_api_call(client, **kwargs):
     Raises:
         BudgetExhausted: daily dollar or call limit reached
         CircuitOpen: too many consecutive failures
-        ValueError: client is None (no API key configured)
+        BudgetExhausted: client is None (template backend or no API key)
     """
     if client is None:
         raise BudgetExhausted("No API client configured — using fallback")

@@ -3,13 +3,27 @@ import logging
 
 import anthropic
 import httpx
+from celery.exceptions import SoftTimeLimitExceeded
 
+from apps.email_engine.services.exceptions import EmailBackendError, RateLimited
 from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..api_budget import ApiGateClosed, guarded_api_call
 
 logger = logging.getLogger("agents.bias_detector")
+
+
+def coerce_llm_score(value, fallback):
+    """A bias score from the LLM as an int in 0-100, or ``fallback`` if unusable.
+
+    A local model served through Ollama ignores the forced tool schema, so the
+    score can arrive as a string, a float, out of range, or missing.
+    """
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _parse_json_response(response_text, fallback):
@@ -64,9 +78,11 @@ def _make_bias_llm_client():
         api_key=django_settings.OLLAMA_API_KEY,
         base_url=django_settings.OLLAMA_BASE_URL,
         model=django_settings.BIAS_OLLAMA_MODEL,
-        # CPU inference on a ~1.5k-token verdict prompt takes ~30s warm; a cold
-        # start also pays the model load.
-        timeout=httpx.Timeout(300.0, connect=10.0),
+        # CPU inference on a ~1.5k-token verdict prompt takes ~30-60s warm; a
+        # cold start also pays the model load. BIAS_LLM_TIMEOUT stays below the
+        # email task's soft time limit, so a slow verdict falls back to the
+        # deterministic score instead of the task being killed mid-call.
+        timeout=httpx.Timeout(float(django_settings.BIAS_LLM_TIMEOUT), connect=10.0),
         provider="ollama",
     )
 
@@ -93,7 +109,7 @@ def _format_flag_detail(prescreen):
 
 
 def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **api_kwargs):
-    """Call the Anthropic API once, returning ``fallback`` on terminal failure.
+    """Call the bias LLM once, returning ``fallback`` on terminal failure.
 
     Transient errors are retried by the SDK client's own bounded backoff
     (policy pinned in utils.anthropic_client); there is no extra retry loop
@@ -108,7 +124,9 @@ def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **
         return _extract_tool_result(response, fallback)
     except ApiGateClosed:
         raise  # let callers invoke _handle_bias_unavailable
-    except anthropic.APIError as e:
+    except SoftTimeLimitExceeded:
+        raise  # the task's time limit must stop the task, not become a fallback
+    except (anthropic.APIError, EmailBackendError, RateLimited) as e:
         logger.error("%s failed (%s: %s) — %s", service_name, type(e).__name__, e, final_failure_suffix)
         return fallback
     except Exception as e:

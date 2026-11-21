@@ -33,8 +33,9 @@ def test_generated_email_has_sent_at_marker(sample_application):
 def test_email_task_has_soft_time_limit():
     from apps.email_engine.tasks import generate_email_task
 
-    assert generate_email_task.soft_time_limit == 100
-    assert generate_email_task.time_limit == 120
+    # Room for a local CPU bias verdict (BIAS_LLM_TIMEOUT=240s) inside the soft limit.
+    assert generate_email_task.soft_time_limit == 300
+    assert generate_email_task.time_limit == 330
 
 
 def test_generate_does_not_sleep_on_rate_limit(monkeypatch):

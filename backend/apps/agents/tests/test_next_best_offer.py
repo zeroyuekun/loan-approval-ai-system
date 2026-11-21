@@ -171,7 +171,8 @@ class TestNextBestOfferGeneratorInit:
         assert gen.client is None
         assert gen.engine is not None
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
+    # Claude is opt-in: the copy follows EMAIL_LLM_BACKEND (default template).
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key"})
     @patch("apps.agents.services.next_best_offer.anthropic.Anthropic")
     def test_with_api_key_creates_client(self, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()

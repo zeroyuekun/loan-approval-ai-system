@@ -5,7 +5,7 @@ from django.conf import settings as django_settings
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..deterministic_prescreen import DeterministicBiasPreScreen
-from .helpers import _call_with_fallback, _format_flag_detail, _make_bias_llm_client, bias_model
+from .helpers import _call_with_fallback, _format_flag_detail, _make_bias_llm_client, bias_model, coerce_llm_score
 from .thresholds import is_severe
 from .tools import BIAS_ANALYSIS_TOOL
 
@@ -121,7 +121,6 @@ class BiasDetector:
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
         sanitized_purpose = _sanitize_prompt_input(str(application_context.get("purpose", "N/A")), max_length=200)
         sanitized_decision = _sanitize_prompt_input(str(application_context.get("decision", "N/A")), max_length=20)
-        self._format_prescreen_results(prescreen)
         flag_detail = _format_flag_detail(prescreen)
 
         prompt = f"""You are a compliance analyst at an Australian bank called AussieLoanAI. You have been on the team for two years. You follow the checklist. You do not editorialize.
@@ -182,7 +181,7 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             tool_choice={"type": "tool", "name": "record_bias_analysis"},
         )
 
-        llm_raw_score = result.get("score", det_score)
+        llm_raw_score = coerce_llm_score(result.get("score"), det_score)
 
         # Final score: deterministic is the anchor, LLM adjusts.
         # Deterministic weighted higher (60%) due to LLM agreeableness bias (TNR < 25%, ACL 2025)
@@ -208,19 +207,3 @@ Use the record_bias_analysis tool to submit your findings. In the analysis field
             # queue and admin filter mis-handle.
             "requires_human_review": final_score > bias_threshold_pass,
         }
-
-    def _format_prescreen_results(self, prescreen):
-        """Format pre-screen results summary for injection into the LLM prompt."""
-        lines = []
-        checks = {
-            "prohibited_language": "Prohibited language",
-            "tone_check": "Tone",
-            "professional_financial_language": "Professional language",
-            "informal_tone": "Informal tone",
-        }
-        triggered_names = {f["check_name"] for f in prescreen["findings"]}
-        for check_name, label in checks.items():
-            status = "FAILED" if check_name in triggered_names else "PASSED"
-            lines.append(f"- {label}: {status}")
-        lines.append(f"- Pre-screen score: {prescreen['deterministic_score']}/100")
-        return "\n".join(lines)

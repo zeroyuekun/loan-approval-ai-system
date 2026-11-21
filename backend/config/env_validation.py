@@ -67,25 +67,34 @@ def validate_env():
     # --- Optional but warned (only in non-debug mode to avoid noisy dev logs) ---
     if not is_debug:
         optional_warned = {
-            "ANTHROPIC_API_KEY": "Claude API calls (email generation, bias detection) will fail",
             "EMAIL_HOST_USER": "Outbound email delivery will fail",
             "EMAIL_HOST_PASSWORD": "Outbound email delivery will fail",
         }
+        # Claude is opt-in: only warn about its key when a backend selects it.
+        email_backend = os.environ.get("EMAIL_LLM_BACKEND", "").lower()
+        bias_backend = os.environ.get("BIAS_LLM_BACKEND", "").lower()
+        if "anthropic" in (email_backend, bias_backend):
+            optional_warned["ANTHROPIC_API_KEY"] = "Claude calls will fall back (templates, deterministic bias score)"
 
         # When the email backend is set to Groq, warn (don't block) on a missing
         # key — a missing key degrades cleanly to the deterministic template path.
-        if os.environ.get("EMAIL_LLM_BACKEND", "").lower() == "groq":
+        if email_backend == "groq":
             optional_warned["GROQ_API_KEY"] = "Groq email generation will fall back to deterministic templates"
 
         for var, consequence in optional_warned.items():
             if not os.environ.get(var):
                 logger.warning("Environment variable %s is not set — %s.", var, consequence)
 
-        # The senior bias reviewer always calls the Anthropic API; a non-Claude
-        # model ID (e.g. an Ollama tag) would 404 every senior review, silently
-        # degrading to human escalation and feeding the shared circuit breaker.
+        # On the Anthropic bias backend the senior reviewer calls Claude; a
+        # non-Claude model ID (e.g. an Ollama tag) would 404 every senior review,
+        # silently degrading to human escalation and feeding the circuit breaker.
+        # On the local backend the reviewer uses BIAS_OLLAMA_MODEL instead.
         reviewer_model = os.environ.get("BIAS_REVIEWER_MODEL", "")
-        if reviewer_model and not reviewer_model.startswith(("claude-", "anthropic.", "us.anthropic.")):
+        if (
+            bias_backend == "anthropic"
+            and reviewer_model
+            and not reviewer_model.startswith(("claude-", "anthropic.", "us.anthropic."))
+        ):
             logger.warning(
                 "BIAS_REVIEWER_MODEL=%r does not look like an Anthropic model ID — "
                 "senior bias reviews will fail and fall back to human escalation.",

@@ -5,7 +5,14 @@ from django.conf import settings as django_settings
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..deterministic_prescreen import DeterministicBiasPreScreen
-from .helpers import _call_with_fallback, _format_flag_detail, _make_bias_llm_client, _reviewer_model, bias_model
+from .helpers import (
+    _call_with_fallback,
+    _format_flag_detail,
+    _make_bias_llm_client,
+    _reviewer_model,
+    bias_model,
+    coerce_llm_score,
+)
 from .thresholds import is_severe
 from .tools import MARKETING_BIAS_TOOL, MARKETING_REVIEW_TOOL
 
@@ -107,7 +114,6 @@ class MarketingBiasDetector:
 
         sanitized_email = _sanitize_prompt_input(email_text, max_length=5000)
         sanitized_purpose = _sanitize_prompt_input(str(application_context.get("purpose", "N/A")), max_length=200)
-        self._format_prescreen_results(prescreen)
 
         flag_detail = _format_flag_detail(prescreen)
 
@@ -167,7 +173,7 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
             tool_choice={"type": "tool", "name": "record_marketing_bias_analysis"},
         )
 
-        llm_raw_score = result.get("score", det_score)
+        llm_raw_score = coerce_llm_score(result.get("score"), det_score)
         # Deterministic weighted higher (60%) due to LLM agreeableness bias (TNR < 25%, ACL 2025)
         # If LLM says false positive (low score), trust it — that's why we called the LLM.
         if llm_raw_score <= 30:
@@ -188,25 +194,6 @@ Use the record_marketing_bias_analysis tool to submit your findings. In the anal
             # silently report requires_human_review=False on the BiasReport.
             "requires_human_review": final_score > mkt_pass,
         }
-
-    def _format_prescreen_results(self, prescreen):
-        """Format pre-screen results summary for injection into the LLM prompt."""
-        lines = []
-        checks = {
-            "prohibited_language": "Prohibited language",
-            "tone_check": "Tone",
-            "professional_financial_language": "Professional language",
-            "decline_language": "Decline references",
-            "patronising_language": "Patronising language",
-            "false_urgency": "False urgency",
-            "guaranteed_approval": "Guaranteed approval claims",
-        }
-        triggered_names = {f["check_name"] for f in prescreen["findings"]}
-        for check_name, label in checks.items():
-            status = "FAILED" if check_name in triggered_names else "PASSED"
-            lines.append(f"- {label}: {status}")
-        lines.append(f"- Pre-screen score: {prescreen['deterministic_score']}/100")
-        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

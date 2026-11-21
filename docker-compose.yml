@@ -318,14 +318,14 @@ services:
   # degrades cleanly to the deterministic template (ConnectError -> fallback),
   # so the default stack is unaffected.
   ollama:
-    image: ollama/ollama:latest  # pin a version for reproducibility, e.g. ollama/ollama:0.5.7
+    image: ollama/ollama:0.30.7  # pinned: model behaviour and the /v1 API change between releases
     profiles: ["ollama"]
     restart: unless-stopped
     deploy:
       resources:
         limits:
           cpus: '4.0'      # inference is CPU-bound; give it threads
-          memory: 8G       # qwen2.5:7b Q4 ~5GB weights + 16k KV-cache headroom
+          memory: 8G       # llama3.1:8b Q4 ~5GB weights + 16k KV-cache headroom
     volumes:
       - ollama_models:/root/.ollama
     environment:
@@ -341,17 +341,19 @@ services:
     networks:
       - internal
 
-  # One-shot: pull the base model and bake the 16k-context `loan-email` model,
-  # then exit. Re-runs are cheap (model cached in the named volume).
+  # One-shot: pull Llama 3.1 8B (the bias-verdict model) and bake the
+  # 16k-context `loan-email` model from it, then exit. Re-runs are cheap (the
+  # model is cached in the named volume).
   ollama-init:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.30.7
     profiles: ["ollama"]
     depends_on:
       ollama:
         condition: service_healthy
     entrypoint: ["/bin/sh", "-c"]
     command: >
-      "ollama pull qwen2.5:7b &&
+      "ollama pull llama3.1:8b &&
+       ollama pull ${BIAS_OLLAMA_MODEL:-llama3.1:8b} &&
        ollama create loan-email -f /models/Modelfile &&
        echo 'ollama loan-email model ready'"
     environment:

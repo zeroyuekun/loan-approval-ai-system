@@ -446,8 +446,10 @@ AI_TEMPERATURE_ANALYSIS = 0.0  # Bias detection, reviews, structured analysis
 AI_TEMPERATURE_DECISION_EMAIL = 0.0  # Approval/denial emails (regulatory documents)
 AI_TEMPERATURE_MARKETING = 0.2  # Marketing/retention content (slight variance for anti-spam)
 
-# Email LLM backend — which provider writes the decision emails.
-#   "anthropic" (default): paid Claude API (claude-sonnet-4-6).
+# Email LLM backend — which provider, if any, writes customer-facing copy
+# (decision emails, offer wording, the marketing follow-up).
+#   "template" (default): no LLM; every email is the deterministic template.
+#   "anthropic": paid Claude API (claude-sonnet-4-6), opt-in with a key.
 #   "groq": free, OpenAI-compatible Groq (llama-3.1-8b-instant) — chosen because
 #           its free tier does NOT train on prompts. See ADR 010.
 #   "ollama": free, LOCAL/on-prem Ollama — no per-minute token cap (so it fits
@@ -458,7 +460,7 @@ AI_TEMPERATURE_MARKETING = 0.2  # Marketing/retention content (slight variance f
 # unreachable backend degrades cleanly to the deterministic template fallback.
 # EmailGenerator reads these from the environment directly; declared here for
 # documentation + audit.
-EMAIL_LLM_BACKEND = os.environ.get("EMAIL_LLM_BACKEND", "anthropic")
+EMAIL_LLM_BACKEND = os.environ.get("EMAIL_LLM_BACKEND", "") or "template"
 EMAIL_LLM_MODEL = os.environ.get("EMAIL_LLM_MODEL", "")  # blank -> backend default
 EMAIL_LLM_SEED = _env_int("EMAIL_LLM_SEED", 0)  # reproducibility (best-effort; Groq + Ollama)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
@@ -476,11 +478,15 @@ BIAS_REVIEWER_MODEL = os.environ.get("BIAS_REVIEWER_MODEL", "") or "claude-opus-
 # applicant's address.
 EMAIL_REDIRECT_ALL_TO = os.environ.get("EMAIL_REDIRECT_ALL_TO", "").strip()
 
-# Backend for the bias verdicts: "anthropic" (default) or "ollama", which runs
-# every bias agent on the local Ollama server. A 3B model passed blatantly
-# discriminatory text as a false positive in testing; 7B is the floor.
-BIAS_LLM_BACKEND = os.environ.get("BIAS_LLM_BACKEND", "anthropic").lower()
-BIAS_OLLAMA_MODEL = os.environ.get("BIAS_OLLAMA_MODEL", "") or "qwen2.5:7b"
+# Backend for the bias verdicts: "ollama" (default) runs every bias agent on the
+# local Ollama server at $0 with nothing leaving the host; "anthropic" is the
+# opt-in Claude path. A 3B model passed blatantly discriminatory text as a false
+# positive in testing, so never go below 7-8B for the verdict model.
+BIAS_LLM_BACKEND = (os.environ.get("BIAS_LLM_BACKEND", "") or "ollama").lower()
+BIAS_OLLAMA_MODEL = os.environ.get("BIAS_OLLAMA_MODEL", "") or "llama3.1:8b"
+# Seconds one local bias verdict may take. Must stay below the email task's
+# soft time limit (300s), so a slow verdict falls back instead of being killed.
+BIAS_LLM_TIMEOUT = _env_int("BIAS_LLM_TIMEOUT", 240)
 
 # Bias detection thresholds (used by orchestrator pipeline)
 BIAS_THRESHOLD_PASS = 30  # 0-30: compliant, email can be sent

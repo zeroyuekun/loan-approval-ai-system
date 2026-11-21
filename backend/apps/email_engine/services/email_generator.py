@@ -9,6 +9,7 @@ from apps.ml_engine.services.scoring.decision_assembly import POLICY_DECLINE_PRE
 from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
+from .content_llm import email_llm_backend
 from .documentation import build_documentation_checklist
 from .exceptions import EmailBackendError
 from .guardrails import GuardrailChecker, nbo_offer_amounts
@@ -85,7 +86,7 @@ class EmailGenerator:
         # run on a free, OpenAI-compatible provider instead of the paid Claude
         # API. The lending DECISION is deterministic ML and never uses this.
         # Default "anthropic" keeps existing behaviour unchanged.
-        backend = (os.environ.get("EMAIL_LLM_BACKEND", "anthropic") or "anthropic").lower()
+        backend = email_llm_backend()
         configured_model = os.environ.get("EMAIL_LLM_MODEL", "") or ""
         self.client, self.provider, self._model = self._build_client(backend, configured_model)
 
