@@ -114,3 +114,53 @@ def test_non_positive_page_is_clamped(url):
     client = APIClient()
     client.force_authenticate(user=_customer("pager"))
     assert client.get(url).status_code == 200
+
+
+# --- Request IDs, log redaction ---------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_untrusted_request_id_is_replaced():
+    resp = APIClient().get("/api/v1/health/", HTTP_X_REQUEST_ID="<script>" + "a" * 200)
+    rid = resp["X-Request-ID"]
+    assert "<" not in rid and len(rid) == 32
+
+
+@pytest.mark.django_db
+def test_plain_request_id_is_echoed():
+    resp = APIClient().get("/api/v1/health/", HTTP_X_REQUEST_ID="abc-123")
+    assert resp["X-Request-ID"] == "abc-123"
+
+
+def test_pii_filter_redacts_exception_args_and_tracebacks():
+    import logging
+
+    from config.logging_filters import PiiMaskingFilter
+
+    try:
+        raise ValueError("could not mail jane@example.com")
+    except ValueError as exc:
+        record = logging.LogRecord("t", logging.ERROR, __file__, 1, "send failed: %s", (exc,), exc_info=True)
+        record.exc_info = __import__("sys").exc_info()
+    PiiMaskingFilter().filter(record)
+    assert "jane@example.com" not in record.getMessage()
+    assert "jane@example.com" not in record.exc_text
+    assert "[EMAIL_REDACTED]" in record.exc_text
+
+
+def test_pii_filter_keeps_numeric_args():
+    import logging
+
+    from config.logging_filters import PiiMaskingFilter
+
+    record = logging.LogRecord("t", logging.INFO, __file__, 1, "count=%d ratio=%.1f", (3, 0.5), None)
+    PiiMaskingFilter().filter(record)
+    assert record.getMessage() == "count=3 ratio=0.5"
+
+
+def test_dockerignore_excludes_env_files():
+    from pathlib import Path
+
+    backend_root = Path(__file__).resolve().parents[1]
+    rules = (backend_root / ".dockerignore").read_text().splitlines()
+    assert ".env" in rules and ".env.*" in rules

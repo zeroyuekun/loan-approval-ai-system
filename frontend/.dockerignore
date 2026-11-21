@@ -30,3 +30,8 @@ Dockerfile
 
 # Misc
 *.md
+
+# Secrets: never bake an env file into an image
+.env
+.env.*
+!.env.example

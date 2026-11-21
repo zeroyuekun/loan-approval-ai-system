@@ -10,6 +10,7 @@ Usage:
 """
 
 import logging
+import re
 import threading
 import uuid
 
@@ -19,6 +20,9 @@ _correlation_id = threading.local()
 def get_correlation_id() -> str | None:
     """Return the current request's correlation ID (or ``None`` outside a request)."""
     return getattr(_correlation_id, "value", None)
+
+
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 
 
 class _CorrelationIdFilter(logging.Filter):
@@ -48,7 +52,10 @@ class CorrelationIdMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        cid = request.META.get("HTTP_X_REQUEST_ID") or uuid.uuid4().hex
+        # The ID is copied into every log line and the response header, so only
+        # a short, plain token is trusted; anything else gets a fresh ID.
+        incoming = request.META.get("HTTP_X_REQUEST_ID", "")
+        cid = incoming if _REQUEST_ID_RE.fullmatch(incoming) else uuid.uuid4().hex
         _correlation_id.value = cid
         request.correlation_id = cid
 
