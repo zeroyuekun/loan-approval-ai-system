@@ -200,6 +200,10 @@ REST_FRAMEWORK = {
     "NUM_PROXIES": _env_int("TRUSTED_PROXY_COUNT", 0),
 }
 
+# A customer may hold this many undecided applications at once (each one runs
+# the full pipeline), so one account cannot flood the queues.
+MAX_OPEN_APPLICATIONS_PER_CUSTOMER = _env_int("MAX_OPEN_APPLICATIONS_PER_CUSTOMER", 5)
+
 # Simple JWT
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),

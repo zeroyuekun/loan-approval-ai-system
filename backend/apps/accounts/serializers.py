@@ -176,6 +176,16 @@ class UserSerializer(NameValidationMixin, serializers.ModelSerializer):
         fields = ("id", "username", "email", "role", "first_name", "last_name", "created_at")
         read_only_fields = ("id", "username", "role", "created_at")
 
+    def validate_email(self, value):
+        # Same rule as registration: email is a login identifier, so another
+        # account's address (in any letter case) cannot be taken on a profile edit.
+        others = CustomUser.objects.filter(email__iexact=value)
+        if self.instance is not None:
+            others = others.exclude(pk=self.instance.pk)
+        if value and others.exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value
+
 
 def _mask_id_number(value):
     """Show only last 4 characters of an ID number."""

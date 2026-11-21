@@ -1,5 +1,6 @@
 import pytest
 from django.conf import settings as django_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.agents.models import AgentRun, BiasReport, MarketingEmail
@@ -46,13 +47,29 @@ def full_application(sample_application):
         subject="Your loan has been approved",
         body="Congratulations, your loan is approved.",
         prompt_used="test prompt",
+        sent_at=timezone.now(),
+    )
+    # A draft the guardrails withheld: never sent, so never exported.
+    GeneratedEmail.objects.create(
+        application=app,
+        decision="approved",
+        subject="Withheld draft",
+        body="Draft body with a hallucinated rate of 1.9%.",
+        prompt_used="test prompt",
     )
 
     # Agent run with bias report
     run = AgentRun.objects.create(
         application=app,
         status="completed",
-        steps=[{"step_name": "predict", "status": "completed"}],
+        steps=[
+            {
+                "step_name": "predict",
+                "status": "completed",
+                "result_summary": {"probability": 0.91},
+                "error": "internal detail",
+            }
+        ],
     )
     BiasReport.objects.create(
         agent_run=run,
@@ -68,6 +85,15 @@ def full_application(sample_application):
         application=app,
         subject="Special offer for you",
         body="Check out our new products.",
+        prompt_used="marketing prompt",
+        sent=True,
+        sent_at=timezone.now(),
+    )
+    MarketingEmail.objects.create(
+        agent_run=run,
+        application=app,
+        subject="Unsent offer draft",
+        body="Held by the bias check.",
         prompt_used="marketing prompt",
     )
 
@@ -116,16 +142,23 @@ class TestCustomerDataExport:
         assert app_data["emails"][0]["subject"] == "Your loan has been approved"
         assert app_data["emails"][0]["decision"] == "approved"
 
-    def test_export_includes_agent_runs_with_bias(self, auth_client, full_application):
+    def test_export_agent_runs_are_customer_view(self, auth_client, full_application):
+        """Runs carry step names and timing only: no internal results, errors or bias analysis."""
         resp = auth_client.get(self.URL)
         data = resp.json()
         app_data = next(a for a in data["loan_applications"] if a["id"] == str(full_application.id))
         assert len(app_data["agent_runs"]) == 1
         run = app_data["agent_runs"][0]
         assert run["status"] == "completed"
-        assert len(run["bias_reports"]) == 1
-        assert run["bias_reports"][0]["bias_score"] == 12.5
-        assert run["bias_reports"][0]["categories"] == ["age"]
+        assert "bias_reports" not in run
+        assert set(run["steps"][0]) == {"step_name", "status", "started_at", "completed_at"}
+
+    def test_export_excludes_unsent_drafts(self, auth_client, full_application):
+        resp = auth_client.get(self.URL)
+        app_data = next(a for a in resp.json()["loan_applications"] if a["id"] == str(full_application.id))
+        subjects = [e["subject"] for e in app_data["emails"] + app_data["marketing_emails"]]
+        assert "Withheld draft" not in subjects
+        assert "Unsent offer draft" not in subjects
 
     def test_export_includes_marketing_emails(self, auth_client, full_application):
         resp = auth_client.get(self.URL)

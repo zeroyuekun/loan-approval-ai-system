@@ -19,6 +19,9 @@ from apps.loans.permissions import check_loan_access
 
 
 class EmailGenerationThrottle(UserRateThrottle):
+    # Own scope: without it the history is shared with the default "user"
+    # throttle, and ordinary requests trim it to a minute.
+    scope = "email_generation"
     rate = "10/hour"
 
 
@@ -57,6 +60,7 @@ class EmailListView(APIView):
             page = int(request.query_params.get("page", 1))
         except (ValueError, TypeError):
             page = 1
+        page = max(page, 1)  # page 0 or below would make a negative slice (500)
         try:
             page_size = min(int(request.query_params.get("page_size", 20)), 100)
         except (ValueError, TypeError):

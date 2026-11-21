@@ -52,6 +52,38 @@ class IsOwnerOrStaff(permissions.BasePermission):
         return obj.applicant_id == request.user.id
 
 
+class LoanCreateThrottle(UserRateThrottle):
+    """Each application runs the whole pipeline (model, bias check, emails), so
+    creation gets its own budget instead of the general 60/min."""
+
+    scope = "loan_create"
+    rate = "10/hour"
+
+
+# Statuses that still have pipeline work pending or under way.
+OPEN_APPLICATION_STATUSES = (
+    LoanApplication.Status.PENDING,
+    LoanApplication.Status.PROCESSING,
+    LoanApplication.Status.REVIEW,
+    LoanApplication.Status.QUEUE_FAILED,
+)
+
+
+def _refuse_if_too_many_open(user):
+    """A customer may hold only a few undecided applications at once."""
+    cap = getattr(settings, "MAX_OPEN_APPLICATIONS_PER_CUSTOMER", 5)
+    open_count = LoanApplication.objects.filter(
+        applicant=user, status__in=OPEN_APPLICATION_STATUSES, deleted_at__isnull=True
+    ).count()
+    if open_count >= cap:
+        raise drf_serializers.ValidationError(
+            {
+                "detail": f"You already have {open_count} applications in progress. "
+                "Please wait for a decision before applying again."
+            }
+        )
+
+
 class LoanApplicationViewSet(viewsets.ModelViewSet):
     filterset_class = LoanApplicationFilter
     ordering_fields = ["created_at", "loan_amount", "credit_score", "status"]
@@ -87,8 +119,15 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated(), IsOwnerOrStaff()]
         return [permissions.IsAuthenticated()]
 
+    def get_throttles(self):
+        if self.action == "create":
+            return [*super().get_throttles(), LoanCreateThrottle()]
+        return super().get_throttles()
+
     def perform_create(self, serializer):
         user = self.request.user
+        if user.role == "customer":
+            _refuse_if_too_many_open(user)
         with transaction.atomic():
             instance = serializer.save(applicant=user)
             # Ensure customer has a profile and seed it from the application
