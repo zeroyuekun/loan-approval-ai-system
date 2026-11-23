@@ -4,12 +4,13 @@ from datetime import date
 import anthropic
 
 from apps.agents.services.api_budget import ApiGateClosed, guarded_api_call
+from apps.email_engine.services.content_llm import make_content_llm_client
+from apps.email_engine.services.exceptions import EmailBackendError, RateLimited
 from apps.email_engine.services.guardrails import GuardrailChecker, nbo_offer_amounts
 
 # Use the hardened shared sanitizer (NFKC + zero-width strip + broader
 # blocklist + pipe removal) instead of a weaker local copy (L26). The alias
 # preserves the module-level name existing callers/tests import.
-from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 MARKETING_EMAIL_PROMPT = """You are filling in a templated follow-up email for AussieLoanAI. This email is sent AFTER the customer has already received their decline notification. It does NOT repeat the decline.
@@ -111,7 +112,9 @@ class MarketingAgent:
     MAX_RETRIES = 3
 
     def __init__(self):
-        self.client = make_anthropic_client()
+        # Follows EMAIL_LLM_BACKEND: None under ``template`` (the default), so
+        # the follow-up email is the deterministic template.
+        self.client, self.model = make_content_llm_client()
         self.guardrail_checker = GuardrailChecker()
 
     def generate(self, application, nbo_result, denial_reasons=""):
@@ -214,7 +217,7 @@ class MarketingAgent:
                     "credit_assessment",
                     "financial_profile",
                 ],
-                model="claude-sonnet-4-6",
+                model=self.model,
                 max_tokens=1500,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
                 messages=[{"role": "user", "content": current_prompt}],
@@ -223,9 +226,9 @@ class MarketingAgent:
             _logger.info("Marketing email API budget exhausted, circuit open, or no API key — using template")
         except anthropic.AuthenticationError as api_err:
             _logger.error("Marketing email API auth error (not retryable): %s", api_err)
-        except (anthropic.RateLimitError, anthropic.APIConnectionError) as api_err:
-            # Transient (rate limit, network, timeout) → template fallback (no sleep).
-            # APITimeoutError subclasses APIConnectionError.
+        except (anthropic.RateLimitError, anthropic.APIConnectionError, EmailBackendError, RateLimited) as api_err:
+            # Transient (rate limit, network, timeout, local model down) → template
+            # fallback (no sleep). APITimeoutError subclasses APIConnectionError.
             _logger.warning("Marketing email API %s — using template: %s", type(api_err).__name__, api_err)
         except anthropic.APIStatusError as api_err:
             if api_err.status_code >= 500:

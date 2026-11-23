@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.conf import settings as django_settings
 from django.contrib.auth.hashers import check_password, make_password
-from django.db.models import Prefetch, Q
+from django.db.models import Q
 from django.middleware.csrf import get_token as get_csrf_token
 from django.middleware.csrf import rotate_token
 from django.shortcuts import get_object_or_404
@@ -18,10 +18,8 @@ from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.agents.models import AgentRun, MarketingEmail
 from apps.common.http import client_ip
-from apps.email_engine.models import GeneratedEmail
-from apps.loans.models import AuditLog, LoanApplication, LoanDecision
+from apps.loans.models import AuditLog
 
 from .authentication import CookieJWTAuthentication
 from .models import CustomerProfile, CustomUser
@@ -35,6 +33,7 @@ from .serializers import (
     UserSerializer,
 )
 from .services.customer_activity import customer_activity
+from .services.data_export import build_customer_export
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +119,9 @@ class CookieTokenRefreshView(generics.GenericAPIView):
     # client uses to recover from it (the refresh cookie is checked below).
     authentication_classes = ()
     throttle_classes = (RefreshRateThrottle,)
+    # JSON only (also the project default): with no authentication there is no
+    # CSRF check, and a cross-site HTML form cannot send application/json.
+    parser_classes = (JSONParser,)
 
     def post(self, request, *args, **kwargs):
         refresh_name = getattr(django_settings, "JWT_REFRESH_COOKIE_NAME", "refresh_token")
@@ -131,6 +133,8 @@ class CookieTokenRefreshView(generics.GenericAPIView):
             )
         try:
             refresh = RefreshToken(raw_refresh)
+            # A disabled or deleted account must not keep a sliding session.
+            user = self._get_user_from_token(refresh)
             new_access = refresh.access_token
 
             # Rotate refresh token if configured
@@ -140,7 +144,7 @@ class CookieTokenRefreshView(generics.GenericAPIView):
                         refresh.blacklist()
                     except AttributeError:
                         logger.debug("Token blacklist not available — skipping")
-                refresh = RefreshToken.for_user(self._get_user_from_token(refresh))
+                refresh = RefreshToken.for_user(user)
                 new_access = refresh.access_token
 
             _record_activity(refresh["user_id"])
@@ -165,12 +169,15 @@ class CookieTokenRefreshView(generics.GenericAPIView):
 
     def _get_user_from_token(self, token):
         try:
-            return CustomUser.objects.get(pk=token["user_id"])
+            user = CustomUser.objects.get(pk=token["user_id"])
         except CustomUser.DoesNotExist as exc:
             # Deleted-user race: token is cryptographically valid but its
             # subject no longer exists. Treat as invalid token (401) rather
             # than letting the outer handler return 500.
             raise TokenError("user no longer exists") from exc
+        if not user.is_active:
+            raise TokenError("user is inactive")
+        return user
 
 
 class LoginRateThrottle(AnonRateThrottle):
@@ -392,151 +399,9 @@ class CustomerDataExportView(generics.GenericAPIView):
     permission_classes = (IsAuthenticated,)
     throttle_classes = (DataExportThrottle,)
 
-    # Prevent unbounded memory load for high-volume applicants. Real users will
-    # never exceed these caps; attackers who synthesise many records would OOM
-    # the worker without them.
-    MAX_APPLICATIONS = 500
-    MAX_EMAILS_PER_APP = 50
-    MAX_AGENT_RUNS_PER_APP = 20
-
     def get(self, request):
-        user = request.user
-        data = {
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "role": user.role,
-                "created_at": user.created_at.isoformat(),
-            },
-        }
-
-        # Profile data
-        try:
-            profile = user.profile
-            data["profile"] = {
-                f.name: str(getattr(profile, f.name, ""))
-                for f in profile._meta.get_fields()
-                if hasattr(f, "column") and f.name not in ("id", "user")
-            }
-        except CustomerProfile.DoesNotExist:
-            data["profile"] = None
-
-        # Loan applications with related decisions, emails, agent runs, bias reports
-        applications = (
-            LoanApplication.objects.filter(applicant=user)
-            .select_related("decision", "decision__model_version")
-            .prefetch_related(
-                # Use Prefetch with bounded sub-querysets so Django's prefetch
-                # cache is hit inside the loop (list(qs)[:n] bypasses the cache
-                # and causes N+1 queries per application).
-                Prefetch(
-                    "emails",
-                    queryset=GeneratedEmail.objects.order_by("-created_at")[: self.MAX_EMAILS_PER_APP],
-                    to_attr="_emails_cached",
-                ),
-                Prefetch(
-                    "agent_runs",
-                    queryset=AgentRun.objects.prefetch_related("bias_reports").order_by("-created_at")[
-                        : self.MAX_AGENT_RUNS_PER_APP
-                    ],
-                    to_attr="_agent_runs_cached",
-                ),
-                Prefetch(
-                    "marketing_emails",
-                    queryset=MarketingEmail.objects.order_by("-created_at")[: self.MAX_EMAILS_PER_APP],
-                    to_attr="_marketing_emails_cached",
-                ),
-            )
-            .order_by("-created_at")[: self.MAX_APPLICATIONS]
-        )
-
-        apps_data = []
-        for app in applications:
-            app_dict = {
-                "id": str(app.id),
-                "loan_amount": str(app.loan_amount),
-                "purpose": app.purpose,
-                "status": app.status,
-                "created_at": app.created_at.isoformat(),
-            }
-
-            # Loan decision with ML explanation
-            try:
-                d = app.decision
-                app_dict["decision"] = {
-                    "decision": d.decision,
-                    "confidence": d.confidence,
-                    "risk_grade": d.risk_grade,
-                    "feature_importances": d.feature_importances,
-                    "shap_values": d.shap_values,
-                    "reasoning": d.reasoning,
-                    "model_version": str(d.model_version) if d.model_version else None,
-                    "created_at": d.created_at.isoformat(),
-                }
-            except LoanDecision.DoesNotExist:
-                app_dict["decision"] = None
-
-            app_dict["emails"] = [
-                {
-                    "subject": e.subject,
-                    "body": e.body,
-                    "decision": e.decision,
-                    "created_at": e.created_at.isoformat(),
-                }
-                for e in getattr(app, "_emails_cached", [])
-            ]
-
-            app_dict["marketing_emails"] = [
-                {
-                    "subject": me.subject,
-                    "body": me.body,
-                    "sent": me.sent,
-                    "sent_at": me.sent_at.isoformat() if me.sent_at else None,
-                    "created_at": me.created_at.isoformat(),
-                }
-                for me in getattr(app, "_marketing_emails_cached", [])
-            ]
-
-            app_dict["agent_runs"] = [
-                {
-                    "status": run.status,
-                    "steps": run.steps,
-                    "created_at": run.created_at.isoformat(),
-                    "bias_reports": [
-                        {
-                            "bias_score": br.bias_score,
-                            "categories": br.categories,
-                            "analysis": br.analysis,
-                            "flagged": br.flagged,
-                            "created_at": br.created_at.isoformat(),
-                        }
-                        for br in run.bias_reports.all()
-                    ],
-                }
-                for run in getattr(app, "_agent_runs_cached", [])
-            ]
-
-            apps_data.append(app_dict)
-
-        data["loan_applications"] = apps_data
-
-        # Audit log entries
-        audit_logs = (
-            AuditLog.objects.filter(user=user)
-            .order_by("-timestamp")[:100]
-            .values(
-                "action",
-                "resource_type",
-                "timestamp",
-            )
-        )
-        data["audit_logs"] = [{k: str(v) for k, v in log.items()} for log in audit_logs]
-
-        _audit_user_event(request, user, "data_export")
-
+        data = build_customer_export(request.user)
+        _audit_user_event(request, request.user, "data_export")
         return Response(data)
 
 

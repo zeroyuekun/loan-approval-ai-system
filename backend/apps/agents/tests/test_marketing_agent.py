@@ -198,7 +198,8 @@ class TestMarketingAgentInit:
         assert agent.client is None
         assert agent.guardrail_checker is not None
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-abc"})
+    # Claude is opt-in: the copy follows EMAIL_LLM_BACKEND (default template).
+    @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "anthropic", "ANTHROPIC_API_KEY": "test-key-abc"})
     @patch("apps.agents.services.marketing_agent.anthropic.Anthropic")
     def test_init_with_api_key_creates_client(self, mock_anthropic_cls):
         mock_anthropic_cls.return_value = MagicMock()

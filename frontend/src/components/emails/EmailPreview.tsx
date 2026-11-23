@@ -9,11 +9,24 @@ import { renderEmailHtml } from '@/lib/emailHtmlRenderer'
 import { GuardrailLogDisplay } from './GuardrailLogDisplay'
 import { CheckCircle, XCircle, Clock, Star, Reply, Forward, MoreVertical, Paperclip } from 'lucide-react'
 
+// Layout properties that let email HTML escape its preview box and draw over
+// the dashboard (a fixed overlay with a fake login form, for example).
+const BLOCKED_STYLE_PROPS = new Set(['position', 'z-index', 'inset', 'top', 'right', 'bottom', 'left'])
+
+/** Drop declarations that could position content outside the preview. */
+export function stripPositioning(style: string): string {
+  return style
+    .split(';')
+    .map((decl) => decl.trim())
+    .filter((decl) => decl && !BLOCKED_STYLE_PROPS.has(decl.split(':')[0].trim().toLowerCase()))
+    .join('; ')
+}
+
 // Sanitize HTML and enforce rel="noopener noreferrer" on _blank anchors.
 // The 'rel' attribute must be in ALLOWED_ATTR so DOMPurify does not strip the
 // value we inject in the post-processing DOM walk (H23 tabnapping fix).
 // nosec: content is sanitized with DOMPurify before the innerHTML assignment
-function sanitizeEmailHtml(html: string): string {
+export function sanitizeEmailHtml(html: string): string {
   // Without a DOM (server render) DOMPurify returns its input unchanged, so
   // there is nothing safe to emit. HtmlEmailBody only renders after mount.
   if (typeof document === 'undefined') return ''
@@ -30,6 +43,11 @@ function sanitizeEmailHtml(html: string): string {
   div.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]').forEach((a) => {
     a.setAttribute('rel', 'noopener noreferrer')
   })
+  div.querySelectorAll<HTMLElement>('[style]').forEach((el) => {
+    const safe = stripPositioning(el.getAttribute('style') || '')
+    if (safe) el.setAttribute('style', safe)
+    else el.removeAttribute('style')
+  })
   return div.innerHTML
 }
 
@@ -42,7 +60,8 @@ function useIsClient(): boolean {
 
 export function HtmlEmailBody({ html }: { html: string }) {
   const isClient = useIsClient()
-  const safeHtml = isClient ? sanitizeEmailHtml(html) : ''
+  // Sanitising parses and rewrites the whole email; do it once per html.
+  const safeHtml = useMemo(() => (isClient ? sanitizeEmailHtml(html) : ''), [html, isClient])
 
   return (
     <div

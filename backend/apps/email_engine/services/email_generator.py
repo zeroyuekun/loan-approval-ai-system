@@ -9,6 +9,7 @@ from apps.ml_engine.services.scoring.decision_assembly import POLICY_DECLINE_PRE
 from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
+from .content_llm import email_llm_backend
 from .documentation import build_documentation_checklist
 from .exceptions import EmailBackendError
 from .guardrails import GuardrailChecker, nbo_offer_amounts
@@ -84,8 +85,8 @@ class EmailGenerator:
         # Email LLM backend is selectable so the (low-stakes) email writer can
         # run on a free, OpenAI-compatible provider instead of the paid Claude
         # API. The lending DECISION is deterministic ML and never uses this.
-        # Default "anthropic" keeps existing behaviour unchanged.
-        backend = (os.environ.get("EMAIL_LLM_BACKEND", "anthropic") or "anthropic").lower()
+        # Default "template": no LLM writes emails unless one is chosen.
+        backend = email_llm_backend()
         configured_model = os.environ.get("EMAIL_LLM_MODEL", "") or ""
         self.client, self.provider, self._model = self._build_client(backend, configured_model)
 
@@ -110,6 +111,10 @@ class EmailGenerator:
         produce a compliant, sendable email. Clients are memoized in
         ``_CLIENT_CACHE`` (see its comment).
         """
+        if backend == "template":
+            # No LLM writes emails: every email is the deterministic template.
+            return None, "template", ""
+
         if backend == "groq":
             from .llm_client import DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, GroqLLMClient
 

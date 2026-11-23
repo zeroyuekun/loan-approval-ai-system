@@ -20,7 +20,7 @@ from apps.agents.services.human_review_actions import (
     apply_human_review_action,
 )
 from apps.agents.tasks import orchestrate_pipeline_task
-from apps.common.http import client_ip
+from apps.common.http import client_ip, page_params
 from apps.loans.models import AuditLog, LoanApplication
 from apps.loans.permissions import check_loan_access
 
@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 
 class OrchestrationThrottle(UserRateThrottle):
+    # Own scope: without it the history is shared with the default "user"
+    # throttle, and ordinary requests trim it to a minute.
+    scope = "orchestration"
     rate = "60/hour"
 
 
@@ -71,14 +74,7 @@ class AgentRunListView(APIView):
                 queryset = queryset.filter(id=Subquery(latest_per_app)).distinct()
 
         # Simple pagination (clamped to max 100)
-        try:
-            page = int(request.query_params.get("page", 1))
-        except (ValueError, TypeError):
-            page = 1
-        try:
-            page_size = min(int(request.query_params.get("page_size", 20)), 100)
-        except (ValueError, TypeError):
-            page_size = 20
+        page, page_size = page_params(request)
         total = queryset.count()
         offset = (page - 1) * page_size
         runs = queryset[offset : offset + page_size]

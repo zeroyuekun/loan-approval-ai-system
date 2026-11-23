@@ -24,3 +24,21 @@ def client_ip(request) -> str | None:
     except ValueError:
         return remote_addr
     return ident
+
+
+def page_params(request, default_size=20, max_size=100):
+    """``(page, page_size)`` from the query string, each clamped to a usable range.
+
+    Non-numbers fall back to the defaults; values below 1 become 1, so a
+    hand-written paginator never builds a negative slice (a 500).
+    """
+
+    def _int(name, default):
+        try:
+            return int(request.query_params.get(name, default))
+        except (ValueError, TypeError):
+            return default
+
+    page = max(_int("page", 1), 1)
+    page_size = min(max(_int("page_size", default_size), 1), max_size)
+    return page, page_size

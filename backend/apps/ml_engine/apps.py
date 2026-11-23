@@ -11,4 +11,8 @@ class MlEngineConfig(AppConfig):
         try:
             from apps.ml_engine import signals  # noqa: F401
         except Exception:
-            pass
+            # Never block startup, but a missing signal handler (e.g. the MRM
+            # dossier refresh) must be visible rather than silently absent.
+            import logging
+
+            logging.getLogger(__name__).exception("ml_engine signal handlers failed to register")

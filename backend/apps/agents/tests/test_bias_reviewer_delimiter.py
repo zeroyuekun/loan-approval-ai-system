@@ -20,7 +20,7 @@ def test_decision_reviewer_prompt_fences_email(monkeypatch):
         return {"approved": True, "confidence": 0.9, "reasoning": "ok"}
 
     monkeypatch.setattr("apps.agents.services.bias.reviewer._call_with_fallback", _fake_call)
-    monkeypatch.setattr("apps.agents.services.bias.reviewer._make_anthropic_client", lambda: MagicMock())
+    monkeypatch.setattr("apps.agents.services.bias.reviewer._make_bias_llm_client", lambda: MagicMock())
 
     reviewer = AIEmailReviewer()
     reviewer.review(
@@ -43,7 +43,7 @@ def test_marketing_reviewer_prompt_fences_email(monkeypatch):
         return {"approved": True, "confidence": 0.9, "reasoning": "ok"}
 
     monkeypatch.setattr("apps.agents.services.bias.marketing._call_with_fallback", _fake_call)
-    monkeypatch.setattr("apps.agents.services.bias.marketing._make_anthropic_client", lambda: MagicMock())
+    monkeypatch.setattr("apps.agents.services.bias.marketing._make_bias_llm_client", lambda: MagicMock())
 
     reviewer = MarketingEmailReviewer()
     reviewer.review(

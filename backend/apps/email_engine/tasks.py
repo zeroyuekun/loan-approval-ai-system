@@ -35,7 +35,10 @@ def _email_context(application, decision):
 # OSErrors). The dedup lock is kept across them and across the RateLimited
 # retry, as the orchestrate task keeps its lock (M22).
 _AUTORETRY = (OSError,)
-_EMAIL_TIME_LIMIT = 120
+# Room for a local (CPU) bias verdict: BIAS_LLM_TIMEOUT (240s) fits inside the
+# soft limit, so a slow verdict falls back instead of the task being killed.
+_EMAIL_TIME_LIMIT = 330
+_EMAIL_SOFT_TIME_LIMIT = 300
 # The longest wait before a retry: a provider's Retry-After is capped here, and
 # the autoretry backoff (1, 2, 4 s) stays far below it.
 _MAX_RETRY_COUNTDOWN = 300
@@ -52,7 +55,7 @@ def _email_lock_key(application_id, decision):
     bind=True,
     name="apps.email_engine.tasks.generate_email_task",
     time_limit=_EMAIL_TIME_LIMIT,
-    soft_time_limit=100,
+    soft_time_limit=_EMAIL_SOFT_TIME_LIMIT,
     autoretry_for=_AUTORETRY,
     retry_backoff=True,
     retry_backoff_max=_MAX_RETRY_COUNTDOWN,

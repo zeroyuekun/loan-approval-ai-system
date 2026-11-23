@@ -2,301 +2,206 @@
 
 ![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
 ![Django 5](https://img.shields.io/badge/Django-5-092E20?logo=django&logoColor=white)
+![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
 [![CI](https://github.com/zeroyuekun/loan-approval-ai-system/actions/workflows/ci.yml/badge.svg)](https://github.com/zeroyuekun/loan-approval-ai-system/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/zeroyuekun/loan-approval-ai-system)](https://github.com/zeroyuekun/loan-approval-ai-system/releases)
-![Last commit](https://img.shields.io/github/last-commit/zeroyuekun/loan-approval-ai-system)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-Full-stack loan approval system for Australian lending. XGBoost scores applicants, Claude writes the decision emails, and an agent pipeline checks everything for bias before it ships.
+A loan approval system for Australian lending. A machine-learning model scores
+each application, the system writes and sends the decision email, checks that
+email for discriminatory wording, and offers declined customers other products.
+Everything runs on your own machine, including the AI, at no cost.
 
-What makes it different:
+> **Limits up front.** The model is trained on synthetic data that copies
+> published Australian lending statistics, so it shows how the pipeline works;
+> it is not a credit model for real customers. See the
+> [model card](backend/docs/MODEL_CARD.md).
 
-- Bias detection runs in 3 layers: a regex pre-screen, then a Claude review, then human escalation. Each generated email gets a bias score from 0 to 100.
-- Every Claude-generated decision email goes through 18 deterministic guardrails (19 for a marketing email). They catch prohibited language, hallucinated dollar amounts, and aggressive tone, check that the required regulatory elements are present, and more.
-- Email generation is template-first, and Claude spend is capped at $5/day, so cost control is part of the production design from the start.
-- Every applicant is told how their decision was made (solely automated, assisted, or human-decided) and can request a human review. Borderline, drift, and policy-"refer" cases keep the model decision and carry the reason on the decision record; only bias flags go to an officer.
+## What it does
 
-Most of the work went into the compliance layer: APRA serviceability buffers, NCCP Act responsible lending, Banking Code disclosure, and Privacy Act automated-decision (ADM) transparency.
+1. **Scores the application.** An XGBoost model gives an approval probability
+   and the main reasons behind it (SHAP), checked against Australian
+   responsible-lending rules (serviceability buffer, living-cost benchmarks).
+2. **Writes the decision email.** Compliance-checked templates fill in the
+   real figures. Every email passes deterministic guardrails (required
+   disclosures, no invented dollar amounts, no prohibited language) before it
+   can be sent.
+3. **Checks for bias.** A rule-based screen scores every email. Only
+   ambiguous cases go to a local AI model (Llama 3.1 8B), and anything it
+   confirms as biased goes to a human reviewer.
+4. **Offers alternatives.** A declined customer gets a follow-up with
+   products they qualify for, with amounts and rates calculated by code, not
+   by the AI.
+5. **Explains itself.** Every applicant is told whether a person was involved
+   in their decision and can ask for a human review.
+
+```mermaid
+flowchart LR
+    A[Application] --> B[XGBoost score<br/>+ reasons]
+    B --> C[Decision email<br/>template + guardrails]
+    C --> D{Bias screen}
+    D -- clean --> E[Email sent]
+    D -- ambiguous --> F[Local Llama<br/>verdict]
+    F -- clean --> E
+    F -- biased --> G[Human review]
+    D -- severe --> G
+    E --> H{Declined?}
+    H -- yes --> I[Alternative offers<br/>follow-up email]
+```
 
 <details>
-<summary><strong>Screenshots</strong> (click to expand)</summary>
+<summary><strong>Screenshots</strong></summary>
 
-### Dashboard
 ![Dashboard](docs/screenshots/01-dashboard.png)
-
-### Loan Applications
 ![Applications](docs/screenshots/02-applications.png)
-
-### Application Detail
-![Application Detail](docs/screenshots/03-application-detail.png)
-
-### Model Metrics
-![Model Metrics](docs/screenshots/04-model-metrics.png)
-
-### Generated Emails
+![Application detail](docs/screenshots/03-application-detail.png)
+![Model metrics](docs/screenshots/04-model-metrics.png)
 ![Emails](docs/screenshots/05-emails.png)
 
 </details>
 
-## How the pipeline works
+## Run it
 
-```mermaid
-flowchart TD
-    A[Application submitted] --> B[1. XGBoost scores it]
-    B --> B1[probability + SHAP]
-    B1 --> C[2. Claude writes the decision email<br/>denials also carry a deterministic NBO teaser]
-    C --> D[3. Guardrails — 18 deterministic checks]
-    D --> E[4. Bias pre-screen regex<br/>score 0–100]
-    E -- "score ≤ 30" --> F[Send the email]
-    E -- "31–59 (moderate)" --> G[Junior LLM classifies flags]
-    G -- "composite ≤ 30" --> F
-    G -- "composite ≥ 60" --> H[Human review queue]
-    E -- "score ≥ 60 (severe)" --> H
-    F --> I[5. Decision email sends]
-    I --> J{Denied?}
-    J -- yes --> K[6. NBO — full offer set as a<br/>separate marketing follow-up email]
-    J -- no --> L[7. Frontend polls status]
-    K --> L
-
-    classDef primary fill:#1e40af,color:#fff,stroke:#1e3a8a
-    classDef review fill:#dc2626,color:#fff,stroke:#991b1b
-    classDef ok fill:#059669,color:#fff,stroke:#065f46
-    class A,B,C,I primary
-    class H review
-    class F,L ok
-```
-
-A failed prediction step returns the application to "pending" so it can be re-run, with the failure recorded in the audit log and the decision waterfall. Stuck pipelines auto-recover after 5 minutes. Borderline scores, severe drift, or a policy "refer" rule do not hold the decision: the model decision is applied and each reason is written to the decision waterfall and the audit log. The human review queue is only for bias flags.
-
-On a denial, alternatives reach the customer through two emails. The decision email itself carries one deterministic alternative-offer teaser (the best-scoring product and its headline figure, validated by the same hallucinated-number guardrail as the rest of the letter), so the customer has a concrete next step straight away. The full personalised offer set follows as a separate marketing follow-up email (step 6) with its own bias and senior-review gate. Splitting it out keeps the regulated decision letter concise.
-
-## Decision transparency & contestability
-
-Australia's Privacy Act automated-decision-making (ADM) reforms (APP 1.7 to 1.9) require lenders to disclose when a decision is made by automated means. Every decision carries an honest ADM disclosure, one of:
-
-- Solely automated: the model decided with no human involved.
-- Assisted: the model assessed the application and a lending officer reviewed it.
-- Human: a lending officer made or overrode the decision.
-
-Applicants can request a human review of a declined automated decision. An officer can uphold or overturn it (override → approve), and every transition is audit-logged. The disclosure comes from a persisted record of human involvement, so a decision that was escalated and then resolved, or overturned by an officer, is never mislabelled "solely automated", even after the application reaches its final state.
-
-## Stack
-
-| Layer | Tech |
-|-------|------|
-| Backend | Django 5, DRF, PostgreSQL 17, Celery + Redis |
-| Frontend | Next.js 15, React 19, TanStack Query, Tailwind, shadcn/ui |
-| ML | scikit-learn, XGBoost, SHAP, Optuna |
-| AI | Claude API (Sonnet for generation, Opus for compliance review) |
-| Infra (local) | Docker Compose, separate ML and IO Celery workers |
-| Infra (cloud) | Kubernetes (deployments, HPA, NetworkPolicies, PodDisruptionBudgets, Ingress) + Terraform (AWS EKS, RDS Postgres, ElastiCache Redis) |
-
-## Run locally in 60 seconds
-
-Prereqs: Docker Desktop (or Docker Engine + Compose v2), ~4 GB free RAM, an Anthropic API key.
+You need Docker Desktop (or Docker Engine with Compose v2) and about 10 GB of
+free RAM for the full stack with the local AI model. No API key is needed.
 
 ```bash
 git clone https://github.com/zeroyuekun/loan-approval-ai-system.git
 cd loan-approval-ai-system
-cp .env.example .env      # add ANTHROPIC_API_KEY
-docker compose up -d      # backend, frontend, db, redis, ml + io workers
-                          # backend start runs migrations and creates the admin user
+cp .env.example .env        # then set DJANGO_SECRET_KEY, FIELD_ENCRYPTION_KEY and the passwords
+docker compose up -d        # first start downloads Llama 3.1 8B (~5 GB)
+make seed                   # generate synthetic data and train the model
+```
+
+- Dashboard: <http://localhost:3000>. Log in as `admin` with the
+  `DJANGO_SUPERUSER_PASSWORD` from `.env`.
+- API docs: <http://localhost:8000/api/schema/swagger-ui/>.
+- Problems: see the [runbooks](docs/runbooks/).
+
+**AI settings.** By default the AI runs locally through Ollama
+(`COMPOSE_PROFILES=ollama`, `BIAS_LLM_BACKEND=ollama`, `BIAS_OLLAMA_MODEL=llama3.1:8b`)
+and emails come from templates (`EMAIL_LLM_BACKEND=template`). Nothing leaves
+your machine. If you leave Ollama off, the bias screen still runs and any
+ambiguous email waits for a human. Claude is optional: set a backend to
+`anthropic` and add `ANTHROPIC_API_KEY`. Why Llama 3.1 8B and not a smaller
+model: [bias verdict model comparison](docs/experiments/bias_verdict_model.md).
+
+## How I built this
+
+I designed the architecture and made the product decisions: the three-stage
+pipeline (score, email, bias check), the split into five Django apps,
+deterministic checks before any AI, template-first emails with cost caps, the
+local-model setup and the fairness approach. I wrote parts of the code by hand
+and used AI (Claude Code) as a pair programmer for much of the implementation.
+I reviewed every change, set the testing strategy, and debugged issues across
+the project's pull requests.
+
+## Tech
+
+| Layer | Tools |
+|---|---|
+| Backend | Django 5, Django REST Framework, PostgreSQL 17, Celery + Redis |
+| Frontend | Next.js 16, React 19, TanStack Query, Tailwind, shadcn/ui |
+| Machine learning | XGBoost, scikit-learn, SHAP, Optuna |
+| AI | Llama 3.1 8B on Ollama (local); Claude optional |
+| Infrastructure | Docker Compose; Kubernetes manifests and Terraform for AWS (not deployed) |
+
+## Design decisions
+
+| Decision | Why |
+|---|---|
+| Deterministic checks before any AI | Rules are predictable and auditable; the AI only judges the ambiguous cases ([ADR 003](docs/adr/003-hybrid-bias-detection.md)) |
+| Template-first emails | A lending letter must state exact figures; templates cannot invent them ([ADR 006](docs/adr/006-template-first-email-with-cost-cap.md)) |
+| Local Llama for verdicts | $0 running cost and no customer data leaves the machine ([ADR 010](docs/adr/010-pluggable-email-llm-backend-data-safety.md)) |
+| XGBoost with monotonic constraints | Higher income can never lower the score, which keeps decisions explainable ([ADR 002](docs/adr/002-xgboost-with-monotonic-constraints.md)) |
+| Synthetic data calibrated to public statistics | No real loan data is available ([ADR 001](docs/adr/001-synthetic-data-with-copula.md)) |
+
+All decision records: [docs/adr](docs/adr/README.md).
+
+<details>
+<summary><strong>Model details</strong></summary>
+
+XGBoost trained on synthetic Australian lending data calibrated to ATO, ABS,
+APRA and Equifax published statistics, with noise and hidden factors so the
+results are realistic rather than perfect. Test AUC on the synthetic holdout is
+0.88 (5-fold CV 0.87); details and limits are in the
+[model card](backend/docs/MODEL_CARD.md). Training uses Optuna tuning,
+isotonic calibration and monotonic constraints. The project also includes
+drift monitoring (PSI), a scorecard baseline for comparison, and APRA-style
+stress testing.
+
+Retrain:
+
+```bash
 docker compose exec backend python manage.py generate_data --num-records 10000
 docker compose exec backend python manage.py train_model --algorithm xgb
 ```
 
-Then:
-
-- Dashboard at [http://localhost:3000](http://localhost:3000) (log in as `admin` with the `DJANGO_SUPERUSER_PASSWORD` from your `.env`)
-- API docs at [http://localhost:8000/api/schema/swagger-ui/](http://localhost:8000/api/schema/swagger-ui/)
-- Run the tests with `docker compose exec backend pytest tests/ -v`
-
-Something broken? See [runbooks](docs/runbooks/).
+</details>
 
 <details>
-<summary><strong>Project layout</strong> (click to expand)</summary>
+<summary><strong>Compliance features</strong></summary>
 
-```
-backend/
-  apps/
-    accounts/       # JWT auth, roles (admin, officer, customer)
-    loans/          # application CRUD, status management, audit log
-    ml_engine/      # training, prediction, drift detection, metrics
-    email_engine/   # Claude emails, guardrails, pricing
-    agents/         # bias detection, NBO, marketing agent, orchestrator
-  config/           # settings, celery, urls
+- Responsible-lending checks: serviceability with a 3% rate buffer and
+  living-cost benchmarks.
+- Decision emails include the required elements (complaints body, hardship
+  and contact details) and are checked for prohibited language and invented
+  figures before sending; an email that fails is withheld, not sent.
+- Automated-decision disclosure (Privacy Act reforms): every decision says
+  whether it was fully automated, assisted, or made by a person, and declined
+  applicants can request a human review.
+- Customers can export their data (Privacy Act APP 12).
 
-frontend/src/
-  app/              # pages (dashboard, applications, agents, customers)
-  components/       # shadcn/ui + domain components
-  hooks/            # polling, mutations, auth
-
-scripts/            # database backup/restore, k8s placeholder check
-tools/              # standalone training + evaluation scripts
-workflows/          # markdown SOPs for each pipeline stage
-k8s/                # Kubernetes manifests — deployments, HPA, NetworkPolicies, PDBs, Ingress
-terraform/          # AWS infra-as-code — EKS, RDS Postgres, ElastiCache Redis
-```
+These are implemented as engineering features, not reviewed by a compliance
+professional.
 
 </details>
 
-## Design decisions
+<details>
+<summary><strong>Security</strong></summary>
 
-| Decision | ADR |
-|----------|-----|
-| Gaussian copula synthetic data calibrated to ATO/ABS/APRA stats | [001](docs/adr/001-synthetic-data-with-copula.md) |
-| XGBoost with monotonic constraints for regulatory consistency | [002](docs/adr/002-xgboost-with-monotonic-constraints.md) |
-| Bias detection: deterministic regex -> junior LLM (moderate flags) -> human escalation; senior Opus review on marketing emails | [003](docs/adr/003-hybrid-bias-detection.md) |
-| Temporal validation strategy with out-of-time splits | [004](docs/adr/004-temporal-validation-strategy.md) |
-| Django over FastAPI | [005](docs/adr/005-django-over-fastapi.md) |
-| Template-first email with $5/day Claude budget cap | [006](docs/adr/006-template-first-email-with-cost-cap.md) |
-| WAT architecture (workflows, agents, tools) | [007](docs/adr/007-wat-architecture.md) |
-| Security architecture | [008](docs/adr/008-security-architecture.md) |
-| Pluggable email LLM backend + free-tier data-safety (no real client data to a training cloud AI) | [010](docs/adr/010-pluggable-email-llm-backend-data-safety.md) |
+JWT in HttpOnly cookies with refresh rotation and blacklisting, CSRF protection,
+Argon2 password hashing, field-level encryption for personal data, per-endpoint
+role checks and rate limits, a per-request CSP nonce, and prompt-injection
+defences on any text that reaches an AI prompt. Logs are scrubbed of personal
+data. Details: [ADR 008](docs/adr/008-security-architecture.md).
 
-The full list of ADRs is in [docs/adr/README.md](docs/adr/README.md).
+</details>
 
 <details>
-<summary><strong>ML model details</strong> (click to expand)</summary>
+<summary><strong>Testing</strong></summary>
 
-The model is XGBoost, trained on synthetic Australian lending data. It takes 71 raw applicant input fields (48 numeric + categoricals) with 31 engineered interactions. Training uses Optuna Bayesian hyperparameter optimisation, isotonic probability calibration, and 76 monotonic constraints (higher income -> lower risk, etc.).
+About 2,500 backend tests (pytest) and 480+ frontend tests (vitest).
 
-The synthetic data is calibrated against ATO, ABS, APRA, and Equifax published statistics. It includes latent variables the model can't see (documentation quality, savings patterns, employer stability), underwriter disagreement noise, and measurement error. That is why the model hits realistic metrics rather than the 0.99 you get with clean synthetic labels: test AUC is 0.88 per the active `ModelVersion`, and the reproducible benchmark on a 2,000-record subset is 0.85 with default hyperparameters (see `docs/experiments/benchmark.md`).
+CI runs Ruff, Bandit, gitleaks, npm audit, Trivy image scans and an end-to-end
+smoke test (`tools/smoke_e2e.sh`: register, apply, decide, email).
 
-Other ML features: IV-based feature selection, PSI/CSI drift monitoring, reject inference (parcelling method), conformal prediction intervals, SHAP-mapped adverse action reason codes (70 codes), APRA stress testing (+3% rate buffer), and a WOE scorecard built alongside XGBoost for interpretability comparison.
-
-## Email guardrails
-
-Every Claude-generated decision email passes 18 deterministic checks before sending (a marketing email runs 19; a pre-vetted template runs a 4-check core). They include:
-
-1. Prohibited language (discrimination acts)
-2. Hallucinated dollar amounts (validated against application data)
-3. Aggressive tone
-4. Overly formal/corporate phrasing
-5. Unprofessional financial language
-6. Markdown/HTML rejection (plain text only)
-7. Word count limits
-8. Required regulatory elements (AFCA reference, cooling-off period, etc.)
-9. Double sign-off detection
-10. Sentence rhythm uniformity (flags suspiciously even sentence lengths)
-
-Up to three regeneration attempts; if guardrails still fail, the decision email is withheld (not sent) and the run is flagged for operations. The human-review queue is reserved for bias escalations.
-
-### Retraining the model
+Run the backend tests locally (the runtime image does not ship pytest):
 
 ```bash
-docker compose exec backend python manage.py generate_data --num-records 10000 --output .tmp/synthetic_loans.csv
-docker compose exec backend python manage.py train_model --algorithm xgb --data-path .tmp/synthetic_loans.csv
+docker compose exec backend bash -lc "pip install -q --user pytest pytest-django && python -m pytest"
 ```
+
+Frontend: `cd frontend && npx vitest run`.
 
 </details>
 
 <details>
-<summary><strong>API reference</strong> (click to expand)</summary>
+<summary><strong>Project layout</strong></summary>
 
-Auth: `POST /api/v1/auth/{register,login,refresh,logout}/`, `GET /api/v1/auth/me/`
-
-Loans: `GET /api/v1/loans/`, `POST /api/v1/loans/`, `GET /api/v1/loans/{id}/`
-
-ML: `POST /api/v1/ml/predict/{id}/` (disabled by default and gated behind `ML_STANDALONE_PREDICT_ENABLED`; the agent orchestrator pipeline is the production decision path), `GET /api/v1/ml/models/active/metrics/`
-
-Emails: `POST /api/v1/emails/generate/{id}/`, `GET /api/v1/emails/{id}/`
-
-Agents: `POST /api/v1/agents/orchestrate/{id}/`, `GET /api/v1/agents/runs/{id}/`, `POST /api/v1/agents/review/{id}/`
-
-</details>
-
-## Security
-
-JWT with HttpOnly cookies, 60-min access / 7-day refresh with rotation and blacklisting. Argon2 password hashing. Fernet field-level encryption for PII. Rate limiting (20/min anon, 60/min auth). CORS locked to frontend origin. Three roles with per-endpoint permission checks. Prompt injection defences on user text entering LLM prompts.
-
-<details>
-<summary><strong>Monitoring and observability</strong> (click to expand)</summary>
-
-A full monitoring stack ships behind the `monitoring` profile: Prometheus, Grafana, Loki, Promtail, Alertmanager, a Celery exporter, and a Postgres exporter. Django exposes `/metrics` via `django-prometheus` with request latencies, ORM query counts, Celery task counters, and a custom training-duration histogram. Nothing runs by default, so the core stack stays small; you opt in when you want dashboards.
-
-Grafana lives in `docker-compose.monitoring.yml` so the main stack parses without a Grafana admin password. Before launching, set `GRAFANA_ADMIN_PASSWORD` in `.env` (compose refuses to start the monitoring profile without it instead of falling back silently), then launch alongside the regular stack:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml --profile monitoring up -d
 ```
-
-Or set `COMPOSE_FILE=docker-compose.yml:docker-compose.monitoring.yml` in `.env` to make both files the default, after which `docker compose --profile monitoring up -d` works as before.
-
-Then:
-
-- Grafana at `localhost:3001` for dashboards (Django request latencies, Celery queue depth, Postgres slow queries, system logs)
-- Prometheus at `localhost:9090` for raw metric queries
-- Loki at `localhost:3100` as the log aggregation backend for Promtail
-
-A separate `watchdog` service runs in the core stack at all times. It polls every 30 seconds for loan applications stuck in the `pending` state for more than 5 minutes and re-queues their orchestration task. Transient worker or broker failures then self-recover instead of leaving zombie applications in the queue.
-
-</details>
-
-## Testing
-
-1,900+ backend tests and 370+ frontend tests. 63% backend coverage floor enforced in CI. CI pipeline runs Ruff, Bandit SAST, gitleaks, npm audit, OWASP ZAP DAST, k6 load test, and Trivy container scanning.
-
-<details>
-<summary><strong>Verifying the build</strong> (click to expand)</summary>
-
-An end-to-end smoke script exercises the full pipeline (register → apply → orchestrate → decision → email) against a locally-running stack:
-
-```bash
-docker compose up -d
-make seed                     # generate data + train model
-tools/smoke_e2e.sh            # full cycle + teardown
-tools/smoke_e2e.sh --keep-up  # leave stack up for manual inspection
-```
-
-Result is written to `.tmp/smoke_result.json`:
-
-```json
-{
-  "started_at": "2026-04-19T12:34:56Z",
-  "finished_at": "2026-04-19T12:35:42Z",
-  "duration_ms": 46123,
-  "status": "success",
-  "reason": "ok",
-  "model_version_id": "<uuid>",
-  "email_subject_hash": "<sha256-prefix>"
-}
-```
-
-The same script runs as a manually-triggered GitHub Actions job under `smoke-e2e` (see `.github/workflows/smoke-e2e.yml`). The workflow is `workflow_dispatch`-only by design, to keep costs down. A cron can be added once the signal is known to be stable.
-
-</details>
-
-<details>
-<summary><strong>Housekeeping</strong> (click to expand)</summary>
-
-Local development accumulates build artifacts, test caches, and trained model files. To reclaim disk:
-
-```bash
-make clean-soft  # caches + build output ONLY — docker volumes (DB, redis) preserved
-make clean       # FULL wipe: containers + volumes + caches (DB is wiped — use sparingly)
-make clean-deep  # clean + removes node_modules and backend/.venv (forces reinstall)
-```
-
-Day-to-day, `make clean-soft` is the right default: it reclaims several hundred MB of Python/Next.js caches without touching the Postgres volume. Reserve `make clean` for "I want a fresh-from-seed DB".
-
-To prune stale trained-model `.joblib` artifacts from `backend/ml_models/` (after many training iterations):
-
-```bash
-docker compose exec backend python manage.py prune_model_artifacts --dry-run  # preview
-docker compose exec backend python manage.py prune_model_artifacts            # delete
+backend/apps/
+  accounts/      login, roles (admin, officer, customer), data export
+  loans/         applications, decisions, audit log
+  ml_engine/     data generation, training, prediction, drift
+  email_engine/  templates, guardrails, email delivery
+  agents/        bias checks, alternative offers, pipeline orchestrator
+frontend/src/    Next.js dashboard and customer portal
+tools/           standalone scripts (benchmarks, smoke test, model comparison)
+workflows/       step-by-step operating procedures
+k8s/, terraform/ deployment manifests (not deployed)
 ```
 
 </details>
-
-## Scope & limits
-
-- **Synthetic training data.** The data generator is calibrated against ATO, ABS, APRA, and Equifax published statistics, runs labels through a 1000-line rules-based underwriting engine, and adds a separate loan-performance simulator. It does not capture real-world feedback loops, fraud patterns, broker channel effects, or lender-specific heuristics. A production rollout would retrain on real historical data.
-- **Reported AUC is on the synthetic pipeline.** XGBoost achieves 0.88 AUC on the synthetic holdout of the active `ModelVersion` (see `backend/docs/MODEL_CARD.md`). The TSTR validator estimates real-world AUC around 0.82 with moderate confidence. Walk-forward temporal CV AUC is reported in `training_metadata.temporal_cv_auc_mean` so the drift gap against random CV is visible.
-- **XGBoost lift over a simple scorecard is a measured number.** Every training run fits a logistic-regression baseline on `credit_score, annual_income, loan_amount, debt_to_income` and records `training_metadata.baseline_auc` + `xgb_lift_over_baseline` on the model card.
-- **Email generation is template-first.** Claude is used for creative variations only, with a $5/day spend cap on the Anthropic API. The guardrail layer runs 18 deterministic checks on every LLM-generated decision email before it ships.
-- **Compliance framing is implemented, not audited.** APRA CPG 235, NCCP Act responsible lending, Banking Code disclosure, and adverse-action language are baked into the data model, email templates, and fairness gates. None of this has been independently reviewed by a compliance professional.
-- **Reliability is prototype-grade.** Eight core services ship with healthchecks, the watchdog auto-recovers stuck pipelines, and the monitoring stack exposes Prometheus metrics + Grafana dashboards. There is no paging, multi-region failover, or SLO enforcement. It is good enough for a demo, not for a fintech launch.
 
 ## License
 

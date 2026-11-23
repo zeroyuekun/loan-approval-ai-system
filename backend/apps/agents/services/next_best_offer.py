@@ -1,38 +1,54 @@
-import json
 import logging
 
-import anthropic
+from celery.exceptions import SoftTimeLimitExceeded
 
-from utils.anthropic_client import make_anthropic_client
+from apps.email_engine.services.content_llm import make_content_llm_client
 
-from .api_budget import guarded_api_call
+from .api_budget import ApiGateClosed, guarded_api_call
+from .bias.helpers import LLM_CALL_ERRORS, _extract_tool_result
 from .recommendation_engine import RecommendationEngine
 
 logger = logging.getLogger("agents.next_best_offer")
 
 
-def _extract_tool_result(response, fallback):
-    """Extract structured result from tool_use response, with fallback."""
-    try:
-        tool_block = next(b for b in response.content if b.type == "tool_use")
-        return tool_block.input
-    except (StopIteration, AttributeError):
-        text_block = next((b for b in response.content if b.type == "text"), None)
-        if text_block:
-            try:
-                json_start = text_block.text.find("{")
-                json_end = text_block.text.rfind("}") + 1
-                return json.loads(text_block.text[json_start:json_end])
-            except (json.JSONDecodeError, ValueError) as exc:
-                logger.debug(
-                    "nbo_tool_text_parse_failed",
-                    extra={"error": type(exc).__name__},
-                )
-        return fallback
-
-
 # Shown when the LLM wording step is unavailable.
 NBO_FALLBACK_MESSAGE = "Thank you for applying with us. Based on your application, these products may suit you."
+
+
+def _fallback_messaging(offers):
+    """Offer reasoning built from each product's own benefit text (no LLM)."""
+    return {
+        "offer_reasoning": [{"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers],
+        "analysis": "We have identified alternative products based on your financial profile.",
+        "personalized_message": NBO_FALLBACK_MESSAGE,
+    }
+
+
+def _fallback_marketing_message(application, offers):
+    """Deterministic marketing message listing each offer (no LLM)."""
+    offer_lines = []
+    for o in offers:
+        line = o.get("name", o.get("type", "Product"))
+        amt = o.get("amount")
+        benefit = o.get("benefit", "")
+        if amt:
+            line += f" (${amt:,.2f})"
+        if benefit:
+            line += f" – {benefit}"
+        offer_lines.append(line)
+    offers_text = "\n".join(f"  - {line}" for line in offer_lines)
+    applicant_name = f"{application.applicant.first_name} {application.applicant.last_name}".strip()
+    return (
+        f"Dear {applicant_name},\n\n"
+        f"We appreciate your interest in banking with AussieLoanAI. "
+        f"Based on your financial profile, we have identified the following "
+        f"products that may suit your needs:\n\n"
+        f"{offers_text}\n\n"
+        f"To discuss these options, please contact our team on 1300 000 000 "
+        f"or visit your nearest branch.\n\n"
+        f"Kind regards,\n"
+        f"The AussieLoanAI Team"
+    )
 
 
 class NextBestOfferGenerator:
@@ -44,7 +60,9 @@ class NextBestOfferGenerator:
     """
 
     def __init__(self):
-        self.client = make_anthropic_client()
+        # Follows EMAIL_LLM_BACKEND: None under ``template`` (the default), so
+        # the offer wording comes from the deterministic fallbacks below.
+        self.client, self.model = make_content_llm_client()
         self.engine = RecommendationEngine()
 
     def generate(self, application, denial_reasons=""):
@@ -165,7 +183,7 @@ RULES:
                 # Interpolated: loan amount, credit score, income, decline
                 # factors and the banking-relationship profile.
                 _pii_categories=["loan_amount", "credit_score", "income", "credit_assessment", "financial_profile"],
-                model="claude-sonnet-4-6",
+                model=self.model,
                 max_tokens=1024,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_ANALYSIS", 0.0),
                 messages=[{"role": "user", "content": prompt}],
@@ -177,38 +195,18 @@ RULES:
             if result is None:
                 raise ValueError("No tool result extracted")
             return result
-        except (
-            anthropic.AuthenticationError,
-            anthropic.RateLimitError,
-            anthropic.APITimeoutError,
-            anthropic.APIConnectionError,
-            anthropic.APIStatusError,
-        ) as e:
-            import logging as _logging
-
-            _logging.getLogger("agents.next_best_offer").warning("NBO messaging LLM call failed: %s", e)
-            # Fallback: generate basic reasoning from the benefit text
-            return {
-                "offer_reasoning": [
-                    {"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers
-                ],
-                "analysis": "We have identified alternative products based on your financial profile.",
-                "personalized_message": NBO_FALLBACK_MESSAGE,
-            }
+        except ApiGateClosed as e:
+            # Template backend, no key, budget spent or circuit open: by design.
+            logger.info("NBO messaging uses the deterministic wording: %s", e)
+            return _fallback_messaging(offers)
+        except SoftTimeLimitExceeded:
+            raise  # the task's time limit must stop the task, not become a fallback
+        except LLM_CALL_ERRORS as e:
+            logger.warning("NBO messaging LLM call failed: %s", e)
+            return _fallback_messaging(offers)
         except Exception as e:
-            import logging as _logging
-
-            _logging.getLogger("agents.next_best_offer").critical(
-                "NBO messaging UNEXPECTED failure: %s", e, exc_info=True
-            )
-            # Fallback: generate basic reasoning from the benefit text
-            return {
-                "offer_reasoning": [
-                    {"product_id": o.get("type", ""), "reasoning": o.get("benefit", "")} for o in offers
-                ],
-                "analysis": "We have identified alternative products based on your financial profile.",
-                "personalized_message": NBO_FALLBACK_MESSAGE,
-            }
+            logger.critical("NBO messaging UNEXPECTED failure: %s", e, exc_info=True)
+            return _fallback_messaging(offers)
 
     def _format_precalculated_offers(self, offers):
         """Format pre-calculated offers for the messaging prompt."""
@@ -290,7 +288,7 @@ Respond with the marketing message text only, no JSON wrapping."""
                     "credit_assessment",
                     "financial_profile",
                 ],
-                model="claude-sonnet-4-6",
+                model=self.model,
                 max_tokens=1024,
                 temperature=getattr(django_settings, "AI_TEMPERATURE_MARKETING", 0.2),
                 messages=[{"role": "user", "content": prompt}],
@@ -300,43 +298,17 @@ Respond with the marketing message text only, no JSON wrapping."""
                 "marketing_message": response.content[0].text.strip(),
                 "generation_time_ms": generation_time_ms,
             }
+        except ApiGateClosed as e:
+            # Template backend, no key, budget spent or circuit open: by design.
+            logger.info("Marketing message uses the deterministic template: %s", e)
+        except SoftTimeLimitExceeded:
+            raise  # the task's time limit must stop the task, not become a fallback
         except Exception as e:
-            import logging as _logging
-
-            _logging.getLogger("agents.next_best_offer").warning(
-                "Marketing message LLM call failed: %s — using template fallback",
-                e,
-            )
-            generation_time_ms = int((time.time() - start) * 1000)
-            # Build a deterministic fallback message from the offers
-            offer_lines = []
-            for o in offers:
-                name = o.get("name", o.get("type", "Product"))
-                amt = o.get("amount")
-                benefit = o.get("benefit", "")
-                line = f"{name}"
-                if amt:
-                    line += f" (${amt:,.2f})"
-                if benefit:
-                    line += f" \u2013 {benefit}"
-                offer_lines.append(line)
-            offers_text = "\n".join(f"  - {line}" for line in offer_lines)
-            applicant_name = f"{application.applicant.first_name} {application.applicant.last_name}".strip()
-            message = (
-                f"Dear {applicant_name},\n\n"
-                f"We appreciate your interest in banking with AussieLoanAI. "
-                f"Based on your financial profile, we have identified the following "
-                f"products that may suit your needs:\n\n"
-                f"{offers_text}\n\n"
-                f"To discuss these options, please contact our team on 1300 000 000 "
-                f"or visit your nearest branch.\n\n"
-                f"Kind regards,\n"
-                f"The AussieLoanAI Team"
-            )
-            return {
-                "marketing_message": message,
-                "generation_time_ms": generation_time_ms,
-            }
+            logger.warning("Marketing message LLM call failed: %s — using template fallback", e)
+        return {
+            "marketing_message": _fallback_marketing_message(application, offers),
+            "generation_time_ms": int((time.time() - start) * 1000),
+        }
 
     def _get_customer_context(self, application):
         """Pull banking profile into a string for the prompt."""

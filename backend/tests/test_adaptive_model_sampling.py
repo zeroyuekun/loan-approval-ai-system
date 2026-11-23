@@ -97,7 +97,7 @@ def test_adaptive_only_models_are_priced_not_default_fallback():
     assert estimate_cost_usd(1_000_000, 1_000_000, "claude-fable-5") == 60.0
 
 
-@override_settings(BIAS_REVIEWER_MODEL="claude-fable-5")
+@override_settings(BIAS_REVIEWER_MODEL="claude-fable-5", BIAS_LLM_BACKEND="anthropic")
 def test_senior_reviewers_use_configured_model():
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
         from apps.agents.services.bias.marketing import MarketingEmailReviewer
@@ -114,6 +114,7 @@ def test_blank_reviewer_model_falls_back_to_default():
     assert _reviewer_model() == DEFAULT_REVIEWER_MODEL == "claude-opus-4-8"
 
 
+@override_settings(BIAS_LLM_BACKEND="anthropic")
 def test_reviewer_has_no_client_without_api_key():
     with patch.dict(os.environ, {}, clear=True):
         from apps.agents.services.bias.reviewer import AIEmailReviewer

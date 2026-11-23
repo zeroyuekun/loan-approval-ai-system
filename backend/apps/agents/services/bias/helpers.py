@@ -2,15 +2,28 @@ import json
 import logging
 
 import anthropic
+import httpx
+from celery.exceptions import SoftTimeLimitExceeded
 
-from utils.anthropic_client import (
-    make_anthropic_client as _make_anthropic_client,  # noqa: F401 - re-exported to bias modules
-)
+from apps.email_engine.services.exceptions import EmailBackendError, RateLimited
+from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
 from ..api_budget import ApiGateClosed, guarded_api_call
 
 logger = logging.getLogger("agents.bias_detector")
+
+
+def coerce_llm_score(value, fallback):
+    """A bias score from the LLM as an int in 0-100, or ``fallback`` if unusable.
+
+    A local model served through Ollama ignores the forced tool schema, so the
+    score can arrive as a string, a float, out of range, or missing.
+    """
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _parse_json_response(response_text, fallback):
@@ -47,6 +60,49 @@ def _reviewer_model():
     return getattr(django_settings, "BIAS_REVIEWER_MODEL", "") or DEFAULT_REVIEWER_MODEL
 
 
+def _make_bias_llm_client():
+    """Client for the bias verdicts.
+
+    BIAS_LLM_BACKEND=ollama runs every verdict on the local Ollama server at $0.
+    Otherwise Anthropic, which is None without an API key; the callers then
+    treat the bias check as unavailable.
+    """
+    from django.conf import settings as django_settings
+
+    if getattr(django_settings, "BIAS_LLM_BACKEND", "anthropic") != "ollama":
+        return make_anthropic_client()
+
+    from apps.email_engine.services.email_generator import _cached_client
+    from apps.email_engine.services.llm_client import OpenAICompatibleLLMClient
+
+    base_url = django_settings.OLLAMA_BASE_URL
+    model = django_settings.BIAS_OLLAMA_MODEL
+    timeout = float(django_settings.BIAS_LLM_TIMEOUT)
+    # One connection pool per worker process, shared by every bias agent
+    # (several are built per pipeline run), as the email clients are.
+    return _cached_client(
+        ("bias-ollama", base_url, model, timeout),
+        lambda: OpenAICompatibleLLMClient(
+            api_key=django_settings.OLLAMA_API_KEY,
+            base_url=base_url,
+            model=model,
+            # CPU inference on a ~1.5k-token verdict prompt takes ~30-60s warm,
+            # plus the model load when cold.
+            timeout=httpx.Timeout(timeout, connect=10.0),
+            provider="ollama",
+        ),
+    )
+
+
+def bias_model(client, default):
+    """The model a bias call names: the local model on Ollama, else ``default``."""
+    if getattr(client, "provider", None) == "ollama":
+        from django.conf import settings as django_settings
+
+        return django_settings.BIAS_OLLAMA_MODEL
+    return default
+
+
 def _format_flag_detail(prescreen):
     """Format each individual flag with its details for the junior analyst."""
     if not prescreen["findings"]:
@@ -59,8 +115,12 @@ def _format_flag_detail(prescreen):
     return "\n".join(lines)
 
 
+# Provider failures a caller turns into its deterministic fallback.
+LLM_CALL_ERRORS = (anthropic.APIError, EmailBackendError, RateLimited)
+
+
 def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **api_kwargs):
-    """Call the Anthropic API once, returning ``fallback`` on terminal failure.
+    """Call the bias LLM once, returning ``fallback`` on terminal failure.
 
     Transient errors are retried by the SDK client's own bounded backoff
     (policy pinned in utils.anthropic_client); there is no extra retry loop
@@ -75,7 +135,9 @@ def _call_with_fallback(client, fallback, service_name, final_failure_suffix, **
         return _extract_tool_result(response, fallback)
     except ApiGateClosed:
         raise  # let callers invoke _handle_bias_unavailable
-    except anthropic.APIError as e:
+    except SoftTimeLimitExceeded:
+        raise  # the task's time limit must stop the task, not become a fallback
+    except LLM_CALL_ERRORS as e:
         logger.error("%s failed (%s: %s) — %s", service_name, type(e).__name__, e, final_failure_suffix)
         return fallback
     except Exception as e:

@@ -28,6 +28,20 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
+def _redact_arg(arg):
+    """Redact a log argument that can carry PII; leave numbers untouched.
+
+    Strings are redacted. Exceptions are replaced by their redacted message
+    (``"%s" % exc`` prints the message anyway, so formatting is unchanged).
+    Coercing numbers to str would break "%d"/"%f" format strings.
+    """
+    if isinstance(arg, str):
+        return redact_pii(arg)
+    if isinstance(arg, BaseException):
+        return redact_pii(str(arg))
+    return arg
+
+
 def redact_pii(text: str) -> str:
     """Replace every PII pattern match in text with its redaction marker."""
     for pattern, replacement in _PATTERNS:
@@ -49,9 +63,14 @@ class PiiMaskingFilter(logging.Filter):
             # them, so a "%d"/"%f" format string would raise TypeError at emit
             # time. PII only ever appears in string args.
             if isinstance(record.args, dict):
-                record.args = {k: (redact_pii(v) if isinstance(v, str) else v) for k, v in record.args.items()}
+                record.args = {k: _redact_arg(v) for k, v in record.args.items()}
             elif isinstance(record.args, tuple):
-                record.args = tuple(redact_pii(a) if isinstance(a, str) else a for a in record.args)
+                record.args = tuple(_redact_arg(a) for a in record.args)
+        # Tracebacks (logger.exception / exc_info=True) can quote PII in the
+        # exception message, e.g. an SMTP error naming the recipient. Format
+        # and redact them now; the standard formatter reuses record.exc_text.
+        if record.exc_info and not record.exc_text:
+            record.exc_text = redact_pii(logging.Formatter().formatException(record.exc_info))
         # Structured-logging extras land as custom record attributes; redact any
         # string-valued ones without disturbing the standard LogRecord fields.
         for key, value in list(record.__dict__.items()):

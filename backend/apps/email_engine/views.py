@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrOfficer
 from apps.accounts.policy import is_staff_role
+from apps.common.http import page_params
 from apps.email_engine.models import GeneratedEmail
 from apps.email_engine.services.decision_email import (
     DecisionMismatch,
@@ -19,6 +20,9 @@ from apps.loans.permissions import check_loan_access
 
 
 class EmailGenerationThrottle(UserRateThrottle):
+    # Own scope: without it the history is shared with the default "user"
+    # throttle, and ordinary requests trim it to a minute.
+    scope = "email_generation"
     rate = "10/hour"
 
 
@@ -53,14 +57,7 @@ class EmailListView(APIView):
 
         queryset = _visible_emails(user, queryset)
 
-        try:
-            page = int(request.query_params.get("page", 1))
-        except (ValueError, TypeError):
-            page = 1
-        try:
-            page_size = min(int(request.query_params.get("page_size", 20)), 100)
-        except (ValueError, TypeError):
-            page_size = 20
+        page, page_size = page_params(request)
         total = queryset.count()
         offset = (page - 1) * page_size
         emails = queryset[offset : offset + page_size]

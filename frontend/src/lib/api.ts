@@ -154,10 +154,13 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && isAuthCheck) {
       return Promise.reject(error)
     }
-    // Retry transient failures (429 Too Many Requests, 503 Service Unavailable)
+    // Retry transient failures (429 Too Many Requests, 503 Service Unavailable),
+    // but only for safe methods: a POST that got a 503 after the server acted
+    // on it would otherwise be submitted twice.
     const retryableStatus = [429, 503]
     const retryCount = originalRequest._retryCount || 0
-    if (retryableStatus.includes(error.response?.status) && retryCount < 2) {
+    const idempotent = ['get', 'head', 'options'].includes((originalRequest.method || 'get').toLowerCase())
+    if (idempotent && retryableStatus.includes(error.response?.status) && retryCount < 2) {
       originalRequest._retryCount = retryCount + 1
       const delay = Math.pow(2, retryCount) * 1000 // 1s, 2s
       await new Promise((resolve) => setTimeout(resolve, delay))

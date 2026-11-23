@@ -4,7 +4,7 @@ from django.conf import settings as django_settings
 
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
-from .helpers import _call_with_fallback, _make_anthropic_client, _reviewer_model
+from .helpers import _call_with_fallback, _make_bias_llm_client, _reviewer_model, bias_model
 from .tools import EMAIL_REVIEW_TOOL
 
 logger = logging.getLogger("agents.bias_detector")
@@ -30,8 +30,8 @@ class AIEmailReviewer:
     """
 
     def __init__(self):
-        self.client = _make_anthropic_client()
-        self.model = _reviewer_model()
+        self.client = _make_bias_llm_client()
+        self.model = bias_model(self.client, _reviewer_model())
 
     def review(self, email_text, bias_result, application_context):
         """Review a flagged email as the senior compliance authority.

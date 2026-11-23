@@ -137,6 +137,13 @@ class GuardrailChecker:
             valid_amounts.add(f"${nbo_val:,.0f}")
             valid_amounts.add(f"${int(nbo_val):,}")
 
+        # The recommendation engine writes figures into each offer's benefit
+        # text (the Goal Saver's monthly target and interest have no principal
+        # to derive them from), so an email quoting that text is not inventing them.
+        for offer in context.get("nbo_offers") or []:
+            if isinstance(offer, dict) and offer.get("benefit"):
+                valid_amounts.update(re.findall(dollar_pattern, str(offer["benefit"])))
+
         # Add pricing engine amounts as valid (monthly payment, establishment fee)
         pricing = context.get("pricing", {})
         if pricing.get("monthly_payment_number"):

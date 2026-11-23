@@ -25,6 +25,9 @@ jobs:
           {
             echo "DJANGO_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')"
             echo "FIELD_ENCRYPTION_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+            # No local model in CI: the smoke run covers the deterministic path
+            # (template emails; bias falls back to its deterministic score).
+            echo "COMPOSE_PROFILES="
           } >> .env
 
       - name: Build + up
@@ -53,11 +56,16 @@ jobs:
       - name: Run smoke script
         run: bash tools/smoke_e2e.sh --keep-up  # invoke via bash; the script isn't marked +x
 
-      - name: Print backend + celery logs on failure
+      - name: Print service state and logs on failure
         if: failure()
         run: |
-          docker compose logs backend | tail -200
-          docker compose logs celery_worker_ml | tail -100
+          docker compose ps -a
+          # Every service, so an unhealthy one (e.g. celery_beat) shows its own error.
+          docker compose logs --tail 200
+          for svc in $(docker compose ps -a --services); do
+            cid=$(docker compose ps -aq "$svc")
+            [ -n "$cid" ] && echo "$svc health: $(docker inspect --format '{{json .State.Health}}' "$cid" 2>/dev/null)"
+          done
 
       - name: Upload smoke result
         if: always()

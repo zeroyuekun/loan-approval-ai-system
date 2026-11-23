@@ -162,6 +162,8 @@ On top of the standard prohibited language and tone checks, marketing emails are
 - **API failure during bias check**: decision emails follow `BIAS_FAILURE_MODE` (default `block`: withhold the email and retry later). Marketing emails → block silently.
 - **The senior reviewer rejects**: for a decision email, the Agent 2 rewrite is not sent and the template path takes over. For a marketing email (Agent 4), the email is blocked.
 - **Both agents score 0**: the email is compliant and needs no senior review.
+- **No Anthropic key**: with `BIAS_LLM_BACKEND=anthropic` and no `ANTHROPIC_API_KEY`, every email the regex pre-screen flags fails the bias check as unavailable and is held at pending (`BIAS_FAILURE_MODE=block`). Set `BIAS_LLM_BACKEND=ollama` to run the verdicts locally instead.
+- **Local verdicts (`BIAS_LLM_BACKEND=ollama`)**: every bias agent runs on `BIAS_OLLAMA_MODEL` (default `qwen2.5:7b`), about 20-60s per verdict on CPU. In testing (2026-10-03), `llama3.2:3b` called blatantly discriminatory text a false positive, so do not use a 3B model. `qwen2.5:7b` flagged the blatant case but was not stable at the boundary: a "single mother" sentence scored 46 on one run and 30 (passed) on another. The verdict only runs when the regex pre-screen flags something, so with template emails (`EMAIL_LLM_BACKEND=template`) it rarely runs.
 
 ## Scoring rubric
 

@@ -23,8 +23,13 @@ def send_decision_email(recipient_email, subject, body, email_type="approval"):
             "approval" for backwards compatibility with existing callers.
 
     Returns:
-        dict with 'sent' (bool) and, on failure, 'error' (str).
+        dict with 'sent' (bool), and 'recipient' (the address actually used)
+        on success or 'error' (str) on failure.
+
+    When ``EMAIL_REDIRECT_ALL_TO`` is set, the email goes to that inbox instead
+    of ``recipient_email`` (demo mode: every email lands in the bank's inbox).
     """
+    recipient_email = getattr(settings, "EMAIL_REDIRECT_ALL_TO", "") or recipient_email
     using_console = settings.EMAIL_BACKEND == "django.core.mail.backends.console.EmailBackend"
     if not using_console and (not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD):
         msg = "Email credentials not configured — skipping send"
@@ -43,7 +48,7 @@ def send_decision_email(recipient_email, subject, body, email_type="approval"):
             fail_silently=False,
         )
         logger.info("Email sent to %s: %s", recipient_email, subject)
-        return {"sent": True}
+        return {"sent": True, "recipient": recipient_email}
     except Exception as exc:
         logger.exception("Failed to send email to %s", recipient_email)
         return {"sent": False, "error": str(exc)}

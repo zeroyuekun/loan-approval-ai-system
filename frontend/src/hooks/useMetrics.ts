@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mlApi, tasksApi, withNotFoundFallback } from '@/lib/api'
-import { nextPollInterval } from '@/lib/polling'
+import { isTerminalTaskStatus, nextPollInterval, taskPollingExpired } from '@/lib/polling'
 import { ModelMetrics } from '@/types'
 import { TRAINING_STORAGE_KEY } from '@/lib/clientState'
 
@@ -16,8 +16,7 @@ function loadTrainingTask(): { taskId: string; algorithm: string; startedAt: num
     const raw = localStorage.getItem(TRAINING_STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw)
-    // Expire after 15 minutes
-    if (Date.now() - parsed.startedAt > 15 * 60 * 1000) {
+    if (taskPollingExpired(parsed.startedAt)) {
       localStorage.removeItem(TRAINING_STORAGE_KEY)
       return null
     }
@@ -63,11 +62,13 @@ export function useTrainModel() {
   // `activation_blocked`); empty unless trainingStatus is 'blocked'.
   const [blockedGates, setBlockedGates] = useState<string[]>([])
   const pollCountRef = useRef(0)
+  const startedAtRef = useRef(0)
 
   // On mount, check if there's a training task in progress
   useEffect(() => {
     const saved = loadTrainingTask()
     if (saved) {
+      startedAtRef.current = saved.startedAt
       setTaskId(saved.taskId)
       setTrainingAlgorithm(saved.algorithm)
       setTrainingStatus('training')
@@ -81,6 +82,7 @@ export function useTrainModel() {
     },
     onSuccess: (data) => {
       pollCountRef.current = 0  // reset backoff for new job so first poll is 2s, not up to 30s
+      startedAtRef.current = Date.now()
       setBlockedGates([])
       setTaskId(data.task_id)
       setTrainingAlgorithm(data.algorithm)
@@ -120,13 +122,18 @@ export function useTrainModel() {
     gcTime: 30_000, // 30s: polled data, drop fast after unmount
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      if (status !== 'SUCCESS' && status !== 'FAILURE') {
+      // startedAtRef is 0 until a job starts; React Query also evaluates this
+      // callback before the first poll, which must not count as expired.
+      const expired = startedAtRef.current > 0 && taskPollingExpired(startedAtRef.current)
+      if (!isTerminalTaskStatus(status) && !expired) {
         const interval = nextPollInterval(pollCountRef.current)
         pollCountRef.current += 1
         return interval
       }
       const taskResult = parseTaskResult(query.state.data?.result)
-      if (status === 'FAILURE') {
+      if (status !== 'SUCCESS') {
+        // A revoked task, or one still not finished after the polling cap
+        // (an unknown task id stays PENDING forever), is reported as failed.
         setTrainingStatus('failure')
       } else if (taskResult?.status === 'skipped') {
         // A Celery SUCCESS can still be a no-op run (the task short-circuited
