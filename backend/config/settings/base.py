@@ -522,6 +522,10 @@ BIAS_FAILURE_MODE = os.environ.get("BIAS_FAILURE_MODE", "block").lower()
 # check (bias detector clean + senior reviewer approved with confidence)
 # before handing over to the deterministic template path.
 BIAS_AGENT2_ENABLED = os.environ.get("BIAS_AGENT2_ENABLED", "true").lower() == "true"
+# Every denial the regex screen passes is also read by the bias LLM for protected
+# attributes and labels on the person (BiasDetector._full_screen). Costs one LLM
+# call per denial ($0 on Ollama, ~30-130 s on CPU).
+BIAS_SCREEN_EVERY_DENIAL = os.environ.get("BIAS_SCREEN_EVERY_DENIAL", "true").lower() == "true"
 BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE = 0.70
 # Agent 2 is skipped (the template path takes over) when less than this many
 # seconds remain before the pipeline task's soft time limit: a rewrite plus a

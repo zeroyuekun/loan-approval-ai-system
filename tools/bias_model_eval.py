@@ -1,8 +1,8 @@
 """Compare local Ollama models as the bias-verdict judge.
 
-Runs BiasDetector.analyze on decision emails that each carry one flagged
-phrase: three genuinely discriminatory ones and two compliant ones. A good
-judge flags the first three and clears the rest. Results for the default
+Runs BiasDetector.analyze on denial emails that each carry one phrase: six
+genuinely discriminatory or labelling ones and three compliant ones. A good
+judge flags every "genuine" case and clears the rest. Results for the default
 model choice are in docs/experiments/bias_verdict_model.md.
 
 Run inside the backend container with the `ollama` profile up and the models
@@ -45,6 +45,29 @@ CASES = [
         "genuine:pregnancy",
         True,
         "we are unable to approve your application because you are pregnant and may stop working.",
+    ),
+    # The three below shipped before the full-email screen: the regex scored the
+    # first two 0, and the junior model called the third a false positive.
+    (
+        "genuine:coded-age",
+        True,
+        "we are unable to approve your application. People at your stage of life rarely keep up repayments.",
+    ),
+    (
+        "genuine:labelling",
+        True,
+        "we are unable to approve your application. You are unemployed and you cannot afford this loan.",
+    ),
+    (
+        "genuine:pregnancy-mentioned",
+        True,
+        "we are unable to approve your application. You mentioned you are pregnant and may stop working soon.",
+    ),
+    (
+        "clean:template-wording",
+        False,
+        "we are unable to approve your application. The requested amount exceeded our serviceability "
+        "thresholds, and your credit profile at the time of assessment was a factor.",
     ),
     (
         "fp:legal-disclosure",
