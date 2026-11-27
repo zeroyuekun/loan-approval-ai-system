@@ -77,7 +77,9 @@ def decline_rule_codes(decision_waterfall) -> list[str]:
     codes: list[str] = []
     for entry in decision_waterfall or []:
         code = entry.get("reason_code") if isinstance(entry, dict) else None
-        if (code == PRICING_TIER_DECLINE or (code or "").startswith(POLICY_DECLINE_PREFIX)) and code not in codes:
+        if not isinstance(code, str):
+            continue
+        if (code == PRICING_TIER_DECLINE or code.startswith(POLICY_DECLINE_PREFIX)) and code not in codes:
             codes.append(code)
     return codes
 
