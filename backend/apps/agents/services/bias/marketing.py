@@ -14,7 +14,7 @@ from .helpers import (
     coerce_llm_score,
 )
 from .thresholds import is_severe
-from .tools import MARKETING_BIAS_TOOL, MARKETING_REVIEW_TOOL
+from .tools import MARKETING_BIAS_TOOL, MARKETING_REVIEW_TOOL, PROTECTED_ATTRIBUTE_CATEGORIES
 
 logger = logging.getLogger("agents.bias_detector")
 
@@ -41,12 +41,7 @@ class MarketingBiasDetector:
         "pressure_tactics",
         "discriminatory_product_steering",
         "false_promises",
-        "gender",
-        "race",
-        "age",
-        "religion",
-        "disability",
-        "marital_status",
+        *PROTECTED_ATTRIBUTE_CATEGORIES,
     ]
 
     def __init__(self):

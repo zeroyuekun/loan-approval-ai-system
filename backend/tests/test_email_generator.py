@@ -402,12 +402,12 @@ class TestEmailBackendSelection:
 
         gen = EmailGenerator()
         assert gen.provider == "groq"
-        assert gen._model == "llama-3.1-8b-instant"
+        assert gen._model == "openai/gpt-oss-20b"
         assert gen.client is mock_groq_cls.return_value
         # Constructed with the configured key + reproducibility seed.
         _, kwargs = mock_groq_cls.call_args
         assert kwargs["api_key"] == "gsk-test"
-        assert kwargs["model"] == "llama-3.1-8b-instant"
+        assert kwargs["model"] == "openai/gpt-oss-20b"
 
     @patch.dict(os.environ, {"EMAIL_LLM_BACKEND": "groq", "GROQ_API_KEY": ""}, clear=True)
     @patch("apps.agents.services.api_budget.ApiBudgetGuard")

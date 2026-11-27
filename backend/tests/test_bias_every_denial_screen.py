@@ -110,6 +110,12 @@ def test_approval_emails_are_not_screened(ollama, llm):
     assert result["flagged"] is False
 
 
+def test_denial_a_human_reviewer_already_decided_is_not_screened_again(ollama, llm):
+    calls, _ = llm
+    BiasDetector().analyze(CLEAN, DENIED, full_screen=False)
+    assert calls == []
+
+
 def test_screen_can_be_switched_off(ollama, llm):
     ollama.BIAS_SCREEN_EVERY_DENIAL = False
     calls, _ = llm

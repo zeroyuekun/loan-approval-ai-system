@@ -127,21 +127,18 @@ def test_resume_approved(escalated_agent_run, resume_mocks):
     resume_mocks["email_gen"].return_value.generate.assert_called_once()
 
 
-@CACHE_OVERRIDE
-@pytest.mark.django_db
-def test_resume_denied(escalated_agent_run, resume_mocks):
-    """Resuming an escalated denied run triggers NBO + marketing pipeline."""
-    decision = escalated_agent_run.application.decision
+def _arrange_denied_resume(agent_run, resume_mocks):
+    """A denied escalated run whose resume issues the denial email, then the marketing follow-up."""
+    decision = agent_run.application.decision
     decision.decision = "denied"
     decision.feature_importances = {"credit_score": 0.4, "income": 0.3, "dti": 0.2}
     decision.save()
 
-    # The denied resume now issues the denial email before the marketing follow-up.
     from apps.email_engine.models import GeneratedEmail
 
     resume_mocks["email_gen"].return_value.generate.return_value = _email()
     resume_mocks["persistence"].save_generated_email.return_value = GeneratedEmail.objects.create(
-        application=escalated_agent_run.application,
+        application=agent_run.application,
         decision="denied",
         subject="Your Loan Decision",
         body="Dear Customer, ...",
@@ -160,6 +157,13 @@ def test_resume_denied(escalated_agent_run, resume_mocks):
         "score_source": "composite",
     }
 
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
+def test_resume_denied(escalated_agent_run, resume_mocks):
+    """Resuming an escalated denied run triggers NBO + marketing pipeline."""
+    _arrange_denied_resume(escalated_agent_run, resume_mocks)
+
     from apps.agents.services.orchestrator import PipelineOrchestrator
 
     run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
@@ -168,6 +172,34 @@ def test_resume_denied(escalated_agent_run, resume_mocks):
     escalated_agent_run.application.refresh_from_db()
     assert escalated_agent_run.application.status == "denied"
     resume_mocks["nbo"].return_value.generate.assert_called_once()
+    denial_sends = [c for c in resume_mocks["send"].call_args_list if c.kwargs.get("email_type") == "denial"]
+    assert len(denial_sends) == 1
+
+
+@CACHE_OVERRIDE
+@pytest.mark.django_db
+def test_resume_after_reviewer_sends_denial_the_full_llm_screen_flagged(escalated_agent_run, resume_mocks, settings):
+    """The reviewer's decision is the second check: the resume must not loop on the LLM screen.
+
+    Without this, a denial the full-email screen flagged comes back flagged on
+    every resume (same template, same model), so the reviewer could never send it.
+    """
+    settings.BIAS_SCREEN_EVERY_DENIAL = True
+    settings.BIAS_LLM_BACKEND = "ollama"
+    _arrange_denied_resume(escalated_agent_run, resume_mocks)
+    screens = []
+
+    def flagging_screen(client, fallback, *args, **kwargs):
+        screens.append(kwargs["_service"])
+        return {"score": 80, "categories": ["age"], "analysis": "flagged again"}
+
+    from apps.agents.services.orchestrator import PipelineOrchestrator
+
+    with patch("apps.agents.services.bias.core._call_with_fallback", flagging_screen):
+        run = PipelineOrchestrator().resume_after_review(escalated_agent_run.pk)
+
+    assert screens == []
+    assert run.status == "completed"
     denial_sends = [c for c in resume_mocks["send"].call_args_list if c.kwargs.get("email_type") == "denial"]
     assert len(denial_sends) == 1
 

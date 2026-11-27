@@ -61,45 +61,57 @@ def _reviewer_model():
 
 
 def _make_bias_llm_client():
-    """Client for the bias verdicts.
+    """Client for the bias verdicts, picked by BIAS_LLM_BACKEND.
 
-    BIAS_LLM_BACKEND=ollama runs every verdict on the local Ollama server at $0.
-    Otherwise Anthropic, which is None without an API key; the callers then
-    treat the bias check as unavailable.
+    ``none`` (default): no LLM, the rule-based screen decides alone.
+    ``groq``: Groq's free hosted API. ``ollama``: the local Ollama server,
+    nothing leaves the host. ``anthropic``: Claude. Any other value, and Groq or
+    Claude without an API key, also give None; the callers then treat the LLM
+    check as unavailable.
     """
     from django.conf import settings as django_settings
 
-    if getattr(django_settings, "BIAS_LLM_BACKEND", "anthropic") != "ollama":
+    backend = getattr(django_settings, "BIAS_LLM_BACKEND", "none")
+    if backend == "anthropic":
         return make_anthropic_client()
+    if backend == "groq":
+        if not django_settings.GROQ_API_KEY:
+            return None
+        return _openai_compatible_bias_client(
+            "groq", django_settings.GROQ_API_KEY, django_settings.GROQ_BASE_URL, django_settings.BIAS_GROQ_MODEL
+        )
+    if backend == "ollama":
+        return _openai_compatible_bias_client(
+            "ollama", django_settings.OLLAMA_API_KEY, django_settings.OLLAMA_BASE_URL, django_settings.BIAS_OLLAMA_MODEL
+        )
+    return None
+
+
+def _openai_compatible_bias_client(provider, api_key, base_url, model):
+    from django.conf import settings as django_settings
 
     from apps.email_engine.services.email_generator import _cached_client
     from apps.email_engine.services.llm_client import OpenAICompatibleLLMClient
 
-    base_url = django_settings.OLLAMA_BASE_URL
-    model = django_settings.BIAS_OLLAMA_MODEL
     timeout = float(django_settings.BIAS_LLM_TIMEOUT)
     # One connection pool per worker process, shared by every bias agent
     # (several are built per pipeline run), as the email clients are.
     return _cached_client(
-        ("bias-ollama", base_url, model, timeout),
+        (f"bias-{provider}", base_url, model, timeout),
         lambda: OpenAICompatibleLLMClient(
-            api_key=django_settings.OLLAMA_API_KEY,
+            api_key=api_key,
             base_url=base_url,
             model=model,
-            # CPU inference on a ~1.5k-token verdict prompt takes ~30-60s warm,
-            # plus the model load when cold.
             timeout=httpx.Timeout(timeout, connect=10.0),
-            provider="ollama",
+            provider=provider,
         ),
     )
 
 
 def bias_model(client, default):
-    """The model a bias call names: the local model on Ollama, else ``default``."""
-    if getattr(client, "provider", None) == "ollama":
-        from django.conf import settings as django_settings
-
-        return django_settings.BIAS_OLLAMA_MODEL
+    """The model a bias call names: the configured model on Groq or Ollama, else ``default``."""
+    if getattr(client, "provider", None) in ("groq", "ollama"):
+        return client.default_model
     return default
 
 

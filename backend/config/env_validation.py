@@ -80,6 +80,8 @@ def validate_env():
         # key — a missing key degrades cleanly to the deterministic template path.
         if email_backend == "groq":
             optional_warned["GROQ_API_KEY"] = "Groq email generation will fall back to deterministic templates"
+        if bias_backend == "groq":
+            optional_warned["GROQ_API_KEY"] = "Bias verdicts have no LLM; unclear emails wait for a human"
 
         for var, consequence in optional_warned.items():
             if not os.environ.get(var):
@@ -88,7 +90,7 @@ def validate_env():
         # On the Anthropic bias backend the senior reviewer calls Claude; a
         # non-Claude model ID (e.g. an Ollama tag) would 404 every senior review,
         # silently degrading to human escalation and feeding the circuit breaker.
-        # On the local backend the reviewer uses BIAS_OLLAMA_MODEL instead.
+        # On Groq or Ollama the reviewer uses BIAS_GROQ_MODEL / BIAS_OLLAMA_MODEL.
         reviewer_model = os.environ.get("BIAS_REVIEWER_MODEL", "")
         if (
             bias_backend == "anthropic"

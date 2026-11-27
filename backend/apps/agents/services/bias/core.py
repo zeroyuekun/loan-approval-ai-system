@@ -7,7 +7,7 @@ from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 from ..deterministic_prescreen import DeterministicBiasPreScreen
 from .helpers import _call_with_fallback, _format_flag_detail, _make_bias_llm_client, bias_model, coerce_llm_score
 from .thresholds import is_severe
-from .tools import BIAS_ANALYSIS_TOOL
+from .tools import BIAS_ANALYSIS_TOOL, PROTECTED_ATTRIBUTE_CATEGORIES
 
 logger = logging.getLogger("agents.bias_detector")
 
@@ -33,22 +33,24 @@ class BiasDetector:
     "it's probably fine."
     """
 
-    BIAS_CATEGORIES = ["gender", "race", "age", "religion", "disability", "marital_status"]
+    BIAS_CATEGORIES = PROTECTED_ATTRIBUTE_CATEGORIES
 
     def __init__(self):
         self.client = _make_bias_llm_client()
         self.prescreener = DeterministicBiasPreScreen()
 
-    def analyze(self, email_text, application_context):
+    def analyze(self, email_text, application_context, full_screen=True):
         """Score a decision email for bias (0-100).
 
         Runs the deterministic-first screen below. A denial the screen did not
         flag then gets one more LLM pass over the whole email (``_full_screen``):
         regex misses phrasing it has no pattern for, and a junior "false
         positive" verdict must not clear a protected term on its own.
+        ``full_screen=False`` skips that pass: a resume after a human reviewer's
+        decision, where it would only re-flag the email the reviewer already read.
         """
         result = self._screen(email_text, application_context)
-        if result["flagged"] or not self._screens_every_denial(application_context):
+        if result["flagged"] or not full_screen or not self._screens_every_denial(application_context):
             return result
         return self._full_screen(email_text, application_context, result)
 
@@ -84,11 +86,11 @@ Describing the person instead of the application ("you are unemployed", "you can
 Tone, warmth, length and style are checked elsewhere. Standard lending terms (income, expenses, credit history, debt-to-income, employment tenure) and legal or complaint information (AFCA, the discrimination Acts) are not bias.
 
 === SCORING ===
-- 0-30: no protected attribute is used against the applicant and the person is not labelled.
+- 0-30: no protected attribute is used against the applicant and the person is not labelled. A protected attribute named only in a legal disclosure, or in a statement that it was NOT considered, is a false positive and scores 0-30.
 - 40-60: the person is labelled.
 - 70-100: a protected attribute is cited as a reason, a circumstance or a repayment factor.
 
-Use the record_bias_analysis tool. In the analysis field, quote the exact phrase behind your score."""
+Use the record_bias_analysis tool. In the analysis field, quote the exact phrase behind your score. List in categories only the protected attributes used against the applicant; a false positive lists none."""
 
         fallback = {
             "score": (bias_threshold_pass + bias_threshold_review) // 2,
@@ -152,8 +154,8 @@ Use the record_bias_analysis tool. In the analysis field, quote the exact phrase
         bias_threshold_review = getattr(django_settings, "BIAS_THRESHOLD_REVIEW", 60)
 
         # ── Clean email: all deterministic checks passed ──
-        # Real banks don't ask a second reviewer to "score" a clean email.
-        # If the compliance checklist passes, the email ships.
+        # No LLM scores the flags of a clean email. A denial still gets the
+        # full-email read in analyze(); an approval ships.
         if prescreen["all_clean"]:
             logger.info("Bias pre-screen: all checks passed, deterministic_score=%d — email compliant", det_score)
             return {
@@ -201,7 +203,7 @@ Use the record_bias_analysis tool. In the analysis field, quote the exact phrase
             }
 
         # ── Moderate findings: deterministic flagged something ambiguous ──
-        # This is the ONLY case where LLM adds value — interpreting whether
+        # The junior LLM call: interpreting whether
         # a flagged phrase is genuinely discriminatory or a false positive
         # (e.g., prohibited term appearing in a legal disclosure context).
         # The junior analyst's mandate is NARROW: classify each flag, nothing more.

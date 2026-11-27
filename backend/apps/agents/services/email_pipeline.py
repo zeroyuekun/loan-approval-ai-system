@@ -50,6 +50,7 @@ def replace_flagged_email(
     tracker,
     steps,
     profile_context=None,
+    full_screen=True,
 ):
     """Swap a moderate-band flagged email for the template and bias-check the template.
 
@@ -63,7 +64,7 @@ def replace_flagged_email(
     same text. Returns None when the template failed its guardrails. Exceptions
     from the bias check propagate after the step is recorded. ``profile_context``
     carries ``nbo_offer`` for denials, so the replacement template still carries
-    the next-best offer.
+    the next-best offer. ``full_screen`` is passed to ``BiasDetector.analyze``.
     """
     step = tracker.start_step("bias_regeneration")
     if email_result.get("template_fallback"):
@@ -84,7 +85,7 @@ def replace_flagged_email(
                 )
             )
             return None
-        new_bias = detector.analyze(result["body"], bias_context(application, decision))
+        new_bias = detector.analyze(result["body"], bias_context(application, decision), full_screen=full_screen)
         save_bias_report(agent_run, generated_email, new_bias)
     except Exception as exc:
         steps.append(tracker.fail_step(step, str(exc), failure_category="transient"))
@@ -127,6 +128,7 @@ def screen_bias(
     steps,
     profile_context=None,
     step_name="bias_check",
+    human_reviewed=False,
 ):
     """Bias-check a persisted decision email and settle which email, if any, may be sent.
 
@@ -138,11 +140,16 @@ def screen_bias(
     holds, ``warn``/``off`` let the email through. Each caller maps a hold to
     its own state. ``detector_class`` is the caller's ``BiasDetector`` name, so
     a test patching it in the caller's module reaches the check.
+    ``human_reviewed`` marks a resume after a reviewer's decision: the
+    reviewer was the second check, so the full-email LLM screen is skipped
+    (it would re-flag the same template and loop the run back to review).
     """
     step = tracker.start_step(step_name)
     try:
         detector = detector_class()
-        bias_result = detector.analyze(email_result["body"], bias_context(application, decision))
+        bias_result = detector.analyze(
+            email_result["body"], bias_context(application, decision), full_screen=not human_reviewed
+        )
         save_bias_report(agent_run, generated_email, bias_result)
     except Exception as exc:
         steps.append(tracker.fail_step(step, str(exc), failure_category="transient"))
@@ -178,6 +185,7 @@ def screen_bias(
             tracker,
             steps,
             profile_context=profile_context,
+            full_screen=not human_reviewed,
         )
     except Exception as exc:
         logger.error("Application %s: bias re-check of the replacement failed: %s", application.pk, exc)

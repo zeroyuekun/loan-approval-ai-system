@@ -10,23 +10,38 @@ import threading
 
 import pytest
 
+from apps.agents.services import api_budget
 from apps.agents.services.api_budget import ApiBudgetGuard, BudgetExhausted
 from tests.conftest import skip_without_redis
 
 
-def _flush_budget_keys(guard):
-    """Remove the day's budget counters so each test starts clean."""
-    r = guard._get_redis()
-    r.delete(guard._daily_key("cost_cents"))
-    r.delete(guard._daily_key("calls"))
-    r.delete("ai_budget:circuit_breaker:anthropic")
+@pytest.fixture(autouse=True)
+def _isolated_budget_keys(monkeypatch):
+    """Point the guard at test-only keys, cleared before and after each test.
+
+    The Redis here is the real one the running stack uses; writing today's real
+    keys would add phantom spend to (or wipe) the live daily budget.
+    """
+    monkeypatch.setattr(api_budget, "_KEY_PREFIX", "test_ai_budget")
+
+    def clear():
+        try:
+            guard = ApiBudgetGuard()
+            keys = [guard._daily_key(s) for s in ("cost_cents", "calls", "tokens")]
+            keys += [api_budget._breaker_key(None), api_budget._failures_key(None)]
+            guard._get_redis().delete(*keys)
+        except Exception:
+            pass  # no Redis: the tests themselves are skipped
+
+    clear()
+    yield
+    clear()
 
 
 @skip_without_redis
 def test_reserve_budget_atomic_increment(settings):
     settings.AI_DAILY_BUDGET_LIMIT_USD = 5.0
     guard = ApiBudgetGuard()
-    _flush_budget_keys(guard)
     r = guard._get_redis()
 
     guard.reserve_budget(estimated_cost_cents=100)
@@ -40,7 +55,6 @@ def test_reserve_budget_atomic_increment(settings):
 def test_reserve_budget_blocks_at_cap_and_rolls_back(settings):
     settings.AI_DAILY_BUDGET_LIMIT_USD = 5.0
     guard = ApiBudgetGuard()
-    _flush_budget_keys(guard)
     r = guard._get_redis()
 
     # Pre-seed $4.99 spent; a 200c reserve would breach the $5.00 cap.
@@ -65,7 +79,6 @@ def test_failed_call_release_restores_cost_and_call_counters(settings):
     """
     settings.AI_DAILY_BUDGET_LIMIT_USD = 5.0
     guard = ApiBudgetGuard()
-    _flush_budget_keys(guard)
     r = guard._get_redis()
 
     cost_key = guard._daily_key("cost_cents")
@@ -105,7 +118,6 @@ def test_successful_call_keeps_call_and_reconciles_cost(settings):
     """
     settings.AI_DAILY_BUDGET_LIMIT_USD = 5.0
     guard = ApiBudgetGuard()
-    _flush_budget_keys(guard)
     r = guard._get_redis()
 
     cost_key = guard._daily_key("cost_cents")
@@ -130,7 +142,6 @@ def test_successful_call_keeps_call_and_reconciles_cost(settings):
 def test_concurrent_reservations_never_exceed_cap(settings):
     settings.AI_DAILY_BUDGET_LIMIT_USD = 1.0  # $1.00 cap == 100 cents
     guard = ApiBudgetGuard()
-    _flush_budget_keys(guard)
     r = guard._get_redis()
 
     successes = []

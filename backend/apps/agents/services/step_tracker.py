@@ -21,7 +21,10 @@ STEP_TIMEOUT_BUDGETS_MS = getattr(
         "fraud_check": 10_000,
         "ml_prediction": 30_000,
         "email_generation": 60_000,
-        "bias_check": 60_000,
+        # A denial gets the full-email LLM screen, and a moderate-band one the
+        # junior classifier too: up to two local CPU LLM calls, plus a model
+        # cold load after an idle spell (docs/experiments/bias_verdict_model.md).
+        "bias_check": 180_000,
         "bias_regeneration": 60_000,
         # Rewrite + bias check + senior review: one generation, one detector
         # call and one review call, each budgeted like its own step.

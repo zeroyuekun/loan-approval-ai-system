@@ -2,23 +2,38 @@
 # Tool definitions for structured output via tool_use
 # ---------------------------------------------------------------------------
 
+# Every protected attribute the verdict prompts name (PROTECTED_ATTRIBUTE_RULE
+# in core.py). The tool enums must cover all of them: Groq rejects a tool call
+# whose arguments fall outside the schema, and a structured-output model is
+# forced to pick a wrong value instead.
+PROTECTED_ATTRIBUTE_CATEGORIES = [
+    "gender",
+    "pregnancy",
+    "race",
+    "nationality",
+    "age",
+    "religion",
+    "disability",
+    "marital_status",
+    "family_responsibilities",
+]
+
 BIAS_ANALYSIS_TOOL = {
     "name": "record_bias_analysis",
     "description": "Record the bias analysis results for this email.",
     "input_schema": {
         "type": "object",
+        # Order matters: a local model under a json_schema response_format writes
+        # fields in this order, so the reasoning comes before the score it justifies.
         "properties": {
-            "score": {"type": "integer", "minimum": 0, "maximum": 100},
+            "analysis": {"type": "string"},
             "categories": {
                 "type": "array",
-                "items": {
-                    "type": "string",
-                    "enum": ["gender", "race", "age", "religion", "disability", "marital_status"],
-                },
+                "items": {"type": "string", "enum": PROTECTED_ATTRIBUTE_CATEGORIES},
             },
-            "analysis": {"type": "string"},
+            "score": {"type": "integer", "minimum": 0, "maximum": 100},
         },
-        "required": ["score", "categories", "analysis"],
+        "required": ["analysis", "categories", "score"],
     },
 }
 
@@ -52,12 +67,7 @@ MARKETING_BIAS_TOOL = {
                         "pressure_tactics",
                         "discriminatory_product_steering",
                         "false_promises",
-                        "gender",
-                        "race",
-                        "age",
-                        "religion",
-                        "disability",
-                        "marital_status",
+                        *PROTECTED_ATTRIBUTE_CATEGORIES,
                     ],
                 },
             },

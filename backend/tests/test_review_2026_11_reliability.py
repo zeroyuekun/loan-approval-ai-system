@@ -135,8 +135,8 @@ def test_nbo_template_wording_without_critical_log(caplog):
 # --- Local Llama is the default AI ------------------------------------------------
 
 
-def test_llm_defaults_are_local_when_unset():
-    """With no LLM variables set, emails are templates and verdicts run on local Llama."""
+def test_llm_defaults_when_unset():
+    """With no LLM variables set, no LLM runs: emails are templates and the bias check is rules only."""
     import os
     import subprocess
     import sys
@@ -144,16 +144,16 @@ def test_llm_defaults_are_local_when_unset():
     env = {
         k: v
         for k, v in os.environ.items()
-        if k not in {"EMAIL_LLM_BACKEND", "BIAS_LLM_BACKEND", "BIAS_OLLAMA_MODEL", "EMAIL_LLM_MODEL"}
+        if k not in {"EMAIL_LLM_BACKEND", "BIAS_LLM_BACKEND", "BIAS_GROQ_MODEL", "BIAS_OLLAMA_MODEL", "EMAIL_LLM_MODEL"}
     }
     code = (
         "import django; django.setup(); from django.conf import settings as s; "
-        "print(s.EMAIL_LLM_BACKEND, s.BIAS_LLM_BACKEND, s.BIAS_OLLAMA_MODEL)"
+        "print(s.EMAIL_LLM_BACKEND, s.BIAS_LLM_BACKEND, s.BIAS_GROQ_MODEL, s.BIAS_OLLAMA_MODEL)"
     )
     out = subprocess.run(  # noqa: S603 - fixed interpreter and code
         [sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True
     )
-    assert out.stdout.split()[-3:] == ["template", "ollama", "llama3.1:8b"]
+    assert out.stdout.split()[-4:] == ["template", "none", "openai/gpt-oss-20b", "llama3.1:8b"]
 
 
 def test_email_generator_defaults_to_template(monkeypatch):

@@ -111,6 +111,64 @@ class TestGroqResponseNormalisation:
         assert resp.usage.output_tokens == 0
 
 
+class TestOllamaForcedToolUsesStructuredOutput:
+    """Ollama's /v1 ignores a forced tool_choice, so the tool schema goes in response_format."""
+
+    def _ollama(self):
+        c = OpenAICompatibleLLMClient(api_key="ollama", base_url="http://ollama:11434/v1", provider="ollama")
+        c._http = MagicMock()
+        c._http.post.return_value = _http_response(
+            payload=_completion(text=json.dumps({"subject": "S", "body": "B"}), finish_reason="stop")
+        )
+        return c
+
+    def test_forced_tool_is_sent_as_json_schema_response_format(self):
+        c = self._ollama()
+        c.messages.create(
+            messages=[{"role": "user", "content": "x"}],
+            tools=[EMAIL_SUBMIT_TOOL],
+            tool_choice={"type": "tool", "name": "submit_email"},
+        )
+        sent = c._http.post.call_args.kwargs["json"]
+        assert sent["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {"name": "submit_email", "schema": EMAIL_SUBMIT_TOOL["input_schema"]},
+        }
+        assert "tools" not in sent
+        assert "tool_choice" not in sent
+
+    def test_structured_reply_comes_back_as_a_tool_use_block(self):
+        # Every caller (bias, NBO, email generator) reads tool_use first, so the
+        # reply must not depend on each caller's own text fallback.
+        c = self._ollama()
+        resp = c.messages.create(
+            messages=[{"role": "user", "content": "x"}],
+            tools=[EMAIL_SUBMIT_TOOL],
+            tool_choice={"type": "tool", "name": "submit_email"},
+        )
+        tool_block = next(b for b in resp.content if b.type == "tool_use")
+        assert tool_block.input == {"subject": "S", "body": "B"}
+
+    def test_no_forced_tool_means_no_response_format(self):
+        c = self._ollama()
+        c.messages.create(messages=[{"role": "user", "content": "x"}])
+        assert "response_format" not in c._http.post.call_args.kwargs["json"]
+
+    def test_groq_keeps_function_calling(self):
+        c = _client()
+        c._http.post.return_value = _http_response(
+            payload=_completion(tool_args=json.dumps({"subject": "S", "body": "B"}))
+        )
+        c.messages.create(
+            messages=[{"role": "user", "content": "x"}],
+            tools=[EMAIL_SUBMIT_TOOL],
+            tool_choice={"type": "tool", "name": "submit_email"},
+        )
+        sent = c._http.post.call_args.kwargs["json"]
+        assert "response_format" not in sent
+        assert sent["tools"][0]["function"]["name"] == "submit_email"
+
+
 class TestGroqRequestPayload:
     def test_payload_injects_seed_temperature_and_translated_tool(self):
         c = _client(seed=42)

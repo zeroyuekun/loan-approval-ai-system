@@ -9,12 +9,29 @@
 A loan approval system for Australian lending. A machine-learning model scores
 each application, the system writes and sends the decision email, checks that
 email for discriminatory wording, and offers declined customers other products.
-Everything runs on your own machine, including the AI, at no cost.
+It runs on your own machine at no cost, with no LLM in the default setup
+([why](#the-optional-llm-check)).
 
 > **Limits up front.** The model is trained on synthetic data that copies
 > published Australian lending statistics, so it shows how the pipeline works;
 > it is not a credit model for real customers. See the
 > [model card](backend/docs/MODEL_CARD.md).
+
+## For engineers reviewing this
+
+A full-stack system: Django REST API, Celery workers, a Next.js dashboard, an
+XGBoost model and a rule-based bias screen, all run with one `docker compose up`. About
+2,500 backend tests and 480+ frontend tests run in CI. Running cost is $0.
+
+Good places to start reading:
+
+| Area | File |
+|---|---|
+| The pipeline (one Celery task, one `AgentRun` record per application) | [`agents/services/orchestrator.py`](backend/apps/agents/services/orchestrator.py) |
+| Bias screen: rules first, optional LLM second | [`agents/services/deterministic_prescreen.py`](backend/apps/agents/services/deterministic_prescreen.py), [`agents/services/bias/core.py`](backend/apps/agents/services/bias/core.py) |
+| Email guardrails | [`email_engine/services/guardrails/engine.py`](backend/apps/email_engine/services/guardrails/engine.py) |
+| Scoring and the reasons behind a decision | [`ml_engine/services/scoring/predictor.py`](backend/apps/ml_engine/services/scoring/predictor.py), [`shap_attribution.py`](backend/apps/ml_engine/services/scoring/shap_attribution.py) |
+| Human review and resuming a held run | [`agents/services/human_review_handler.py`](backend/apps/agents/services/human_review_handler.py) |
 
 ## What it does
 
@@ -25,9 +42,9 @@ Everything runs on your own machine, including the AI, at no cost.
    real figures. Every email passes deterministic guardrails (required
    disclosures, no invented dollar amounts, no prohibited language) before it
    can be sent.
-3. **Checks for bias.** A rule-based screen scores every email. Only
-   ambiguous cases go to a local AI model (Llama 3.1 8B), and anything it
-   confirms as biased goes to a human reviewer.
+3. **Checks for bias.** Rule-based checks read every email. Clean emails are
+   sent; severe or unclear ones wait for a human reviewer, whose decision is
+   final. An optional LLM check can also read every decline in full.
 4. **Offers alternatives.** A declined customer gets a follow-up with
    products they qualify for, with amounts and rates calculated by code, not
    by the AI.
@@ -38,15 +55,35 @@ Everything runs on your own machine, including the AI, at no cost.
 flowchart LR
     A[Application] --> B[XGBoost score<br/>+ reasons]
     B --> C[Decision email<br/>template + guardrails]
-    C --> D{Bias screen}
+    C --> D{Rule-based<br/>bias screen}
     D -- clean --> E[Email sent]
-    D -- ambiguous --> F[Local Llama<br/>verdict]
-    F -- clean --> E
-    F -- biased --> G[Human review]
-    D -- severe --> G
+    D -- severe or<br/>unclear --> G[Human review]
+    G -- reviewer sends --> E
     E --> H{Declined?}
     H -- yes --> I[Alternative offers<br/>follow-up email]
 ```
+
+### The optional LLM check
+
+By default no LLM runs anywhere. The rule-based screen decides alone: clean
+emails are sent, and severe or unclear ones wait for a human.
+
+An LLM check can be switched on (`BIAS_LLM_BACKEND`). It is a reviewer only: it
+never writes to the customer and never makes the lending decision. It reads
+every decline email in full, plus any email the rules could not judge, and
+returns a bias score with the exact phrase behind it. That catches wording the
+rules have no pattern for, such as "as a young applicant you lack the
+maturity". In a 27-run test with Llama 3.1 8B it flagged every biased email
+and cleared every compliant one ([results](docs/experiments/bias_verdict_model.md)).
+
+It is off for two reasons:
+
+- **Memory.** Running Llama 3.1 8B locally takes about 6 GB of RAM on top of
+  the rest of the stack, more than a 16 GB laptop can spare.
+- **Privacy.** The free hosted option (Groq) would avoid the memory cost, but
+  the email being checked (the applicant's name, the loan amount, the
+  decision) would leave the machine. Private customer data should not be sent
+  to a third-party API, so a real lender would run this check in-house.
 
 <details>
 <summary><strong>Screenshots</strong></summary>
@@ -61,36 +98,36 @@ flowchart LR
 
 ## Run it
 
-You need Docker Desktop (or Docker Engine with Compose v2) and about 10 GB of
-free RAM for the full stack with the local AI model. No API key is needed.
+You need Docker Desktop (or Docker Engine with Compose v2) and about 4 GB of
+free RAM. No API key is needed.
 
 ```bash
 git clone https://github.com/zeroyuekun/loan-approval-ai-system.git
 cd loan-approval-ai-system
 cp .env.example .env        # then set DJANGO_SECRET_KEY, FIELD_ENCRYPTION_KEY and the passwords
-docker compose up -d        # first start downloads Llama 3.1 8B (~5 GB)
+docker compose up -d
 make seed                   # generate synthetic data and train the model
 ```
 
 - Dashboard: <http://localhost:3000>. Log in as `admin` with the
   `DJANGO_SUPERUSER_PASSWORD` from `.env`.
-- API docs: <http://localhost:8000/api/schema/swagger-ui/>.
+- API docs: <http://localhost:8000/api/docs/> (admin only, so log in first).
 - Problems: see the [runbooks](docs/runbooks/).
 
-**AI settings.** By default the AI runs locally through Ollama
-(`COMPOSE_PROFILES=ollama`, `BIAS_LLM_BACKEND=ollama`, `BIAS_OLLAMA_MODEL=llama3.1:8b`)
-and emails come from templates (`EMAIL_LLM_BACKEND=template`). Nothing leaves
-your machine. If you leave Ollama off, the bias screen still runs and any
-ambiguous email waits for a human. Claude is optional: set a backend to
-`anthropic` and add `ANTHROPIC_API_KEY`. Why Llama 3.1 8B and not a smaller
-model: [bias verdict model comparison](docs/experiments/bias_verdict_model.md).
+**AI settings.** By default no LLM runs: emails come from templates
+(`EMAIL_LLM_BACKEND=template`) and the bias check is rule-based
+(`BIAS_LLM_BACKEND=none`). To turn the LLM check on, set `BIAS_LLM_BACKEND` to
+`ollama` (local; also set `COMPOSE_PROFILES=ollama`, first start downloads
+about 5 GB), `groq` (free hosted API, needs `GROQ_API_KEY`) or `anthropic`
+(Claude, needs `ANTHROPIC_API_KEY`). Why Llama 3.1 8B and not a smaller model:
+[bias verdict model comparison](docs/experiments/bias_verdict_model.md).
 
 ## How I built this
 
 I designed the architecture and made the product decisions: the three-stage
 pipeline (score, email, bias check), the split into five Django apps,
 deterministic checks before any AI, template-first emails with cost caps, the
-local-model setup and the fairness approach. I wrote parts of the code by hand
+pluggable LLM backends and the fairness approach. I wrote parts of the code by hand
 and used AI (Claude Code) as a pair programmer for much of the implementation.
 I reviewed every change, set the testing strategy, and debugged issues across
 the project's pull requests.
@@ -102,7 +139,7 @@ the project's pull requests.
 | Backend | Django 5, Django REST Framework, PostgreSQL 17, Celery + Redis |
 | Frontend | Next.js 16, React 19, TanStack Query, Tailwind, shadcn/ui |
 | Machine learning | XGBoost, scikit-learn, SHAP, Optuna |
-| AI | Llama 3.1 8B on Ollama (local); Claude optional |
+| AI | Optional: Llama 3.1 8B (local Ollama or Groq) or Claude; off by default |
 | Infrastructure | Docker Compose; Kubernetes manifests and Terraform for AWS (not deployed) |
 
 ## Design decisions
@@ -111,7 +148,7 @@ the project's pull requests.
 |---|---|
 | Deterministic checks before any AI | Rules are predictable and auditable; the AI only judges the ambiguous cases ([ADR 003](docs/adr/003-hybrid-bias-detection.md)) |
 | Template-first emails | A lending letter must state exact figures; templates cannot invent them ([ADR 006](docs/adr/006-template-first-email-with-cost-cap.md)) |
-| Local Llama for verdicts | $0 running cost and no customer data leaves the machine ([ADR 010](docs/adr/010-pluggable-email-llm-backend-data-safety.md)) |
+| LLM bias check off by default | A local model needs about 6 GB of RAM, and a hosted one would send customer data off the machine; the rule-based screen plus human review covers the gap ([why](#the-optional-llm-check), [ADR 010](docs/adr/010-pluggable-email-llm-backend-data-safety.md)) |
 | XGBoost with monotonic constraints | Higher income can never lower the score, which keeps decisions explainable ([ADR 002](docs/adr/002-xgboost-with-monotonic-constraints.md)) |
 | Synthetic data calibrated to public statistics | No real loan data is available ([ADR 001](docs/adr/001-synthetic-data-with-copula.md)) |
 

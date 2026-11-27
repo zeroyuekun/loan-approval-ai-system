@@ -122,12 +122,16 @@ _FREE_PROVIDERS = frozenset({"groq", "ollama"})
 _DEFAULT_PROVIDER = "anthropic"
 
 
+# Prefix of every Redis key this module writes (tests swap it for a private one).
+_KEY_PREFIX = "ai_budget"
+
+
 def _breaker_key(provider):
-    return f"ai_budget:circuit_breaker:{provider or _DEFAULT_PROVIDER}"
+    return f"{_KEY_PREFIX}:circuit_breaker:{provider or _DEFAULT_PROVIDER}"
 
 
 def _failures_key(provider):
-    return f"ai_budget:consecutive_failures:{provider or _DEFAULT_PROVIDER}"
+    return f"{_KEY_PREFIX}:consecutive_failures:{provider or _DEFAULT_PROVIDER}"
 
 
 def open_circuit_providers(r):
@@ -174,8 +178,12 @@ def _estimate_reserve_cents(model, max_tokens=None, provider="anthropic"):
     """Worst-case cents to reserve before a call whose real token usage is unknown.
 
     Assumes a large-ish prompt (8k input) producing up to ``max_tokens`` output.
-    Never returns below ``_RESERVE_FLOOR_CENTS``.
+    A free provider reserves 0: a $0 call holds no money, so a call killed
+    mid-flight cannot leave phantom spend on the counter. Any paid call reserves
+    at least ``_RESERVE_FLOOR_CENTS``.
     """
+    if provider in _FREE_PROVIDERS:
+        return 0
     cost_usd = estimate_cost_usd(8000, max_tokens or 2048, model, provider=provider)
     return max(_RESERVE_FLOOR_CENTS, int(cost_usd * 100))
 
@@ -246,7 +254,7 @@ class ApiBudgetGuard:
     def _daily_key(self, suffix):
         from datetime import date
 
-        return f"ai_budget:{date.today().isoformat()}:{suffix}"
+        return f"{_KEY_PREFIX}:{date.today().isoformat()}:{suffix}"
 
     def check_budget(self, provider=_DEFAULT_PROVIDER):
         """Raise BudgetExhausted if daily limit reached, CircuitOpen if breaker tripped.
@@ -325,13 +333,14 @@ class ApiBudgetGuard:
         counter and the $5/day cap can no longer be overshot. Raises
         ``BudgetExhausted`` if the reservation would breach the dollar or call cap
         (the counter is NOT incremented in that case — no leak). Returns the cents
-        actually reserved so ``record_call`` can reconcile to the true cost.
+        actually reserved so ``record_call`` can reconcile to the true cost; 0 is
+        a real reservation (a free provider's call slot, no money).
 
         On a Redis outage it falls back to the same per-process cap that
-        ``check_budget`` uses and returns 0 (reserved nothing; record_call records
-        the real cost).
+        ``check_budget`` uses and returns None (reserved nothing; record_call
+        counts the call and records the real cost).
         """
-        estimated_cost_cents = max(_RESERVE_FLOOR_CENTS, int(estimated_cost_cents))
+        estimated_cost_cents = int(estimated_cost_cents)  # floors live in _estimate_reserve_cents
         budget_limit = getattr(settings, "AI_DAILY_BUDGET_LIMIT_USD", 5.0)
         budget_limit_cents = int(budget_limit * 100)
         call_limit = getattr(settings, "AI_DAILY_CALL_LIMIT", 500)
@@ -378,16 +387,18 @@ class ApiBudgetGuard:
                 _REDIS_FALLBACK_LIMIT,
                 e,
             )
-            return 0
+            return None
 
     def record_call(
-        self, input_tokens=0, output_tokens=0, model="", reserved_cents=0, released=False, provider="anthropic"
+        self, input_tokens=0, output_tokens=0, model="", reserved_cents=None, released=False, provider="anthropic"
     ):
         """Record actual usage, reconciling any prior reservation to the true cost.
 
-        Three paths, keyed off ``reserved_cents`` and ``released``:
+        Three paths, keyed off ``reserved_cents`` and ``released``. A reservation
+        of 0 cents (a free provider) is still a reservation: its call slot was
+        taken in ``reserve_budget``. Only ``None`` means nothing was reserved.
 
-        * **Failure release** (``reserved_cents`` > 0 and ``released`` is True): the
+        * **Failure release** (``reserved_cents`` set and ``released`` is True): the
           guarded call reserved budget but the API call failed and produced no
           billable tokens. FULLY release the reservation — no ``max(1, …)`` floor,
           so the cost counter returns to its pre-reserve value (``cost_delta`` is
@@ -395,12 +406,12 @@ class ApiBudgetGuard:
           1, since ``reserve_budget`` had incremented it for a call that never
           completed.
 
-        * **Successful reconcile** (``reserved_cents`` > 0 and ``released`` is
+        * **Successful reconcile** (``reserved_cents`` set and ``released`` is
           False): the call succeeded. The call was already counted inside
           ``reserve_budget`` so keep the call counted; only INCRBY the delta
           ``actual - reserved`` (may be a DECRBY) so cost settles at the true value.
 
-        * **Unreserved fallback** (``reserved_cents`` == 0): the call was never
+        * **Unreserved fallback** (``reserved_cents`` is None): the call was never
           reserved (Redis was down at reserve time, or a legacy caller). Count the
           call + full cost, keeping the ``max(1, …)`` minimum-cent floor.
 
@@ -417,13 +428,13 @@ class ApiBudgetGuard:
             tokens_key = self._daily_key("tokens")
             cost_key = self._daily_key("cost_cents")
 
-            reserved = int(reserved_cents)
+            reserved = reserved_cents
             cost_usd = estimate_cost_usd(input_tokens, output_tokens, model, provider=provider)
             # Minimum 1 cent per real call, except free providers ($0).
             min_cents = 0 if provider in _FREE_PROVIDERS else 1
             floored_cents = max(min_cents, int(cost_usd * 100))
 
-            if reserved > 0 and released:
+            if reserved is not None and released:
                 # Failure release: undo the reservation in full. No cent floor —
                 # the call produced no billable cost — and give back the call slot
                 # that reserve_budget consumed.
@@ -435,7 +446,7 @@ class ApiBudgetGuard:
                 if r.exists(calls_key):
                     pipe.decr(calls_key)
                     pipe.expire(calls_key, self.KEY_TTL)
-            elif reserved > 0:
+            elif reserved is not None:
                 # Successful reconcile to the real cost. The call was already
                 # counted inside reserve_budget, so do NOT touch calls again.
                 cost_delta = floored_cents - reserved
@@ -460,7 +471,7 @@ class ApiBudgetGuard:
                 output_tokens,
                 model or "unknown",
                 cost_usd,
-                reserved,
+                reserved or 0,
                 cost_delta,
                 released,
             )
