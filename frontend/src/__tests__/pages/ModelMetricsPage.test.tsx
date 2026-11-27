@@ -107,12 +107,15 @@ describe('ModelMetricsPage', () => {
     expect(screen.getByText('v3')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
 
-    // Key metrics should be rendered
-    expect(screen.getByText('Accuracy')).toBeInTheDocument()
-    expect(screen.getByText('Precision')).toBeInTheDocument()
-    expect(screen.getByText('Recall')).toBeInTheDocument()
-    expect(screen.getByText('F1 Score')).toBeInTheDocument()
-    expect(screen.getByText('AUC-ROC')).toBeInTheDocument()
+    // Plain-English summary replaces the raw KPI strip
+    expect(screen.getByText('Is the model accurate?')).toBeInTheDocument()
+    expect(screen.getByText('91%')).toBeInTheDocument()
+    // 850 + 870 correct of 2,000 tested
+    expect(screen.getByText(/On 2,000 past applications/)).toBeInTheDocument()
+    expect(screen.getByText('130')).toBeInTheDocument() // good borrowers wrongly declined
+    expect(screen.getByText('150')).toBeInTheDocument() // risky borrowers wrongly approved
+    // Raw data-science scores are not on the default view
+    expect(screen.queryByText('F1 Score')).not.toBeInTheDocument()
   })
 
   it('shows "no model" state when metrics returns 404', async () => {
@@ -205,7 +208,7 @@ describe('ModelMetricsPage', () => {
     })
   })
 
-  it('defaults to the Performance tab and switches to Diagnostics on click', async () => {
+  it('keeps technical charts in an admin-only Technical details tab', async () => {
     const richMetrics = {
       ...mockMetrics,
       decile_analysis: { deciles: [{ decile: 1, count: 10, actual_rate: 0.1, cumulative_rate: 0.1, lift: 0.5 }] },
@@ -221,30 +224,31 @@ describe('ModelMetricsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument())
 
-    // Performance tab is active by default → Confusion Matrix visible
-    expect(screen.getByText('Confusion Matrix')).toBeInTheDocument()
-    // Diagnostics content is NOT in the DOM yet (inactive tab unmounts)
-    expect(screen.queryByText('Training Metadata')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Diagnostics' }))
-
-    expect(await screen.findByText('Training Metadata')).toBeInTheDocument()
-    expect(screen.getByText('Split Strategy')).toBeInTheDocument()
-    // Confusion Matrix (Performance tab) is now unmounted
+    // Technical content is not mounted until the tab is opened
     expect(screen.queryByText('Confusion Matrix')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Technical details' }))
+
+    expect(await screen.findByText('Confusion Matrix')).toBeInTheDocument()
+    expect(screen.getByText('F1 Score')).toBeInTheDocument()
+    expect(screen.getByText('Training Metadata')).toBeInTheDocument()
+    expect(screen.getByText('Split Strategy')).toBeInTheDocument()
+    // No drift reports -> no drift section
+    expect(screen.queryByText('Data Drift (PSI)')).not.toBeInTheDocument()
   })
 
-  it('hides the Drift tab when there are no drift reports', async () => {
+  it('hides the Technical details tab from officers', async () => {
     server.use(
       http.get(`${API_URL}/ml/models/active/metrics/`, () => HttpResponse.json(mockMetrics)),
       http.get(`${API_URL}/ml/models/active/drift-reports/`, () => HttpResponse.json([])),
     )
-    renderPage()
+    renderPage({ ...mockUser, role: 'officer' as const })
     await waitFor(() => expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: 'Drift' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Technical details' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try it' })).toBeInTheDocument()
   })
 
-  it('shows the Drift tab when drift reports exist and reveals the drift panel on click', async () => {
+  it('shows the drift section inside Technical details when drift reports exist', async () => {
     const driftReports = [
       {
         id: 'd1', report_date: '2026-06-01', psi_score: 0.07, psi_per_feature: {},
@@ -262,11 +266,7 @@ describe('ModelMetricsPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'XGBoost' })).toBeInTheDocument())
-
-    const driftTab = await screen.findByRole('button', { name: 'Drift' })
-    expect(driftTab).toBeInTheDocument()
-
-    await user.click(driftTab)
+    await user.click(screen.getByRole('button', { name: 'Technical details' }))
     expect(await screen.findByText('Data Drift (PSI)')).toBeInTheDocument()
   })
 })

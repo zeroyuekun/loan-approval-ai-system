@@ -97,3 +97,16 @@ export function formatPurpose(purpose: string | null | undefined): string {
   return PURPOSE_LABELS[key] || titleCase(key)
 }
 
+
+type NamedUser = { first_name?: string | null; last_name?: string | null; email?: string | null; username?: string | null }
+
+/** "First Last", else the email, else the legacy username. */
+export function userDisplayName(user: NamedUser | null | undefined): string {
+  if (!user) return ''
+  return `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email || user.username || ''
+}
+
+/** Single uppercase letter for an avatar. */
+export function userInitial(user: NamedUser | null | undefined): string {
+  return (userDisplayName(user)[0] ?? '?').toUpperCase()
+}

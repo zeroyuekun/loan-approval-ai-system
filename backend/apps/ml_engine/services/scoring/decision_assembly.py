@@ -50,6 +50,7 @@ __all__ = [
     "PricingUnavailable",
     "assemble_decision",
     "decline_overrides",
+    "decline_rule_codes",
 ]
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,20 @@ _BORDERLINE_MARGIN = float(os.environ.get("ML_BORDERLINE_MARGIN", "0.05"))
 # Reason codes for a denial a rule made over a model approval.
 PRICING_TIER_DECLINE = "PRICING_TIER_DECLINE"
 POLICY_DECLINE_PREFIX = "POLICY_DECLINE_"
+
+
+def decline_rule_codes(decision_waterfall) -> list[str]:
+    """Codes of the lending rules that declined an application, in waterfall order.
+
+    A rule decline outranks the model's drivers when explaining a denial: the
+    model scored the application as an approval and a rule overrode it.
+    """
+    codes: list[str] = []
+    for entry in decision_waterfall or []:
+        code = entry.get("reason_code") if isinstance(entry, dict) else None
+        if (code == PRICING_TIER_DECLINE or (code or "").startswith(POLICY_DECLINE_PREFIX)) and code not in codes:
+            codes.append(code)
+    return codes
 
 
 class PricingUnavailable(RuntimeError):

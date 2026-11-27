@@ -5,7 +5,11 @@ import time
 import anthropic
 import httpx
 
-from apps.ml_engine.services.scoring.decision_assembly import POLICY_DECLINE_PREFIX, PRICING_TIER_DECLINE
+from apps.ml_engine.services.scoring.decision_assembly import (
+    POLICY_DECLINE_PREFIX,
+    PRICING_TIER_DECLINE,
+    decline_rule_codes,
+)
 from utils.anthropic_client import make_anthropic_client
 from utils.sanitization import sanitize_prompt_input as _sanitize_prompt_input
 
@@ -256,12 +260,10 @@ class EmailGenerator:
     def _decline_rule_reasons(self, decision_waterfall):
         """Plain-language reasons for the lending rules that declined the application, or []."""
         reasons = []
-        for entry in decision_waterfall or []:
-            code = entry.get("reason_code") if isinstance(entry, dict) else None
-            if code == PRICING_TIER_DECLINE or (code or "").startswith(POLICY_DECLINE_PREFIX):
-                reason = self.DECLINE_RULE_REASON_MAP.get(code, "Your application didn't meet our lending policy")
-                if reason not in reasons:
-                    reasons.append(reason)
+        for code in decline_rule_codes(decision_waterfall):
+            reason = self.DECLINE_RULE_REASON_MAP.get(code, "Your application didn't meet our lending policy")
+            if reason not in reasons:
+                reasons.append(reason)
         return reasons
 
     def _format_denial_reasons(self, feature_importances, shap_values=None, decision_waterfall=None):

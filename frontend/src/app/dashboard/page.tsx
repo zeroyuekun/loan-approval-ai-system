@@ -3,7 +3,9 @@
 import { useApplications } from '@/hooks/useApplications'
 import { useDashboardStats } from '@/hooks/useDashboardStats'
 import { StatsCards } from '@/components/dashboard/StatsCards'
-import { ApprovalRateChart } from '@/components/dashboard/ApprovalRateChart'
+import { ApprovalTrendChart } from '@/components/dashboard/ApprovalTrendChart'
+import { DeclineReasonsCard } from '@/components/dashboard/DeclineReasonsCard'
+import { DecisionHandlingCard } from '@/components/dashboard/DecisionHandlingCard'
 import { RecentApplications } from '@/components/dashboard/RecentApplications'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -45,8 +47,13 @@ export default function DashboardPage() {
       />
 
       <div className="grid gap-6 md:grid-cols-2">
-        <ApprovalRateChart approved={stats.approved_count} denied={stats.denied_count} />
+        <ApprovalTrendChart volume={stats.daily_volume} approvalTrend={stats.approval_trend} />
         <RecentApplications applications={applications} />
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <DeclineReasonsCard data={stats.decline_reasons} />
+        <DecisionHandlingCard data={stats.decision_handling} />
       </div>
     </div>
   )

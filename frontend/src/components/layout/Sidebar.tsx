@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LayoutDashboard, FileText, BarChart3, Mail, UserCircle, Users, ShieldAlert, ClipboardList } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, userDisplayName, userInitial } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
 import { LogoIcon } from '@/components/ui/logo'
 
@@ -87,11 +87,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           <div className="border-t border-white/10 p-4">
             <div className="flex items-center gap-3 rounded-lg bg-white/5 p-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 via-indigo-500 to-violet-500 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 border border-white/20">
-                {user.first_name?.[0] || (user.username?.[0]?.toUpperCase() ?? '?')}
+                {userInitial(user)}
               </div>
               <div className="flex-1 overflow-hidden">
                 <p className="truncate text-sm font-medium text-white">
-                  {user.first_name ? `${user.first_name} ${user.last_name}` : user.username}
+                  {userDisplayName(user)}
                 </p>
                 <p className="text-xs text-slate-400 capitalize">{user.role}</p>
               </div>

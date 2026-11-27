@@ -38,6 +38,7 @@ from .serializers import (
 )
 from .services.audit_diff import field_change_details, snapshot
 from .services.decision_review import OverturnGateBlocked, apply_review_outcome, withdraw_review
+from .services.lending_overview import decision_handling, top_decline_reasons
 from .tasks import dispatch_pipeline_or_queue_failed
 
 logger = logging.getLogger(__name__)
@@ -338,6 +339,8 @@ class DashboardStatsView(APIView):
                 if pipeline_total > 0
                 else 0,
             },
+            "decline_reasons": top_decline_reasons(),
+            "decision_handling": decision_handling(),
         }
 
 

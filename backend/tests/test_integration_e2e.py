@@ -44,7 +44,6 @@ class TestFullPipeline(TestCase):
         reg_resp = self.client.post(
             "/api/v1/auth/register/",
             {
-                "username": "e2e_test_user",
                 "email": "e2e@test.com",
                 "password": "TestPass123!",
                 "password2": "TestPass123!",
@@ -58,7 +57,7 @@ class TestFullPipeline(TestCase):
         login_resp = self.client.post(
             "/api/v1/auth/login/",
             {
-                "username": "e2e_test_user",
+                "email": "e2e@test.com",
                 "password": "TestPass123!",
             },
         )
@@ -72,7 +71,7 @@ class TestFullPipeline(TestCase):
         NCCP Act 2009 and AML/CTF Act 2006 require these fields before a
         loan application can be submitted.
         """
-        user = CustomUser.objects.get(username="e2e_test_user")
+        user = CustomUser.objects.get(email="e2e@test.com")
         profile, _ = CustomerProfile.objects.get_or_create(user=user)
         profile.date_of_birth = date(1990, 5, 15)
         profile.phone = "0412345678"
@@ -497,7 +496,6 @@ class TestFullPipeline(TestCase):
         reg_resp = self.client.post(
             "/api/v1/auth/register/",
             {
-                "username": "e2e_user_2",
                 "email": "e2e2@test.com",
                 "password": "TestPass123!",
                 "password2": "TestPass123!",
@@ -510,12 +508,12 @@ class TestFullPipeline(TestCase):
         self.client.post(
             "/api/v1/auth/login/",
             {
-                "username": "e2e_user_2",
+                "email": "e2e2@test.com",
                 "password": "TestPass123!",
             },
         )
 
-        user2 = CustomUser.objects.get(username="e2e_user_2")
+        user2 = CustomUser.objects.get(email="e2e2@test.com")
         from datetime import date
 
         from apps.accounts.models import CustomerProfile

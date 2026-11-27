@@ -19,11 +19,22 @@ import { CalibrationThresholdsTab } from '@/components/metrics/tabs/CalibrationT
 import { DriftTab } from '@/components/metrics/tabs/DriftTab'
 import { DiagnosticsTab } from '@/components/metrics/tabs/DiagnosticsTab'
 import { TryItTab } from '@/components/metrics/tabs/TryItTab'
+import { ModelSummary } from '@/components/metrics/ModelSummary'
+
+function TechnicalSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+      {children}
+    </section>
+  )
+}
 
 export default function ModelMetricsPage() {
   const { data: metrics, isLoading, isError } = useModelMetrics()
-  const { data: driftReports } = useDriftReports(6)
   const { user } = useAuth()
+  // Drift is only shown in the admin-only Technical details tab.
+  const { data: driftReports } = useDriftReports(6, { enabled: user?.role === 'admin' })
   const { trainingStatus, trainingAlgorithm, blockedGates, errorMessage: trainErrorMessage, ...trainModel } = useTrainModel()
   const [selectedAlgorithm, setSelectedAlgorithm] = useState('xgb')
   const isTraining = trainModel.isPending || trainingStatus === 'training'
@@ -116,24 +127,29 @@ export default function ModelMetricsPage() {
         trainErrorMessage={trainErrorMessage}
       />
 
-      <KpiStrip metrics={metrics} />
+      <ModelSummary metrics={metrics} />
 
-      <Tabs defaultValue="performance">
+      <Tabs defaultValue="fairness">
         <TabsList className="flex-wrap">
-          <TabsTrigger value="performance">Performance</TabsTrigger>
-          <TabsTrigger value="fairness">Fairness</TabsTrigger>
-          <TabsTrigger value="calibration">Calibration &amp; Thresholds</TabsTrigger>
-          {hasDrift && <TabsTrigger value="drift">Drift</TabsTrigger>}
-          <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
+          <TabsTrigger value="fairness">Fairness by group</TabsTrigger>
           {canScore && <TabsTrigger value="try-it">Try it</TabsTrigger>}
+          {isAdmin && <TabsTrigger value="technical">Technical details</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="performance"><PerformanceTab metrics={metrics} /></TabsContent>
         <TabsContent value="fairness"><FairnessTab metrics={metrics} /></TabsContent>
-        <TabsContent value="calibration"><CalibrationThresholdsTab metrics={metrics} /></TabsContent>
-        {hasDrift && <TabsContent value="drift"><DriftTab reports={driftReports} /></TabsContent>}
-        <TabsContent value="diagnostics"><DiagnosticsTab metrics={metrics} /></TabsContent>
         {canScore && <TabsContent value="try-it"><TryItTab /></TabsContent>}
+        {isAdmin && (
+          <TabsContent value="technical" className="space-y-10">
+            <p className="text-sm text-muted-foreground">
+              Data-science measures for model validation. The cards above summarise them in plain English.
+            </p>
+            <TechnicalSection title="Headline scores"><KpiStrip metrics={metrics} /></TechnicalSection>
+            <TechnicalSection title="Errors and ranking"><PerformanceTab metrics={metrics} /></TechnicalSection>
+            <TechnicalSection title="Calibration and thresholds"><CalibrationThresholdsTab metrics={metrics} /></TechnicalSection>
+            {hasDrift && <TechnicalSection title="Drift"><DriftTab reports={driftReports} /></TechnicalSection>}
+            <TechnicalSection title="Diagnostics"><DiagnosticsTab metrics={metrics} /></TechnicalSection>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

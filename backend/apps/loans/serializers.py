@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -216,7 +217,24 @@ class CustomerLoanApplicationSerializer(PIIMaskingMixin, serializers.ModelSerial
         read_only_fields = ("id", "status", "created_at", "updated_at")
 
 
+class WholeYearsField(serializers.IntegerField):
+    """Accepts fractional years ("3.5") and stores whole completed years.
+
+    Applicants naturally answer "time in current role" with a decimal; rounding
+    down is the conservative reading for tenure thresholds.
+    """
+
+    def to_internal_value(self, data):
+        try:
+            data = int(Decimal(str(data)))  # truncates toward zero; negatives fail min_value
+        except (InvalidOperation, ValueError, TypeError):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
 class LoanApplicationCreateSerializer(serializers.ModelSerializer):
+    employment_length = WholeYearsField(min_value=0)
+
     class Meta:
         model = LoanApplication
         fields = (

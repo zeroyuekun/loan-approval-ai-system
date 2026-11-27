@@ -2,11 +2,23 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-interface ConfusionMatrixProps {
-  matrix: {
-    tp?: number; fp?: number; tn?: number; fn?: number;
-    true_positives?: number; false_positives?: number; true_negatives?: number; false_negatives?: number;
+export interface RawConfusionMatrix {
+  tp?: number; fp?: number; tn?: number; fn?: number;
+  true_positives?: number; false_positives?: number; true_negatives?: number; false_negatives?: number;
+}
+
+/** Stored matrices use either short or long keys; positive class = approved. */
+export function normalizeConfusionMatrix(raw: RawConfusionMatrix | null | undefined) {
+  return {
+    tp: raw?.tp ?? raw?.true_positives ?? 0,
+    fp: raw?.fp ?? raw?.false_positives ?? 0,
+    tn: raw?.tn ?? raw?.true_negatives ?? 0,
+    fn: raw?.fn ?? raw?.false_negatives ?? 0,
   }
+}
+
+interface ConfusionMatrixProps {
+  matrix: RawConfusionMatrix
   /** The operating threshold these counts were computed at. Surfaced so the
    *  matrix is never mistaken for a 0.5-cutoff classifier the system never runs. */
   threshold?: number | null
@@ -17,12 +29,7 @@ interface ConfusionMatrixProps {
 }
 
 export function ConfusionMatrix({ matrix: raw, threshold, servingThreshold }: ConfusionMatrixProps) {
-  const matrix = {
-    tp: raw.tp ?? raw.true_positives ?? 0,
-    fp: raw.fp ?? raw.false_positives ?? 0,
-    tn: raw.tn ?? raw.true_negatives ?? 0,
-    fn: raw.fn ?? raw.false_negatives ?? 0,
-  }
+  const matrix = normalizeConfusionMatrix(raw)
   const total = matrix.tp + matrix.fp + matrix.tn + matrix.fn
   // Scale colour to the largest of the four cells INDEPENDENTLY of TN, which on
   // imbalanced data dwarfs the rest and washes the heat-map out. TN keeps a

@@ -15,4 +15,15 @@ services:
     environment:
       NODE_ENV: development
       WATCHPACK_POLLING: "true"
+    # The dev compiler (next dev --turbopack) peaks around 2.5 GiB compiling the
+    # dashboard routes, most of it native memory outside the Node heap cap. At
+    # the base file's 1g it thrashes at the limit and never finishes a route,
+    # so post-login navigation hangs.
+    mem_limit: 3g
+    # src/instrumentation.ts imports these from the frontend root; the base
+    # file mounts only src/, public/ and a few configs, and the image does
+    # not contain them, so the dev server fails with MODULE_NOT_FOUND.
+    volumes:
+      - ./frontend/sentry.server.config.ts:/app/sentry.server.config.ts
+      - ./frontend/sentry.edge.config.ts:/app/sentry.edge.config.ts
     command: sh -c "npm ci && npm run dev"

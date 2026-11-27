@@ -3,14 +3,22 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth'
+import { formatApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
+const REGISTER_LABELS: Record<string, string> = {
+  first_name: 'First name',
+  last_name: 'Last name',
+  email: 'Email',
+  password: 'Password',
+  password2: 'Confirm password',
+}
+
 export default function RegisterPage() {
   const { register } = useAuth()
   const [formData, setFormData] = useState({
-    username: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -38,14 +46,8 @@ export default function RegisterPage() {
     try {
       const { confirmPassword, ...submitData } = formData
       await register({ ...submitData, password2: formData.confirmPassword })
-    } catch (err: any) {
-      const data = err.response?.data
-      if (data && typeof data === 'object') {
-        const messages = Object.values(data).flat().join(' ')
-        setError(messages || 'Registration failed. Please try again.')
-      } else {
-        setError('Registration failed. Please try again.')
-      }
+    } catch (err: unknown) {
+      setError(formatApiError(err, { fallback: 'Registration failed. Please try again.', labels: REGISTER_LABELS }))
     } finally {
       setIsLoading(false)
     }
@@ -76,12 +78,8 @@ export default function RegisterPage() {
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="username">Username</Label>
-            <Input id="username" name="username" value={formData.username} onChange={handleChange} required autoComplete="username" placeholder="johndoe" />
-          </div>
-          <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" name="email" type="email" value={formData.email} onChange={handleChange} required placeholder="john@example.com" />
+            <Input id="email" name="email" type="email" value={formData.email} onChange={handleChange} required autoComplete="email" placeholder="john@example.com" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>

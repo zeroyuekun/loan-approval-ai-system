@@ -71,7 +71,6 @@ export default function CustomersPage() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Username</TableHead>
                     <TableHead>Member Since</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -87,7 +86,6 @@ export default function CustomersPage() {
                         </Link>
                       </TableCell>
                       <TableCell className="text-muted-foreground">{customer.email}</TableCell>
-                      <TableCell className="font-mono text-sm">{customer.username}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {customer.created_at ? formatDate(customer.created_at) : '—'}
                       </TableCell>
