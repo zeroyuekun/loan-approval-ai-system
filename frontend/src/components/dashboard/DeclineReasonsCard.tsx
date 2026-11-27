@@ -30,7 +30,7 @@ export function DeclineReasonsCard({ data }: DeclineReasonsCardProps) {
                   <span className="shrink-0 tabular-nums text-muted-foreground">{r.share}%</span>
                 </div>
                 <div className="mt-1.5 h-2 rounded-full bg-muted" aria-hidden="true">
-                  <div className="h-2 rounded-full bg-red-500/70" style={{ width: `${Math.min(100, r.share)}%` }} />
+                  <div className="h-2 rounded-full bg-red-500/70" style={{ width: `${r.share}%` }} />
                 </div>
               </li>
             ))}

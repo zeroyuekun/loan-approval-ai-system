@@ -9,8 +9,8 @@ import type { DashboardStats } from '@/types'
  * /api/v1/loans/dashboard-stats/, including the rolling-24h decision
  * latency percentiles and today's LLM spend.
  *
- * Cached for 30 seconds server-side (DashboardStatsView), so a 30s
- * staleTime on the client side avoids redundant fetches.
+ * Cached for 60 seconds server-side (DashboardStatsView); a 30s client
+ * staleTime avoids redundant fetches between visits.
  */
 export function useDashboardStats() {
   return useQuery<DashboardStats>({

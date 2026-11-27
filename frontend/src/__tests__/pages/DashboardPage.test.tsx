@@ -143,11 +143,7 @@ describe('DashboardPage', () => {
   it('shows plain empty states before any decisions exist', async () => {
     server.use(
       http.get(`${API_URL}/loans/dashboard-stats/`, () =>
-        HttpResponse.json({
-          ...baseStats,
-          decline_reasons: { total_declines: 0, window_days: 90, reasons: [] },
-          decision_handling: { total: 0, automated: 0, reviewed: 0, overridden: 0 },
-        })
+        HttpResponse.json(baseStats)
       ),
       http.get(`${API_URL}/loans/`, () =>
         HttpResponse.json({ count: 0, next: null, previous: null, results: [] })

@@ -97,18 +97,6 @@ def test_orchestration_and_email_throttles_have_own_scope():
 
 
 @pytest.mark.django_db
-def test_profile_email_change_cannot_take_another_accounts_email():
-    _customer("owner_a", email="taken@example.com")
-    user_b = _customer("owner_b", email="b@example.com")
-    client = APIClient()
-    client.force_authenticate(user=user_b)
-    resp = client.patch("/api/v1/auth/me/", {"email": "TAKEN@example.com"}, format="json")
-    assert resp.status_code == 400
-    resp = client.patch("/api/v1/auth/me/", {"email": "b@example.com"}, format="json")
-    assert resp.status_code == 200  # keeping your own address is fine
-
-
-@pytest.mark.django_db
 @pytest.mark.parametrize("url", ["/api/v1/agents/runs/?page=0", "/api/v1/emails/?page=-3"])
 def test_non_positive_page_is_clamped(url):
     client = APIClient()

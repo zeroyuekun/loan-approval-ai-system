@@ -21,8 +21,15 @@ fields = {
     'is_superuser': True,
     'role': 'admin',
 }
-if User.objects.filter(username=username).exists():
+existing = User.objects.filter(username=username).first()
+if existing:
     print(f'Admin account {username!r} already exists — skipping password reset.')
+    # Sign-in is by email, so an admin created before that change, with no
+    # email, could not sign in. Fill a blank email; never overwrite one.
+    if not existing.email and fields['email']:
+        existing.email = fields['email']
+        existing.save(update_fields=['email'])
+        print(f'Admin account {username!r}: email set from DJANGO_SUPERUSER_EMAIL.')
 else:
     # The bootstrap admin gets the same password rules as every other account.
     # A weak password is refused (the server still starts) rather than crashing.

@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from rest_framework import serializers
 
 from utils.sanitization import sanitize_prompt_input
@@ -88,23 +89,6 @@ class NameValidationMixin:
         return self._validate_name(value, "last_name")
 
 
-def _email_taken(value, exclude_pk=None):
-    """True when another account already uses this email, in any letter case.
-
-    Email is a login identifier (LoginSerializer resolves an "@"-style login to
-    a username via CustomUser.objects.get(email=...)), but CustomUser inherits
-    AbstractUser's non-unique email. Without this check a second account could
-    take a victim's email and break their email login with an unhandled
-    MultipleObjectsReturned (500 / account DoS).
-    """
-    if not value:
-        return False
-    others = CustomUser.objects.filter(email__iexact=value)
-    if exclude_pk is not None:
-        others = others.exclude(pk=exclude_pk)
-    return others.exists()
-
-
 class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=12)
     password2 = serializers.CharField(write_only=True, min_length=12)
@@ -142,13 +126,14 @@ class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
         return data
 
     def validate_email(self, value):
-        # Uniqueness rationale: see _email_taken. Registration also checks the
-        # username column, because a new account's username is its email.
+        # Email is the sign-in identifier, but CustomUser inherits a non-unique
+        # email column, so uniqueness is enforced here, in any letter case. The
+        # username column is checked too: a new account's username is its email.
         value = value.strip().lower()
         # The email doubles as the internal username, whose column holds 150 chars.
         if len(value) > CustomUser._meta.get_field("username").max_length:
             raise serializers.ValidationError("Email address is too long.")
-        if _email_taken(value) or CustomUser.objects.filter(username__iexact=value).exists():
+        if CustomUser.objects.filter(Q(email__iexact=value) | Q(username__iexact=value)).exists():
             raise serializers.ValidationError("An account with this email already exists.")
         return value
 
@@ -194,7 +179,9 @@ class LoginSerializer(serializers.Serializer):
         identifier = login_identifier(data)
         if not identifier:
             raise serializers.ValidationError({"email": "This field is required."})
-        user_obj = resolve_login_user(identifier)
+        # LoginView has already resolved the account for its lockout check and
+        # passes it in, so the lookup runs once per login.
+        user_obj = self.context.get("user_obj") or resolve_login_user(identifier)
         if user_obj is None:
             raise serializers.ValidationError("Invalid credentials.")
         user = authenticate(username=user_obj.username, password=data["password"])
@@ -206,19 +193,17 @@ class LoginSerializer(serializers.Serializer):
         return data
 
 
-class UserSerializer(NameValidationMixin, serializers.ModelSerializer):
+class UserSerializer(serializers.ModelSerializer):
+    """The signed-in user's identity, read-only everywhere.
+
+    Email is the sign-in identifier and the name is identity-verified, so no
+    view may write them through this serializer (see UserProfileView).
+    """
+
     class Meta:
         model = CustomUser
         fields = ("id", "username", "email", "role", "first_name", "last_name", "created_at")
-        read_only_fields = ("id", "username", "role", "created_at")
-
-    def validate_email(self, value):
-        # Same rule as registration, on a profile edit: another account's
-        # address cannot be taken. Keeping your own address skips the query.
-        unchanged = self.instance is not None and value.lower() == (self.instance.email or "").lower()
-        if not unchanged and _email_taken(value, exclude_pk=getattr(self.instance, "pk", None)):
-            raise serializers.ValidationError("An account with this email already exists.")
-        return value
+        read_only_fields = fields
 
 
 def _mask_id_number(value):

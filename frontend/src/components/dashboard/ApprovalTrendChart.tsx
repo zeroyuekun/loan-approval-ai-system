@@ -1,6 +1,7 @@
 'use client'
 
 import { Bar, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { ChartHoverPanel, renderEmptyTooltip, useChartHover } from '@/components/metrics/ChartHoverPanel'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface ApprovalTrendChartProps {
@@ -13,6 +14,7 @@ function shortDate(iso: string): string {
 }
 
 export function ApprovalTrendChart({ volume, approvalTrend }: ApprovalTrendChartProps) {
+  const { active, hoverProps } = useChartHover()
   const rateByDate = new Map(approvalTrend.map((d) => [d.date, d.rate]))
   const data = volume.map((d) => ({
     date: shortDate(d.date),
@@ -35,7 +37,7 @@ export function ApprovalTrendChart({ volume, approvalTrend }: ApprovalTrendChart
         ) : (
           <div role="img" aria-label={`Applications and approval rate over the last 30 days, ${data.length} days with activity`}>
             <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
+              <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }} {...hoverProps}>
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
                 <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
                 <YAxis
@@ -47,16 +49,12 @@ export function ApprovalTrendChart({ volume, approvalTrend }: ApprovalTrendChart
                   tickLine={false}
                   axisLine={false}
                 />
-                <Tooltip
-                  formatter={(value, name) =>
-                    name === 'approvalRate' ? [`${value}%`, 'Approved'] : [value, 'Applications']
-                  }
-                  contentStyle={{ borderRadius: '10px', fontSize: '13px' }}
-                />
-                <Bar yAxisId="count" dataKey="applications" fill="hsl(var(--chart-1) / 0.25)" radius={[4, 4, 0, 0]} />
+                <Tooltip content={renderEmptyTooltip} />
+                <Bar yAxisId="count" dataKey="applications" name="Applications" fill="hsl(var(--chart-1) / 0.25)" radius={[4, 4, 0, 0]} />
                 <Line
                   yAxisId="rate"
                   dataKey="approvalRate"
+                  name="Approved"
                   stroke="hsl(var(--chart-1))"
                   strokeWidth={2}
                   dot={{ r: 3 }}
@@ -64,6 +62,7 @@ export function ApprovalTrendChart({ volume, approvalTrend }: ApprovalTrendChart
                 />
               </ComposedChart>
             </ResponsiveContainer>
+            <ChartHoverPanel active={active} formatValue={(v, name) => (name === 'Approved' ? `${v}%` : String(v))} />
           </div>
         )}
       </CardContent>

@@ -21,12 +21,20 @@ export const HOME_OWNERSHIP_OPTIONS: FieldOption[] = [
   { value: 'rent', label: 'Renting' },
 ]
 
-export const EMPLOYMENT_TYPE_OPTIONS: FieldOption[] = [
-  { value: 'payg_permanent', label: 'PAYG Full-Time/Permanent' },
-  { value: 'payg_casual', label: 'PAYG Casual' },
-  { value: 'self_employed', label: 'Self-Employed (ABN)' },
-  { value: 'contract', label: 'Fixed-Term Contract' },
-]
+// A literal tuple so the application form's z.enum can use the same values.
+export const EMPLOYMENT_TYPES = ['payg_permanent', 'payg_casual', 'self_employed', 'contract'] as const
+
+const EMPLOYMENT_TYPE_LABELS: Record<(typeof EMPLOYMENT_TYPES)[number], string> = {
+  payg_permanent: 'PAYG Full-Time/Permanent',
+  payg_casual: 'PAYG Casual',
+  self_employed: 'Self-Employed (ABN)',
+  contract: 'Fixed-Term Contract',
+}
+
+export const EMPLOYMENT_TYPE_OPTIONS: FieldOption[] = EMPLOYMENT_TYPES.map((value) => ({
+  value,
+  label: EMPLOYMENT_TYPE_LABELS[value],
+}))
 
 export const PURPOSE_OPTIONS: FieldOption[] = [
   { value: 'home', label: 'Home Purchase / Refinance' },

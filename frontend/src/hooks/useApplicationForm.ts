@@ -10,11 +10,10 @@ import { useCustomerProfile } from '@/hooks/useCustomerProfile'
 import { useAuth } from '@/lib/auth'
 import { DRAFT_STORAGE_KEY } from '@/lib/clientState'
 import { formatApiError } from '@/lib/api'
+import { EMPLOYMENT_TYPES } from '@/lib/loanFieldOptions'
 import type { CustomerProfile } from '@/types'
 
 export const STEP_LABELS = ['Personal', 'Employment & Income', 'Expenses & Debts', 'Loan Details', 'Review & Submit']
-
-const EMPLOYMENT_TYPES = ['payg_permanent', 'payg_casual', 'self_employed', 'contract'] as const
 
 const formSchema = z.object({
   // Step 1: Personal

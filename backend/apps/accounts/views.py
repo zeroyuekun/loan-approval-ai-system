@@ -252,8 +252,8 @@ class LoginView(generics.GenericAPIView):
         identifier = login_identifier(request.data)
         password = request.data.get("password", "")
 
-        # Same resolver as LoginSerializer, so switching identifier form can't
-        # bypass the lockout or the failed-attempt audit.
+        # Resolved once here and handed to LoginSerializer, so the lockout,
+        # the failed-attempt audit and the password check see the same account.
         user_obj = resolve_login_user(identifier)
 
         if user_obj is None or user_obj.is_locked:
@@ -263,7 +263,9 @@ class LoginView(generics.GenericAPIView):
                 _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(
+            data=request.data, context={**self.get_serializer_context(), "user_obj": user_obj}
+        )
         if not serializer.is_valid():
             if api_settings.NON_FIELD_ERRORS_KEY not in serializer.errors:
                 # A missing or blank field fails before authenticate() runs.
