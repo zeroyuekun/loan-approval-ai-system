@@ -52,6 +52,32 @@ _MARKETING_CHECKS = (
 )
 
 
+# Age wording and labels that describe the person instead of the application.
+# The shared PROHIBITED_TERMS list misses these ("As a young applicant you lack
+# the maturity..." scored 0). Kept bias-only, so the email guardrails are unchanged.
+_AGE_OR_LABELLING_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\btoo\s+(?:young|old)\b",
+        r"\b(?:young|old|older|elderly)\s+(?:applicant|borrower|customer|person)s?\b",
+        r"\black(?:s|ing)?\s+(?:the\s+)?maturity\b",
+        r"\black\s+of\s+maturity\b",
+        r"\byou(?:\s+are|['’]re)\s+(?:unemployed|jobless|(?:a\s+)?high[- ]risk|not\s+creditworthy|irresponsible|unreliable)\b",
+        r"\byou\s+(?:cannot|can\s+not|can['’]t)\s+afford\b",
+        r"\byour\s+poor\s+credit\b",
+    )
+)
+
+
+def _check_age_or_labelling(email_text):
+    found = [match.group(0) for pattern in _AGE_OR_LABELLING_PATTERNS for match in pattern.finditer(email_text)]
+    return {
+        "check_name": "Age Or Labelling Language",
+        "passed": not found,
+        "details": f"Age wording or a label on the person: {', '.join(found)}" if found else "None found",
+    }
+
+
 class DeterministicBiasPreScreen:
     """Pure-Python pre-screening that runs regex guardrails before LLM analysis.
 
@@ -96,6 +122,8 @@ class DeterministicBiasPreScreen:
                 (self.checker.check_tone, 20),
                 (self.checker.check_professional_financial_language, 15),
                 (self.checker.check_ai_giveaway_language, 5),
+                # Moderate weight: the LLM judges these in context.
+                (_check_age_or_labelling, 40),
             ),
             0,
             findings,

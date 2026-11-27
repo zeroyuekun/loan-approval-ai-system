@@ -193,6 +193,7 @@ class HumanReviewHandler:
                 steps=steps,
                 profile_context=email_context,
                 step_name="bias_check_resume",
+                human_reviewed=True,
             )
             if screening.check_error is not None and screening.held_reason:
                 # BIAS_FAILURE_MODE=block. The run goes back to ESCALATED

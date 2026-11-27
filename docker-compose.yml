@@ -330,7 +330,10 @@ services:
     volumes:
       - ollama_models:/root/.ollama
     environment:
-      OLLAMA_KEEP_ALIVE: "30m"        # keep the model warm between emails
+      # How long the model stays in RAM after a check. A short value gives
+      # the memory back between bursts; the next check then cold-loads the
+      # model first. Raise it (.env) on a machine with RAM to spare.
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-5m}"
       OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_NUM_PARALLEL: "1"
     healthcheck:

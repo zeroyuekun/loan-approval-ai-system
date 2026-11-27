@@ -32,10 +32,10 @@ structural change. The adapter:
     degrades to the deterministic template.
 
 Ollama notes (see ADR 010 + the research that drove this):
-  * Ollama's OpenAI ``/v1`` endpoint *ignores* forced ``tool_choice``, so a
-    small local model may answer in plain text. The adapter already emits a text
-    block alongside any tool block, so ``_parse_tool_response``'s text fallback
-    covers it; if that fails, guardrails + the template fallback are the floor.
+  * Ollama's OpenAI ``/v1`` endpoint *ignores* forced ``tool_choice``, so for
+    Ollama a forced tool is sent as a ``json_schema`` ``response_format``
+    instead: Ollama constrains decoding to the tool's schema, and ``_normalise``
+    turns the reply (the arguments as valid JSON) into a tool_use block.
   * Ollama's ``/v1`` endpoint also ignores a per-request context window, so the
     ~9k-token compliance prompt must be served by a model whose context window
     is baked in (a Modelfile ``PARAMETER num_ctx 16384`` — done in the compose
@@ -53,7 +53,7 @@ from .exceptions import EmailBackendError, RateLimited
 logger = logging.getLogger("email_engine.llm_client")
 
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 
 # Local Ollama defaults. ``loan-email`` is the custom model baked with a 16k
 # context window (Modelfile) by the compose ``ollama-init`` service.
@@ -156,6 +156,11 @@ class OpenAICompatibleLLMClient:
         self.provider = provider
         self.messages = _Messages(self)
 
+    @property
+    def default_model(self):
+        """The model sent when a call names none."""
+        return self._default_model
+
     # -- internal -----------------------------------------------------------
 
     def _create(self, **kwargs):
@@ -187,7 +192,7 @@ class OpenAICompatibleLLMClient:
                 f"{self.provider} API error {resp.status_code}: {resp.text[:300]}", status_code=resp.status_code
             )
 
-        return self._normalise(resp.json())
+        return self._normalise(resp.json(), structured="response_format" in payload)
 
     # Anthropic-shaped kwargs the adapter knows how to translate/forward. Anything
     # else would be silently dropped — which is an audit-integrity hazard (e.g.
@@ -228,42 +233,55 @@ class OpenAICompatibleLLMClient:
         if max_tokens:
             payload["max_tokens"] = max_tokens
 
-        tools = kwargs.get("tools")
+        tools = kwargs.get("tools") or []
+        tool_choice = kwargs.get("tool_choice")
+        forced = tool_choice.get("name") if isinstance(tool_choice, dict) else None
+        forced_tool = next((t for t in tools if t.get("name") == forced), None)
+
+        if self.provider == "ollama" and forced_tool:
+            # Ollama ignores tool_choice; see the module docstring.
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": forced, "schema": forced_tool.get("input_schema", {"type": "object"})},
+            }
+            return payload
+
         if tools:
             payload["tools"] = [_to_openai_tool(t) for t in tools]
-
-        tool_choice = kwargs.get("tool_choice")
-        if isinstance(tool_choice, dict) and tool_choice.get("name"):
-            # Anthropic {"type":"tool","name":X} -> OpenAI forced function call.
-            # (Groq honours this; Ollama's /v1 ignores it and may answer in plain
-            # text — handled by the text block emitted in _normalise.)
-            payload["tool_choice"] = {"type": "function", "function": {"name": tool_choice["name"]}}
+        if forced:
+            # Anthropic {"type":"tool","name":X} -> OpenAI forced function call (Groq honours it).
+            payload["tool_choice"] = {"type": "function", "function": {"name": forced}}
         return payload
 
-    def _normalise(self, data):
-        """Convert an OpenAI chat-completion dict into the Anthropic-ish shape."""
+    def _normalise(self, data, structured=False):
+        """Convert an OpenAI chat-completion dict into the Anthropic-ish shape.
+
+        ``structured``: the request sent the forced tool as a json_schema
+        ``response_format``, so the reply text is the tool's arguments and
+        becomes a tool_use block, the same shape a real tool call gives.
+        """
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message") or {}
-        blocks = []
+        text = message.get("content")
+        raw_calls = [(c.get("function") or {}).get("arguments") for c in message.get("tool_calls") or []]
+        if structured and text:
+            raw_calls.append(text)
 
-        # Forced function call -> a synthetic tool_use block carrying {subject,body}.
-        for call in message.get("tool_calls") or []:
-            func = call.get("function") or {}
-            raw_args = func.get("arguments")
+        blocks = []
+        for raw_args in raw_calls:
             if not raw_args:
                 continue
             try:
                 parsed = json.loads(raw_args)
             except (TypeError, ValueError):
-                logger.warning("tool_call arguments were not valid JSON — relying on text fallback")
+                logger.warning("tool arguments were not valid JSON — relying on text fallback")
                 continue
-            blocks.append(_Block(type="tool_use", input=parsed))
+            if isinstance(parsed, dict):
+                blocks.append(_Block(type="tool_use", input=parsed))
 
-        # Always also expose any plain text so the caller's text-parse fallback
+        # Also expose any plain text so the caller's text-parse fallback
         # (EmailGenerator._parse_tool_response) can recover if the tool call was
-        # malformed or empty — smaller / local models are less reliable at tool
-        # use, and Ollama's /v1 endpoint ignores forced tool_choice entirely.
-        text = message.get("content")
+        # malformed or empty: smaller local models are less reliable at tool use.
         if text:
             blocks.append(_Block(type="text", text=text))
 

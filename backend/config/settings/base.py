@@ -453,7 +453,7 @@ AI_TEMPERATURE_MARKETING = 0.2  # Marketing/retention content (slight variance f
 # (decision emails, offer wording, the marketing follow-up).
 #   "template" (default): no LLM; every email is the deterministic template.
 #   "anthropic": paid Claude API (claude-sonnet-4-6), opt-in with a key.
-#   "groq": free, OpenAI-compatible Groq (llama-3.1-8b-instant) — chosen because
+#   "groq": free, OpenAI-compatible Groq (openai/gpt-oss-20b) — chosen because
 #           its free tier does NOT train on prompts. See ADR 010.
 #   "ollama": free, LOCAL/on-prem Ollama — no per-minute token cap (so it fits
 #           the ~9k-token compliance prompts that overran Groq's free tier) and
@@ -480,11 +480,13 @@ BIAS_REVIEWER_MODEL = os.environ.get("BIAS_REVIEWER_MODEL", "") or "claude-opus-
 # applicant's address.
 EMAIL_REDIRECT_ALL_TO = os.environ.get("EMAIL_REDIRECT_ALL_TO", "").strip()
 
-# Backend for the bias verdicts: "ollama" (default) runs every bias agent on the
-# local Ollama server at $0 with nothing leaving the host; "anthropic" is the
-# opt-in Claude path. A 3B model passed blatantly discriminatory text as a false
-# positive in testing, so never go below 7-8B for the verdict model.
-BIAS_LLM_BACKEND = (os.environ.get("BIAS_LLM_BACKEND", "") or "ollama").lower()
+# Backend for the bias verdicts: "none" (default) runs the rule-based screen
+# only, with no LLM. Opt-in: "groq" (Groq's free hosted API; the email leaves
+# the machine), "ollama" (local, about 6 GB of RAM), "anthropic" (Claude). A 3B
+# model passed blatantly discriminatory text as a false positive in testing, so
+# never go below 7-8B for the verdict model.
+BIAS_LLM_BACKEND = (os.environ.get("BIAS_LLM_BACKEND", "") or "none").lower()
+BIAS_GROQ_MODEL = os.environ.get("BIAS_GROQ_MODEL", "") or "openai/gpt-oss-20b"
 BIAS_OLLAMA_MODEL = os.environ.get("BIAS_OLLAMA_MODEL", "") or "llama3.1:8b"
 # Seconds one local bias verdict may take; must stay below the email task's
 # soft time limit (see apps/email_engine/tasks.py).
@@ -522,6 +524,10 @@ BIAS_FAILURE_MODE = os.environ.get("BIAS_FAILURE_MODE", "block").lower()
 # check (bias detector clean + senior reviewer approved with confidence)
 # before handing over to the deterministic template path.
 BIAS_AGENT2_ENABLED = os.environ.get("BIAS_AGENT2_ENABLED", "true").lower() == "true"
+# Every denial the regex screen passes is also read by the bias LLM for protected
+# attributes and labels on the person (BiasDetector._full_screen). Costs one LLM
+# call per denial ($0 on Ollama, ~30-130 s on CPU).
+BIAS_SCREEN_EVERY_DENIAL = os.environ.get("BIAS_SCREEN_EVERY_DENIAL", "true").lower() == "true"
 BIAS_AGENT2_MIN_REVIEWER_CONFIDENCE = 0.70
 # Agent 2 is skipped (the template path takes over) when less than this many
 # seconds remain before the pipeline task's soft time limit: a rewrite plus a

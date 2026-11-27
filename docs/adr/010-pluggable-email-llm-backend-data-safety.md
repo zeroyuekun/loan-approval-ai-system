@@ -142,3 +142,20 @@ For a real deployment with real borrowers, Groq's free tier is not the endpoint
 to use. Switch the same toggle to a no-train paid tier or a self-hosted model.
 The free Groq backend is for the synthetic-data demo, where the data-safety
 argument above holds.
+
+### Update (2026-11-24): bias LLM off by default, Groq added
+
+The bias check now defaults to `BIAS_LLM_BACKEND=none`: the rule-based screen
+decides alone and unclear emails go to a human. `groq` (`openai/gpt-oss-20b`)
+is a new opt-in backend. The reason for not running the local model by default
+is memory: the local Llama 3.1 8B takes about 6 GB of RAM, which a
+16 GB development machine cannot spare alongside the stack. A verdict prompt
+is small (about 1k tokens), so it fits Groq's free-tier limits where the email
+prompts did not.
+
+This sends the checked email (applicant name, loan amount, decision) to a
+third party. Private customer data should not leave the lender, so the
+production note above applies here too: with real borrowers, use
+`BIAS_LLM_BACKEND=ollama` or a contracted no-train endpoint. Groq's forced
+`tool_choice` works, so no structured-output workaround is needed there; Ollama
+gets the tool schema as a json_schema `response_format`.

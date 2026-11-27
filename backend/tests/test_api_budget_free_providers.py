@@ -12,15 +12,17 @@ Two phantom-spend bugs this pins shut:
 The fix keys $0 pricing off the client's ``provider`` (groq/ollama), which
 ``guarded_api_call`` already reads for the APICallLog destination. Free calls
 still consume call slots against the daily call limit — only the dollar
-accounting is zeroed.
+accounting is zeroed. A free call also reserves 0 cents up front, so a call
+killed mid-flight cannot leave a phantom hold on the cost counter.
 """
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import redis
 
-from apps.agents.services.api_budget import ApiBudgetGuard, estimate_cost_usd, guarded_api_call
+from apps.agents.services.api_budget import ApiBudgetGuard, _estimate_reserve_cents, estimate_cost_usd, guarded_api_call
 
 _UNLISTED_TAG = "totally-unknown-tag"  # deliberately NOT in MODEL_PRICING
 
@@ -30,9 +32,11 @@ def _cost_key():
 
 
 def _guard():
-    """ApiBudgetGuard with a pre-injected mock Redis client + pipeline."""
+    """ApiBudgetGuard with a pre-injected mock Redis client, pipeline and reserve script."""
     g = ApiBudgetGuard()
     g._redis = MagicMock()
+    g._redis.exists.return_value = False
+    g._redis.register_script.return_value = MagicMock(return_value=[1, 0, 1])
     pipe = MagicMock()
     g._redis.pipeline.return_value = pipe
     return g, pipe
@@ -87,10 +91,52 @@ def test_record_call_free_provider_unreserved_adds_zero_cost():
     """Unreserved fallback path on a free provider: 0 cents recorded (the
     delta-zero short-circuit means no cost incrby at all)."""
     guard, pipe = _guard()
-    guard.record_call(input_tokens=8000, output_tokens=2048, model=_UNLISTED_TAG, reserved_cents=0, provider="groq")
+    guard.record_call(input_tokens=8000, output_tokens=2048, model=_UNLISTED_TAG, reserved_cents=None, provider="groq")
     assert _cost_incrby_deltas(pipe) == []
     # The call slot is still consumed (call-count accounting unchanged).
     pipe.incr.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# reserve: a free call holds no money but still takes a call slot
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", ["ollama", "groq"])
+def test_free_provider_reserves_zero_cents(provider):
+    assert _estimate_reserve_cents(_UNLISTED_TAG, 1024, provider=provider) == 0
+
+
+def test_paid_provider_keeps_the_reserve_floor():
+    assert _estimate_reserve_cents("claude-sonnet-4-6", 1024, provider="anthropic") >= 5
+
+
+def test_zero_cent_reservation_holds_no_money_but_takes_a_call_slot():
+    guard, _ = _guard()
+    assert guard.reserve_budget(estimated_cost_cents=0, provider="ollama") == 0
+    cents, calls = guard._redis.register_script.return_value.call_args.kwargs["args"][:2]
+    assert (cents, calls) == (0, 1)
+
+
+def test_reconcile_after_a_zero_cent_reservation_does_not_count_the_call_twice():
+    guard, pipe = _guard()
+    guard.record_call(input_tokens=700, output_tokens=60, model=_UNLISTED_TAG, reserved_cents=0, provider="ollama")
+    pipe.incr.assert_not_called()
+    assert _cost_incrby_deltas(pipe) == []
+
+
+def test_failure_after_a_zero_cent_reservation_gives_the_call_slot_back():
+    guard, pipe = _guard()
+    guard._redis.exists.return_value = True
+    guard.record_call(model=_UNLISTED_TAG, reserved_cents=0, released=True, provider="ollama")
+    pipe.decr.assert_called_once_with(guard._daily_key("calls"))
+    assert _cost_incrby_deltas(pipe) == []
+
+
+def test_redis_outage_reserves_nothing_and_says_so():
+    guard, _ = _guard()
+    guard._redis.exists.side_effect = redis.ConnectionError("down")
+    assert guard.reserve_budget(estimated_cost_cents=5) is None
 
 
 def test_record_call_paid_provider_keeps_one_cent_floor():
@@ -131,6 +177,7 @@ def test_guarded_api_call_passes_provider_to_record_call(mock_guard_cls):
 
     assert guard.record_call.call_count == 1
     assert guard.record_call.call_args.kwargs["provider"] == "ollama"
+    assert guard.reserve_budget.call_args.kwargs["estimated_cost_cents"] == 0
 
 
 @pytest.mark.django_db
