@@ -67,16 +67,17 @@ class ApplicantUser(HttpUser):
     def on_start(self):
         """Register a unique user."""
         self.username = f'loadtest_{"".join(random.choices(string.ascii_lowercase, k=8))}'
+        email = f'{self.username}@loadtest.com'
         self.client.post('/api/v1/auth/register/', json={
-            'username': self.username,
-            'email': f'{self.username}@loadtest.com',
+            'email': email,
             'password': 'LoadTest123!',
             'password2': 'LoadTest123!',
             'first_name': 'Load',
             'last_name': 'Tester',
         })
+        # Email is the only sign-in identifier.
         self.client.post('/api/v1/auth/login/', json={
-            'username': self.username,
+            'email': email,
             'password': 'LoadTest123!',
         })
 

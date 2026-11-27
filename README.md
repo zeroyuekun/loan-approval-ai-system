@@ -21,7 +21,7 @@ It runs on your own machine at no cost, with no LLM in the default setup
 
 A full-stack system: Django REST API, Celery workers, a Next.js dashboard, an
 XGBoost model and a rule-based bias screen, all run with one `docker compose up`. About
-2,500 backend tests and 480+ frontend tests run in CI. Running cost is $0.
+2,600 backend tests and 480+ frontend tests run in CI. Running cost is $0.
 
 Good places to start reading:
 
@@ -50,6 +50,9 @@ Good places to start reading:
    by the AI.
 5. **Explains itself.** Every applicant is told whether a person was involved
    in their decision and can ask for a human review.
+6. **Shows the lending picture.** The staff dashboard summarises approvals
+   over time, the main decline reasons, and how many decisions were made
+   automatically, checked by staff, or changed by staff.
 
 ```mermaid
 flowchart LR
@@ -72,9 +75,10 @@ An LLM check can be switched on (`BIAS_LLM_BACKEND`). It is a reviewer only: it
 never writes to the customer and never makes the lending decision. It reads
 every decline email in full, plus any email the rules could not judge, and
 returns a bias score with the exact phrase behind it. That catches wording the
-rules have no pattern for, such as "as a young applicant you lack the
-maturity". In a 27-run test with Llama 3.1 8B it flagged every biased email
-and cleared every compliant one ([results](docs/experiments/bias_verdict_model.md)).
+rules have no pattern for, such as "people at your stage of life rarely keep up
+repayments". On the test set it flagged every biased email and cleared every
+compliant one: 27 of 27 runs with Llama 3.1 8B locally, and 9 of 9 with
+`openai/gpt-oss-20b` on Groq ([results](docs/experiments/bias_verdict_model.md)).
 
 It is off for two reasons:
 
@@ -109,8 +113,9 @@ docker compose up -d
 make seed                   # generate synthetic data and train the model
 ```
 
-- Dashboard: <http://localhost:3000>. Log in as `admin` with the
-  `DJANGO_SUPERUSER_PASSWORD` from `.env`.
+- Dashboard: <http://localhost:3000>. Sign in with the
+  `DJANGO_SUPERUSER_EMAIL` and `DJANGO_SUPERUSER_PASSWORD` from `.env`
+  (sign-in is by email).
 - API docs: <http://localhost:8000/api/docs/> (admin only, so log in first).
 - Problems: see the [runbooks](docs/runbooks/).
 
@@ -118,9 +123,11 @@ make seed                   # generate synthetic data and train the model
 (`EMAIL_LLM_BACKEND=template`) and the bias check is rule-based
 (`BIAS_LLM_BACKEND=none`). To turn the LLM check on, set `BIAS_LLM_BACKEND` to
 `ollama` (local; also set `COMPOSE_PROFILES=ollama`, first start downloads
-about 5 GB), `groq` (free hosted API, needs `GROQ_API_KEY`) or `anthropic`
-(Claude, needs `ANTHROPIC_API_KEY`). Why Llama 3.1 8B and not a smaller model:
-[bias verdict model comparison](docs/experiments/bias_verdict_model.md).
+about 5 GB), `groq` (free hosted API with `openai/gpt-oss-20b`, needs a free
+`GROQ_API_KEY` from console.groq.com) or `anthropic` (Claude, needs
+`ANTHROPIC_API_KEY`). Groq's free tier allows only a few checks a minute;
+beyond that, emails wait for a human until it recovers. Model choices and
+results: [bias verdict model comparison](docs/experiments/bias_verdict_model.md).
 
 ## How I built this
 
@@ -132,6 +139,13 @@ and used AI (Claude Code) as a pair programmer for much of the implementation.
 I reviewed every change, set the testing strategy, and debugged issues across
 the project's pull requests.
 
+Choices that could be measured were measured first. The bias reviewer model was
+picked by running the same labelled emails through each candidate
+(`tools/bias_model_eval.py`), and when Groq retired the first hosted model, the
+same harness picked its replacement. The
+[engineering journal](docs/engineering-journal.md) records how the project was
+built, what went wrong, and why decisions changed.
+
 ## Tech
 
 | Layer | Tools |
@@ -139,7 +153,7 @@ the project's pull requests.
 | Backend | Django 5, Django REST Framework, PostgreSQL 17, Celery + Redis |
 | Frontend | Next.js 16, React 19, TanStack Query, Tailwind, shadcn/ui |
 | Machine learning | XGBoost, scikit-learn, SHAP, Optuna |
-| AI | Optional: Llama 3.1 8B (local Ollama or Groq) or Claude; off by default |
+| AI | Optional bias reviewer: Llama 3.1 8B (local Ollama), gpt-oss-20b (Groq) or Claude; off by default |
 | Infrastructure | Docker Compose; Kubernetes manifests and Terraform for AWS (not deployed) |
 
 ## Design decisions
@@ -207,7 +221,7 @@ data. Details: [ADR 008](docs/adr/008-security-architecture.md).
 <details>
 <summary><strong>Testing</strong></summary>
 
-About 2,500 backend tests (pytest) and 480+ frontend tests (vitest).
+About 2,600 backend tests (pytest) and 480+ frontend tests (vitest).
 
 CI runs Ruff, Bandit, gitleaks, npm audit, Trivy image scans and an end-to-end
 smoke test (`tools/smoke_e2e.sh`: register, apply, decide, email).

@@ -3,8 +3,8 @@
 > A running record of how this project was built, why the major decisions went the way they did, what went wrong, and how the rough edges got ground down. It's written so a reader (hiring manager, teammate, future-me) can see why things were shipped the way they were, as well as what was shipped.
 
 **Project:** Australian Loan Approval AI System
-**Timeline:** project start → v1.10.4 SLO instrumentation (2026-04-19)
-**Current version:** see `CHANGELOG.md` top entry (v1.10.4)
+**Timeline:** project start → the November 2026 bias-check and sign-in work
+**Current version:** see `CHANGELOG.md` (latest tag v1.11.1, newer work under "Unreleased")
 **Status:** portfolio / demonstrator, not in production use
 
 ---
@@ -202,6 +202,30 @@ So the backend defaults to Claude, and the free option is Groq specifically. It 
 
 The implementation kept the blast radius small. A thin adapter (`llm_client.py`) duck-types the Anthropic client with the same `.messages.create` surface, so the single budget-guarded call site, the 18 guardrails, the retry loop and the deterministic template fallback are all untouched. It's built on `httpx`, which was already a dependency, so the swap added zero new packages. One thing I deliberately did not do was route the safety-critical bias detection through the free model. The free model writes prose. The compliance gate stays on the deterministic rules (ADR 003), so the safety floor stays auditable and doesn't depend on any model. Putting a weaker model in charge of the bias check to save nothing would have been a bad trade.
 
+> **Update (November 2026):** two things in this entry changed. Emails no longer default to Claude: they come from templates only (`EMAIL_LLM_BACKEND=template`). And a model now does help with the bias check, but only as a second reader on top of the rules, never in place of them. See the next entry.
+
 Honest limits: `llama-3.1-8b-instant` is weaker than Claude at forced tool calls and at reproducing exact figures. The guardrail, retry and template-fallback chain absorbs that, but more emails will fall back or retry than they would on Claude. Groq's `seed` is best-effort, so reproducibility is "near-identical", not bitwise. And this free tier is not the endpoint to use for a real production deployment. There you'd point the same toggle at a no-train paid tier or a self-hosted model. That swap is a config change, not a rewrite, which was the whole reason for making it pluggable. The full reasoning is in ADR 010.
 
 *Reviewed: 2026-06-10.*
+
+---
+
+## The bias check gets a second reader, and the AI gets switched off (2026-10 → 2026-11)
+
+The rule-based bias screen had a blind spot I only found by writing test emails meant to get past it. A regex can only catch wording it has a pattern for. "As a young applicant you lack the maturity" scored 0 and would have been sent. The LLM also only ever saw emails the regex had already flagged, so a junior "false positive" verdict on a flagged word like "pregnant" could clear the email on its own.
+
+The fix was a second check: every decline email is now read in full by a model, which looks for protected attributes used as reasons and for wording that labels the person rather than the application. A "false positive" verdict from the first check no longer clears an email by itself. If the model can't answer, the email is held for a human instead of being sent unchecked.
+
+I first ran that model locally (Llama 3.1 8B on Ollama), so no applicant data left the machine. It worked: 27 of 27 runs correct on a labelled set of biased and compliant emails. But it took about 6 GB of RAM, and Docker kept crashing on a 16 GB laptop. So the LLM check is now off by default. The rules decide alone, and anything unclear goes to a human. Groq's free API is an opt-in alternative, and the README says plainly why that's a trade-off: the email being checked would leave the machine, which a real lender would not accept for real customer data.
+
+Turning Groq on surfaced three problems the mocked tests could not:
+
+- **The model no longer existed.** Groq had retired `llama-3.1-8b-instant`, and every call returned 404. The pipeline failed safe (emails held), which also hid the problem: the eval script counted a held email as a correct "flag", so a dead model still scored 6 of 9. The eval now counts any run with a failed call as an error, never as correct. On the models still available, `openai/gpt-oss-20b` scored 9 of 9 with no errors and became the default.
+- **The schema didn't match the prompt.** The prompt named pregnancy, nationality and family responsibilities as protected attributes, but the tool's category list didn't include them. Groq rejects tool calls whose values fall outside the schema, so a correct verdict could have come back as an error. Both now use one shared list, and a test fails if they drift apart.
+- **The free tier has a token-per-minute ceiling.** Back-to-back checks got 429s, and three in a row opened the circuit breaker for ten minutes. That fails the safe way, with emails held for a human, but it means the free tier only suits a demo.
+
+The test I trust most from this round runs the real Groq client end to end with only the network faked. It walks through the case that needs the second check, where the first check wrongly clears a pregnancy denial and the second check holds it. With the second check switched off, all six tests in that file fail.
+
+Two smaller changes from the same period. Two-factor authentication was removed, so staff sign in with a password. Sign-in is now by email only, and a session alone can no longer change the account's email or name. That would otherwise be a quick account takeover from a stolen session.
+
+*Reviewed: 2026-11-28.*

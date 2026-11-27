@@ -1,6 +1,5 @@
 {
   "user": {
-    "username": "smoke{{RANDOM}}",
     "email": "smoke-{{RANDOM}}@example.test",
     "password": "SmokePass!2026",
     "first_name": "Smoke",
