@@ -1,13 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 test.describe('Human Review Queue', () => {
   test.beforeEach(async ({ page }) => {
-    // Login as admin/staff
-    await page.goto('/login');
-    await page.getByLabel(/username/i).fill('admin');
-    await page.getByLabel(/password/i).fill('admin1234');
-    await page.getByRole('button', { name: /sign in|log in|submit/i }).click();
-    await page.waitForURL('**/dashboard', { timeout: 10000 });
+    await loginAsAdmin(page);
   });
 
   test('human review page loads', async ({ page }) => {
@@ -18,19 +14,13 @@ test.describe('Human Review Queue', () => {
   test('shows empty state or review items', async ({ page }) => {
     await page.goto('/dashboard/human-review');
 
-    // Wait for content to load — either shows items or empty state
-    const hasContent = await page
-      .getByText(/no.*review|pending|bias|escalat/i)
-      .first()
-      .isVisible({ timeout: 5000 })
-      .catch(() => false);
-
-    const hasTable = await page
-      .locator('table, [role="table"]')
-      .isVisible({ timeout: 2000 })
-      .catch(() => false);
-
-    expect(hasContent || hasTable).toBeTruthy();
+    // Wait for content: the review table, the empty state, or the load error
+    await expect(
+      page
+        .locator('table')
+        .or(page.getByText(/no applications require human review|failed to load escalated applications/i))
+        .first(),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test('review page is accessible from sidebar', async ({ page }) => {

@@ -2,10 +2,15 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
+  // Signs in once per role so specs stay under the backend login throttle.
+  globalSetup: './e2e/global-setup.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // One worker everywhere: the specs share one session per role, and the
+  // backend throttles each user to 60 requests a minute. Parallel workers
+  // exceed that and pages fail to load with HTTP 429.
+  workers: 1,
   reporter: 'html',
   timeout: 30000,
   use: {

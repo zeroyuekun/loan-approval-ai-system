@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { loginAsAdmin, loginAsCustomer } from './helpers/auth';
 
 test.describe('Accessibility', () => {
   test('login page has no critical accessibility violations', async ({ page }) => {
@@ -17,12 +18,7 @@ test.describe('Accessibility', () => {
   });
 
   test('dashboard has no critical accessibility violations', async ({ page }) => {
-    // Login first
-    await page.goto('/login');
-    await page.getByLabel(/username/i).fill('admin');
-    await page.getByLabel(/password/i).fill('admin1234');
-    await page.getByRole('button', { name: /sign in|log in|submit/i }).click();
-    await page.waitForURL('**/dashboard', { timeout: 10000 });
+    await loginAsAdmin(page);
     await page.waitForLoadState('networkidle');
 
     const results = await new AxeBuilder({ page })
@@ -36,12 +32,7 @@ test.describe('Accessibility', () => {
   });
 
   test('application form has no critical accessibility violations', async ({ page }) => {
-    // Login as customer
-    await page.goto('/login');
-    await page.getByLabel(/username/i).fill('nevillezeng');
-    await page.getByLabel(/password/i).fill('admin1234');
-    await page.getByRole('button', { name: /sign in|log in|submit/i }).click();
-    await page.waitForURL('**/apply', { timeout: 10000 });
+    await loginAsCustomer(page);
 
     await page.goto('/apply/new');
     await page.waitForLoadState('networkidle');

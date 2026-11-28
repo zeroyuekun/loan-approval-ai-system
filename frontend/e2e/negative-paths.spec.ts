@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAsCustomer } from './helpers/auth';
 
 test.describe('Negative Paths', () => {
   test('unauthenticated access to dashboard redirects to login', async ({ page }) => {
@@ -29,14 +30,7 @@ test.describe('Negative Paths', () => {
   });
 
   test('customer application form validates required fields', async ({ page }) => {
-    // Login as a customer first
-    await page.goto('/login');
-    await page.getByLabel(/username/i).fill('nevillezeng');
-    await page.getByLabel(/password/i).fill('admin1234');
-    await page.getByRole('button', { name: /sign in|log in|submit/i }).click();
-
-    // Wait for customer portal
-    await page.waitForURL('**/apply', { timeout: 10000 });
+    await loginAsCustomer(page);
 
     // Navigate to new application
     await page.goto('/apply/new');

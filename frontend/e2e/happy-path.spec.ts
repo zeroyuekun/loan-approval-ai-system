@@ -1,20 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * Happy-path E2E test: Login → Create Application → Run Pipeline → Verify Completion
  *
  * Prerequisites: Docker Compose must be running (backend, frontend, db, redis, celery workers).
- * Uses the seeded admin account (admin / admin1234).
+ * Signs in with E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD (see e2e/helpers/auth.ts).
  */
-
-async function loginAsAdmin(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  // The login form email field has id="username" but type="email" — fill via id
-  await page.locator('#username').fill(process.env.E2E_ADMIN_EMAIL || 'admin@example.com');
-  await page.locator('#password').fill(process.env.E2E_ADMIN_PASSWORD || 'admin12345');
-  await page.getByRole('button', { name: /sign in|log in|submit/i }).click();
-  await page.waitForURL('**/dashboard', { timeout: 10000 });
-}
 
 test.describe('Happy Path: Loan Application Lifecycle', () => {
   test('create application, run pipeline, verify completion', async ({ page }) => {
@@ -87,15 +79,14 @@ test.describe('Happy Path: Loan Application Lifecycle', () => {
     const hasDecision = await page.getByText(/approved|denied/i).first().isVisible().catch(() => false);
     expect(hasDecision).toBeTruthy();
 
-    // --- Step 8: Verify email was generated ---
-    // The email section should show a generated email (subject or body content)
-    const hasEmail = await page.getByText(/subject:|dear|application/i).first().isVisible().catch(() => false);
-    // Email may not be visible if API key is not set — that's OK for CI
-    if (hasEmail) {
-      // Verify bias check ran (bias score indicator should exist)
-      const hasBias = await page.getByText(/bias|compliance/i).first().isVisible().catch(() => false);
-      expect(hasBias).toBeTruthy();
-    }
+    // --- Step 8: Verify email and bias check ---
+    // The decision can show before the email and bias reports load. The
+    // Decision Email tab appears once the pipeline output arrives and holds
+    // the email preview and the bias analysis.
+    const emailTab = page.getByRole('button', { name: 'Decision Email', exact: true });
+    await expect(emailTab).toBeVisible({ timeout: 60_000 });
+    await emailTab.click();
+    await expect(page.getByText('Bias Analysis', { exact: true })).toBeVisible({ timeout: 60_000 });
   });
 
   test('application appears in the applications list', async ({ page }) => {
