@@ -110,6 +110,7 @@ export function StatsCards({
               {stat.kind === 'spend' && (
                 <div
                   role="progressbar"
+                  aria-label="LLM spend as a share of the daily cap"
                   aria-valuenow={Math.round(stat.progressPct)}
                   aria-valuemin={0}
                   aria-valuemax={100}

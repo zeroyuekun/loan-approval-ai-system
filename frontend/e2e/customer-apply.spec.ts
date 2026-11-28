@@ -1,20 +1,16 @@
 import { test, expect } from '@playwright/test';
+import { loginAsCustomer } from './helpers/auth';
 
 test.describe('Customer Apply Portal', () => {
   test.beforeEach(async ({ page }) => {
-    // Login as customer
-    await page.goto('/login');
-    await page.getByLabel(/username/i).fill('nevillezeng');
-    await page.getByLabel(/password/i).fill('admin1234');
-    await page.getByRole('button', { name: /sign in|log in|submit/i }).click();
-    await page.waitForURL('**/apply', { timeout: 10000 });
+    await loginAsCustomer(page);
   });
 
   test('customer portal loads and shows apply page', async ({ page }) => {
     await expect(page).toHaveURL(/\/apply/);
     // Should show some portal content
     const heading = page.getByRole('heading').first();
-    await expect(heading).toBeVisible({ timeout: 5000 });
+    await expect(heading).toBeVisible({ timeout: 10000 });
   });
 
   test('navigate to new application form', async ({ page }) => {

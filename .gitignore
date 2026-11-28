@@ -89,6 +89,8 @@ CLAUDE.md
 # Playwright test artifacts
 frontend/playwright-report/
 frontend/test-results/
+# Signed-in sessions written by frontend/e2e/global-setup.ts (contain auth cookies)
+frontend/e2e/.auth/
 
 # Windows artifacts
 nul
