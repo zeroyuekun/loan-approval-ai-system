@@ -46,10 +46,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchProfile().finally(() => setIsLoading(false))
   }, [fetchProfile])
 
-  const login = useCallback(async (username: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     // Ensure we have a CSRF token before the login POST
     await authApi.getCsrfToken()
-    const { data } = await authApi.login({ username, password })
+    const { data } = await authApi.login({ email, password })
     if (!data?.user?.role || !data.user.username) {
       throw new Error('Unexpected login response from the server.')
     }
@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(async (formData: RegisterPayload) => {
     await authApi.getCsrfToken()
     await authApi.register(formData)
-    await login(formData.username, formData.password)
+    await login(formData.email, formData.password)
   }, [login])
 
   const logout = useCallback(async () => {

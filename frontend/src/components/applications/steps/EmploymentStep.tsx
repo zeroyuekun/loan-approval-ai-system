@@ -31,7 +31,7 @@ export function EmploymentStep({ register, errors }: EmploymentStepProps) {
           </div>
           <div>
             <Label htmlFor="employment_length">Time in Current Role (years)</Label>
-            <Input id="employment_length" type="number" min={0} aria-describedby="employment_length_help" {...register('employment_length')} />
+            <Input id="employment_length" type="number" min={0} step="any" aria-describedby="employment_length_help" {...register('employment_length')} />
             {errors.employment_length && <p className="text-sm text-destructive mt-1">{errors.employment_length.message}</p>}
             <p id="employment_length_help" className="text-xs text-muted-foreground mt-1">Self-employed applicants typically need 2+ years of ABN history.</p>
           </div>

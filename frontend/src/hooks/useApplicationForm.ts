@@ -9,6 +9,9 @@ import { useCreateApplication } from '@/hooks/useApplications'
 import { useCustomerProfile } from '@/hooks/useCustomerProfile'
 import { useAuth } from '@/lib/auth'
 import { DRAFT_STORAGE_KEY } from '@/lib/clientState'
+import { formatApiError } from '@/lib/api'
+import { EMPLOYMENT_TYPES } from '@/lib/loanFieldOptions'
+import type { CustomerProfile } from '@/types'
 
 export const STEP_LABELS = ['Personal', 'Employment & Income', 'Expenses & Debts', 'Loan Details', 'Review & Submit']
 
@@ -20,7 +23,8 @@ const formSchema = z.object({
 
   // Step 2: Employment & Income
   annual_income: z.coerce.number().min(1, 'Gross annual income is required'),
-  employment_type: z.enum(['payg_permanent', 'payg_casual', 'self_employed', 'contract']),
+  employment_type: z.enum(EMPLOYMENT_TYPES),
+  // Decimal years are fine: the API stores whole completed years.
   employment_length: z.coerce.number().min(0, 'Employment length is required'),
   credit_score: z.coerce.number().min(0).max(1200, 'Equifax score must be between 0 and 1200'),
 
@@ -75,6 +79,48 @@ const STEP_FIELDS: Record<number, (keyof FormData)[]> = {
   2: ['annual_income', 'credit_score', 'employment_length', 'employment_type'],
   3: ['debt_to_income', 'existing_credit_card_limit'],
   4: ['loan_amount', 'loan_term_months', 'purpose'],
+}
+
+const FIELD_NAMES: Record<string, string> = {
+  annual_income: 'Gross annual income',
+  credit_score: 'Credit score',
+  employment_length: 'Time in current role',
+  employment_type: 'Employment type',
+  monthly_expenses: 'Monthly living expenses',
+  existing_credit_card_limit: 'Credit card limits',
+  debt_to_income: 'Debt-to-income ratio',
+  loan_amount: 'Loan amount',
+  loan_term_months: 'Loan term',
+  purpose: 'Loan purpose',
+  property_value: 'Property value',
+  deposit_amount: 'Deposit',
+  number_of_dependants: 'Number of dependants',
+  notes: 'Notes',
+}
+
+export function describeSubmitError(error: unknown): string {
+  return formatApiError(error, { fallback: 'Failed to submit application. Please try again.', labels: FIELD_NAMES })
+}
+
+const HOUSING_TO_OWNERSHIP: Record<string, FormData['home_ownership']> = {
+  own_outright: 'own',
+  mortgage: 'mortgage',
+  renting: 'rent',
+  boarding: 'rent',
+  living_with_parents: 'rent',
+}
+/** Profile answers that map onto application fields, so the applicant does not type them twice. */
+function profileDefaults(profile: CustomerProfile): Partial<FormData> {
+  const out: Partial<FormData> = {}
+  if (profile.gross_annual_income) out.annual_income = Number(profile.gross_annual_income)
+  if (profile.years_in_current_role != null) out.employment_length = Number(profile.years_in_current_role)
+  if ((EMPLOYMENT_TYPES as readonly string[]).includes(profile.employment_status)) {
+    out.employment_type = profile.employment_status as FormData['employment_type']
+  }
+  if (HOUSING_TO_OWNERSHIP[profile.housing_situation]) out.home_ownership = HOUSING_TO_OWNERSHIP[profile.housing_situation]
+  if (profile.number_of_dependants != null) out.number_of_dependants = profile.number_of_dependants
+  if (profile.other_credit_card_limits) out.existing_credit_card_limit = Number(profile.other_credit_card_limits)
+  return out
 }
 
 export function useApplicationForm(onSuccessPath?: string) {
@@ -144,6 +190,18 @@ export function useApplicationForm(onSuccessPath?: string) {
 
   const { data: profile, isLoading: profileLoading } = useCustomerProfile({ enabled: isCustomer, staleTime: 0 })
 
+  // Pre-fill from the profile once, without overwriting a saved draft or anything typed.
+  const prefilledRef = useRef(false)
+  useEffect(() => {
+    if (!profile || prefilledRef.current) return
+    prefilledRef.current = true
+    for (const [key, value] of Object.entries(profileDefaults(profile)) as [keyof FormData, never][]) {
+      // getFieldState reads without subscribing the form to dirty-state re-renders.
+      if ((savedDraft && key in savedDraft) || form.getFieldState(key).isDirty) continue
+      form.setValue(key, value)
+    }
+  }, [profile, savedDraft, form])
+
   const onSubmit = async (data: FormData) => {
     if (submittingRef.current) return
     submittingRef.current = true
@@ -198,6 +256,6 @@ export function useApplicationForm(onSuccessPath?: string) {
     goNext,
     goPrev,
     submitting: createApplication.isPending,
-    submitError: createApplication.isError,
+    submitError: createApplication.isError ? describeSubmitError(createApplication.error) : null,
   }
 }

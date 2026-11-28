@@ -608,6 +608,17 @@ export interface DashboardStats {
     escalated: number
     success_rate: number
   }
+  decline_reasons: {
+    total_declines: number
+    window_days: number
+    reasons: Array<{ code: string; reason: string; count: number; share: number }>
+  }
+  decision_handling: {
+    total: number
+    automated: number
+    reviewed: number
+    overridden: number
+  }
 }
 
 export interface AuditLogEntry {

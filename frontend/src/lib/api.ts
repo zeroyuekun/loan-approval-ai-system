@@ -15,7 +15,6 @@ interface PaginationParams {
 }
 
 export interface RegisterPayload {
-  username: string
   email: string
   password: string
   password2?: string
@@ -185,6 +184,26 @@ api.interceptors.response.use(
 export default api
 
 /**
+ * Turn a DRF error response into a sentence a user can act on: the `detail`
+ * message, else each field error prefixed with its label, else `fallback`.
+ */
+export function formatApiError(
+  error: unknown,
+  { fallback, labels = {} }: { fallback: string; labels?: Record<string, string> },
+): string {
+  const data = (error as { response?: { data?: unknown } })?.response?.data
+  if (!data || typeof data !== 'object') return fallback
+  const record = data as Record<string, unknown>
+  if (typeof record.detail === 'string') return record.detail
+  const parts = Object.entries(record).map(([field, messages]) => {
+    const text = Array.isArray(messages) ? messages.join(' ') : String(messages)
+    if (field === 'non_field_errors') return text
+    return `${labels[field] ?? field.replace(/_/g, ' ')}: ${text}`
+  })
+  return parts.length ? parts.join(' ') : fallback
+}
+
+/**
  * Run `request`, resolving to `fallback` when the endpoint answers 404
  * (e.g. no active model has been trained yet). Any other error is rethrown.
  */
@@ -201,7 +220,7 @@ export async function withNotFoundFallback<T, F>(request: () => Promise<T>, fall
 
 // Auth
 export const authApi = {
-  login: (data: { username: string; password: string }) => api.post('/auth/login/', data),
+  login: (data: { email: string; password: string }) => api.post('/auth/login/', data),
   register: (data: RegisterPayload) => api.post('/auth/register/', data),
   getProfile: () => api.get('/auth/me/'),
   getCustomerProfile: () => api.get('/auth/me/profile/'),

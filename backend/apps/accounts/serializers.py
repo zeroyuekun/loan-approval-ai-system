@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from rest_framework import serializers
 
 from utils.sanitization import sanitize_prompt_input
@@ -88,30 +89,17 @@ class NameValidationMixin:
         return self._validate_name(value, "last_name")
 
 
-def _email_taken(value, exclude_pk=None):
-    """True when another account already uses this email, in any letter case.
-
-    Email is a login identifier (LoginSerializer resolves an "@"-style login to
-    a username via CustomUser.objects.get(email=...)), but CustomUser inherits
-    AbstractUser's non-unique email. Without this check a second account could
-    take a victim's email and break their email login with an unhandled
-    MultipleObjectsReturned (500 / account DoS).
-    """
-    if not value:
-        return False
-    others = CustomUser.objects.filter(email__iexact=value)
-    if exclude_pk is not None:
-        others = others.exclude(pk=exclude_pk)
-    return others.exists()
-
-
 class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=12)
     password2 = serializers.CharField(write_only=True, min_length=12)
 
     class Meta:
         model = CustomUser
-        fields = ("username", "email", "password", "password2", "first_name", "last_name")
+        # Email is the only sign-in identifier. The inherited `username` column
+        # is still populated (with the email) because Django's auth backend and
+        # admin key on it, but customers never choose or see one.
+        fields = ("email", "password", "password2", "first_name", "last_name")
+        extra_kwargs = {"email": {"required": True, "allow_blank": False}}
 
     def validate(self, data):
         if data["password"] != data["password2"]:
@@ -127,7 +115,6 @@ class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
         # to the username/email/name, all-numeric). A throwaway user carries
         # the attributes the similarity check compares against.
         candidate = CustomUser(
-            username=data.get("username", ""),
             email=data.get("email", ""),
             first_name=data.get("first_name", ""),
             last_name=data.get("last_name", ""),
@@ -139,40 +126,65 @@ class RegisterSerializer(NameValidationMixin, serializers.ModelSerializer):
         return data
 
     def validate_email(self, value):
-        if _email_taken(value):
+        # Email is the sign-in identifier, but CustomUser inherits a non-unique
+        # email column, so uniqueness is enforced here, in any letter case. The
+        # username column is checked too: a new account's username is its email.
+        value = value.strip().lower()
+        # The email doubles as the internal username, whose column holds 150 chars.
+        if len(value) > CustomUser._meta.get_field("username").max_length:
+            raise serializers.ValidationError("Email address is too long.")
+        if CustomUser.objects.filter(Q(email__iexact=value) | Q(username__iexact=value)).exists():
             raise serializers.ValidationError("An account with this email already exists.")
         return value
 
     def create(self, validated_data):
         validated_data.pop("password2")
         password = validated_data.pop("password")
-        user = CustomUser(**validated_data, role="customer")
+        user = CustomUser(**validated_data, username=validated_data["email"], role="customer")
         user.set_password(password)
         user.save()
         return user
 
 
+def login_identifier(payload) -> str:
+    """The sign-in identifier from a login payload: ``email``, or the legacy ``username`` key.
+
+    The UI sends ``email``. ``username`` stays accepted so existing API clients and
+    staff accounts created before email-only sign-in keep working.
+    """
+    return str(payload.get("email") or payload.get("username") or "").strip()
+
+
+def resolve_login_user(identifier: str):
+    """The account a login identifier names, or None.
+
+    An email resolves case-insensitively to the OLDEST matching account, so
+    legacy duplicate emails (predating the registration uniqueness check) can
+    never 500 and the original owner can still sign in. Shared by the serializer
+    and LoginView's lockout check so both always resolve the same account.
+    """
+    if not identifier:
+        return None
+    if "@" in identifier:
+        return CustomUser.objects.filter(email__iexact=identifier).order_by("id").first()
+    return CustomUser.objects.filter(username=identifier).first()
+
+
 class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
+    email = serializers.CharField(required=False, allow_blank=True)
+    username = serializers.CharField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        username_or_email = data["username"]
-        # Allow login with email: resolve to username first
-        if "@" in username_or_email:
-            try:
-                user_obj = CustomUser.objects.get(email=username_or_email)
-                username_or_email = user_obj.username
-            except CustomUser.DoesNotExist as err:
-                raise serializers.ValidationError("Invalid credentials.") from err
-            except CustomUser.MultipleObjectsReturned:
-                # Legacy duplicate emails (predating the registration-time
-                # uniqueness check) must never 500. Resolve to the ORIGINAL owner
-                # (oldest account) so the victim can still log in by email; a
-                # wrong password still fails authenticate() below.
-                user_obj = CustomUser.objects.filter(email=username_or_email).order_by("id").first()
-                username_or_email = user_obj.username
-        user = authenticate(username=username_or_email, password=data["password"])
+        identifier = login_identifier(data)
+        if not identifier:
+            raise serializers.ValidationError({"email": "This field is required."})
+        # LoginView has already resolved the account for its lockout check and
+        # passes it in, so the lookup runs once per login.
+        user_obj = self.context.get("user_obj") or resolve_login_user(identifier)
+        if user_obj is None:
+            raise serializers.ValidationError("Invalid credentials.")
+        user = authenticate(username=user_obj.username, password=data["password"])
         if not user:
             raise serializers.ValidationError("Invalid credentials.")
         if not user.is_active:
@@ -181,19 +193,17 @@ class LoginSerializer(serializers.Serializer):
         return data
 
 
-class UserSerializer(NameValidationMixin, serializers.ModelSerializer):
+class UserSerializer(serializers.ModelSerializer):
+    """The signed-in user's identity, read-only everywhere.
+
+    Email is the sign-in identifier and the name is identity-verified, so no
+    view may write them through this serializer (see UserProfileView).
+    """
+
     class Meta:
         model = CustomUser
         fields = ("id", "username", "email", "role", "first_name", "last_name", "created_at")
-        read_only_fields = ("id", "username", "role", "created_at")
-
-    def validate_email(self, value):
-        # Same rule as registration, on a profile edit: another account's
-        # address cannot be taken. Keeping your own address skips the query.
-        unchanged = self.instance is not None and value.lower() == (self.instance.email or "").lower()
-        if not unchanged and _email_taken(value, exclude_pk=getattr(self.instance, "pk", None)):
-            raise serializers.ValidationError("An account with this email already exists.")
-        return value
+        read_only_fields = fields
 
 
 def _mask_id_number(value):

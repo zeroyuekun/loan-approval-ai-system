@@ -28,7 +28,7 @@ describe('RegisterPage', () => {
     expect(screen.getByText('Create account')).toBeInTheDocument()
     expect(screen.getByLabelText('First Name')).toBeInTheDocument()
     expect(screen.getByLabelText('Last Name')).toBeInTheDocument()
-    expect(screen.getByLabelText('Username')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Username')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Email')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toBeInTheDocument()
     expect(screen.getByLabelText('Confirm Password')).toBeInTheDocument()
@@ -39,7 +39,6 @@ describe('RegisterPage', () => {
     renderPage()
     await user.type(screen.getByLabelText('First Name'), 'John')
     await user.type(screen.getByLabelText('Last Name'), 'Doe')
-    await user.type(screen.getByLabelText('Username'), 'johndoe')
     await user.type(screen.getByLabelText('Email'), 'john@example.com')
     await user.type(screen.getByLabelText('Password'), 'password123')
     await user.type(screen.getByLabelText('Confirm Password'), 'different')
@@ -54,14 +53,13 @@ describe('RegisterPage', () => {
     renderPage()
     await user.type(screen.getByLabelText('First Name'), 'John')
     await user.type(screen.getByLabelText('Last Name'), 'Doe')
-    await user.type(screen.getByLabelText('Username'), 'johndoe')
     await user.type(screen.getByLabelText('Email'), 'john@example.com')
     await user.type(screen.getByLabelText('Password'), 'password123')
     await user.type(screen.getByLabelText('Confirm Password'), 'password123')
     await user.click(screen.getByRole('button', { name: 'Create Account' }))
     await waitFor(() => {
       expect(mockRegister).toHaveBeenCalledWith({
-        first_name: 'John', last_name: 'Doe', username: 'johndoe',
+        first_name: 'John', last_name: 'Doe',
         email: 'john@example.com', password: 'password123', password2: 'password123',
       })
     })
@@ -73,12 +71,11 @@ describe('RegisterPage', () => {
     renderPage()
     await user.type(screen.getByLabelText('First Name'), 'John')
     await user.type(screen.getByLabelText('Last Name'), 'Doe')
-    await user.type(screen.getByLabelText('Username'), 'johndoe')
     await user.type(screen.getByLabelText('Email'), 'taken@example.com')
     await user.type(screen.getByLabelText('Password'), 'password123')
     await user.type(screen.getByLabelText('Confirm Password'), 'password123')
     await user.click(screen.getByRole('button', { name: 'Create Account' }))
-    await waitFor(() => { expect(screen.getByText('Email already in use')).toBeInTheDocument() })
+    await waitFor(() => { expect(screen.getByText('Email: Email already in use')).toBeInTheDocument() })
   })
 
   it('has a link to the login page', () => {

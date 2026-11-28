@@ -279,7 +279,7 @@ describe('useAuth', () => {
       )
     })
 
-    it('sends only the username and password, then takes staff to the dashboard', async () => {
+    it('sends only the email and password, then takes staff to the dashboard', async () => {
       let body: Record<string, unknown> = {}
       server.use(
         http.post(`${API_URL}/auth/login/`, async ({ request }) => {
@@ -295,7 +295,7 @@ describe('useAuth', () => {
       await waitFor(() => {
         expect(screen.getByTestId('user')).toHaveTextContent('officer1')
       })
-      expect(body).toEqual({ username: 'officer1', password: 'pw' })
+      expect(body).toEqual({ email: 'officer1', password: 'pw' })
       expect(mockReplace).toHaveBeenCalledWith('/dashboard')
       expect(mockReplace).not.toHaveBeenCalledWith('/dashboard/two-factor')
     })

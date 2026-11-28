@@ -18,18 +18,27 @@ type GroupStats = {
   included_in_fairness?: boolean
 }
 
+export type FairnessStatus = 'pass' | 'fail' | 'unknown'
+
+/**
+ * The backend emits disparate_impact_ratio / passes_80_percent_rule as null when
+ * fewer than two groups are large enough to assess (or there are no approvals at
+ * all). An un-measurable result must never read as a clean pass on a regulated
+ * lending dashboard, so it is 'unknown', not 'pass'.
+ */
+export function fairnessStatus(data: any): FairnessStatus {
+  const assessable = typeof data?.disparate_impact_ratio === 'number' && typeof data?.passes_80_percent_rule === 'boolean'
+  if (!assessable) return 'unknown'
+  return data.passes_80_percent_rule ? 'pass' : 'fail'
+}
+
 function FairnessAttributeCard({ attribute, data }: { attribute: string; data: any }) {
   const { active, hoverProps } = useChartHover()
   if (!data?.groups) return null
 
   const groups = data.groups as Record<string, GroupStats>
-  // The backend emits disparate_impact_ratio / passes_80_percent_rule as null when
-  // fewer than two groups are large enough to assess (or there are no approvals at
-  // all). When that's the case we hide the Equalized Odds figure rather than show a
-  // coerced 0.0000 — an un-measurable fairness result must never read as a clean
-  // pass on a regulated lending dashboard.
-  const assessable: boolean =
-    typeof data.disparate_impact_ratio === 'number' && typeof data.passes_80_percent_rule === 'boolean'
+  // Hide the Equalized Odds figure when unassessable rather than show a coerced 0.0000.
+  const assessable = fairnessStatus(data) !== 'unknown'
   const eqOddsDiff: number | null =
     assessable && typeof data.equalized_odds_difference === 'number' ? data.equalized_odds_difference : null
   const minGroupSize: number = data.min_group_size ?? 30

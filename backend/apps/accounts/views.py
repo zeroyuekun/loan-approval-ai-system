@@ -31,6 +31,8 @@ from .serializers import (
     RegisterSerializer,
     StaffCustomerDetailSerializer,
     UserSerializer,
+    login_identifier,
+    resolve_login_user,
 )
 from .services.customer_activity import customer_activity
 from .services.data_export import build_customer_export
@@ -207,7 +209,7 @@ class RegisterView(generics.CreateAPIView):
         user = serializer.save()
         refresh = RefreshToken.for_user(user)
 
-        _audit_user_event(request, user, "register", {"username": user.username})
+        _audit_user_event(request, user, "register", {})
 
         response = Response(
             {
@@ -246,20 +248,13 @@ class LoginView(generics.GenericAPIView):
         check_password(str(password), _dummy_password_hash())
 
     def post(self, request, *args, **kwargs):
-        generic_error = {"detail": "Invalid username or password."}
-        username = request.data.get("username", "")
+        generic_error = {"detail": "Invalid email or password."}
+        identifier = login_identifier(request.data)
         password = request.data.get("password", "")
 
-        user_obj = None
-        if username:
-            # Resolve the acting user the SAME way LoginSerializer does (it
-            # accepts an email in this field). Resolving only by username here
-            # would let an attacker bypass the lockout + failed-attempt audit
-            # entirely by submitting the email instead of the username.
-            if "@" in username:
-                user_obj = CustomUser.objects.filter(email=username).first()
-            else:
-                user_obj = CustomUser.objects.filter(username=username).first()
+        # Resolved once here and handed to LoginSerializer, so the lockout,
+        # the failed-attempt audit and the password check see the same account.
+        user_obj = resolve_login_user(identifier)
 
         if user_obj is None or user_obj.is_locked:
             # Not authenticate(): it hashes for a missing user too, which would make two.
@@ -268,7 +263,9 @@ class LoginView(generics.GenericAPIView):
                 _audit_user_event(request, user_obj, "login_blocked_locked", {"reason": "account_locked"})
             return Response(generic_error, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(
+            data=request.data, context={**self.get_serializer_context(), "user_obj": user_obj}
+        )
         if not serializer.is_valid():
             if api_settings.NON_FIELD_ERRORS_KEY not in serializer.errors:
                 # A missing or blank field fails before authenticate() runs.
@@ -291,7 +288,16 @@ class LoginView(generics.GenericAPIView):
         return response
 
 
-class UserProfileView(generics.RetrieveUpdateAPIView):
+class UserProfileView(generics.RetrieveAPIView):
+    """The signed-in user's identity. Read-only.
+
+    Email is the sign-in identifier and the address every decision email goes
+    to, and the name is identity-verified (AML/CTF), so neither may change over
+    a session cookie alone: a stolen session could otherwise redirect a
+    victim's mail and take over the account. Contact and financial details are
+    edited through ``/auth/me/profile/`` instead.
+    """
+
     serializer_class = UserSerializer
     permission_classes = (IsAuthenticated,)
 

@@ -164,8 +164,8 @@ export function ApplicationForm({ onSuccessPath }: ApplicationFormProps = {}) {
       </div>
 
       {submitError && (
-        <p className="text-sm text-destructive text-center">
-          Failed to submit application. Please try again.
+        <p role="alert" className="text-sm text-destructive text-center">
+          {submitError}
         </p>
       )}
     </div>

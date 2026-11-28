@@ -78,7 +78,6 @@ for i in {1..60}; do
 done
 
 random=$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8 || echo "smoke$(date +%s)")
-username=$(jq -r ".user.username" "${FIXTURE}" | sed "s/{{RANDOM}}/${random}/")
 email=$(jq -r ".user.email" "${FIXTURE}" | sed "s/{{RANDOM}}/${random}/")
 password=$(jq -r ".user.password" "${FIXTURE}")
 first_name=$(jq -r ".user.first_name" "${FIXTURE}")
@@ -93,16 +92,17 @@ csrf_header() {
   echo "X-CSRFToken: ${token}"
 }
 
-echo "[smoke] Registering customer ${email} (username=${username})..."
+echo "[smoke] Registering customer ${email}..."
 curl -fsS -X POST "${API_BASE}/auth/register/" \
   -H "Content-Type: application/json" \
-  -d "{\"username\":\"${username}\",\"email\":\"${email}\",\"password\":\"${password}\",\"password2\":\"${password}\",\"first_name\":\"${first_name}\",\"last_name\":\"${last_name}\"}" \
+  -d "{\"email\":\"${email}\",\"password\":\"${password}\",\"password2\":\"${password}\",\"first_name\":\"${first_name}\",\"last_name\":\"${last_name}\"}" \
   > /dev/null || { write_result "failure" "register-failed"; exit 1; }
 
+# Email is the only sign-in identifier.
 echo "[smoke] Logging in (cookie auth)..."
 curl -fsS -c "${COOKIE_JAR}" -X POST "${API_BASE}/auth/login/" \
   -H "Content-Type: application/json" \
-  -d "{\"username\":\"${username}\",\"password\":\"${password}\"}" \
+  -d "{\"email\":\"${email}\",\"password\":\"${password}\"}" \
   > /dev/null || { write_result "failure" "login-failed"; exit 1; }
 
 if ! grep -q "csrftoken" "${COOKIE_JAR}"; then

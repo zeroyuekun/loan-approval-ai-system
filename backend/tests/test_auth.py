@@ -28,7 +28,9 @@ class AuthTestCase(TestCase):
         response = self.client.post("/api/v1/auth/register/", self.user_data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIn("user", response.data)
-        self.assertEqual(response.data["user"]["username"], "testuser")
+        # Email is the sign-in identifier; a submitted username is ignored.
+        self.assertEqual(response.data["user"]["email"], "test@example.com")
+        self.assertEqual(response.data["user"]["username"], "test@example.com")
         # HttpOnly cookies should be set
         self.assertIn("access_token", response.cookies)
         self.assertTrue(response.cookies["access_token"]["httponly"])
@@ -37,6 +39,31 @@ class AuthTestCase(TestCase):
         self.client.post("/api/v1/auth/register/", self.user_data)
         response = self.client.post("/api/v1/auth/register/", self.user_data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_register_rejects_same_email_in_different_case(self):
+        self.client.post("/api/v1/auth/register/", self.user_data)
+        response = self.client.post("/api/v1/auth/register/", {**self.user_data, "email": "TEST@Example.com"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data)
+
+    def test_register_requires_email(self):
+        response = self.client.post("/api/v1/auth/register/", {**self.user_data, "email": ""})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data)
+
+    def test_login_with_email_field_is_case_insensitive(self):
+        self.client.post("/api/v1/auth/register/", self.user_data)
+        self.client.cookies.clear()
+        response = self.client.post("/api/v1/auth/login/", {"email": "Test@Example.com", "password": "TestPass123!"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["user"]["email"], "test@example.com")
+
+    def test_login_wrong_password_by_email_counts_toward_lockout(self):
+        CustomUser.objects.create_user(username="testuser", password="TestPass123!", email="test@example.com")
+        response = self.client.post("/api/v1/auth/login/", {"email": "test@example.com", "password": "nope"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["detail"], "Invalid email or password.")
+        self.assertEqual(CustomUser.objects.get(username="testuser").failed_login_attempts, 1)
 
     def test_login_success(self):
         CustomUser.objects.create_user(username="testuser", password="TestPass123!", email="test@example.com")
@@ -115,3 +142,17 @@ class AuthTestCase(TestCase):
         response = self.client.get("/api/v1/auth/me/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["username"], "testuser")
+
+    def test_me_endpoint_rejects_email_name_and_role_changes(self):
+        """Email is the sign-in identifier; a session alone must not be able to change it."""
+        user = CustomUser.objects.create_user(username="victim", password="TestPass123!", email="victim@example.com")
+        self.client.force_authenticate(user=user)
+        for method in (self.client.patch, self.client.put):
+            response = method(
+                "/api/v1/auth/me/",
+                {"email": "attacker@example.com", "first_name": "Mallory", "role": "admin"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        user.refresh_from_db()
+        self.assertEqual((user.email, user.first_name, user.role), ("victim@example.com", "", "customer"))

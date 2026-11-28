@@ -57,6 +57,8 @@ const baseStats = {
   daily_volume: [],
   approval_trend: [],
   pipeline: { total: 0, completed: 0, failed: 0, escalated: 0, success_rate: 0 },
+  decline_reasons: { total_declines: 0, window_days: 90, reasons: [] },
+  decision_handling: { total: 0, automated: 0, reviewed: 0, overridden: 0 },
 }
 
 describe('DashboardPage', () => {
@@ -108,26 +110,48 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('2.3s')).not.toBeInTheDocument()
   })
 
-  it('renders the approval-rate donut with the approved/denied split and no status strip', async () => {
+  it('renders the business cards: trend, decline reasons and who made the decision', async () => {
     server.use(
-      http.get(`${API_URL}/loans/dashboard-stats/`, () => HttpResponse.json(baseStats)),
+      http.get(`${API_URL}/loans/dashboard-stats/`, () =>
+        HttpResponse.json({
+          ...baseStats,
+          daily_volume: [{ date: '2026-11-20', count: 4 }],
+          approval_trend: [{ date: '2026-11-20', rate: 75 }],
+          decline_reasons: {
+            total_declines: 12,
+            window_days: 90,
+            reasons: [{ code: 'R06', reason: 'Credit score below minimum lending threshold', count: 9, share: 75 }],
+          },
+          decision_handling: { total: 42, automated: 40, reviewed: 1, overridden: 1 },
+        })
+      ),
       http.get(`${API_URL}/loans/`, () =>
         HttpResponse.json({ count: 0, next: null, previous: null, results: [] })
       )
     )
     renderPage()
-    // The donut exposes an accessible role="img" whose label encodes the
-    // approved/denied split computed from approved_count / denied_count
-    // (30 / 12 → 71.4% approved, 28.6% denied). Use it to disambiguate from
-    // the StatsCards "Approval Rate" tile, which shares the same heading text.
-    await waitFor(() =>
-      expect(screen.getByRole('img', { name: /approval rate chart: 71\.4% approved, 28\.6% denied/i })).toBeInTheDocument()
-    )
-    // Donut legend labels.
-    expect(screen.getByText('Approved')).toBeInTheDocument()
-    expect(screen.getByText('Denied')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Top reasons for declines')).toBeInTheDocument())
+    expect(screen.getByText('Applications & approval rate')).toBeInTheDocument()
+    expect(screen.getByText('Credit score below minimum lending threshold')).toBeInTheDocument()
+    expect(screen.getByText('75%')).toBeInTheDocument()
+    expect(screen.getByText('Decided automatically')).toBeInTheDocument()
+    expect(screen.getByText('40 (95.2%)')).toBeInTheDocument()
     // The operator status strip is no longer mounted on the dashboard.
-    expect(screen.queryByText('Drift')).not.toBeInTheDocument()
     expect(screen.queryByText('Watchdog')).not.toBeInTheDocument()
+  })
+
+  it('shows plain empty states before any decisions exist', async () => {
+    server.use(
+      http.get(`${API_URL}/loans/dashboard-stats/`, () =>
+        HttpResponse.json(baseStats)
+      ),
+      http.get(`${API_URL}/loans/`, () =>
+        HttpResponse.json({ count: 0, next: null, previous: null, results: [] })
+      )
+    )
+    renderPage()
+    await waitFor(() => expect(screen.getByText('No applications declined in the last 90 days.')).toBeInTheDocument())
+    expect(screen.getByText('No decisions yet.')).toBeInTheDocument()
+    expect(screen.getByText('No applications in the last 30 days.')).toBeInTheDocument()
   })
 })
